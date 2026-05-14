@@ -65,6 +65,43 @@ def get_rag_service() -> RAGService:
     return _rag_service
 
 
+async def _require_valid_session(session_id: str) -> dict:
+    session = await get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    return session
+
+
+async def _get_user_session_ids(db: AsyncSession, session_id: str) -> list[str]:
+    """Return valid sessions for the same Bilibili account as session_id."""
+    mid = await db.scalar(
+        select(UserSession.bili_mid).where(
+            UserSession.session_id == session_id,
+            UserSession.is_valid.is_(True),
+        )
+    )
+    if not mid:
+        return [session_id]
+
+    rows = await db.execute(
+        select(UserSession.session_id).where(
+            UserSession.bili_mid == mid,
+            UserSession.is_valid.is_(True),
+        )
+    )
+    session_ids = [row[0] for row in rows.fetchall()]
+    return session_ids or [session_id]
+
+
+async def _get_folder_ids_for_sessions(db: AsyncSession, session_ids: list[str]) -> list[int]:
+    if not session_ids:
+        return []
+    rows = await db.execute(
+        select(FavoriteFolder.id).where(FavoriteFolder.session_id.in_(session_ids))
+    )
+    return [row[0] for row in rows.fetchall()]
+
+
 class BuildRequest(BaseModel):
     """知识库构建请求"""
     folder_ids: List[int]  # 要处理的收藏夹 ID 列表
@@ -734,24 +771,79 @@ async def get_build_status(task_id: str):
 
 
 @router.delete("/clear")
-async def clear_knowledge_base():
+async def clear_knowledge_base(
+    session_id: str = Query(..., description="会话ID"),
+    db: AsyncSession = Depends(get_db),
+):
     """清空知识库"""
+    await _require_valid_session(session_id)
     try:
+        session_ids = await _get_user_session_ids(db, session_id)
+        other_folder_count = await db.scalar(
+            select(func.count())
+            .select_from(FavoriteFolder)
+            .where(FavoriteFolder.session_id.notin_(session_ids))
+        )
+        if other_folder_count:
+            raise HTTPException(
+                status_code=409,
+                detail="检测到其他用户的知识库数据，拒绝执行全局清空",
+            )
+
         rag = get_rag_service()
         rag.clear_collection()
         return {"message": "知识库已清空"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"清空知识库失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/video/{bvid}")
-async def delete_video_from_knowledge(bvid: str):
+async def delete_video_from_knowledge(
+    bvid: str,
+    session_id: str = Query(..., description="会话ID"),
+    db: AsyncSession = Depends(get_db),
+):
     """从知识库中删除指定视频"""
+    await _require_valid_session(session_id)
     try:
+        session_ids = await _get_user_session_ids(db, session_id)
+        folder_ids = await _get_folder_ids_for_sessions(db, session_ids)
+        if not folder_ids:
+            raise HTTPException(status_code=404, detail="未找到可管理的收藏夹")
+
+        owned_count = await db.scalar(
+            select(func.count())
+            .select_from(FavoriteVideo)
+            .where(
+                FavoriteVideo.bvid == bvid,
+                FavoriteVideo.folder_id.in_(folder_ids),
+            )
+        )
+        if not owned_count:
+            raise HTTPException(status_code=403, detail="无权删除该视频")
+
+        other_count = await db.scalar(
+            select(func.count())
+            .select_from(FavoriteVideo)
+            .where(
+                FavoriteVideo.bvid == bvid,
+                FavoriteVideo.folder_id.notin_(folder_ids),
+            )
+        )
+        if other_count:
+            raise HTTPException(
+                status_code=409,
+                detail="该视频仍被其他用户引用，拒绝删除共享向量",
+            )
+
         rag = get_rag_service()
         rag.delete_video(bvid)
         return {"message": f"已删除视频 {bvid}"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"删除视频失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
