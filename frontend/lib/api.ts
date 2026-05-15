@@ -51,7 +51,11 @@ export interface FavoriteVideosResponse {
   has_more?: boolean;
   page?: number;
   page_size?: number;
-  total?: number;
+}
+
+export interface AllFavoriteVideosResponse {
+  total: number;
+  videos: Video[];
 }
 
 export interface BuildRequest {
@@ -223,7 +227,7 @@ export const favoritesApi = {
       })}`,
     ),
   getAllVideos: (mediaId: number, sessionId: string) =>
-    request<FavoriteVideosResponse>(
+    request<AllFavoriteVideosResponse>(
       `/favorites/${mediaId}/all-videos${query({ session_id: sessionId })}`,
     ),
   organizePreview: (folderId: number, sessionId: string) =>
