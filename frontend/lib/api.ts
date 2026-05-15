@@ -3,7 +3,7 @@ export const API_BASE_URL =
 
 export interface UserInfo {
   mid?: number | string | null;
-  uname?: string | null;
+  uname: string;
   face?: string | null;
   level?: number | null;
 }
