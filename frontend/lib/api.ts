@@ -31,7 +31,7 @@ export interface FavoriteFolder {
   title: string;
   media_count: number;
   is_selected: boolean;
-  is_default?: boolean | null;
+  is_default?: boolean;
 }
 
 export interface Video {
@@ -87,8 +87,8 @@ export interface KnowledgeStats {
 export interface FolderStatus {
   media_id: number;
   indexed_count: number;
-  media_count?: number | null;
-  last_sync_at?: string | null;
+  media_count?: number;
+  last_sync_at?: string;
 }
 
 export interface OrganizePreviewItem {
