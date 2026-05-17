@@ -212,7 +212,7 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
   };
 
   // 格式化时间
-  const formatTime = (value?: string) => {
+  const formatTime = (value?: string | null) => {
     if (!value) return null;
     try {
       let dateStr = value;
