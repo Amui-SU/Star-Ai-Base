@@ -7,7 +7,7 @@ import json
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy import select, func, or_
@@ -20,6 +20,7 @@ from app.database import get_db
 from app.models import ChatRequest, ChatResponse, FavoriteFolder, FavoriteVideo, VideoCache
 from app.config import settings
 from app.routers.knowledge import get_rag_service
+from app.routers.auth import get_session
 
 router = APIRouter(prefix="/chat", tags=["对话"])
 
@@ -143,6 +144,15 @@ def _normalize_provider(provider: Optional[str]) -> str:
     return normalized
 
 
+async def _require_valid_session(session_id: Optional[str]) -> dict:
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    session = await get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    return session
+
+
 def _resolve_llm_config(provider: Optional[str] = None) -> Dict[str, str]:
     normalized = _normalize_provider(provider)
     meta = PROVIDER_META.get(normalized)
@@ -230,9 +240,13 @@ async def get_llm_config():
 
 
 @router.post("/llm/provider-config")
-async def save_llm_provider_config(body: LLMProviderConfigRequest):
+async def save_llm_provider_config(
+    body: LLMProviderConfigRequest,
+    session_id: str = Query(..., description="会话ID"),
+):
     """保存模型提供方配置到 .env.local，并立即应用到当前进程。"""
     global _current_llm_provider
+    await _require_valid_session(session_id)
 
     provider = _normalize_provider(body.provider)
     env_fields = PROVIDER_ENV_FIELDS.get(provider)
@@ -274,9 +288,13 @@ async def save_llm_provider_config(body: LLMProviderConfigRequest):
 
 
 @router.post("/llm/config")
-async def set_llm_config(body: LLMProviderUpdateRequest):
+async def set_llm_config(
+    body: LLMProviderUpdateRequest,
+    session_id: str = Query(..., description="会话ID"),
+):
     """切换当前问答模型提供方"""
     global _current_llm_provider
+    await _require_valid_session(session_id)
     llm_config = _resolve_llm_config(body.provider)
     if not llm_config["api_key"]:
         raise HTTPException(
@@ -294,8 +312,9 @@ async def set_llm_config(body: LLMProviderUpdateRequest):
 
 
 @router.get("/health/llm")
-async def llm_health_check():
+async def llm_health_check(session_id: str = Query(..., description="会话ID")):
     """LLM 连通性检查"""
+    await _require_valid_session(session_id)
     llm_config = _resolve_llm_config()
     if not llm_config["api_key"]:
         return {
@@ -881,6 +900,7 @@ async def ask_question(request: ChatRequest, db: AsyncSession = Depends(get_db))
     """智能问答"""
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
+    await _require_valid_session(request.session_id)
     try:
         messages, sources, _ = await _prepare_messages(request, db)
         messages = _enforce_markdown_output(messages)
@@ -909,6 +929,7 @@ async def ask_question_stream(request: ChatRequest, db: AsyncSession = Depends(g
     """流式问答"""
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
+    await _require_valid_session(request.session_id)
     try:
         messages, sources, _ = await _prepare_messages(request, db)
         messages = _enforce_markdown_output(messages)
@@ -947,13 +968,23 @@ async def ask_question_stream(request: ChatRequest, db: AsyncSession = Depends(g
         raise HTTPException(status_code=500, detail=f"流式问答失败: {str(e)}")
 
 @router.post("/search")
-async def search_videos(query: str, k: int = 5):
+async def search_videos(
+    query: str,
+    k: int = 5,
+    session_id: str = Query(..., description="会话ID"),
+    db: AsyncSession = Depends(get_db),
+):
     """搜索相关视频片段"""
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="查询不能为空")
+    await _require_valid_session(session_id)
     try:
         rag = get_rag_service()
-        docs = rag.search(query, k=k)
+        folder_ids = await _get_folder_ids_for_session(db, session_id, None)
+        bvids = await _get_bvids_by_folder_ids(db, folder_ids)
+        if not bvids:
+            return {"results": []}
+        docs = rag.search(query, k=k, bvids=bvids)
         results, seen_bvids = [], set()
         for doc in docs:
             bvid = doc.metadata.get("bvid", "")

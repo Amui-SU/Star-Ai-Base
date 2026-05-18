@@ -139,40 +139,28 @@ async def get_session_info(session_id: str):
     """
     获取会话信息
     """
-    session = login_sessions.get(session_id)
+    session = await get_session(session_id)
     if not session:
-        async with get_db_context() as db:
-            result = await db.execute(
-                select(UserSessionModel).where(UserSessionModel.session_id == session_id)
-            )
-            db_session = result.scalar_one_or_none()
-        if not db_session or not db_session.is_valid:
-            raise HTTPException(status_code=404, detail="会话不存在或已过期")
-        session = {
-            "cookies": {
-                "SESSDATA": db_session.sessdata,
-                "bili_jct": db_session.bili_jct,
-                "DedeUserID": db_session.dedeuserid,
-            },
-            "user_info": {
-                "mid": db_session.bili_mid,
-                "uname": db_session.bili_uname,
-                "face": db_session.bili_face,
-            },
-        }
-        login_sessions[session_id] = session
+        raise HTTPException(status_code=404, detail="会话不存在或已过期")
 
     return {"valid": True, "user_info": session.get("user_info")}
 
 
 @router.delete("/session/{session_id}")
-async def logout(session_id: str):
+async def logout(session_id: str, db: AsyncSession = Depends(get_db)):
     """
     退出登录
     """
-    if session_id in login_sessions:
-        del login_sessions[session_id]
-    
+    login_sessions.pop(session_id, None)
+
+    result = await db.execute(
+        select(UserSessionModel).where(UserSessionModel.session_id == session_id)
+    )
+    db_session = result.scalar_one_or_none()
+    if db_session:
+        db_session.is_valid = False
+        await db.commit()
+
     return {"message": "已退出登录"}
 
 
@@ -181,8 +169,6 @@ async def get_session(session_id: str) -> dict:
     获取会话信息（内部使用）
     """
     session = login_sessions.get(session_id)
-    if session:
-        return session
 
     async with get_db_context() as db:
         result = await db.execute(
@@ -190,7 +176,12 @@ async def get_session(session_id: str) -> dict:
         )
         db_session = result.scalar_one_or_none()
         if not db_session or not db_session.is_valid:
+            login_sessions.pop(session_id, None)
             return None
+
+        if session:
+            return session
+
         session = {
             "cookies": {
                 "SESSDATA": db_session.sessdata,
@@ -206,4 +197,14 @@ async def get_session(session_id: str) -> dict:
 
     if session:
         login_sessions[session_id] = session
+    return session
+
+
+async def require_session(session_id: str) -> dict:
+    """Return a valid session or fail the request consistently."""
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    session = await get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
     return session

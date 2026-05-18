@@ -164,6 +164,10 @@ export default function ChatPanel({ statsKey, sessionId, folderIds, sidebarOpen 
 
   const handleSaveProviderConfig = async () => {
     if (!configProvider || configSaving) return;
+    if (!sessionId) {
+      setConfigError("请先登录");
+      return;
+    }
     if (!configApiKey.trim()) {
       setConfigError("请填写 API Key");
       return;
@@ -176,8 +180,8 @@ export default function ChatPanel({ statsKey, sessionId, folderIds, sidebarOpen 
         api_key: configApiKey.trim(),
         base_url: configBaseUrl.trim() || undefined,
         model: configModel.trim() || undefined,
-      });
-      const [cfg, health] = await Promise.all([chatApi.getModelConfig(), chatApi.health()]);
+      }, sessionId);
+      const [cfg, health] = await Promise.all([chatApi.getModelConfig(), chatApi.health(sessionId)]);
       setLlmConfig(cfg);
       setLlmHealth(health);
       closeProviderConfig(true);
@@ -203,9 +207,10 @@ export default function ChatPanel({ statsKey, sessionId, folderIds, sidebarOpen 
       }
     };
     const check = async () => {
+      if (!sessionId) return;
       setLlmChecking(true);
       try {
-        const res = await chatApi.health();
+        const res = await chatApi.health(sessionId);
         if (!cancelled) setLlmHealth(res);
       } catch {
         if (!cancelled) {
@@ -228,14 +233,23 @@ export default function ChatPanel({ statsKey, sessionId, folderIds, sidebarOpen 
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [sessionId]);
 
   const handleSwitchProvider = async (provider: LLMProvider) => {
     if (llmSwitching) return;
+    if (!sessionId) {
+      setLlmHealth({
+        status: "down",
+        message: "请先登录",
+        latency_ms: null,
+        model: "unknown",
+      });
+      return;
+    }
     setLlmSwitching(true);
     try {
-      await chatApi.setModelProvider(provider);
-      const [cfg, health] = await Promise.all([chatApi.getModelConfig(), chatApi.health()]);
+      await chatApi.setModelProvider(provider, sessionId);
+      const [cfg, health] = await Promise.all([chatApi.getModelConfig(), chatApi.health(sessionId)]);
       setLlmConfig(cfg);
       setLlmHealth(health);
     } catch (err) {
