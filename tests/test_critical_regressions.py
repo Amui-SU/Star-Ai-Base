@@ -62,6 +62,22 @@ class CriticalSecurityRegressionTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertFalse(is_valid)
 
+    async def test_get_session_rejects_stale_cached_session_after_db_revocation(self):
+        await self._create_session("stale-cache-session")
+        auth.login_sessions["stale-cache-session"] = {
+            "cookies": {"SESSDATA": "cached", "bili_jct": "cached", "DedeUserID": "1001"},
+            "user_info": {"mid": 1001, "uname": "cached"},
+        }
+        async with async_session_factory() as db:
+            db_session = await db.scalar(
+                select(UserSession).where(UserSession.session_id == "stale-cache-session")
+            )
+            db_session.is_valid = False
+            await db.commit()
+
+        self.assertIsNone(await auth.get_session("stale-cache-session"))
+        self.assertNotIn("stale-cache-session", auth.login_sessions)
+
     async def test_llm_provider_config_requires_valid_session_before_writing_env(self):
         env_file = Path(_DB_DIR) / ".env.local"
         original_env_file_path = chat._env_file_path
@@ -87,6 +103,28 @@ class CriticalSecurityRegressionTests(unittest.IsolatedAsyncioTestCase):
             chat._current_llm_provider = original_provider
             chat.settings.openai_native_api_key = original_native_key
             chat.settings.openai_native_base_url = original_native_base_url
+
+    async def test_chat_llm_switch_and_health_require_session(self):
+        with self.assertRaises(HTTPException) as switch_error:
+            await chat.set_llm_config(chat.LLMProviderUpdateRequest(provider="dashscope"))
+        self.assertEqual(switch_error.exception.status_code, 401)
+
+        with self.assertRaises(HTTPException) as health_error:
+            await chat.llm_health_check()
+        self.assertEqual(health_error.exception.status_code, 401)
+
+    async def test_chat_ask_routes_require_session(self):
+        request = chat.ChatRequest(question="hello")
+
+        with self.assertRaises(HTTPException) as ask_error:
+            async with async_session_factory() as db:
+                await chat.ask_question(request, db)
+        self.assertEqual(ask_error.exception.status_code, 401)
+
+        with self.assertRaises(HTTPException) as stream_error:
+            async with async_session_factory() as db:
+                await chat.ask_question_stream(request, db)
+        self.assertEqual(stream_error.exception.status_code, 401)
 
     async def test_chat_search_scopes_vector_query_to_session_videos(self):
         await self._create_session("search-session", mid=2002)
@@ -157,6 +195,70 @@ class CriticalSecurityRegressionTests(unittest.IsolatedAsyncioTestCase):
         finally:
             knowledge.get_rag_service = original_get_rag_service
 
+    async def test_knowledge_delete_requires_session_before_deleting_vectors(self):
+        class FakeRag:
+            def __init__(self):
+                self.deleted = []
+
+            def delete_video(self, bvid):
+                self.deleted.append(bvid)
+
+        fake_rag = FakeRag()
+        original_get_rag_service = knowledge.get_rag_service
+        knowledge.get_rag_service = lambda: fake_rag
+        try:
+            with self.assertRaises(HTTPException) as raised:
+                await knowledge.delete_video_from_knowledge("BV_SECRET")
+
+            self.assertEqual(raised.exception.status_code, 401)
+            self.assertEqual(fake_rag.deleted, [])
+        finally:
+            knowledge.get_rag_service = original_get_rag_service
+
+    async def test_knowledge_clear_refuses_to_clear_when_other_users_have_folders(self):
+        await self._create_session("clear-owner", mid=4004)
+        await self._create_session("other-owner", mid=5005)
+        async with async_session_factory() as db:
+            db.add_all(
+                [
+                    FavoriteFolder(
+                        session_id="clear-owner",
+                        media_id=61,
+                        title="Owner folder",
+                        media_count=0,
+                        is_selected=True,
+                    ),
+                    FavoriteFolder(
+                        session_id="other-owner",
+                        media_id=62,
+                        title="Other folder",
+                        media_count=0,
+                        is_selected=True,
+                    ),
+                ]
+            )
+            await db.commit()
+
+        class FakeRag:
+            def __init__(self):
+                self.cleared = False
+
+            def clear_collection(self):
+                self.cleared = True
+
+        fake_rag = FakeRag()
+        original_get_rag_service = knowledge.get_rag_service
+        knowledge.get_rag_service = lambda: fake_rag
+        try:
+            async with async_session_factory() as db:
+                with self.assertRaises(HTTPException) as raised:
+                    await knowledge.clear_knowledge_base(session_id="clear-owner", db=db)
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertFalse(fake_rag.cleared)
+        finally:
+            knowledge.get_rag_service = original_get_rag_service
+
     async def test_knowledge_delete_refuses_to_delete_other_users_video(self):
         await self._create_session("owner-session", mid=3003)
         async with async_session_factory() as db:
@@ -192,6 +294,58 @@ class CriticalSecurityRegressionTests(unittest.IsolatedAsyncioTestCase):
                     )
 
             self.assertEqual(raised.exception.status_code, 403)
+            self.assertEqual(fake_rag.deleted, [])
+        finally:
+            knowledge.get_rag_service = original_get_rag_service
+
+    async def test_knowledge_delete_refuses_shared_bvid_global_deletion(self):
+        await self._create_session("shared-owner", mid=6006)
+        await self._create_session("shared-other", mid=7007)
+        async with async_session_factory() as db:
+            owner_folder = FavoriteFolder(
+                session_id="shared-owner",
+                media_id=71,
+                title="Owner folder",
+                media_count=1,
+                is_selected=True,
+            )
+            other_folder = FavoriteFolder(
+                session_id="shared-other",
+                media_id=72,
+                title="Other folder",
+                media_count=1,
+                is_selected=True,
+            )
+            db.add_all([owner_folder, other_folder])
+            await db.flush()
+            db.add_all(
+                [
+                    FavoriteVideo(folder_id=owner_folder.id, bvid="BV_SHARED", is_selected=True),
+                    FavoriteVideo(folder_id=other_folder.id, bvid="BV_SHARED", is_selected=True),
+                ]
+            )
+            await db.commit()
+
+        class FakeRag:
+            def __init__(self):
+                self.deleted = []
+
+            def delete_video(self, bvid):
+                self.deleted.append(bvid)
+
+        fake_rag = FakeRag()
+        original_get_rag_service = knowledge.get_rag_service
+        knowledge.get_rag_service = lambda: fake_rag
+        try:
+            async with async_session_factory() as db:
+                with self.assertRaises(HTTPException) as raised:
+                    await knowledge.delete_video_from_knowledge(
+                        "BV_SHARED",
+                        session_id="shared-owner",
+                        db=db,
+                    )
+
+            self.assertEqual(raised.exception.status_code, 409)
             self.assertEqual(fake_rag.deleted, [])
         finally:
             knowledge.get_rag_service = original_get_rag_service
