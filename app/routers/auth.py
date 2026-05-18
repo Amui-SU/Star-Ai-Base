@@ -218,6 +218,8 @@ async def get_session(session_id: str) -> dict:
 
 async def require_session(session_id: str) -> dict:
     """Return a valid session or fail the request consistently."""
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
     session = await get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")

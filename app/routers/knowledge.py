@@ -66,6 +66,8 @@ def get_rag_service() -> RAGService:
 
 
 async def _require_valid_session(session_id: str) -> dict:
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
     session = await get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
