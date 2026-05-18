@@ -139,28 +139,9 @@ async def get_session_info(session_id: str):
     """
     获取会话信息
     """
-    session = login_sessions.get(session_id)
+    session = await get_session(session_id)
     if not session:
-        async with get_db_context() as db:
-            result = await db.execute(
-                select(UserSessionModel).where(UserSessionModel.session_id == session_id)
-            )
-            db_session = result.scalar_one_or_none()
-        if not db_session or not db_session.is_valid:
-            raise HTTPException(status_code=404, detail="会话不存在或已过期")
-        session = {
-            "cookies": {
-                "SESSDATA": db_session.sessdata,
-                "bili_jct": db_session.bili_jct,
-                "DedeUserID": db_session.dedeuserid,
-            },
-            "user_info": {
-                "mid": db_session.bili_mid,
-                "uname": db_session.bili_uname,
-                "face": db_session.bili_face,
-            },
-        }
-        login_sessions[session_id] = session
+        raise HTTPException(status_code=404, detail="会话不存在或已过期")
 
     return {"valid": True, "user_info": session.get("user_info")}
 
@@ -188,8 +169,6 @@ async def get_session(session_id: str) -> dict:
     获取会话信息（内部使用）
     """
     session = login_sessions.get(session_id)
-    if session:
-        return session
 
     async with get_db_context() as db:
         result = await db.execute(
@@ -197,7 +176,12 @@ async def get_session(session_id: str) -> dict:
         )
         db_session = result.scalar_one_or_none()
         if not db_session or not db_session.is_valid:
+            login_sessions.pop(session_id, None)
             return None
+
+        if session:
+            return session
+
         session = {
             "cookies": {
                 "SESSDATA": db_session.sessdata,
