@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 
 from app.database import async_session_factory, init_db
 from app.models import FavoriteFolder, FavoriteVideo, UserSession
-from app.routers import auth, chat
+from app.routers import auth, chat, knowledge
 
 
 class FrontendApiClientTests(unittest.TestCase):
@@ -136,3 +136,62 @@ class CriticalSecurityRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(fake_rag.calls, [{"query": "private topic", "k": 3, "bvids": ["BV_ALLOWED"]}])
         finally:
             chat.get_rag_service = original_get_rag_service
+
+    async def test_knowledge_clear_requires_session_before_clearing_vectors(self):
+        class FakeRag:
+            def __init__(self):
+                self.cleared = False
+
+            def clear_collection(self):
+                self.cleared = True
+
+        fake_rag = FakeRag()
+        original_get_rag_service = knowledge.get_rag_service
+        knowledge.get_rag_service = lambda: fake_rag
+        try:
+            with self.assertRaises(HTTPException) as raised:
+                await knowledge.clear_knowledge_base()
+
+            self.assertEqual(raised.exception.status_code, 401)
+            self.assertFalse(fake_rag.cleared)
+        finally:
+            knowledge.get_rag_service = original_get_rag_service
+
+    async def test_knowledge_delete_refuses_to_delete_other_users_video(self):
+        await self._create_session("owner-session", mid=3003)
+        async with async_session_factory() as db:
+            folder = FavoriteFolder(
+                session_id="owner-session",
+                media_id=51,
+                title="Owner folder",
+                media_count=1,
+                is_selected=True,
+            )
+            db.add(folder)
+            await db.flush()
+            db.add(FavoriteVideo(folder_id=folder.id, bvid="BV_OWNED", is_selected=True))
+            await db.commit()
+
+        class FakeRag:
+            def __init__(self):
+                self.deleted = []
+
+            def delete_video(self, bvid):
+                self.deleted.append(bvid)
+
+        fake_rag = FakeRag()
+        original_get_rag_service = knowledge.get_rag_service
+        knowledge.get_rag_service = lambda: fake_rag
+        try:
+            async with async_session_factory() as db:
+                with self.assertRaises(HTTPException) as raised:
+                    await knowledge.delete_video_from_knowledge(
+                        "BV_OTHER",
+                        session_id="owner-session",
+                        db=db,
+                    )
+
+            self.assertEqual(raised.exception.status_code, 403)
+            self.assertEqual(fake_rag.deleted, [])
+        finally:
+            knowledge.get_rag_service = original_get_rag_service
