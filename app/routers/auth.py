@@ -166,13 +166,20 @@ async def get_session_info(session_id: str):
 
 
 @router.delete("/session/{session_id}")
-async def logout(session_id: str):
+async def logout(session_id: str, db: AsyncSession = Depends(get_db)):
     """
     退出登录
     """
-    if session_id in login_sessions:
-        del login_sessions[session_id]
-    
+    login_sessions.pop(session_id, None)
+
+    result = await db.execute(
+        select(UserSessionModel).where(UserSessionModel.session_id == session_id)
+    )
+    db_session = result.scalar_one_or_none()
+    if db_session:
+        db_session.is_valid = False
+        await db.commit()
+
     return {"message": "已退出登录"}
 
 
@@ -206,4 +213,12 @@ async def get_session(session_id: str) -> dict:
 
     if session:
         login_sessions[session_id] = session
+    return session
+
+
+async def require_session(session_id: str) -> dict:
+    """Return a valid session or fail the request consistently."""
+    session = await get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
     return session
