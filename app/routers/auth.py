@@ -18,6 +18,18 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 login_sessions = {}
 
 
+def _is_authenticated_session(session: dict | None) -> bool:
+    if not isinstance(session, dict):
+        return False
+    cookies = session.get("cookies")
+    user_info = session.get("user_info")
+    if not isinstance(cookies, dict) or not isinstance(user_info, dict):
+        return False
+    has_cookies = all(cookies.get(key) for key in ("SESSDATA", "bili_jct", "DedeUserID"))
+    has_identity = bool(user_info.get("mid") or user_info.get("uname"))
+    return has_cookies and has_identity
+
+
 @router.get("/qrcode", response_model=QRCodeResponse)
 async def generate_qrcode():
     """
@@ -139,39 +151,27 @@ async def get_session_info(session_id: str):
     """
     获取会话信息
     """
-    session = login_sessions.get(session_id)
+    session = await get_session(session_id)
     if not session:
-        async with get_db_context() as db:
-            result = await db.execute(
-                select(UserSessionModel).where(UserSessionModel.session_id == session_id)
-            )
-            db_session = result.scalar_one_or_none()
-        if not db_session or not db_session.is_valid:
-            raise HTTPException(status_code=404, detail="会话不存在或已过期")
-        session = {
-            "cookies": {
-                "SESSDATA": db_session.sessdata,
-                "bili_jct": db_session.bili_jct,
-                "DedeUserID": db_session.dedeuserid,
-            },
-            "user_info": {
-                "mid": db_session.bili_mid,
-                "uname": db_session.bili_uname,
-                "face": db_session.bili_face,
-            },
-        }
-        login_sessions[session_id] = session
+        raise HTTPException(status_code=404, detail="会话不存在或已过期")
 
     return {"valid": True, "user_info": session.get("user_info")}
 
 
 @router.delete("/session/{session_id}")
-async def logout(session_id: str):
+async def logout(session_id: str, db: AsyncSession = Depends(get_db)):
     """
     退出登录
     """
-    if session_id in login_sessions:
-        del login_sessions[session_id]
+    login_sessions.pop(session_id, None)
+
+    result = await db.execute(
+        select(UserSessionModel).where(UserSessionModel.session_id == session_id)
+    )
+    db_session = result.scalar_one_or_none()
+    if db_session:
+        db_session.is_valid = False
+        await db.commit()
     
     return {"message": "已退出登录"}
 
@@ -181,16 +181,24 @@ async def get_session(session_id: str) -> dict:
     获取会话信息（内部使用）
     """
     session = login_sessions.get(session_id)
-    if session:
-        return session
 
     async with get_db_context() as db:
         result = await db.execute(
             select(UserSessionModel).where(UserSessionModel.session_id == session_id)
         )
         db_session = result.scalar_one_or_none()
-        if not db_session or not db_session.is_valid:
+        if db_session:
+            if not db_session.is_valid:
+                login_sessions.pop(session_id, None)
+                return None
+            if _is_authenticated_session(session):
+                return session
+        else:
+            if _is_authenticated_session(session):
+                return session
+            login_sessions.pop(session_id, None)
             return None
+
         session = {
             "cookies": {
                 "SESSDATA": db_session.sessdata,
