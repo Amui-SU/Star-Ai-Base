@@ -65,6 +65,14 @@ def get_rag_service() -> RAGService:
     return _rag_service
 
 
+async def _require_session(session_id: str) -> dict:
+    """验证会话，保护会修改知识库状态的接口。"""
+    session = await get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    return session
+
+
 class BuildRequest(BaseModel):
     """知识库构建请求"""
     folder_ids: List[int]  # 要处理的收藏夹 ID 列表
@@ -734,8 +742,9 @@ async def get_build_status(task_id: str):
 
 
 @router.delete("/clear")
-async def clear_knowledge_base():
+async def clear_knowledge_base(session_id: str = Query(..., description="会话ID")):
     """清空知识库"""
+    await _require_session(session_id)
     try:
         rag = get_rag_service()
         rag.clear_collection()
@@ -746,8 +755,12 @@ async def clear_knowledge_base():
 
 
 @router.delete("/video/{bvid}")
-async def delete_video_from_knowledge(bvid: str):
+async def delete_video_from_knowledge(
+    bvid: str,
+    session_id: str = Query(..., description="会话ID"),
+):
     """从知识库中删除指定视频"""
+    await _require_session(session_id)
     try:
         rag = get_rag_service()
         rag.delete_video(bvid)
