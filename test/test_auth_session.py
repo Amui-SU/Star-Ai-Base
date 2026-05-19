@@ -57,6 +57,14 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(session)
         self.assertNotIn("revoked", auth.login_sessions)
 
+    async def test_get_session_rejects_pending_qrcode_key(self) -> None:
+        auth.login_sessions["qr-key"] = {"status": "waiting"}
+
+        session = await auth.get_session("qr-key")
+
+        self.assertIsNone(session)
+        self.assertNotIn("qr-key", auth.login_sessions)
+
     async def test_logout_marks_persisted_session_invalid(self) -> None:
         await self.add_session("active", is_valid=True)
         auth.login_sessions["active"] = {

@@ -18,6 +18,14 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 login_sessions = {}
 
 
+def _is_authenticated_session(session: dict | None) -> bool:
+    return (
+        isinstance(session, dict)
+        and isinstance(session.get("cookies"), dict)
+        and isinstance(session.get("user_info"), dict)
+    )
+
+
 @router.get("/qrcode", response_model=QRCodeResponse)
 async def generate_qrcode():
     """
@@ -179,10 +187,13 @@ async def get_session(session_id: str) -> dict:
             if not db_session.is_valid:
                 login_sessions.pop(session_id, None)
                 return None
-            if session:
+            if _is_authenticated_session(session):
                 return session
         else:
-            return session
+            if _is_authenticated_session(session):
+                return session
+            login_sessions.pop(session_id, None)
+            return None
 
         session = {
             "cookies": {
