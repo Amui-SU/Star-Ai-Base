@@ -56,7 +56,10 @@ class KnowledgeAuthTests(unittest.TestCase):
         self.assertEqual(self.rag.deleted_bvids, [])
 
     def test_destructive_routes_allow_valid_session(self) -> None:
-        self.set_session({"cookies": {}, "user_info": {}})
+        self.set_session({
+            "cookies": {"SESSDATA": "sess", "bili_jct": "csrf", "DedeUserID": "123"},
+            "user_info": {"mid": 123, "uname": "tester"},
+        })
 
         clear_response = self.client.delete("/knowledge/clear?session_id=valid")
         delete_response = self.client.delete("/knowledge/video/BV1xx411c7mD?session_id=valid")

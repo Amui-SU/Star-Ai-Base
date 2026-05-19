@@ -19,11 +19,15 @@ login_sessions = {}
 
 
 def _is_authenticated_session(session: dict | None) -> bool:
-    return (
-        isinstance(session, dict)
-        and isinstance(session.get("cookies"), dict)
-        and isinstance(session.get("user_info"), dict)
-    )
+    if not isinstance(session, dict):
+        return False
+    cookies = session.get("cookies")
+    user_info = session.get("user_info")
+    if not isinstance(cookies, dict) or not isinstance(user_info, dict):
+        return False
+    has_cookies = all(cookies.get(key) for key in ("SESSDATA", "bili_jct", "DedeUserID"))
+    has_identity = bool(user_info.get("mid") or user_info.get("uname"))
+    return has_cookies and has_identity
 
 
 @router.get("/qrcode", response_model=QRCodeResponse)
