@@ -28,3 +28,13 @@ loguru==0.7.2
 
 # System dependency (required for ASR local fallback)
 # ffmpeg (install separately and add to PATH)
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+asgi-lifespan==2.1.0
+
+# Security
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+cryptography==43.0.3
