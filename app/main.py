@@ -3,6 +3,7 @@ Bilibili RAG 知识库系统
 
 主应用入口
 """
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +12,7 @@ import sys
 
 from app.config import settings, ensure_directories
 from app.database import init_db
-from app.routers import auth, favorites, knowledge, chat
+from app.routers import auth, favorites, knowledge, chat, system_auth
 
 
 # 配置日志
@@ -19,14 +20,9 @@ logger.remove()
 logger.add(
     sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level="DEBUG" if settings.debug else "INFO"
+    level="DEBUG" if settings.debug else "INFO",
 )
-logger.add(
-    "logs/app.log",
-    rotation="10 MB",
-    retention="7 days",
-    level="DEBUG"
-)
+logger.add("logs/app.log", rotation="10 MB", retention="7 days", level="DEBUG")
 
 
 @asynccontextmanager
@@ -37,9 +33,9 @@ async def lifespan(app: FastAPI):
     ensure_directories()
     await init_db()
     logger.info("✅ 数据库初始化完成")
-    
+
     yield
-    
+
     # 关闭时
     logger.info("👋 应用关闭")
 
@@ -66,7 +62,7 @@ app = FastAPI(
 - B站 API (非官方)
     """,
     version="0.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 
@@ -81,6 +77,7 @@ app.add_middleware(
 
 
 # 注册路由
+app.include_router(system_auth.router)
 app.include_router(auth.router)
 app.include_router(favorites.router)
 app.include_router(knowledge.router)
@@ -94,7 +91,7 @@ async def root():
         "message": "🎬 Bilibili RAG 知识库系统",
         "version": "0.1.0",
         "docs": "/docs",
-        "status": "running"
+        "status": "running",
     }
 
 
@@ -106,9 +103,10 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host=settings.app_host,
         port=settings.app_port,
-        reload=settings.debug
+        reload=settings.debug,
     )
