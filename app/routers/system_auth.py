@@ -37,6 +37,10 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _naive_utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def _as_aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -127,7 +131,7 @@ async def _get_current_user(request: Request, db: AsyncSession) -> SystemUser:
     if user is None or user.status != "active":
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
-    session.last_seen_at = _utc_now()
+    session.last_seen_at = _naive_utc_now()
     await db.commit()
     return user
 
