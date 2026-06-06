@@ -89,8 +89,12 @@ class SystemSession(Base):
     __tablename__ = "system_sessions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
-    token_hash = Column(String(128), unique=True, index=True, nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("system_users.id"), index=True, nullable=False
+    )
+    session_token_hash = Column(
+        String(128), unique=True, index=True, nullable=False
+    )
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -103,7 +107,9 @@ class Workspace(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(200), nullable=False)
-    owner_user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    owner_user_id = Column(
+        Integer, ForeignKey("system_users.id"), index=True, nullable=False
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -111,10 +117,14 @@ class Workspace(Base):
 class WorkspaceMember(Base):
     """工作区成员表"""
     __tablename__ = "workspace_members"
-    __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_user"),)
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_user"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=False)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id"), index=True, nullable=False
+    )
     user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
     role = Column(String(20), default="owner", nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
