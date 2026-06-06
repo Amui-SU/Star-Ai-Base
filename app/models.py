@@ -4,6 +4,7 @@ Bilibili RAG 知识库系统
 数据模型定义
 """
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON
+from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -69,6 +70,56 @@ class UserSession(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SystemUser(Base):
+    """系统用户表"""
+    __tablename__ = "system_users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(Text, nullable=False)
+    display_name = Column(String(100), nullable=False)
+    avatar_url = Column(String(500), nullable=True)
+    status = Column(String(20), default="active", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SystemSession(Base):
+    """系统登录会话表"""
+    __tablename__ = "system_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    token_hash = Column(String(128), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Workspace(Base):
+    """工作区表"""
+    __tablename__ = "workspaces"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    owner_user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkspaceMember(Base):
+    """工作区成员表"""
+    __tablename__ = "workspace_members"
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_user"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    role = Column(String(20), default="owner", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class FavoriteFolder(Base):
     """收藏夹记录表"""
     __tablename__ = 'favorite_folders'
@@ -112,6 +163,35 @@ class ContentSource(str, Enum):
     SUBTITLE = "subtitle"
     BASIC_INFO = "basic_info"
     ASR = "asr"
+
+
+class SystemRegisterRequest(BaseModel):
+    email: str
+    password: str
+    display_name: str
+
+
+class SystemLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class SystemUserResponse(BaseModel):
+    id: int
+    email: str
+    display_name: str
+    avatar_url: Optional[str] = None
+
+
+class WorkspaceResponse(BaseModel):
+    id: int
+    name: str
+    role: str
+
+
+class SystemAuthResponse(BaseModel):
+    user: SystemUserResponse
+    workspace: WorkspaceResponse
 
 
 class VideoInfo(BaseModel):
