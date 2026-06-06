@@ -232,7 +232,7 @@ async def logout(
         )
         session = result.scalar_one_or_none()
         if session is not None and session.revoked_at is None:
-            session.revoked_at = _utc_now()
+            session.revoked_at = _naive_utc_now()
             await db.commit()
 
     clear_session_cookie(response)
