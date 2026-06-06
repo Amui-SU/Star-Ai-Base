@@ -1,10 +1,11 @@
 import os
 import sys
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient
 from httpx import ASGITransport
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -17,13 +18,13 @@ from app.models import Base
 
 
 @pytest.fixture()
-async def test_db_url() -> AsyncIterator[str]:
+def test_db_url() -> Iterator[str]:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = os.path.join(temp_dir, "test.db")
         yield f"sqlite+aiosqlite:///{db_path}"
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def test_engine(test_db_url: str):
     engine = create_async_engine(test_db_url, echo=False, future=True)
     async with engine.begin() as conn:
@@ -35,11 +36,11 @@ async def test_engine(test_db_url: str):
 
 
 @pytest.fixture()
-async def db_session_factory(test_engine):
+def db_session_factory(test_engine):
     return async_sessionmaker(test_engine, expire_on_commit=False)
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def client(monkeypatch, db_session_factory) -> AsyncIterator[AsyncClient]:
     import app.database as database
 
@@ -51,10 +52,17 @@ async def client(monkeypatch, db_session_factory) -> AsyncIterator[AsyncClient]:
 
     from app.main import app
 
+    missing_override = object()
+    previous_override = app.dependency_overrides.get(database.get_db, missing_override)
     app.dependency_overrides[database.get_db] = override_get_db
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as test_client:
-        yield test_client
-    app.dependency_overrides.clear()
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as test_client:
+            yield test_client
+    finally:
+        if previous_override is missing_override:
+            app.dependency_overrides.pop(database.get_db, None)
+        else:
+            app.dependency_overrides[database.get_db] = previous_override
