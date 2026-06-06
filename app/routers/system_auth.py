@@ -86,7 +86,7 @@ async def _create_system_session(
         SystemSession(
             user_id=user_id,
             session_token_hash=hash_token(token),
-            expires_at=session_expires_at(),
+            expires_at=session_expires_at().replace(tzinfo=None),
         )
     )
     set_session_cookie(response, token)
