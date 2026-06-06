@@ -13,6 +13,10 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _utc_now_naive() -> datetime:
+    return datetime.utcnow()
+
+
 def _as_aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -53,8 +57,8 @@ async def get_current_user(
     if user is None:
         raise _unauthorized()
 
-    session.last_seen_at = _utc_now()
-    await db.flush()
+    session.last_seen_at = _utc_now_naive()
+    await db.commit()
     return user
 
 
@@ -68,7 +72,7 @@ async def get_current_workspace(
         .where(WorkspaceMember.user_id == current_user.id)
         .order_by(WorkspaceMember.id)
     )
-    workspace = result.scalar_one_or_none()
+    workspace = result.scalars().first()
     if workspace is None:
         raise HTTPException(status_code=403, detail="Workspace access required")
     return workspace
