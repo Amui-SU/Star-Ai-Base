@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -29,6 +30,8 @@ from app.security import (
 
 router = APIRouter(prefix="/system-auth", tags=["系统认证"])
 
+MAX_BCRYPT_PASSWORD_BYTES = 72
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -38,6 +41,18 @@ def _as_aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _password_exceeds_bcrypt_limit(password: str) -> bool:
+    return len(password.encode("utf-8")) > MAX_BCRYPT_PASSWORD_BYTES
+
+
+def _duplicate_email_exception() -> HTTPException:
+    return HTTPException(status_code=400, detail="邮箱已注册")
+
+
+def _invalid_credentials_exception() -> HTTPException:
+    return HTTPException(status_code=401, detail="邮箱或密码错误")
 
 
 def _user_response(user: SystemUser) -> SystemUserResponse:
@@ -126,36 +141,43 @@ async def register(
     email = payload.email.strip().lower()
     display_name = payload.display_name.strip()
 
+    if _password_exceeds_bcrypt_limit(payload.password):
+        raise HTTPException(status_code=400, detail="密码长度不能超过 72 字节")
+
     existing_result = await db.execute(
         select(SystemUser).where(SystemUser.email == email)
     )
     if existing_result.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=400, detail="邮箱已注册")
+        raise _duplicate_email_exception()
 
-    user = SystemUser(
-        email=email,
-        password_hash=hash_password(payload.password),
-        display_name=display_name,
-        status="active",
-    )
-    db.add(user)
-    await db.flush()
+    try:
+        user = SystemUser(
+            email=email,
+            password_hash=hash_password(payload.password),
+            display_name=display_name,
+            status="active",
+        )
+        db.add(user)
+        await db.flush()
 
-    workspace = Workspace(
-        name=f"{display_name} 的个人空间",
-        owner_user_id=user.id,
-    )
-    db.add(workspace)
-    await db.flush()
+        workspace = Workspace(
+            name=f"{display_name} 的个人空间",
+            owner_user_id=user.id,
+        )
+        db.add(workspace)
+        await db.flush()
 
-    member = WorkspaceMember(
-        workspace_id=workspace.id,
-        user_id=user.id,
-        role="owner",
-    )
-    db.add(member)
-    await _create_system_session(db, user.id, response)
-    await db.commit()
+        member = WorkspaceMember(
+            workspace_id=workspace.id,
+            user_id=user.id,
+            role="owner",
+        )
+        db.add(member)
+        await _create_system_session(db, user.id, response)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise _duplicate_email_exception() from None
 
     return SystemAuthResponse(
         user=_user_response(user),
@@ -176,9 +198,10 @@ async def login(
     if (
         user is None
         or user.status != "active"
+        or _password_exceeds_bcrypt_limit(payload.password)
         or not verify_password(payload.password, user.password_hash)
     ):
-        raise HTTPException(status_code=401, detail="邮箱或密码错误")
+        raise _invalid_credentials_exception()
 
     workspace, member = await _get_primary_workspace(db, user.id)
     await _create_system_session(db, user.id, response)
