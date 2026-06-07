@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+import json
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -160,3 +162,26 @@ async def chat_with_knowledge_base(
         k=k,
     )
     return _answer_from_documents(question, documents)
+
+
+@router.post("/{knowledge_base_id}/chat/stream")
+async def stream_chat_with_knowledge_base(
+    payload: KnowledgeBaseChatRequest,
+    knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+):
+    response = await chat_with_knowledge_base(
+        payload=payload,
+        knowledge_base=knowledge_base,
+        current_workspace=current_workspace,
+    )
+
+    def generate():
+        yield response.answer
+        if response.thinking:
+            yield "\n[[THINKING_JSON]]"
+            yield json.dumps(response.thinking, ensure_ascii=False)
+        yield "\n[[SOURCES_JSON]]"
+        yield json.dumps(response.sources, ensure_ascii=False)
+
+    return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")

@@ -145,3 +145,114 @@ async def test_scoped_chat_uses_scoped_retrieval(client, monkeypatch):
     assert body["sources"][0]["title"] == "Python Intro"
     assert captured["workspace_id"] == knowledge_base["workspace_id"]
     assert captured["knowledge_base_id"] == knowledge_base["id"]
+
+
+@pytest.mark.asyncio
+async def test_scoped_chat_stream_requires_owned_knowledge_base(client):
+    await register_user(client, "alice@example.com", "Alice")
+    alice_kb = await create_knowledge_base(client, "Alice Stream KB")
+    await client.post("/system-auth/logout")
+
+    await register_user(client, "bob@example.com", "Bob")
+    response = await client.post(
+        f"/knowledge-bases/{alice_kb['id']}/chat/stream",
+        json={"question": "hello"},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_scoped_chat_stream_returns_answer_for_owner(client, monkeypatch):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Owner Stream KB")
+
+    class FakeRAGService:
+        def search_in_knowledge_base(
+            self,
+            query,
+            workspace_id,
+            knowledge_base_id,
+            k=5,
+        ):
+            return [
+                type(
+                    "FakeDocument",
+                    (),
+                    {
+                        "page_content": "Streamed answer chunk.",
+                        "metadata": {
+                            "bvid": "BV1st411c7mD",
+                            "title": "Stream Intro",
+                            "url": "https://www.bilibili.com/video/BV1st411c7mD",
+                        },
+                    },
+                )()
+            ]
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat/stream",
+        json={"question": "stream please"},
+    )
+
+    assert response.status_code == 200
+    assert "Streamed answer chunk." in response.text
+    assert "[[SOURCES_JSON]]" in response.text
+
+
+@pytest.mark.asyncio
+async def test_scoped_chat_stream_json_encodes_thinking(client, monkeypatch):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Thinking Stream KB")
+
+    async def fake_chat_with_knowledge_base(payload, knowledge_base, current_workspace):
+        from app.models import ChatResponse
+
+        return ChatResponse(answer="done", sources=[], thinking="思考")
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.chat_with_knowledge_base",
+        fake_chat_with_knowledge_base,
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat/stream",
+        json={"question": "show thinking"},
+    )
+
+    assert response.status_code == 200
+    assert '[[THINKING_JSON]]"思考"' in response.text
+
+
+@pytest.mark.asyncio
+async def test_scoped_chat_stream_emits_empty_sources_trailer(client, monkeypatch):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Empty Stream KB")
+
+    class FakeRAGService:
+        def search_in_knowledge_base(
+            self,
+            query,
+            workspace_id,
+            knowledge_base_id,
+            k=5,
+        ):
+            return []
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat/stream",
+        json={"question": "nothing here"},
+    )
+
+    assert response.status_code == 200
+    assert "[[SOURCES_JSON]][]" in response.text
