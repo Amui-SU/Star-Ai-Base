@@ -21,3 +21,9 @@ async def test_new_user_has_empty_source_binding_list(client):
     response = await client.get("/source-bindings")
     assert response.status_code == 200
     assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_bilibili_qrcode_requires_system_login(client):
+    response = await client.get("/source-bindings/bilibili/qrcode")
+    assert response.status_code == 401
