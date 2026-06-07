@@ -9,7 +9,9 @@ from app.dependencies import (
     get_knowledge_base_for_user,
 )
 from app.models import (
+    ChatResponse,
     KnowledgeBase,
+    KnowledgeBaseChatRequest,
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseSearchRequest,
@@ -39,6 +41,29 @@ def _search_result(document) -> KnowledgeBaseSearchResult:
         bvid=metadata.get("bvid"),
         title=metadata.get("title"),
         url=metadata.get("url"),
+    )
+
+
+def _source_from_document(document) -> dict:
+    metadata = document.metadata or {}
+    bvid = metadata.get("bvid")
+    return {
+        "bvid": bvid,
+        "title": metadata.get("title") or bvid or "Untitled",
+        "url": metadata.get("url") or f"https://www.bilibili.com/video/{bvid or ''}",
+    }
+
+
+def _answer_from_documents(question: str, documents: list) -> ChatResponse:
+    if not documents:
+        return ChatResponse(
+            answer="当前知识库中没有找到相关内容。",
+            sources=[],
+        )
+    context = "\n\n".join(document.page_content for document in documents)
+    return ChatResponse(
+        answer=f"基于当前知识库内容，关于“{question}”可以参考：\n\n{context}",
+        sources=[_source_from_document(document) for document in documents],
     )
 
 
@@ -114,3 +139,24 @@ async def search_knowledge_base(
     return KnowledgeBaseSearchResponse(
         results=[_search_result(document) for document in documents]
     )
+
+
+@router.post("/{knowledge_base_id}/chat", response_model=ChatResponse)
+async def chat_with_knowledge_base(
+    payload: KnowledgeBaseChatRequest,
+    knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+) -> ChatResponse:
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    k = max(1, min(payload.k, 20))
+    rag = get_rag_service()
+    documents = rag.search_in_knowledge_base(
+        question,
+        workspace_id=current_workspace.id,
+        knowledge_base_id=knowledge_base.id,
+        k=k,
+    )
+    return _answer_from_documents(question, documents)

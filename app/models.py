@@ -298,6 +298,13 @@ class KnowledgeBaseSearchResponse(BaseModel):
     results: list[KnowledgeBaseSearchResult]
 
 
+class KnowledgeBaseChatRequest(BaseModel):
+    question: str
+    k: int = 5
+    smart_search: bool = False
+    deep_think: bool = False
+
+
 class SourceBindingResponse(BaseModel):
     id: int
     source_type: str

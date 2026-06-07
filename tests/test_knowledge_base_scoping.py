@@ -94,3 +94,54 @@ async def test_scoped_search_uses_workspace_and_knowledge_base_filter(
         "knowledge_base_id": knowledge_base["id"],
         "k": 3,
     }
+
+
+@pytest.mark.asyncio
+async def test_scoped_chat_uses_scoped_retrieval(client, monkeypatch):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Chat KB")
+    captured = {}
+
+    class FakeRAGService:
+        def search_in_knowledge_base(
+            self,
+            query,
+            workspace_id,
+            knowledge_base_id,
+            k=5,
+        ):
+            captured["query"] = query
+            captured["workspace_id"] = workspace_id
+            captured["knowledge_base_id"] = knowledge_base_id
+            captured["k"] = k
+            return [
+                type(
+                    "FakeDocument",
+                    (),
+                    {
+                        "page_content": "Python is a programming language.",
+                        "metadata": {
+                            "bvid": "BV1py411c7mD",
+                            "title": "Python Intro",
+                            "url": "https://www.bilibili.com/video/BV1py411c7mD",
+                        },
+                    },
+                )()
+            ]
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat",
+        json={"question": "What is Python?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "Python" in body["answer"]
+    assert body["sources"][0]["title"] == "Python Intro"
+    assert captured["workspace_id"] == knowledge_base["workspace_id"]
+    assert captured["knowledge_base_id"] == knowledge_base["id"]
