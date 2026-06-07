@@ -58,7 +58,7 @@ async def client(monkeypatch, db_session_factory) -> AsyncIterator[AsyncClient]:
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app),
-            base_url="http://testserver",
+            base_url="https://testserver",
         ) as test_client:
             yield test_client
     finally:
