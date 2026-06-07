@@ -24,14 +24,17 @@ B 站扫码只用于绑定外部内容源。绑定结果写入当前系统用户
 
 ## 知识库接口
 
+已实现的多用户范围化入口：
+
 - `GET /knowledge-bases`
 - `POST /knowledge-bases`
 - `GET /knowledge-bases/{knowledge_base_id}/stats`
+- `POST /knowledge-bases/{knowledge_base_id}/search`
 - `POST /knowledge-bases/{knowledge_base_id}/chat`
 - `POST /knowledge-bases/{knowledge_base_id}/chat/stream`
-- `POST /knowledge-bases/{knowledge_base_id}/search`
+- `POST /knowledge-bases/{knowledge_base_id}/build`
 
-所有知识库 ID 必须属于当前用户可访问的工作区。
+所有知识库 ID 必须属于当前用户可访问的工作区。新入口不接受 `session_id` 作为身份来源。
 
 ## 旧接口处理
 
