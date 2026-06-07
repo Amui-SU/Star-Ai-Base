@@ -1,7 +1,9 @@
 import pytest
 
+from app.models import SourceBinding
 
-async def register_user(client, email: str, display_name: str) -> None:
+
+async def register_user(client, email: str, display_name: str) -> dict:
     response = await client.post(
         "/system-auth/register",
         json={
@@ -11,6 +13,7 @@ async def register_user(client, email: str, display_name: str) -> None:
         },
     )
     assert response.status_code == 200
+    return response.json()
 
 
 async def create_knowledge_base(client, name: str = "Scoped KB") -> dict:
@@ -20,6 +23,28 @@ async def create_knowledge_base(client, name: str = "Scoped KB") -> dict:
     )
     assert response.status_code == 200
     return response.json()
+
+
+async def create_source_binding(
+    db_session_factory,
+    *,
+    user_id: int,
+    workspace_id: int,
+    status: str = "active",
+) -> SourceBinding:
+    async with db_session_factory() as session:
+        binding = SourceBinding(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            source_type="bilibili",
+            external_account_id=f"mid-{user_id}-{workspace_id}-{status}",
+            external_account_name="Bilibili Account",
+            status=status,
+        )
+        session.add(binding)
+        await session.commit()
+        await session.refresh(binding)
+        return binding
 
 
 @pytest.mark.asyncio
@@ -256,3 +281,83 @@ async def test_scoped_chat_stream_emits_empty_sources_trailer(client, monkeypatc
 
     assert response.status_code == 200
     assert "[[SOURCES_JSON]][]" in response.text
+
+
+@pytest.mark.asyncio
+async def test_scoped_build_rejects_unknown_source_binding(client):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Build KB")
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/build",
+        json={"source_binding_id": 999, "folder_ids": [1]},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_scoped_build_records_scope_metadata(client, db_session_factory):
+    auth = await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Build Metadata KB")
+    binding = await create_source_binding(
+        db_session_factory,
+        user_id=auth["user"]["id"],
+        workspace_id=auth["workspace"]["id"],
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/build",
+        json={"source_binding_id": binding.id, "folder_ids": [1, 2]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["workspace_id"] == knowledge_base["workspace_id"]
+    assert body["knowledge_base_id"] == knowledge_base["id"]
+    assert body["source_binding_id"] == binding.id
+    assert body["task_id"]
+
+
+@pytest.mark.asyncio
+async def test_scoped_build_rejects_empty_folder_ids(client, db_session_factory):
+    auth = await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Empty Folders KB")
+    binding = await create_source_binding(
+        db_session_factory,
+        user_id=auth["user"]["id"],
+        workspace_id=auth["workspace"]["id"],
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/build",
+        json={"source_binding_id": binding.id, "folder_ids": []},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "folder_ids cannot be empty"
+
+
+@pytest.mark.asyncio
+async def test_scoped_build_rejects_other_users_source_binding(
+    client,
+    db_session_factory,
+):
+    alice_auth = await register_user(client, "alice@example.com", "Alice")
+    alice_binding = await create_source_binding(
+        db_session_factory,
+        user_id=alice_auth["user"]["id"],
+        workspace_id=alice_auth["workspace"]["id"],
+    )
+    await client.post("/system-auth/logout")
+
+    await register_user(client, "bob@example.com", "Bob")
+    bob_kb = await create_knowledge_base(client, "Bob Build KB")
+
+    response = await client.post(
+        f"/knowledge-bases/{bob_kb['id']}/build",
+        json={"source_binding_id": alice_binding.id, "folder_ids": [1]},
+    )
+
+    assert response.status_code == 404

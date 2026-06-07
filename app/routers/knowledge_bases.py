@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 import json
+import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,12 +14,15 @@ from app.dependencies import (
 from app.models import (
     ChatResponse,
     KnowledgeBase,
+    KnowledgeBaseBuildRequest,
+    KnowledgeBaseBuildResponse,
     KnowledgeBaseChatRequest,
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseSearchRequest,
     KnowledgeBaseSearchResponse,
     KnowledgeBaseSearchResult,
+    SourceBinding,
     SystemUser,
     Workspace,
 )
@@ -118,6 +122,35 @@ async def get_knowledge_base_stats(
         "workspace_id": knowledge_base.workspace_id,
         "scoped": True,
     }
+
+
+@router.post("/{knowledge_base_id}/build", response_model=KnowledgeBaseBuildResponse)
+async def build_knowledge_base(
+    payload: KnowledgeBaseBuildRequest,
+    current_user: SystemUser = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeBaseBuildResponse:
+    binding = await db.get(SourceBinding, payload.source_binding_id)
+    if (
+        binding is None
+        or binding.user_id != current_user.id
+        or binding.workspace_id != current_workspace.id
+        or binding.status != "active"
+    ):
+        raise HTTPException(status_code=404, detail="Source binding not found")
+
+    if not payload.folder_ids:
+        raise HTTPException(status_code=400, detail="folder_ids cannot be empty")
+
+    return KnowledgeBaseBuildResponse(
+        task_id=str(uuid.uuid4()),
+        status="pending",
+        workspace_id=current_workspace.id,
+        knowledge_base_id=knowledge_base.id,
+        source_binding_id=binding.id,
+    )
 
 
 @router.post("/{knowledge_base_id}/search", response_model=KnowledgeBaseSearchResponse)

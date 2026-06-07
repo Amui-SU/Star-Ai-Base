@@ -305,6 +305,20 @@ class KnowledgeBaseChatRequest(BaseModel):
     deep_think: bool = False
 
 
+class KnowledgeBaseBuildRequest(BaseModel):
+    source_binding_id: int
+    folder_ids: list[int]
+    exclude_bvids: Optional[list[str]] = None
+
+
+class KnowledgeBaseBuildResponse(BaseModel):
+    task_id: str
+    status: str
+    workspace_id: int
+    knowledge_base_id: int
+    source_binding_id: int
+
+
 class SourceBindingResponse(BaseModel):
     id: int
     source_type: str
