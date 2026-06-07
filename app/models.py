@@ -282,6 +282,22 @@ class KnowledgeBaseResponse(BaseModel):
     description: Optional[str] = None
 
 
+class KnowledgeBaseSearchRequest(BaseModel):
+    query: str
+    k: int = 5
+
+
+class KnowledgeBaseSearchResult(BaseModel):
+    content: str
+    bvid: Optional[str] = None
+    title: Optional[str] = None
+    url: Optional[str] = None
+
+
+class KnowledgeBaseSearchResponse(BaseModel):
+    results: list[KnowledgeBaseSearchResult]
+
+
 class SourceBindingResponse(BaseModel):
     id: int
     source_type: str

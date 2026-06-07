@@ -12,9 +12,13 @@ from app.models import (
     KnowledgeBase,
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
+    KnowledgeBaseSearchRequest,
+    KnowledgeBaseSearchResponse,
+    KnowledgeBaseSearchResult,
     SystemUser,
     Workspace,
 )
+from app.routers.knowledge import get_rag_service
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
 
@@ -25,6 +29,16 @@ def _response(knowledge_base: KnowledgeBase) -> KnowledgeBaseResponse:
         workspace_id=knowledge_base.workspace_id,
         name=knowledge_base.name,
         description=knowledge_base.description,
+    )
+
+
+def _search_result(document) -> KnowledgeBaseSearchResult:
+    metadata = document.metadata or {}
+    return KnowledgeBaseSearchResult(
+        content=document.page_content,
+        bvid=metadata.get("bvid"),
+        title=metadata.get("title"),
+        url=metadata.get("url"),
     )
 
 
@@ -77,3 +91,26 @@ async def get_knowledge_base_stats(
         "workspace_id": knowledge_base.workspace_id,
         "scoped": True,
     }
+
+
+@router.post("/{knowledge_base_id}/search", response_model=KnowledgeBaseSearchResponse)
+async def search_knowledge_base(
+    payload: KnowledgeBaseSearchRequest,
+    knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+) -> KnowledgeBaseSearchResponse:
+    query = payload.query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Search query cannot be empty")
+
+    k = max(1, min(payload.k, 20))
+    rag = get_rag_service()
+    documents = rag.search_in_knowledge_base(
+        query,
+        workspace_id=current_workspace.id,
+        knowledge_base_id=knowledge_base.id,
+        k=k,
+    )
+    return KnowledgeBaseSearchResponse(
+        results=[_search_result(document) for document in documents]
+    )

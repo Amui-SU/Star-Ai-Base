@@ -38,3 +38,59 @@ async def test_scoped_stats_hides_other_users_knowledge_base(client):
     response = await client.get(f"/knowledge-bases/{alice_kb['id']}/stats")
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_scoped_search_uses_workspace_and_knowledge_base_filter(
+    client,
+    monkeypatch,
+):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Search KB")
+    captured = {}
+
+    class FakeRAGService:
+        def search_in_knowledge_base(
+            self,
+            query,
+            workspace_id,
+            knowledge_base_id,
+            k=5,
+        ):
+            captured["query"] = query
+            captured["workspace_id"] = workspace_id
+            captured["knowledge_base_id"] = knowledge_base_id
+            captured["k"] = k
+            return [
+                type(
+                    "FakeDocument",
+                    (),
+                    {
+                        "page_content": "chunk text",
+                        "metadata": {
+                            "bvid": "BV1xx411c7mD",
+                            "title": "Test Video",
+                            "url": "https://www.bilibili.com/video/BV1xx411c7mD",
+                        },
+                    },
+                )()
+            ]
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/search",
+        json={"query": "人工智能", "k": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["title"] == "Test Video"
+    assert captured == {
+        "query": "人工智能",
+        "workspace_id": knowledge_base["workspace_id"],
+        "knowledge_base_id": knowledge_base["id"],
+        "k": 3,
+    }
