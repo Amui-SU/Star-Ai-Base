@@ -25,6 +25,46 @@ function Test-CommandExists($commandName) {
     return [bool](Get-Command $commandName -ErrorAction SilentlyContinue)
 }
 
+function Test-PythonRunnable($pythonExe) {
+    try {
+        & $pythonExe --version *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
+}
+
+function Resolve-ProjectPython($root) {
+    $candidates = @()
+    $candidates += Join-Path $root ".venv\Scripts\python.exe"
+    $candidates += Join-Path $root "venv\Scripts\python.exe"
+
+    $envPython = [Environment]::GetEnvironmentVariable("BILIBILI_RAG_PYTHON", "Process")
+    if (-not $envPython) {
+        $envPython = [Environment]::GetEnvironmentVariable("BILIBILI_RAG_PYTHON", "User")
+    }
+    if (-not $envPython) {
+        $envPython = [Environment]::GetEnvironmentVariable("BILIBILI_RAG_PYTHON", "Machine")
+    }
+    if ($envPython) {
+        $candidates += $envPython
+    }
+
+    $candidates += "C:\ProgramData\anaconda3\envs\bilibili-rag\python.exe"
+    if (Test-CommandExists -commandName "python") {
+        $candidates += "python"
+    }
+
+    foreach ($candidate in $candidates) {
+        if (($candidate -eq "python" -or (Test-Path $candidate)) -and (Test-PythonRunnable $candidate)) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
 function Test-FfmpegRunnable() {
     try {
         ffmpeg -version *> $null
@@ -83,7 +123,8 @@ Install-RequiredCommand -commandName "python" -displayName "Python" -wingetId "P
 Install-RequiredCommand -commandName "node" -displayName "Node.js LTS" -wingetId "OpenJS.NodeJS.LTS" | Out-Null
 Install-RequiredCommand -commandName "ffmpeg" -displayName "ffmpeg" -wingetId "Gyan.FFmpeg" | Out-Null
 
-$pythonReady = Test-CommandExists -commandName "python"
+$pythonExe = Resolve-ProjectPython -root $projectRoot
+$pythonReady = $null -ne $pythonExe
 $nodeReady = Test-CommandExists -commandName "node"
 $ffmpegReady = Test-FfmpegRunnable
 
@@ -95,11 +136,11 @@ if (-not $nodeReady) {
     throw "Node.js is required but not available."
 }
 
-$pythonVersion = python --version 2>&1
+$pythonVersion = & $pythonExe --version 2>&1
 $nodeVersion = node --version 2>&1
 $npmVersion = npm --version 2>&1
 
-Write-Ok "Python: $pythonVersion"
+Write-Ok "Python: $pythonVersion ($pythonExe)"
 Write-Ok "Node.js: $nodeVersion"
 Write-Ok "npm: $npmVersion"
 if ($ffmpegReady) {
@@ -124,10 +165,10 @@ if (-not (Test-Path $frontendPath)) {
 }
 
 Write-Info "Upgrading pip..."
-python -m pip install --upgrade pip
+& $pythonExe -m pip install --upgrade pip
 
 Write-Info "Installing backend dependencies from requirements.txt..."
-python -m pip install -r $requirementsPath
+& $pythonExe -m pip install -r $requirementsPath
 
 Write-Info "Installing frontend dependencies..."
 Push-Location $frontendPath
