@@ -12,7 +12,15 @@ import sys
 
 from app.config import settings, ensure_directories
 from app.database import init_db
-from app.routers import auth, favorites, knowledge, chat, knowledge_bases, system_auth
+from app.routers import (
+    auth,
+    chat,
+    favorites,
+    knowledge,
+    knowledge_bases,
+    source_bindings,
+    system_auth,
+)
 
 
 # 配置日志
@@ -79,6 +87,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(system_auth.router)
 app.include_router(knowledge_bases.router)
+app.include_router(source_bindings.router)
 app.include_router(auth.router)
 app.include_router(favorites.router)
 app.include_router(knowledge.router)
