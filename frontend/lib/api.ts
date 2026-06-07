@@ -55,6 +55,43 @@ export interface KnowledgeBase {
   description?: string;
 }
 
+export interface KnowledgeBaseSearchRequest {
+  query: string;
+  k?: number;
+}
+
+export interface KnowledgeBaseSearchResult {
+  content: string;
+  bvid?: string | null;
+  title?: string | null;
+  url?: string | null;
+}
+
+export interface KnowledgeBaseSearchResponse {
+  results: KnowledgeBaseSearchResult[];
+}
+
+export interface KnowledgeBaseChatRequest {
+  question: string;
+  k?: number;
+  smart_search?: boolean;
+  deep_think?: boolean;
+}
+
+export interface KnowledgeBaseBuildRequest {
+  source_binding_id: number;
+  folder_ids: number[];
+  exclude_bvids?: string[];
+}
+
+export interface KnowledgeBaseBuildResponse {
+  task_id: string;
+  status: string;
+  workspace_id: number;
+  knowledge_base_id: number;
+  source_binding_id: number;
+}
+
 export interface FavoriteFolder {
   media_id: number;
   title: string;
@@ -256,6 +293,36 @@ export const knowledgeBaseApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  stats: (knowledgeBaseId: number) =>
+    request<KnowledgeStats>(`/knowledge-bases/${knowledgeBaseId}/stats`),
+
+  search: (knowledgeBaseId: number, data: KnowledgeBaseSearchRequest) =>
+    request<KnowledgeBaseSearchResponse>(
+      `/knowledge-bases/${knowledgeBaseId}/search`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    ),
+
+  chat: (knowledgeBaseId: number, data: KnowledgeBaseChatRequest) =>
+    request<ChatResponse>(`/knowledge-bases/${knowledgeBaseId}/chat`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  chatStreamUrl: (knowledgeBaseId: number) =>
+    `${API_BASE_URL}/knowledge-bases/${knowledgeBaseId}/chat/stream`,
+
+  build: (knowledgeBaseId: number, data: KnowledgeBaseBuildRequest) =>
+    request<KnowledgeBaseBuildResponse>(
+      `/knowledge-bases/${knowledgeBaseId}/build`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    ),
 };
 
 export const authApi = {
