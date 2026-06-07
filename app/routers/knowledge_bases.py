@@ -3,7 +3,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user, get_current_workspace
+from app.dependencies import (
+    get_current_user,
+    get_current_workspace,
+    get_knowledge_base_for_user,
+)
 from app.models import (
     KnowledgeBase,
     KnowledgeBaseCreateRequest,
@@ -62,3 +66,14 @@ async def create_knowledge_base(
     await db.commit()
     await db.refresh(knowledge_base)
     return _response(knowledge_base)
+
+
+@router.get("/{knowledge_base_id}/stats")
+async def get_knowledge_base_stats(
+    knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
+) -> dict:
+    return {
+        "knowledge_base_id": knowledge_base.id,
+        "workspace_id": knowledge_base.workspace_id,
+        "scoped": True,
+    }

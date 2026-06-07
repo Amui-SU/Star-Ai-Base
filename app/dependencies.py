@@ -5,7 +5,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import SystemSession, SystemUser, Workspace, WorkspaceMember
+from app.models import (
+    KnowledgeBase,
+    SystemSession,
+    SystemUser,
+    Workspace,
+    WorkspaceMember,
+)
 from app.security import SESSION_COOKIE_NAME, hash_token
 
 
@@ -76,3 +82,20 @@ async def get_current_workspace(
     if workspace is None:
         raise HTTPException(status_code=403, detail="Workspace access required")
     return workspace
+
+
+async def get_knowledge_base_for_user(
+    knowledge_base_id: int,
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeBase:
+    result = await db.execute(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == knowledge_base_id,
+            KnowledgeBase.workspace_id == current_workspace.id,
+        )
+    )
+    knowledge_base = result.scalar_one_or_none()
+    if knowledge_base is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    return knowledge_base
