@@ -154,6 +154,44 @@ class KnowledgeBase(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SourceBinding(Base):
+    """External source account binding."""
+
+    __tablename__ = "source_bindings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id"), index=True, nullable=False
+    )
+    source_type = Column(String(50), index=True, nullable=False)
+    external_account_id = Column(String(100), index=True, nullable=False)
+    external_account_name = Column(String(200), nullable=True)
+    external_avatar_url = Column(String(500), nullable=True)
+    status = Column(String(20), default="active", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_verified_at = Column(DateTime, nullable=True)
+
+
+class SourceCredential(Base):
+    """Encrypted credentials for an external source binding."""
+
+    __tablename__ = "source_credentials"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    source_binding_id = Column(
+        Integer, ForeignKey("source_bindings.id"), index=True, nullable=False
+    )
+    encrypted_payload = Column(Text, nullable=False)
+    encryption_version = Column(String(20), default="fernet-v1", nullable=False)
+    expires_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class FavoriteFolder(Base):
     """收藏夹记录表"""
 
@@ -242,6 +280,15 @@ class KnowledgeBaseResponse(BaseModel):
     workspace_id: int
     name: str
     description: Optional[str] = None
+
+
+class SourceBindingResponse(BaseModel):
+    id: int
+    source_type: str
+    external_account_id: str
+    external_account_name: Optional[str] = None
+    external_avatar_url: Optional[str] = None
+    status: str
 
 
 class VideoInfo(BaseModel):
