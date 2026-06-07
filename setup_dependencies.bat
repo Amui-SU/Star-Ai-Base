@@ -1,15 +1,19 @@
 @echo off
 setlocal
-cd /d "%~dp0"
 
-if not exist "%~dp0setup_dependencies.ps1" (
-    echo [ERROR] setup_dependencies.ps1 not found in:
-    echo %~dp0
+set "PROJECT_ROOT=%~dp0"
+set "PS_SCRIPT=%PROJECT_ROOT%scripts\dev.ps1"
+
+cd /d "%PROJECT_ROOT%"
+
+if not exist "%PS_SCRIPT%" (
+    echo [ERROR] dev runner not found:
+    echo %PS_SCRIPT%
     pause
     exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup_dependencies.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" install
 set EXIT_CODE=%ERRORLEVEL%
 
 if %EXIT_CODE% neq 0 (

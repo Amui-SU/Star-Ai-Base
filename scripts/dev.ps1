@@ -228,8 +228,53 @@ function Invoke-Install {
         [string]$ProjectRoot,
         [switch]$SkipFrontend
     )
-    Write-WarnMsg "install command is not implemented yet."
-    throw "install command is not implemented yet."
+
+    $frontendPath = Get-FrontendPath $ProjectRoot
+    $requirementsPath = Join-Path $ProjectRoot "requirements.txt"
+    $pythonExe = Resolve-ProjectPython $ProjectRoot
+
+    if (-not $pythonExe) {
+        throw "No runnable Python found. Install Python or set BILIBILI_RAG_PYTHON."
+    }
+    if (-not (Test-Path -LiteralPath $requirementsPath -PathType Leaf)) {
+        throw "Missing requirements file: $requirementsPath"
+    }
+    if (-not (Test-Path -LiteralPath $frontendPath -PathType Container)) {
+        throw "Missing frontend directory: $frontendPath"
+    }
+
+    Write-Ok "Using Python: $(& $pythonExe --version 2>&1) ($pythonExe)"
+    Write-Info "Upgrading pip..."
+    & $pythonExe -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) {
+        throw "pip upgrade failed."
+    }
+
+    Write-Info "Installing backend dependencies..."
+    & $pythonExe -m pip install -r $requirementsPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Backend dependency installation failed."
+    }
+
+    if (-not $SkipFrontend) {
+        if (-not (Test-CommandExists "npm")) {
+            throw "npm is missing. Install Node.js LTS."
+        }
+
+        Write-Info "Installing frontend dependencies..."
+        Push-Location -LiteralPath $frontendPath
+        try {
+            npm install
+            if ($LASTEXITCODE -ne 0) {
+                throw "Frontend dependency installation failed."
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
+    Write-Ok "Dependency installation completed."
 }
 
 function Invoke-Start {
