@@ -30,3 +30,36 @@ async def test_user_can_create_and_list_own_knowledge_base(client):
     list_response = await client.get("/knowledge-bases")
     assert list_response.status_code == 200
     assert [item["name"] for item in list_response.json()] == ["B 站学习库"]
+
+
+def test_scoped_rag_search_requires_workspace_and_knowledge_base_filter():
+    from app.services.rag import RAGService
+
+    captured = {}
+
+    class FakeVectorStore:
+        def similarity_search(self, query, k, filter=None):
+            captured["query"] = query
+            captured["k"] = k
+            captured["filter"] = filter
+            return []
+
+    service = RAGService.__new__(RAGService)
+    service.vectorstore = FakeVectorStore()
+
+    result = service.search_in_knowledge_base(
+        "人工智能",
+        workspace_id=10,
+        knowledge_base_id=20,
+        k=3,
+    )
+
+    assert result == []
+    assert captured["query"] == "人工智能"
+    assert captured["k"] == 3
+    assert captured["filter"] == {
+        "$and": [
+            {"workspace_id": 10},
+            {"knowledge_base_id": 20},
+        ]
+    }
