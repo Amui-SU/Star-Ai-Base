@@ -39,10 +39,188 @@ function Ensure-Directory {
     }
 }
 
+function Test-CommandExists {
+    param([string]$CommandName)
+    return [bool](Get-Command $CommandName -ErrorAction SilentlyContinue)
+}
+
+function Test-PythonRunnable {
+    param([string]$PythonExe)
+
+    try {
+        & $PythonExe --version *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
+}
+
+function Resolve-ProjectPython {
+    param([string]$ProjectRoot)
+
+    $candidates = @(
+        (Join-Path $ProjectRoot ".venv\Scripts\python.exe"),
+        (Join-Path $ProjectRoot "venv\Scripts\python.exe")
+    )
+
+    foreach ($target in @("Process", "User", "Machine")) {
+        $envPython = [Environment]::GetEnvironmentVariable("BILIBILI_RAG_PYTHON", $target)
+        if ($envPython) {
+            $candidates += $envPython
+        }
+    }
+
+    $candidates += "C:\ProgramData\anaconda3\envs\bilibili-rag\python.exe"
+    if (Test-CommandExists "python") {
+        $candidates += "python"
+    }
+
+    foreach ($candidate in $candidates) {
+        if (($candidate -eq "python" -or (Test-Path -LiteralPath $candidate -PathType Leaf)) -and (Test-PythonRunnable $candidate)) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Test-BackendDependencies {
+    param([string]$PythonExe)
+
+    $code = "import fastapi, uvicorn, cryptography, jose; from passlib.context import CryptContext; CryptContext(schemes=['bcrypt'], deprecated='auto').hash('dependency-check')"
+    try {
+        & $PythonExe -c $code *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-FfmpegRunnable {
+    try {
+        if (-not (Test-CommandExists "ffmpeg")) {
+            return $false
+        }
+
+        ffmpeg -version *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-PortListening {
+    param([int]$Port)
+
+    try {
+        $result = netstat -ano | Select-String ":$Port\s+.*LISTENING"
+        return [bool]$result
+    }
+    catch {
+        return $false
+    }
+}
+
 function Invoke-Doctor {
     param([string]$ProjectRoot)
-    Write-WarnMsg "doctor command is not implemented yet."
-    throw "doctor command is not implemented yet."
+
+    $failed = $false
+    $frontendPath = Get-FrontendPath $ProjectRoot
+    $logsPath = Get-LogsPath $ProjectRoot
+    $pythonExe = Resolve-ProjectPython $ProjectRoot
+
+    Write-Info "Project root: $ProjectRoot"
+
+    if (Test-Path -LiteralPath $ProjectRoot -PathType Container) {
+        Write-Ok "Project root exists."
+    }
+    else {
+        $failed = $true
+        Write-Fail "Project root missing."
+        throw "doctor found failed checks."
+    }
+
+    if (Test-Path -LiteralPath $frontendPath -PathType Container) {
+        Write-Ok "Frontend directory exists."
+    }
+    else {
+        $failed = $true
+        Write-Fail "Frontend directory missing: $frontendPath"
+    }
+
+    if ($pythonExe) {
+        $pythonVersion = & $pythonExe --version 2>&1
+        Write-Ok "Python: $pythonVersion ($pythonExe)"
+        if (Test-BackendDependencies $pythonExe) {
+            Write-Ok "Backend dependencies are healthy."
+        }
+        else {
+            $failed = $true
+            Write-Fail "Backend dependencies are incomplete. Run: powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 install"
+        }
+    }
+    else {
+        $failed = $true
+        Write-Fail "No runnable Python found. Install Python or set BILIBILI_RAG_PYTHON."
+    }
+
+    if (Test-CommandExists "node") {
+        Write-Ok "Node.js: $(node --version)"
+    }
+    else {
+        $failed = $true
+        Write-Fail "Node.js is missing."
+    }
+
+    if (Test-CommandExists "npm") {
+        Write-Ok "npm: $(npm --version)"
+    }
+    else {
+        $failed = $true
+        Write-Fail "npm is missing."
+    }
+
+    if (Test-Path -LiteralPath (Join-Path $frontendPath "node_modules") -PathType Container) {
+        Write-Ok "Frontend dependencies are installed."
+    }
+    else {
+        Write-WarnMsg "frontend\node_modules is missing. Run install before start."
+    }
+
+    if (Test-FfmpegRunnable) {
+        Write-Ok "ffmpeg is available."
+    }
+    else {
+        Write-WarnMsg "ffmpeg is missing. ASR local fallback may not work."
+    }
+
+    try {
+        Ensure-Directory $logsPath
+        $probePath = Join-Path $logsPath ".doctor-write-test"
+        Set-Content -LiteralPath $probePath -Value "ok" -Encoding ASCII
+        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+        Write-Ok "Logs directory is writable: $logsPath"
+    }
+    catch {
+        $failed = $true
+        Write-Fail "Logs directory is not writable: $logsPath"
+    }
+
+    foreach ($port in @(8000, 3000)) {
+        if (Test-PortListening $port) {
+            Write-WarnMsg "Port $port is already listening. Run status to inspect ownership."
+        }
+        else {
+            Write-Ok "Port $port is free."
+        }
+    }
+
+    if ($failed) {
+        throw "doctor found failed checks."
+    }
 }
 
 function Invoke-Install {
