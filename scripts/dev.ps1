@@ -204,7 +204,7 @@ function Save-RuntimeState {
     }
 
     $runtimePath = Get-RuntimePath $ProjectRoot
-    Ensure-Directory (Split-Path -LiteralPath $runtimePath -Parent)
+    Ensure-Directory ([System.IO.Path]::GetDirectoryName($runtimePath))
     $runtime | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $runtimePath -Encoding UTF8
 }
 
@@ -416,14 +416,110 @@ function Invoke-Start {
         [string]$ProjectRoot,
         [switch]$NoBrowser
     )
-    Write-WarnMsg "start command is not implemented yet."
-    throw "start command is not implemented yet."
+
+    $frontendPath = Get-FrontendPath $ProjectRoot
+    $logsPath = Get-LogsPath $ProjectRoot
+    $backendLog = Join-Path $logsPath "backend-start.log"
+    $backendErrLog = Join-Path $logsPath "backend-start.err.log"
+    $frontendLog = Join-Path $logsPath "frontend-start.log"
+    $frontendErrLog = Join-Path $logsPath "frontend-start.err.log"
+    $pythonExe = Resolve-ProjectPython $ProjectRoot
+    $backendProcess = $null
+    $frontendProcess = $null
+
+    if (-not $pythonExe) {
+        throw "No runnable Python found. Run scripts\dev.ps1 doctor."
+    }
+    if (-not (Test-BackendDependencies $pythonExe)) {
+        throw "Backend dependencies are incomplete. Run scripts\dev.ps1 install."
+    }
+    if (-not (Test-CommandExists "npm")) {
+        throw "npm is missing. Install Node.js LTS."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $frontendPath "node_modules") -PathType Container)) {
+        throw "Frontend dependencies are missing. Run scripts\dev.ps1 install."
+    }
+    foreach ($port in @(8000, 3000)) {
+        if (Test-PortListening $port) {
+            throw "Port $port is already listening. Stop the existing service before running start."
+        }
+    }
+
+    Ensure-Directory $logsPath
+    Invoke-Stop -ProjectRoot $ProjectRoot -Quiet
+
+    Remove-Item -LiteralPath $backendLog, $backendErrLog, $frontendLog, $frontendErrLog -Force -ErrorAction SilentlyContinue
+
+    [Environment]::SetEnvironmentVariable("PYTHONIOENCODING", "utf-8", "Process")
+    [Environment]::SetEnvironmentVariable("PYTHONUTF8", "1", "Process")
+
+    try {
+        Write-Info "Starting backend..."
+        $backendProcess = Start-Process -FilePath $pythonExe `
+            -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000") `
+            -WorkingDirectory $ProjectRoot `
+            -RedirectStandardOutput $backendLog `
+            -RedirectStandardError $backendErrLog `
+            -WindowStyle Hidden `
+            -PassThru
+
+        Write-Info "Starting frontend..."
+        $frontendProcess = Start-Process -FilePath "cmd.exe" `
+            -ArgumentList @("/d", "/c", "npm run dev") `
+            -WorkingDirectory $frontendPath `
+            -RedirectStandardOutput $frontendLog `
+            -RedirectStandardError $frontendErrLog `
+            -WindowStyle Hidden `
+            -PassThru
+
+        if (-not (Wait-Port -Port 8000 -TimeoutSeconds 60)) {
+            Show-LogTail $backendLog
+            Show-LogTail $backendErrLog
+            throw "Backend did not become ready on port 8000."
+        }
+
+        if (-not (Wait-Port -Port 3000 -TimeoutSeconds 60)) {
+            Show-LogTail $frontendLog
+            Show-LogTail $frontendErrLog
+            throw "Frontend did not become ready on port 3000."
+        }
+
+        Save-RuntimeState -ProjectRoot $ProjectRoot -BackendProcess $backendProcess -FrontendProcess $frontendProcess -PythonExe $pythonExe
+        Write-Ok "Backend ready: http://127.0.0.1:8000"
+        Write-Ok "Frontend ready: http://localhost:3000"
+
+        if (-not $NoBrowser) {
+            Start-Process "http://localhost:3000"
+        }
+    }
+    catch {
+        foreach ($process in @($backendProcess, $frontendProcess)) {
+            if ($process -and -not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -in @("python.exe", "node.exe", "cmd.exe")
+        } | ForEach-Object {
+            if (Test-ProjectProcess -ProcessId ([int]$_.ProcessId) -ProjectRoot $ProjectRoot) {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        throw
+    }
 }
 
 function Invoke-Stop {
-    param([string]$ProjectRoot)
-    Write-WarnMsg "stop command is not implemented yet."
-    throw "stop command is not implemented yet."
+    param(
+        [string]$ProjectRoot,
+        [switch]$Quiet
+    )
+
+    if (-not $Quiet) {
+        Write-WarnMsg "stop command is not implemented yet."
+    }
 }
 
 function Invoke-Status {
@@ -451,8 +547,8 @@ function Invoke-CommandByName {
         "start" { Invoke-Start -ProjectRoot $projectRoot -NoBrowser:$NoBrowser }
         "stop" { Invoke-Stop -ProjectRoot $projectRoot }
         "restart" {
-            Invoke-Stop -ProjectRoot $projectRoot
-            Invoke-Start -ProjectRoot $projectRoot -NoBrowser:$NoBrowser
+            Write-WarnMsg "restart command is not implemented yet."
+            throw "restart command is not implemented yet."
         }
         "status" { Invoke-Status -ProjectRoot $projectRoot }
         "logs" { Invoke-Logs -ProjectRoot $projectRoot -Follow:$Follow }
