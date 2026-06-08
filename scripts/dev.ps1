@@ -186,19 +186,21 @@ function Save-RuntimeState {
     )
 
     $startedAt = (Get-Date).ToString("o")
+    $frontendPath = Get-FrontendPath $ProjectRoot
+    $quotedProjectRoot = '"' + ($ProjectRoot -replace '"', '\"') + '"'
     $runtime = [ordered]@{
         project_root = $ProjectRoot
         python = $PythonExe
         backend = [ordered]@{
             pid = $BackendProcess.Id
             port = 8000
-            command = "python -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+            command = "python -m uvicorn app.main:app --app-dir $quotedProjectRoot --host 127.0.0.1 --port 8000"
             started_at = $startedAt
         }
         frontend = [ordered]@{
             pid = $FrontendProcess.Id
             port = 3000
-            command = "npm run dev"
+            command = "cd /d `"$frontendPath`" && npm run dev"
             started_at = $startedAt
         }
     }
@@ -424,6 +426,7 @@ function Invoke-Start {
     $frontendLog = Join-Path $logsPath "frontend-start.log"
     $frontendErrLog = Join-Path $logsPath "frontend-start.err.log"
     $pythonExe = Resolve-ProjectPython $ProjectRoot
+    $quotedProjectRoot = '"' + ($ProjectRoot -replace '"', '\"') + '"'
     $backendProcess = $null
     $frontendProcess = $null
 
@@ -456,7 +459,7 @@ function Invoke-Start {
     try {
         Write-Info "Starting backend..."
         $backendProcess = Start-Process -FilePath $pythonExe `
-            -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000") `
+            -ArgumentList @("-m", "uvicorn", "app.main:app", "--app-dir", $quotedProjectRoot, "--host", "127.0.0.1", "--port", "8000") `
             -WorkingDirectory $ProjectRoot `
             -RedirectStandardOutput $backendLog `
             -RedirectStandardError $backendErrLog `
@@ -464,8 +467,9 @@ function Invoke-Start {
             -PassThru
 
         Write-Info "Starting frontend..."
+        $frontendCommand = "cd /d `"$frontendPath`" && npm run dev"
         $frontendProcess = Start-Process -FilePath "cmd.exe" `
-            -ArgumentList @("/d", "/c", "npm run dev") `
+            -ArgumentList @("/d", "/c", $frontendCommand) `
             -WorkingDirectory $frontendPath `
             -RedirectStandardOutput $frontendLog `
             -RedirectStandardError $frontendErrLog `
@@ -511,21 +515,113 @@ function Invoke-Start {
     }
 }
 
+function Stop-ProjectPid {
+    param(
+        [int]$ProcessId,
+        [string]$ProjectRoot,
+        [switch]$Quiet
+    )
+
+    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if (-not $proc) {
+        return
+    }
+
+    if (-not (Test-ProjectProcess -ProcessId $ProcessId -ProjectRoot $ProjectRoot)) {
+        if (-not $Quiet) {
+            Write-WarnMsg "Refusing to stop PID $ProcessId because it is not owned by this project."
+        }
+        return
+    }
+
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    if (-not $Quiet) {
+        Write-Ok "Stopped PID $ProcessId."
+    }
+}
+
 function Invoke-Stop {
     param(
         [string]$ProjectRoot,
         [switch]$Quiet
     )
 
+    $runtime = Read-RuntimeState $ProjectRoot
+    if ($runtime) {
+        if ($runtime.backend -and $runtime.backend.pid) {
+            Stop-ProjectPid -ProcessId ([int]$runtime.backend.pid) -ProjectRoot $ProjectRoot -Quiet:$Quiet
+        }
+        if ($runtime.frontend -and $runtime.frontend.pid) {
+            Stop-ProjectPid -ProcessId ([int]$runtime.frontend.pid) -ProjectRoot $ProjectRoot -Quiet:$Quiet
+        }
+
+        Remove-RuntimeState $ProjectRoot
+    }
+
+    Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -in @("python.exe", "node.exe", "cmd.exe")
+    } | ForEach-Object {
+        $processId = [int]$_.ProcessId
+        if (Test-ProjectProcess -ProcessId $processId -ProjectRoot $ProjectRoot) {
+            Stop-ProjectPid -ProcessId $processId -ProjectRoot $ProjectRoot -Quiet:$Quiet
+        }
+    }
+
     if (-not $Quiet) {
-        Write-WarnMsg "stop command is not implemented yet."
+        Write-Ok "Project processes stopped."
     }
 }
 
 function Invoke-Status {
     param([string]$ProjectRoot)
-    Write-WarnMsg "status command is not implemented yet."
-    throw "status command is not implemented yet."
+
+    $pythonExe = Resolve-ProjectPython $ProjectRoot
+    $runtime = Read-RuntimeState $ProjectRoot
+
+    Write-Info "Project root: $ProjectRoot"
+
+    if ($pythonExe) {
+        Write-Ok "Python: $(& $pythonExe --version 2>&1) ($pythonExe)"
+    }
+    else {
+        Write-WarnMsg "Python: not found"
+    }
+
+    if (Test-CommandExists "node") {
+        Write-Ok "Node.js: $(node --version)"
+    }
+    else {
+        Write-WarnMsg "Node.js: not found"
+    }
+
+    if ($runtime) {
+        Write-Info "Runtime metadata: $(Get-RuntimePath $ProjectRoot)"
+        foreach ($name in @("backend", "frontend")) {
+            $entry = $runtime.$name
+            if ($entry -and $entry.pid) {
+                $processId = [int]$entry.pid
+                $proc = Get-Process -Id $processId -ErrorAction SilentlyContinue
+                if ($proc -and (Test-ProjectProcess -ProcessId $processId -ProjectRoot $ProjectRoot)) {
+                    Write-Ok "$name running: PID $processId, port $($entry.port)"
+                }
+                else {
+                    Write-WarnMsg "$name metadata is stale: PID $processId"
+                }
+            }
+        }
+    }
+    else {
+        Write-WarnMsg "No runtime metadata found."
+    }
+
+    foreach ($port in @(8000, 3000)) {
+        if (Test-PortListening $port) {
+            Write-WarnMsg "Port $port is listening."
+        }
+        else {
+            Write-Ok "Port $port is not listening."
+        }
+    }
 }
 
 function Invoke-Logs {
