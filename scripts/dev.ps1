@@ -124,6 +124,140 @@ function Test-PortListening {
     }
 }
 
+function Get-ProcessCommandLine {
+    param([int]$ProcessId)
+
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+    if ($proc) {
+        return "" + $proc.CommandLine
+    }
+
+    return ""
+}
+
+function Test-ProjectProcess {
+    param(
+        [int]$ProcessId,
+        [string]$ProjectRoot
+    )
+
+    $commandLine = (Get-ProcessCommandLine -ProcessId $ProcessId).ToLowerInvariant()
+    $normalizedRoot = Resolve-Path -LiteralPath $ProjectRoot -ErrorAction SilentlyContinue
+    if ($normalizedRoot) {
+        $root = $normalizedRoot.Path.ToLowerInvariant()
+    }
+    else {
+        $root = $ProjectRoot.ToLowerInvariant()
+    }
+
+    $startIndex = 0
+    while ($true) {
+        $index = $commandLine.IndexOf($root, $startIndex, [System.StringComparison]::OrdinalIgnoreCase)
+        if ($index -lt 0) {
+            return $false
+        }
+
+        $beforeIsBoundary = $index -eq 0
+        if (-not $beforeIsBoundary) {
+            $before = $commandLine[$index - 1]
+            $beforeIsBoundary = $before -eq '"' -or $before -eq "'" -or [char]::IsWhiteSpace($before)
+        }
+
+        $afterIndex = $index + $root.Length
+        if ($beforeIsBoundary -and $afterIndex -ge $commandLine.Length) {
+            return $true
+        }
+
+        $after = $commandLine[$afterIndex]
+        if ($beforeIsBoundary -and ($after -eq "\" -or $after -eq "/" -or $after -eq '"' -or $after -eq "'" -or [char]::IsWhiteSpace($after))) {
+            return $true
+        }
+
+        $startIndex = $index + 1
+    }
+}
+
+function Save-RuntimeState {
+    param(
+        [string]$ProjectRoot,
+        [System.Diagnostics.Process]$BackendProcess,
+        [System.Diagnostics.Process]$FrontendProcess,
+        [string]$PythonExe
+    )
+
+    $startedAt = (Get-Date).ToString("o")
+    $runtime = [ordered]@{
+        project_root = $ProjectRoot
+        python = $PythonExe
+        backend = [ordered]@{
+            pid = $BackendProcess.Id
+            port = 8000
+            command = "python -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+            started_at = $startedAt
+        }
+        frontend = [ordered]@{
+            pid = $FrontendProcess.Id
+            port = 3000
+            command = "npm run dev"
+            started_at = $startedAt
+        }
+    }
+
+    $runtimePath = Get-RuntimePath $ProjectRoot
+    Ensure-Directory (Split-Path -LiteralPath $runtimePath -Parent)
+    $runtime | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $runtimePath -Encoding UTF8
+}
+
+function Read-RuntimeState {
+    param([string]$ProjectRoot)
+
+    $runtimePath = Get-RuntimePath $ProjectRoot
+    if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
+        return $null
+    }
+
+    return Get-Content -LiteralPath $runtimePath -Raw | ConvertFrom-Json
+}
+
+function Remove-RuntimeState {
+    param([string]$ProjectRoot)
+
+    $runtimePath = Get-RuntimePath $ProjectRoot
+    Remove-Item -LiteralPath $runtimePath -Force -ErrorAction SilentlyContinue
+}
+
+function Wait-Port {
+    param(
+        [int]$Port,
+        [int]$TimeoutSeconds = 60
+    )
+
+    for ($i = 0; $i -lt $TimeoutSeconds; $i++) {
+        if (Test-PortListening $Port) {
+            return $true
+        }
+
+        Start-Sleep -Seconds 1
+    }
+
+    return $false
+}
+
+function Show-LogTail {
+    param(
+        [string]$Path,
+        [int]$Tail = 40
+    )
+
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        Write-Info "Last $Tail lines: $Path"
+        Get-Content -LiteralPath $Path -Tail $Tail
+    }
+    else {
+        Write-WarnMsg "Log file does not exist: $Path"
+    }
+}
+
 function Invoke-Doctor {
     param([string]$ProjectRoot)
 
