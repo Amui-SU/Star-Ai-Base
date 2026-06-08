@@ -629,8 +629,31 @@ function Invoke-Logs {
         [string]$ProjectRoot,
         [switch]$Follow
     )
-    Write-WarnMsg "logs command is not implemented yet."
-    throw "logs command is not implemented yet."
+
+    $logsPath = Get-LogsPath $ProjectRoot
+    $files = @(
+        (Join-Path $logsPath "backend-start.log"),
+        (Join-Path $logsPath "backend-start.err.log"),
+        (Join-Path $logsPath "frontend-start.log"),
+        (Join-Path $logsPath "frontend-start.err.log")
+    )
+
+    foreach ($file in $files) {
+        Write-Info $file
+        if (Test-Path -LiteralPath $file -PathType Leaf) {
+            Get-Content -LiteralPath $file -Tail 80
+        }
+        else {
+            Write-WarnMsg "Missing log file."
+        }
+    }
+
+    if ($Follow) {
+        $existing = @($files | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+        if ($existing.Count -gt 0) {
+            Get-Content -LiteralPath $existing -Tail 20 -Wait
+        }
+    }
 }
 
 function Invoke-CommandByName {
@@ -643,8 +666,8 @@ function Invoke-CommandByName {
         "start" { Invoke-Start -ProjectRoot $projectRoot -NoBrowser:$NoBrowser }
         "stop" { Invoke-Stop -ProjectRoot $projectRoot }
         "restart" {
-            Write-WarnMsg "restart command is not implemented yet."
-            throw "restart command is not implemented yet."
+            Invoke-Stop -ProjectRoot $projectRoot
+            Invoke-Start -ProjectRoot $projectRoot -NoBrowser:$NoBrowser
         }
         "status" { Invoke-Status -ProjectRoot $projectRoot }
         "logs" { Invoke-Logs -ProjectRoot $projectRoot -Follow:$Follow }
