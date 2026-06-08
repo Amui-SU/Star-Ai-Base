@@ -13,7 +13,7 @@
 - [技术栈](#技术栈)
 - [系统要求](#系统要求)
 - [快速开始](#快速开始)
-- [Windows：一键脚本补充](#windows-one-click-extras)
+- [Windows：启动器补充](#windows-one-click-extras)
 - [环境变量](#环境变量)
 - [启动与访问地址](#启动与访问地址)
 - [多模型提供方](#多模型提供方)
@@ -33,11 +33,11 @@
 
 ## 核心价值
 
-| 能力 | 说明 |
-|------|------|
-| **自动入库** | 从收藏夹拉取视频元数据，获取可转写内容，切块后写入向量库 |
-| **语义检索** | 基于 ChromaDB 的向量检索，按语义召回相关片段 |
-| **RAG 问答** | 结合检索上下文由大模型生成回答，并尽量附带视频来源 |
+| 能力           | 说明                                                        |
+| -------------- | ----------------------------------------------------------- |
+| **自动入库**   | 从收藏夹拉取视频元数据，获取可转写内容，切块后写入向量库    |
+| **语义检索**   | 基于 ChromaDB 的向量检索，按语义召回相关片段                |
+| **RAG 问答**   | 结合检索上下文由大模型生成回答，并尽量附带视频来源          |
 | **本地持久化** | SQLite 存业务数据，Chroma 存向量；数据默认在项目 `data/` 下 |
 
 适用场景：学习视频复盘、公开课整理、技术分享归档、个人「第二大脑」式收藏夹运营等。
@@ -57,13 +57,13 @@
 
 ## 技术栈
 
-| 层级 | 选型 | 说明 |
-|------|------|------|
-| 后端 | FastAPI、Uvicorn、SQLAlchemy 2.x、aiosqlite | 异步 SQLite |
-| AI | LangChain、OpenAI 兼容客户端、DashScope | 对话、Embedding、ASR |
-| 向量 | ChromaDB | 持久化目录可配置 |
-| 前端 | Next.js 16、React 19、TypeScript、Tailwind CSS 4 | 默认端口 3000 |
-| 其他 | loguru、httpx、pydantic-settings | 日志与配置 |
+| 层级 | 选型                                             | 说明                 |
+| ---- | ------------------------------------------------ | -------------------- |
+| 后端 | FastAPI、Uvicorn、SQLAlchemy 2.x、aiosqlite      | 异步 SQLite          |
+| AI   | LangChain、OpenAI 兼容客户端、DashScope          | 对话、Embedding、ASR |
+| 向量 | ChromaDB                                         | 持久化目录可配置     |
+| 前端 | Next.js 16、React 19、TypeScript、Tailwind CSS 4 | 默认端口 3000        |
+| 其他 | loguru、httpx、pydantic-settings                 | 日志与配置           |
 
 ---
 
@@ -77,54 +77,43 @@
 
 ## 快速开始
 
-### Windows（推荐：一键脚本）
+### Windows（推荐：仓库内置启动器）
 
-在项目根目录执行（需已允许 PowerShell 执行脚本）：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup_dependencies.ps1
-```
-
-脚本会：
-
-- 通过 **winget** 尝试安装/检测 **Python 3.11**、**Node.js LTS**、**ffmpeg**（`Gyan.FFmpeg`）
-- 执行 `pip install -r requirements.txt`
-- 在 `frontend/` 下执行 `npm install`
-
-仅检查环境、不安装依赖时：
+在项目根目录执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\setup_dependencies.ps1 -SkipInstallDeps
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 doctor
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 install
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 start
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 status
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 logs
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 stop
 ```
 
-**双击运行（不手敲命令）**：在资源管理器中双击仓库根目录下的 **`setup_dependencies.bat`**，效果与上面等价（内部仍调用 `setup_dependencies.ps1`），结束后窗口会暂停，便于查看报错。
+启动器会统一选择 Python，安装依赖到同一环境，启动后端和前端，并把日志写入 `logs/`。运行状态保存在 `logs/runtime.json`；停止时只停止本项目进程，避免误停其它本地服务。
+
+**双击运行（不手敲命令）**：在资源管理器中双击仓库根目录下的这些脚本：
+
+- `setup_dependencies.bat`
+- `start.bat`
+- `stop.bat`
+- `status.bat`
+- `logs.bat`
 
 ---
 
 <a id="windows-one-click-extras"></a>
 
-### Windows：一键脚本补充
+### Windows：启动器补充
 
-若你的本机目录是「外层一个 `main` 文件夹，里面再放 `bilibili-rag-main`」这种布局（与当前开发机常见结构一致），外层可能还有这些脚本，可与本仓库配合使用：
+仓库内置的 `scripts\dev.ps1` 与根目录 BAT 是 Windows 主流程，适合团队协作和新克隆仓库使用。旧的外层 `.bat` / `.vbs` 脚本属于本机便利脚本，不随仓库分发；若你的工作区仍保留这些历史脚本，可以继续按需自用，但建议优先迁移到仓库内置的 `setup_dependencies.bat`、`start.bat`、`stop.bat`、`status.bat` 和 `logs.bat`。
 
-| 文件（位于 `main\`，与 `bilibili-rag-main` 同级） | 作用 |
-|--------------------------------------------------|------|
-| **`一键安装依赖库.bat`** | 检测 `main\bilibili-rag-main\setup_dependencies.ps1` 是否存在，并执行：`powershell -ExecutionPolicy Bypass -File ...`，完成与上文 **一键安装依赖** 相同的步骤。 |
-| **`一键启动.vbs`** | 无控制台窗口启动：后端 `uvicorn`（`127.0.0.1:8000`）+ 前端 `npm run dev`（`3000`）；轮询端口就绪后自动打开浏览器。日志：`bilibili-rag-main\logs\backend-start.log`、`frontend-start.log`。 |
-| **`一键关闭.vbs`** | 结束监听 **3000 / 8000** 的进程，并尽量清理命令行中包含本项目路径的 `node` / `python` 等相关子进程。 |
-| **`闲置自动关闭.vbs`** | 看门狗：若一段时间内 **3000/8000 均无 ESTABLISHED 连接**，则调用一键关闭逻辑。默认由 `一键启动.vbs` 内 `idleMinutes` 控制（脚本里为 `0` 表示默认**不**启用；可改大后由启动脚本拉起，或带参数单独运行该 vbs）。 |
+如需指定 Python，可将用户环境变量 **`BILIBILI_RAG_PYTHON`** 设置为目标 `python.exe` 的完整路径，再运行：
 
-**Python 解释器选择**（`一键启动.vbs` 内优先级，便于多环境并存）：
-
-1. `bilibili-rag-main\.venv\Scripts\python.exe`（且已能 `import uvicorn`）  
-2. `bilibili-rag-main\venv\Scripts\python.exe`  
-3. 环境变量 **`BILIBILI_RAG_PYTHON`** 指向的 `python.exe`  
-4. 固定路径 `C:\ProgramData\anaconda3\envs\bilibili-rag\python.exe`（若存在且含 uvicorn）  
-5. 系统 `PATH` 中的 `python`
-
-若提示未安装 `uvicorn`，请先运行 **`setup_dependencies.bat`** / **`一键安装依赖库.bat`** 或自行 `pip install -r requirements.txt`。
-
-> **说明**：外层 `main` 里的 `.bat` / `.vbs` 多为本机工作区便利脚本，**不一定随本 Git 仓库分发**；克隆仓库后至少可使用根目录的 **`setup_dependencies.bat`** + **`setup_dependencies.ps1`**。若你希望团队统一「外层启动器」，可将上述脚本复制到任意父目录，并把其中的 `bilibili-rag-main` 路径改成你的实际子目录名。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 doctor
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 install
+```
 
 ### 手动安装（全平台）
 
@@ -159,33 +148,33 @@ npm install
 
 ### 应用与存储
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `APP_HOST` | `0.0.0.0` | 后端监听地址 |
-| `APP_PORT` | `8000` | 后端端口 |
-| `DEBUG` | `true` | 调试模式（影响日志级别等） |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./data/bilibili_rag.db` | 异步 SQLite 连接串 |
-| `CHROMA_PERSIST_DIRECTORY` | `./data/chroma_db` | Chroma 持久化目录 |
+| 变量                       | 默认值                                       | 说明                       |
+| -------------------------- | -------------------------------------------- | -------------------------- |
+| `APP_HOST`                 | `0.0.0.0`                                    | 后端监听地址               |
+| `APP_PORT`                 | `8000`                                       | 后端端口                   |
+| `DEBUG`                    | `true`                                       | 调试模式（影响日志级别等） |
+| `DATABASE_URL`             | `sqlite+aiosqlite:///./data/bilibili_rag.db` | 异步 SQLite 连接串         |
+| `CHROMA_PERSIST_DIRECTORY` | `./data/chroma_db`                           | Chroma 持久化目录          |
 
 ### LLM 路由
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
+| 变量           | 默认值      | 说明                                                   |
+| -------------- | ----------- | ------------------------------------------------------ |
 | `LLM_PROVIDER` | `dashscope` | 当前对话使用的提供方，见 [多模型提供方](#多模型提供方) |
 
 ### DashScope（默认对话 / Embedding / ASR）
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `DASHSCOPE_API_KEY` | 空 | 必填之一：对话与 ASR 常用 |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | DashScope 兼容调用时常改为阿里云文档中的 base URL |
-| `LLM_MODEL` | `gpt-4-turbo` | 对话模型名（以 DashScope 侧为准） |
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | 向量模型 |
-| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com/api/v1` | ASR 等 DashScope API |
-| `ASR_MODEL` | `paraformer-v2` | 线上 ASR 模型 |
-| `ASR_MODEL_LOCAL` | `paraformer-realtime-v2` | 本地兜底相关 |
-| `ASR_TIMEOUT` | `600` | ASR 超时（秒） |
-| `ASR_INPUT_FORMAT` | `pcm` | ASR 输入格式 |
+| 变量                 | 默认值                                  | 说明                                              |
+| -------------------- | --------------------------------------- | ------------------------------------------------- |
+| `DASHSCOPE_API_KEY`  | 空                                      | 必填之一：对话与 ASR 常用                         |
+| `OPENAI_BASE_URL`    | `https://api.openai.com/v1`             | DashScope 兼容调用时常改为阿里云文档中的 base URL |
+| `LLM_MODEL`          | `gpt-4-turbo`                           | 对话模型名（以 DashScope 侧为准）                 |
+| `EMBEDDING_MODEL`    | `text-embedding-3-small`                | 向量模型                                          |
+| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com/api/v1` | ASR 等 DashScope API                              |
+| `ASR_MODEL`          | `paraformer-v2`                         | 线上 ASR 模型                                     |
+| `ASR_MODEL_LOCAL`    | `paraformer-realtime-v2`                | 本地兜底相关                                      |
+| `ASR_TIMEOUT`        | `600`                                   | ASR 超时（秒）                                    |
+| `ASR_INPUT_FORMAT`   | `pcm`                                   | ASR 输入格式                                      |
 
 ### 其他可选提供方（与 `LLM_PROVIDER` 对应）
 
@@ -213,10 +202,10 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 python -m uvicorn app.main:app --reload
 ```
 
-| 地址 | 说明 |
-|------|------|
-| [http://localhost:8000/docs](http://localhost:8000/docs) | Swagger API 文档 |
-| [http://localhost:8000/health](http://localhost:8000/health) | 健康检查 |
+| 地址                                                         | 说明             |
+| ------------------------------------------------------------ | ---------------- |
+| [http://localhost:8000/docs](http://localhost:8000/docs)     | Swagger API 文档 |
+| [http://localhost:8000/health](http://localhost:8000/health) | 健康检查         |
 
 **前端**：
 
@@ -225,8 +214,8 @@ cd frontend
 npm run dev
 ```
 
-| 地址 | 说明 |
-|------|------|
+| 地址                                           | 说明                                    |
+| ---------------------------------------------- | --------------------------------------- |
 | [http://localhost:3000](http://localhost:3000) | Web 界面（需与后端 CORS、接口地址一致） |
 
 生产构建：
@@ -243,14 +232,14 @@ npm run start
 
 后端支持的 `LLM_PROVIDER` 取值与界面展示名称如下（可在前端切换，部分配置也可通过 API 持久化到 `.env`）：
 
-| `LLM_PROVIDER` | 说明 |
-|----------------|------|
-| `dashscope` | 阿里云 DashScope |
-| `deepseek` | DeepSeek |
-| `openai` | OpenAI |
-| `kimi` | Moonshot Kimi |
-| `siliconflow` | SiliconFlow |
-| `zhipu` | 智谱 GLM |
+| `LLM_PROVIDER` | 说明             |
+| -------------- | ---------------- |
+| `dashscope`    | 阿里云 DashScope |
+| `deepseek`     | DeepSeek         |
+| `openai`       | OpenAI           |
+| `kimi`         | Moonshot Kimi    |
+| `siliconflow`  | SiliconFlow      |
+| `zhipu`        | 智谱 GLM         |
 
 Embedding 与 ASR 仍以项目当前实现为准（默认与 DashScope 体系配合）；切换对话模型时请确认对应 Key 与 Base URL 已正确配置。
 
@@ -258,9 +247,9 @@ Embedding 与 ASR 仍以项目当前实现为准（默认与 DashScope 体系配
 
 ## 工作流程
 
-1. **登录**：B 站扫码，建立会话。  
-2. **选收藏夹**：查看列表与视频，可选整理默认收藏夹。  
-3. **同步与构建**：同步收藏夹变更，对新增/更新项拉取内容、ASR、切块、写入向量库。  
+1. **登录**：B 站扫码，建立会话。
+2. **选收藏夹**：查看列表与视频，可选整理默认收藏夹。
+3. **同步与构建**：同步收藏夹变更，对新增/更新项拉取内容、ASR、切块、写入向量库。
 4. **使用**：语义检索或 RAG 问答，回答中尽量引用来源视频。
 
 ---
@@ -279,12 +268,18 @@ Embedding 与 ASR 仍以项目当前实现为准（默认与 DashScope 体系配
 ├── data/                     # 运行时生成：SQLite、Chroma（勿提交敏感库）
 ├── logs/                     # 运行时日志
 ├── docs/                     # 功能大纲、前端优化说明等
+├── scripts/
+│   └── dev.ps1               # Windows 开发启动器
 ├── skills/
 │   └── bilibili-rag-local/   # OpenClaw Skill
 ├── test/                     # 诊断脚本（见下文运行方式）
 ├── requirements.txt
 ├── setup_dependencies.ps1
 ├── setup_dependencies.bat
+├── start.bat
+├── stop.bat
+├── status.bat
+├── logs.bat
 └── README.md
 ```
 
@@ -296,13 +291,13 @@ Embedding 与 ASR 仍以项目当前实现为准（默认与 DashScope 体系配
 
 **前置条件**
 
-1. 本地已按上文启动后端，可打开 `http://127.0.0.1:8000/docs`。  
+1. 本地已按上文启动后端，可打开 `http://127.0.0.1:8000/docs`。
 2. OpenClaw 已安装并能加载本地 Skills。
 
 **接入步骤**
 
-1. 将 `skills/bilibili-rag-local` 复制到 OpenClaw 的 Skills 目录（例如 `~/.openclaw/skills/`）。  
-2. 重启或刷新 OpenClaw 的 Skills 列表。  
+1. 将 `skills/bilibili-rag-local` 复制到 OpenClaw 的 Skills 目录（例如 `~/.openclaw/skills/`）。
+2. 重启或刷新 OpenClaw 的 Skills 列表。
 3. 通过 Skill 调用典型接口：`POST /chat/ask`、`POST /chat/search`、`GET /knowledge/folders/status` 等。
 
 **建议**：先完成收藏夹入库再高频问答；问题越具体，召回通常越稳定。
@@ -320,10 +315,10 @@ python test/diagnose_rag.py
 python test/sync_cache_vectors.py
 ```
 
-| 脚本 | 用途 |
-|------|------|
-| `debug_asr_single.py` | 验证单个视频音频链路 |
-| `diagnose_rag.py` | 检查向量检索召回 |
+| 脚本                    | 用途                     |
+| ----------------------- | ------------------------ |
+| `debug_asr_single.py`   | 验证单个视频音频链路     |
+| `diagnose_rag.py`       | 检查向量检索召回         |
 | `sync_cache_vectors.py` | 将数据库缓存与向量库对齐 |
 
 ---
@@ -332,8 +327,8 @@ python test/sync_cache_vectors.py
 
 部分 B 站音频直链存在 **403 / 过期 / 区域限制**，无法被云端直接拉取。此时会尝试：
 
-1. 使用登录态在本地下载音频；  
-2. 用 **ffmpeg** 转为 16 kHz 单声道等格式；  
+1. 使用登录态在本地下载音频；
+2. 用 **ffmpeg** 转为 16 kHz 单声道等格式；
 3. 上传至 DashScope 完成识别。
 
 因此 **ffmpeg 必须在 PATH 中**，否则兜底路径会失败。
@@ -344,9 +339,9 @@ python test/sync_cache_vectors.py
 
 使用 DashScope / 其他云 API 时，可能产生：
 
-- 对话 Token（LLM）  
-- 向量 Embedding Token  
-- ASR 按时长计费  
+- 对话 Token（LLM）
+- 向量 Embedding Token
+- ASR 按时长计费
 
 建议：先用**短时长视频**打通流程并观察账单；正式批量入库前评估收藏夹规模与模型单价。
 
@@ -354,10 +349,10 @@ python test/sync_cache_vectors.py
 
 ## 相关文档
 
-| 文档 | 内容 |
-|------|------|
-| [docs/功能大纲.md](docs/功能大纲.md) | 功能模块、接口索引、用户路径说明 |
-| [docs/frontend-ui-optimization.md](docs/frontend-ui-optimization.md) | 前端交互与 UI 优化记录 |
+| 文档                                                                 | 内容                             |
+| -------------------------------------------------------------------- | -------------------------------- |
+| [docs/功能大纲.md](docs/功能大纲.md)                                 | 功能模块、接口索引、用户路径说明 |
+| [docs/frontend-ui-optimization.md](docs/frontend-ui-optimization.md) | 前端交互与 UI 优化记录           |
 
 ---
 
@@ -375,8 +370,8 @@ A：确认后端已启动、端口一致；开发环境下后端 CORS 当前为�
 **Q：没有 `.env.example`？**  
 A：请直接参考本文 [环境变量](#环境变量) 在根目录创建 `.env` 或 `.env.local`。
 
-**Q：双击「一键启动」提示没有 uvicorn，或用的不是我想用的 Python？**  
-A：先运行 **`setup_dependencies.bat`**（或外层 **`一键安装依赖库.bat`**）。若系统里有多个 Python，可在用户环境变量中设置 **`BILIBILI_RAG_PYTHON`** 为带 uvicorn 的解释器完整路径，或在项目下创建 **`.venv`** / **`venv`** 并安装依赖（启动脚本会优先使用它们）。
+**Q：启动器提示缺依赖，或用的不是我想用的 Python？**
+A：先运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 doctor` 查看诊断，再运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 install` 或双击 **`setup_dependencies.bat`** 安装依赖。若系统里有多个 Python，可在用户环境变量中设置 **`BILIBILI_RAG_PYTHON`** 为目标解释器完整路径。
 
 ---
 
@@ -394,8 +389,8 @@ MIT（见仓库内 [LICENSE](LICENSE) 文件）。
 
 ## 路线图
 
-- [ ] 对话历史与会话管理、检索历史记录  
-- [ ] 支持 B 站分 P 视频  
-- [ ] 适配更多 Embedding / 向量后端与开源模型  
+- [ ] 对话历史与会话管理、检索历史记录
+- [ ] 支持 B 站分 P 视频
+- [ ] 适配更多 Embedding / 向量后端与开源模型
 
 欢迎通过 [Issues](https://github.com/Amui-SU/Amui-SU-Star-Ai-Base/issues) 反馈问题与需求。
