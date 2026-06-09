@@ -3,13 +3,21 @@ import pytest
 from app.models import SourceBinding
 
 
+async def _get_code(client, email: str) -> str:
+    resp = await client.post("/system-auth/send-code", json={"email": email})
+    assert resp.status_code == 200
+    return resp.json()["code"]
+
+
 async def register_user(client, email: str, display_name: str) -> dict:
+    code = await _get_code(client, email)
     response = await client.post(
         "/system-auth/register",
         json={
             "email": email,
             "password": "correct horse battery staple",
             "display_name": display_name,
+            "code": code,
         },
     )
     assert response.status_code == 200

@@ -3,7 +3,7 @@ Bilibili RAG 知识库系统
 
 知识库路由 - 构建和管理知识库
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
 from loguru import logger
 from typing import List, Optional, Callable
@@ -154,10 +154,25 @@ def _extract_video_info(media: dict) -> tuple[str, str, Optional[int]]:
     return bvid, title, cid
 
 
-async def _upsert_video_cache(db: AsyncSession, bvid: str, meta: dict) -> None:
+async def _upsert_video_cache(
+    db: AsyncSession,
+    bvid: str,
+    meta: dict,
+    workspace_id: Optional[int] = None,
+    knowledge_base_id: Optional[int] = None,
+    source_binding_id: Optional[int] = None,
+) -> None:
     """写入或更新视频缓存信息"""
     result = await db.execute(select(VideoCache).where(VideoCache.bvid == bvid))
     cache = result.scalar_one_or_none()
+
+    scoped_fields = {}
+    if workspace_id is not None:
+        scoped_fields["workspace_id"] = workspace_id
+    if knowledge_base_id is not None:
+        scoped_fields["knowledge_base_id"] = knowledge_base_id
+    if source_binding_id is not None:
+        scoped_fields["source_binding_id"] = source_binding_id
 
     if cache is None:
         cache = VideoCache(
@@ -169,6 +184,7 @@ async def _upsert_video_cache(db: AsyncSession, bvid: str, meta: dict) -> None:
             duration=meta.get("duration"),
             pic_url=meta.get("cover"),
             is_processed=False,
+            **scoped_fields,
         )
         db.add(cache)
         return
@@ -184,6 +200,8 @@ async def _upsert_video_cache(db: AsyncSession, bvid: str, meta: dict) -> None:
         cache.duration = meta.get("duration")
     if meta.get("cover") is not None:
         cache.pic_url = meta.get("cover")
+    for key, val in scoped_fields.items():
+        setattr(cache, key, val)
 
 
 async def _sync_folder(
@@ -195,8 +213,11 @@ async def _sync_folder(
     folder_id: int,
     exclude_bvids: Optional[set[str]] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
+    workspace_id: Optional[int] = None,
+    knowledge_base_id: Optional[int] = None,
+    source_binding_id: Optional[int] = None,
 ) -> dict:
-    """同步单个收藏夹到向量库"""
+    """同步单个收藏夹到向量库。可选 scoped 参数用于多用户范围写入。"""
     info = {}
     try:
         info_result = await bili.get_favorite_content(folder_id, pn=1, ps=1)
@@ -222,7 +243,7 @@ async def _sync_folder(
                 "removed": 0,
                 "indexed": existing_count or 0,
                 "message": "本次同步异常：空列表，已跳过",
-                "last_sync_at": datetime.utcnow(),
+                "last_sync_at": datetime.now(timezone.utc),
             }
 
     video_map = {}
@@ -268,6 +289,14 @@ async def _sync_folder(
         media_count=valid_count,
     )
 
+    # 多用户范围：写入归属字段
+    if workspace_id is not None:
+        folder.workspace_id = workspace_id
+    if knowledge_base_id is not None:
+        folder.knowledge_base_id = knowledge_base_id
+    if source_binding_id is not None:
+        folder.source_binding_id = source_binding_id
+
     existing_rows = await db.execute(
         select(FavoriteVideo.bvid).where(FavoriteVideo.folder_id == folder.id)
     )
@@ -276,9 +305,14 @@ async def _sync_folder(
     added = current_bvids - existing_bvids
     removed = existing_bvids - current_bvids
 
-    # 写入标题/简介等信息
+    # 写入标题/简介等信息（含多用户范围）
     for bvid, meta in video_map.items():
-        await _upsert_video_cache(db, bvid, meta)
+        await _upsert_video_cache(
+            db, bvid, meta,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            source_binding_id=source_binding_id,
+        )
 
     source_priority = {
         ContentSource.BASIC_INFO.value: 1,
@@ -394,7 +428,12 @@ async def _sync_folder(
                     rag.delete_video(bvid)
                 except Exception as e:
                     logger.warning(f"删除旧向量失败 [{bvid}]: {e}")
-                chunks = rag.add_video_content(content)
+                chunks = rag.add_video_content(
+                    content,
+                    workspace_id=workspace_id,
+                    knowledge_base_id=knowledge_base_id,
+                    source_binding_id=source_binding_id,
+                )
                 logger.info(f"[{bvid}] 向量化完成，块数={chunks}")
             else:
                 logger.info(f"[{bvid}] 内容未变化或无需升级，跳过向量化")
@@ -410,7 +449,14 @@ async def _sync_folder(
                 )
             )
             if exists_row.scalar_one_or_none() is None:
-                db.add(FavoriteVideo(folder_id=folder.id, bvid=bvid, is_selected=True))
+                fav_kwargs: dict = {"folder_id": folder.id, "bvid": bvid, "is_selected": True}
+                if workspace_id is not None:
+                    fav_kwargs["workspace_id"] = workspace_id
+                if knowledge_base_id is not None:
+                    fav_kwargs["knowledge_base_id"] = knowledge_base_id
+                if source_binding_id is not None:
+                    fav_kwargs["source_binding_id"] = source_binding_id
+                db.add(FavoriteVideo(**fav_kwargs))
             processed_targets += 1
             if progress_callback:
                 progress_callback(meta["title"], processed_targets, total_targets)
@@ -441,7 +487,7 @@ async def _sync_folder(
             )
         )
 
-    folder.last_sync_at = datetime.utcnow()
+    folder.last_sync_at = datetime.now(timezone.utc)
 
     await db.commit()
 
@@ -733,25 +779,27 @@ async def get_build_status(task_id: str):
     )
 
 
-@router.delete("/clear")
+@router.delete("/clear", deprecated=True)
 async def clear_knowledge_base():
-    """清空知识库"""
+    """清空知识库（已废弃：无多用户范围，请使用对应知识库的清空接口）"""
+    logger.warning("调用了已废弃的全局 /knowledge/clear，建议迁移到知识库范围接口")
     try:
         rag = get_rag_service()
         rag.clear_collection()
-        return {"message": "知识库已清空"}
+        return {"message": "知识库已清空（此接口已废弃，请迁移到知识库范围接口）"}
     except Exception as e:
         logger.error(f"清空知识库失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/video/{bvid}")
+@router.delete("/video/{bvid}", deprecated=True)
 async def delete_video_from_knowledge(bvid: str):
-    """从知识库中删除指定视频"""
+    """从知识库中删除指定视频（已废弃：无多用户范围，请使用知识库范围接口）"""
+    logger.warning("调用了已废弃的全局 /knowledge/video/{bvid}，建议迁移到知识库范围接口")
     try:
         rag = get_rag_service()
         rag.delete_video(bvid)
-        return {"message": f"已删除视频 {bvid}"}
+        return {"message": f"已删除视频 {bvid}（此接口已废弃，请迁移到知识库范围接口）"}
     except Exception as e:
         logger.error(f"删除视频失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

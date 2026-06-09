@@ -23,11 +23,11 @@ The main implementation should live in:
 
 The convenience wrappers should call that script:
 
-- `一键安装依赖库.bat` calls `scripts\dev.ps1 install`
-- `一键启动.bat` or existing `一键启动.vbs` calls `scripts\dev.ps1 start`
-- `一键关闭.bat` or existing `一键关闭.vbs` calls `scripts\dev.ps1 stop`
-- `状态检查.bat` calls `scripts\dev.ps1 status`
-- `查看日志.bat` calls `scripts\dev.ps1 logs`
+- `安装依赖.bat` calls `scripts\dev.ps1 install`
+- `启动.bat` calls `scripts\dev.ps1 start`
+- `停止.bat` calls `scripts\dev.ps1 stop`
+- `状态.bat` calls `scripts\dev.ps1 status`
+- `日志.bat` calls `scripts\dev.ps1 logs`
 
 The wrappers are optional thin launchers. They should contain as little logic as possible so future fixes happen in one place.
 

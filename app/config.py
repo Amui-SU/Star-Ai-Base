@@ -70,6 +70,22 @@ class Settings(BaseSettings):
         env="CHROMA_PERSIST_DIRECTORY"
     )
     
+    # Google OAuth
+    google_client_id: str = Field(default="", env="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="", env="GOOGLE_CLIENT_SECRET")
+    google_redirect_uri: str = Field(default="", env="GOOGLE_REDIRECT_URI")
+
+    # HTTP 代理（访问 Google 等境外服务时需要）
+    http_proxy: str = Field(default="", env="HTTP_PROXY")
+
+    # SMTP 邮件配置（用于发送邮箱验证码）
+    smtp_host: str = Field(default="smtp.qq.com", env="SMTP_HOST")
+    smtp_port: int = Field(default=587, env="SMTP_PORT")
+    smtp_user: str = Field(default="", env="SMTP_USER")
+    smtp_password: str = Field(default="", env="SMTP_PASSWORD")
+    smtp_from: str = Field(default="", env="SMTP_FROM")
+    smtp_use_tls: bool = Field(default=True, env="SMTP_USE_TLS")
+
     @field_validator("deepseek_model", mode="before")
     @classmethod
     def normalize_deepseek_model(cls, value: str) -> str:

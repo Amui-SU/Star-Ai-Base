@@ -5,24 +5,40 @@ import { createPortal } from "react-dom";
 import {
   FavoriteFolder,
   Video,
-  favoritesApi,
-  knowledgeApi,
+  sourceBindingApi,
+  knowledgeBaseApi,
   BuildStatus,
   FolderStatus,
   OrganizePreviewResponse,
+  KnowledgeBaseBuildRequest,
 } from "@/lib/api";
 import OrganizePreviewModal from "@/components/OrganizePreviewModal";
 
 interface Props {
-  sessionId: string;
+  sourceBindingId: number;
+  knowledgeBaseId: number;
   onBuildDone?: () => void;
   onSelectionChange?: (folderIds: number[]) => void;
 }
 
-export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange }: Props) {
-  const [folders, setFolders] = useState<(FavoriteFolder & { videos?: Video[]; expanded?: boolean; loading?: boolean; count_source?: "bili" | "filtered" | "db" })[]>([]);
+export default function SourcesPanel({
+  sourceBindingId,
+  knowledgeBaseId,
+  onBuildDone,
+  onSelectionChange,
+}: Props) {
+  const [folders, setFolders] = useState<
+    (FavoriteFolder & {
+      videos?: Video[];
+      expanded?: boolean;
+      loading?: boolean;
+      count_source?: "bili" | "filtered" | "db";
+    })[]
+  >([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [customVideoNames, setCustomVideoNames] = useState<Record<string, string>>({});
+  const [customVideoNames, setCustomVideoNames] = useState<
+    Record<string, string>
+  >({});
   const [loading, setLoading] = useState(true);
   const [building, setBuilding] = useState(false);
   const [progress, setProgress] = useState<BuildStatus | null>(null);
@@ -30,45 +46,58 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
   const [message, setMessage] = useState<string | null>(null);
   const [organizeOpen, setOrganizeOpen] = useState(false);
   const [organizeLoading, setOrganizeLoading] = useState(false);
-  const [organizePreview, setOrganizePreview] = useState<OrganizePreviewResponse | null>(null);
+  const [organizePreview, setOrganizePreview] =
+    useState<OrganizePreviewResponse | null>(null);
   const [organizeMessage, setOrganizeMessage] = useState<string | null>(null);
-  const [playingVideo, setPlayingVideo] = useState<{ bvid: string; title: string } | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<{
+    bvid: string;
+    title: string;
+  } | null>(null);
 
   // 加载收藏夹列表（从B站获取）
   const loadFolders = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await favoritesApi.getList(sessionId);
+      const data = await sourceBindingApi.getFavorites(sourceBindingId);
       setFolders(data.map((f) => ({ ...f, count_source: "bili" })));
       setMessage(null);
     } catch (err) {
       setFolders([]);
-      setMessage(err instanceof Error ? err.message : "加载收藏夹失败，请稍后重试");
+      setMessage(
+        err instanceof Error ? err.message : "加载收藏夹失败，请稍后重试",
+      );
     }
     setLoading(false);
-  }, [sessionId]);
+  }, [sourceBindingId]);
 
-  // 加载入库状态（从本地数据库）
+  // 加载入库状态（从知识库 scoped API）
   const loadStatuses = useCallback(async () => {
+    if (!knowledgeBaseId) return;
     try {
-      const data = await knowledgeApi.getFolderStatus(sessionId);
+      const stats = await knowledgeBaseApi.stats(knowledgeBaseId);
       const map: Record<number, FolderStatus> = {};
-      data.forEach((item) => {
-        map[item.media_id] = item;
-      });
+      if (stats.folders) {
+        stats.folders.forEach(
+          (f: {
+            media_id: number;
+            indexed_count: number;
+            media_count: number;
+            last_sync_at: string | null;
+          }) => {
+            map[f.media_id] = {
+              media_id: f.media_id,
+              indexed_count: f.indexed_count,
+              media_count: f.media_count,
+              last_sync_at: f.last_sync_at,
+            };
+          },
+        );
+      }
       setStatusMap(map);
-      setFolders((prev) =>
-        prev.map((f) => {
-          const s = map[f.media_id];
-          if (!s?.media_count) return f;
-          if (f.count_source === "filtered") return f;
-          return { ...f, count_source: "bili" };
-        })
-      );
     } catch {
       // 状态接口失败不影响主列表展示
     }
-  }, [sessionId]);
+  }, [knowledgeBaseId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -128,7 +157,10 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
     setOrganizeOpen(true);
     setOrganizeLoading(true);
     try {
-      const res = await favoritesApi.organizePreview(folderId, sessionId);
+      const res = await sourceBindingApi.organizePreview(
+        sourceBindingId,
+        folderId,
+      );
       setOrganizePreview(res);
     } catch {
       setOrganizeMessage("预览失败，请稍后重试");
@@ -145,21 +177,32 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
         if (f.expanded) return { ...f, expanded: false };
         if (f.videos) return { ...f, expanded: true };
         return { ...f, expanded: true, loading: true };
-      })
+      }),
     );
 
     const folder = folders.find((f) => f.media_id === id);
     if (!folder?.videos) {
       try {
-        const res = await favoritesApi.getAllVideos(id, sessionId);
+        const res = await sourceBindingApi.getAllFavoriteVideos(
+          sourceBindingId,
+          id,
+        );
         setFolders((prev) =>
           prev.map((f) =>
-            f.media_id === id ? { ...f, videos: res.videos, loading: false, media_count: res.total, count_source: "filtered" } : f
-          )
+            f.media_id === id
+              ? {
+                  ...f,
+                  videos: res.videos,
+                  loading: false,
+                  media_count: res.total,
+                  count_source: "filtered",
+                }
+              : f,
+          ),
         );
       } catch {
         setFolders((prev) =>
-          prev.map((f) => (f.media_id === id ? { ...f, loading: false } : f))
+          prev.map((f) => (f.media_id === id ? { ...f, loading: false } : f)),
         );
       }
     }
@@ -185,10 +228,16 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
     setProgress(null);
 
     try {
-      const res = await knowledgeApi.build({ folder_ids: Array.from(selected) }, sessionId);
+      const res = await knowledgeBaseApi.build(knowledgeBaseId, {
+        source_binding_id: sourceBindingId,
+        folder_ids: Array.from(selected),
+      } as KnowledgeBaseBuildRequest);
 
       const poll = async () => {
-        const s = await knowledgeApi.getBuildStatus(res.task_id);
+        const s = await knowledgeBaseApi.getBuildStatus(
+          knowledgeBaseId,
+          res.task_id,
+        );
         setProgress(s);
 
         if (s.status === "running" || s.status === "pending") {
@@ -216,16 +265,16 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
     if (!value) return null;
     try {
       let dateStr = value;
-      if (!value.includes('T') && !value.includes('Z')) {
-        dateStr = value.replace(' ', 'T') + 'Z';
+      if (!value.includes("T") && !value.includes("Z")) {
+        dateStr = value.replace(" ", "T") + "Z";
       }
       const date = new Date(dateStr);
       if (Number.isNaN(date.getTime())) return null;
 
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      const hour = String(date.getHours()).padStart(2, '0');
-      const minute = String(date.getMinutes()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const hour = String(date.getHours()).padStart(2, "0");
+      const minute = String(date.getMinutes()).padStart(2, "0");
       return `${month}/${day} ${hour}:${minute}`;
     } catch {
       return null;
@@ -258,7 +307,12 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
 
     // 有更新：B站收藏夹比本地多
     if (indexedCount < totalCount && indexedCount > 0) {
-      return { label: "有更新", className: "partial", indexedCount, totalCount };
+      return {
+        label: "有更新",
+        className: "partial",
+        indexedCount,
+        totalCount,
+      };
     }
 
     // 已入库但视频数为0（可能视频都没有内容）
@@ -288,19 +342,35 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
       <div className="panel-header items-start flex-wrap gap-y-2">
         <div className="flex items-center gap-2 ml-1 mt-0.5 min-w-[88px]">
           <div className="w-7 h-7 rounded-lg border border-(--border) bg-[rgba(217,139,43,0.16)] flex items-center justify-center shrink-0">
-            <svg className="w-4 h-4 text-(--accent-strong)" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+            <svg
+              className="w-4 h-4 text-(--accent-strong)"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.9}
+                d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
+              />
             </svg>
           </div>
           <div className="flex flex-col items-center justify-center">
-            <div className="panel-title whitespace-nowrap text-sm leading-4">收藏夹</div>
-            <div className="panel-subtitle text-[11px] leading-4 text-center mt-1">{folders.length} 个</div>
+            <div className="panel-title whitespace-nowrap text-sm leading-4">
+              收藏夹
+            </div>
+            <div className="panel-subtitle text-[11px] leading-4 text-center mt-1">
+              {folders.length} 个
+            </div>
           </div>
         </div>
         <div className="panel-actions ml-auto gap-2">
           <button
             onClick={() => {
-              const def = folders.find((f) => f.is_default || f.title === "默认收藏夹");
+              const def = folders.find(
+                (f) => f.is_default || f.title === "默认收藏夹",
+              );
               if (def) {
                 openOrganizePreview(def.media_id);
               } else {
@@ -320,8 +390,18 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
             title={loading ? "加载中..." : "刷新"}
             aria-label={loading ? "加载中..." : "刷新"}
           >
-            <svg className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M21 12a9 9 0 11-2.2-5.9l1.7 1.9h-3.1" />
+            <svg
+              className={`w-5 h-5 ${loading ? "animate-spin" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.9}
+                d="M21 12a9 9 0 11-2.2-5.9l1.7 1.9h-3.1"
+              />
             </svg>
           </button>
         </div>
@@ -330,18 +410,30 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
       <div className="panel-body">
         <div className="sources-scroll">
           {loading ? (
-            <div className="text-center text-sm text-(--muted) py-6">加载中...</div>
+            <div className="text-center text-sm text-(--muted) py-6">
+              加载中...
+            </div>
           ) : folders.length === 0 ? (
-            <div className="text-center text-sm text-(--muted) py-6">暂无收藏夹</div>
+            <div className="text-center text-sm text-(--muted) py-6">
+              暂无收藏夹
+            </div>
           ) : (
             <div className="space-y-2">
               {folders.map((f) => {
                 const status = getFolderStatus(f.media_id, f.media_count);
-                const lastSync = formatTime(statusMap[f.media_id]?.last_sync_at);
+                const lastSync = formatTime(
+                  statusMap[f.media_id]?.last_sync_at ?? undefined,
+                );
 
                 return (
-                  <div key={f.media_id} className={`folder-card ${selected.has(f.media_id) ? "selected" : ""}`}>
-                    <div className="folder-head" onClick={() => toggleExpand(f.media_id)}>
+                  <div
+                    key={f.media_id}
+                    className={`folder-card ${selected.has(f.media_id) ? "selected" : ""}`}
+                  >
+                    <div
+                      className="folder-head"
+                      onClick={() => toggleExpand(f.media_id)}
+                    >
                       <input
                         type="checkbox"
                         checked={selected.has(f.media_id)}
@@ -351,36 +443,57 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
                         className="folder-checkbox"
                       />
                       <div className="folder-meta">
-                        <div className="folder-title" title={f.title}>{f.title}</div>
-                      <div className="folder-count">
-                        {status.indexedCount}/{status.totalCount ?? f.media_count} 个视频
-                        {lastSync && ` · ${lastSync}`}
+                        <div className="folder-title" title={f.title}>
+                          {f.title}
+                        </div>
+                        <div className="folder-count">
+                          {status.indexedCount}/
+                          {status.totalCount ?? f.media_count} 个视频
+                          {lastSync && ` · ${lastSync}`}
+                        </div>
                       </div>
-                      </div>
-                      <span className={`status-pill ${status.className}`}>{status.label}</span>
+                      <span className={`status-pill ${status.className}`}>
+                        {status.label}
+                      </span>
                       <div className="folder-toggle">
-                        <svg className={`w-4 h-4 transition-transform ${f.expanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        <svg
+                          className={`w-4 h-4 transition-transform ${f.expanded ? "rotate-90" : ""}`}
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 5l7 7-7 7"
+                          />
                         </svg>
                       </div>
                     </div>
 
-                    <div className={`folder-list-wrapper ${f.expanded ? "expanded" : ""}`}>
+                    <div
+                      className={`folder-list-wrapper ${f.expanded ? "expanded" : ""}`}
+                    >
                       <div className="folder-list">
                         {f.loading ? (
-                          <div className="text-xs text-(--muted)">加载中...</div>
+                          <div className="text-xs text-(--muted)">
+                            加载中...
+                          </div>
                         ) : f.videos?.length === 0 ? (
                           <div className="text-xs text-(--muted)">暂无视频</div>
                         ) : (
                           f.videos?.map((v) => (
-                            <div
-                              key={v.bvid}
-                              className="video-item"
-                            >
+                            <div key={v.bvid} className="video-item">
                               <button
                                 type="button"
                                 className="video-play-btn"
-                                onClick={() => setPlayingVideo({ bvid: v.bvid, title: customVideoNames[v.bvid] || v.title })}
+                                onClick={() =>
+                                  setPlayingVideo({
+                                    bvid: v.bvid,
+                                    title: customVideoNames[v.bvid] || v.title,
+                                  })
+                                }
                                 title="在线播放"
                                 aria-label={`播放 ${customVideoNames[v.bvid] || v.title}`}
                               >
@@ -393,8 +506,18 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
                                 aria-label={`重命名 ${customVideoNames[v.bvid] || v.title}`}
                                 onClick={() => renameVideo(v)}
                               >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 11l6.768-6.768a2.5 2.5 0 013.536 0l.232.232a2.5 2.5 0 010 3.536L12.768 14.768A2 2 0 0111.354 15H9v-2.354A2 2 0 019.586 11.939zM5 19h14" />
+                                <svg
+                                  className="w-3 h-3"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M15.232 5.232l3.536 3.536M9 11l6.768-6.768a2.5 2.5 0 013.536 0l.232.232a2.5 2.5 0 010 3.536L12.768 14.768A2 2 0 0111.354 15H9v-2.354A2 2 0 019.586 11.939zM5 19h14"
+                                  />
                                 </svg>
                               </button>
                               <a
@@ -424,36 +547,51 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
         {progress && building && (
           <div className="mb-4">
             <div className="flex justify-between text-xs mb-2">
-              <span className="text-(--muted) truncate">{progress.current_step}</span>
+              <span className="text-(--muted) truncate">
+                {progress.current_step}
+              </span>
               <span className="text-(--accent)">{progress.progress}%</span>
             </div>
             <div className="progress">
-              <div className="progress-bar" style={{ width: `${progress.progress}%` }} />
+              <div
+                className="progress-bar"
+                style={{ width: `${progress.progress}%` }}
+              />
             </div>
           </div>
         )}
 
         {/* 消息 */}
-        {message && <div className="text-xs text-(--muted) mb-3">{message}</div>}
-        {organizeMessage && <div className="text-xs text-(--muted) mb-3">{organizeMessage}</div>}
+        {message && (
+          <div className="text-xs text-(--muted) mb-3">{message}</div>
+        )}
+        {organizeMessage && (
+          <div className="text-xs text-(--muted) mb-3">{organizeMessage}</div>
+        )}
 
         {/* 主按钮 */}
         <button
           onClick={buildKnowledge}
-          disabled={selected.size === 0 || building}
+          disabled={selected.size === 0 || building || !knowledgeBaseId}
           className="btn glass-action-btn w-full"
         >
-          {getButtonText()}
+          {knowledgeBaseId ? getButtonText() : "请先在侧栏创建知识库"}
         </button>
 
-        <p className="text-xs text-(--muted) text-center mt-2">
-          入库后可在右侧进行问答
-        </p>
+        {knowledgeBaseId ? (
+          <p className="text-xs text-(--muted) text-center mt-2">
+            入库后可在右侧进行问答
+          </p>
+        ) : (
+          <p className="text-xs text-(--muted) text-center mt-2">
+            创建知识库后即可将收藏夹内容入库
+          </p>
+        )}
       </div>
 
       <OrganizePreviewModal
         open={organizeOpen}
-        sessionId={sessionId}
+        bindingId={sourceBindingId}
         preview={organizePreview}
         loading={organizeLoading}
         errorMessage={organizeMessage}
@@ -461,28 +599,40 @@ export default function SourcesPanel({ sessionId, onBuildDone, onSelectionChange
         onApplied={refresh}
       />
 
-      {playingVideo && typeof document !== "undefined" && createPortal(
-        <div className="modal-backdrop" onClick={() => setPlayingVideo(null)}>
-          <div className="modal-card video-player-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="video-player-header">
-              <div className="video-player-title truncate" title={playingVideo.title}>
-                {playingVideo.title}
+      {playingVideo &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="modal-backdrop" onClick={() => setPlayingVideo(null)}>
+            <div
+              className="modal-card video-player-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="video-player-header">
+                <div
+                  className="video-player-title truncate"
+                  title={playingVideo.title}
+                >
+                  {playingVideo.title}
+                </div>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setPlayingVideo(null)}
+                  title="关闭"
+                >
+                  关闭
+                </button>
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => setPlayingVideo(null)} title="关闭">
-                关闭
-              </button>
+              <iframe
+                className="video-player-frame"
+                src={`https://player.bilibili.com/player.html?bvid=${playingVideo.bvid}&page=1&high_quality=1&danmaku=0`}
+                title={playingVideo.title}
+                allow="autoplay; fullscreen; picture-in-picture"
+                allowFullScreen
+              />
             </div>
-            <iframe
-              className="video-player-frame"
-              src={`https://player.bilibili.com/player.html?bvid=${playingVideo.bvid}&page=1&high_quality=1&danmaku=0`}
-              title={playingVideo.title}
-              allow="autoplay; fullscreen; picture-in-picture"
-              allowFullScreen
-            />
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

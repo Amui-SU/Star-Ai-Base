@@ -1,5 +1,7 @@
 # Windows Dev Runner Implementation Plan
 
+> **STATUS: COMPLETED** — All 10 tasks implemented, reviewed, and merged to `main` (2026-06-08).
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a Windows-only local dev runner that installs dependencies, starts, stops, checks, and diagnoses the backend/frontend services with one maintainable PowerShell entry point.
@@ -13,12 +15,12 @@
 ## File Structure
 
 - Create `scripts/dev.ps1`: canonical Windows dev runner with commands `doctor`, `install`, `start`, `stop`, `restart`, `status`, and `logs`.
-- Modify `setup_dependencies.bat`: call `scripts\dev.ps1 install` instead of `setup_dependencies.ps1` directly.
+- Modify `安装依赖.bat`: call `scripts\dev.ps1 install` instead of `setup_dependencies.ps1` directly.
 - Keep `setup_dependencies.ps1`: leave as a compatibility installer for this phase because it was already aligned to the same Python selection logic.
-- Create `start.bat`: thin wrapper for `scripts\dev.ps1 start`.
-- Create `stop.bat`: thin wrapper for `scripts\dev.ps1 stop`.
-- Create `status.bat`: thin wrapper for `scripts\dev.ps1 status`.
-- Create `logs.bat`: thin wrapper for `scripts\dev.ps1 logs`.
+- Create `启动.bat`: thin wrapper for `scripts\dev.ps1 start`.
+- Create `停止.bat`: thin wrapper for `scripts\dev.ps1 stop`.
+- Create `状态.bat`: thin wrapper for `scripts\dev.ps1 status`.
+- Create `日志.bat`: thin wrapper for `scripts\dev.ps1 logs`.
 - Modify `README.md`: document the new canonical Windows startup workflow.
 
 Runtime files:
@@ -315,7 +317,7 @@ git commit -m "feat: add windows dev runner doctor"
 **Files:**
 
 - Modify: `scripts/dev.ps1`
-- Modify: `setup_dependencies.bat`
+- Modify: `安装依赖.bat`
 
 - [ ] **Step 1: Add install command**
 
@@ -373,9 +375,9 @@ function Invoke-Install {
 }
 ```
 
-- [ ] **Step 2: Update setup_dependencies.bat**
+- [ ] **Step 2: Update 安装依赖.bat**
 
-Replace the PowerShell call in `setup_dependencies.bat` with:
+Replace the PowerShell call in `安装依赖.bat` with:
 
 ```bat
 powershell -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\scripts\dev.ps1" install
@@ -414,7 +416,7 @@ No broken requirements found.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add scripts\dev.ps1 setup_dependencies.bat
+git add scripts\dev.ps1 安装依赖.bat
 git commit -m "feat: add windows dev runner install"
 ```
 
@@ -947,13 +949,13 @@ git commit -m "feat: add windows dev runner logs"
 
 **Files:**
 
-- Create: `start.bat`
-- Create: `stop.bat`
-- Create: `status.bat`
-- Create: `logs.bat`
-- Modify: `setup_dependencies.bat`
+- Create: `启动.bat`
+- Create: `停止.bat`
+- Create: `状态.bat`
+- Create: `日志.bat`
+- Modify: `安装依赖.bat`
 
-- [ ] **Step 1: Add `start.bat`**
+- [ ] **Step 1: Add `启动.bat`**
 
 ```bat
 @echo off
@@ -963,7 +965,7 @@ powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%scripts\dev.ps1" start
 if errorlevel 1 pause
 ```
 
-- [ ] **Step 2: Add `stop.bat`**
+- [ ] **Step 2: Add `停止.bat`**
 
 ```bat
 @echo off
@@ -973,7 +975,7 @@ powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%scripts\dev.ps1" stop
 if errorlevel 1 pause
 ```
 
-- [ ] **Step 3: Add `status.bat`**
+- [ ] **Step 3: Add `状态.bat`**
 
 ```bat
 @echo off
@@ -983,7 +985,7 @@ powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%scripts\dev.ps1" status
 pause
 ```
 
-- [ ] **Step 4: Add `logs.bat`**
+- [ ] **Step 4: Add `日志.bat`**
 
 ```bat
 @echo off
@@ -993,7 +995,7 @@ powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%scripts\dev.ps1" logs
 pause
 ```
 
-- [ ] **Step 5: Simplify `setup_dependencies.bat`**
+- [ ] **Step 5: Simplify `安装依赖.bat`**
 
 Use this final content:
 
@@ -1030,7 +1032,7 @@ pause
 Run:
 
 ```powershell
-cmd /c status.bat
+cmd /c 状态.bat
 ```
 
 Expected:
@@ -1042,7 +1044,7 @@ Expected:
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add start.bat stop.bat status.bat logs.bat setup_dependencies.bat
+git add 启动.bat 停止.bat 状态.bat 日志.bat 安装依赖.bat
 git commit -m "feat: add windows dev runner wrappers"
 ```
 
@@ -1072,11 +1074,11 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 stop
 
 也可以双击：
 
-- `setup_dependencies.bat`
-- `start.bat`
-- `stop.bat`
-- `status.bat`
-- `logs.bat`
+- `安装依赖.bat`
+- `启动.bat`
+- `停止.bat`
+- `状态.bat`
+- `日志.bat`
 
 启动器会统一选择 Python 环境，安装依赖到同一个环境，启动后端和前端，并把日志写入 `logs/`。运行状态保存在 `logs/runtime.json`，关闭时只停止本项目进程，避免误杀其他本地服务。
 ````

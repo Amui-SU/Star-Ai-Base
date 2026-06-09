@@ -3,6 +3,8 @@ Bilibili RAG 知识库系统
 
 认证路由 - 处理 B站登录
 """
+import time
+
 from fastapi import APIRouter, HTTPException, Depends
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +17,42 @@ import uuid
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 # 临时存储登录会话（生产环境应使用 Redis）
-login_sessions = {}
+login_sessions: dict = {}
+
+# 会话过期时间（秒）
+QRCODE_SESSION_TTL = 300        # 二维码 5 分钟过期
+LOGIN_SESSION_TTL = 14 * 86400  # 登录会话 14 天过期
+
+
+def _cleanup_expired_sessions():
+    """清理过期会话（在每次访问时触发）"""
+    now = time.time()
+    expired_keys = [
+        key for key, val in login_sessions.items()
+        if now - val.get("_created_at", 0) > val.get("_ttl", QRCODE_SESSION_TTL)
+    ]
+    for key in expired_keys:
+        login_sessions.pop(key, None)
+
+
+def _set_session(key: str, value: dict, ttl: int = LOGIN_SESSION_TTL):
+    """写入会话并附加创建时间和 TTL"""
+    value["_created_at"] = time.time()
+    value["_ttl"] = ttl
+    login_sessions[key] = value
+
+
+def _get_session(key: str) -> dict | None:
+    """读取会话（自动清理过期）"""
+    _cleanup_expired_sessions()
+    session = login_sessions.get(key)
+    if session is None:
+        return None
+    now = time.time()
+    if now - session.get("_created_at", 0) > session.get("_ttl", LOGIN_SESSION_TTL):
+        login_sessions.pop(key, None)
+        return None
+    return session
 
 
 @router.get("/qrcode", response_model=QRCodeResponse)
@@ -31,9 +68,7 @@ async def generate_qrcode():
         await bili.close()
         
         # 存储会话
-        login_sessions[result["qrcode_key"]] = {
-            "status": "waiting"
-        }
+        _set_session(result["qrcode_key"], {"status": "waiting"}, QRCODE_SESSION_TTL)
         
         return QRCodeResponse(
             qrcode_key=result["qrcode_key"],
@@ -116,11 +151,11 @@ async def poll_qrcode_status(qrcode_key: str, db: AsyncSession = Depends(get_db)
                 }
 
             # 内存缓存（为了兼容旧代码）
-            login_sessions[session_id] = {
+            _set_session(session_id, {
                 "cookies": cookies,
                 "user_info": user_info_dict,
                 "refresh_token": result.get("refresh_token")
-            }
+            })
             
             response.session_id = session_id
             
@@ -139,7 +174,7 @@ async def get_session_info(session_id: str):
     """
     获取会话信息
     """
-    session = login_sessions.get(session_id)
+    session = _get_session(session_id)
     if not session:
         async with get_db_context() as db:
             result = await db.execute(
@@ -160,7 +195,7 @@ async def get_session_info(session_id: str):
                 "face": db_session.bili_face,
             },
         }
-        login_sessions[session_id] = session
+        _set_session(session_id, session)
 
     return {"valid": True, "user_info": session.get("user_info")}
 
@@ -170,9 +205,7 @@ async def logout(session_id: str):
     """
     退出登录
     """
-    if session_id in login_sessions:
-        del login_sessions[session_id]
-    
+    login_sessions.pop(session_id, None)
     return {"message": "已退出登录"}
 
 
@@ -180,7 +213,7 @@ async def get_session(session_id: str) -> dict:
     """
     获取会话信息（内部使用）
     """
-    session = login_sessions.get(session_id)
+    session = _get_session(session_id)
     if session:
         return session
 
@@ -205,5 +238,5 @@ async def get_session(session_id: str) -> dict:
         }
 
     if session:
-        login_sessions[session_id] = session
+        _set_session(session_id, session)
     return session

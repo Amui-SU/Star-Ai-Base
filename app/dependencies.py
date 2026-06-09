@@ -20,7 +20,8 @@ def _utc_now() -> datetime:
 
 
 def _utc_now_naive() -> datetime:
-    return datetime.utcnow()
+    """返回 naive UTC 时间（与旧数据兼容；新代码优先用 _utc_now）"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _as_aware_utc(value: datetime) -> datetime:

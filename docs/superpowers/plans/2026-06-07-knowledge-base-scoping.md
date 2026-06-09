@@ -1,5 +1,7 @@
 # Knowledge Base Scoping Implementation Plan
 
+> **STATUS: COMPLETED** — All tasks implemented, reviewed, and merged to `main` (2026-06-07).
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add authenticated, knowledge-base scoped stats, search, chat, stream, and build endpoints while keeping legacy session endpoints compatible.

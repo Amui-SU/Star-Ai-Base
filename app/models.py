@@ -9,10 +9,16 @@ from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel
 from enum import Enum
+
+
+def _utc_now() -> datetime:
+    """返回 aware UTC 时间（替代已弃用的 datetime.utcnow）"""
+    return datetime.now(timezone.utc)
+
 
 Base = declarative_base()
 
@@ -48,8 +54,13 @@ class VideoCache(Base):
     is_processed = Column(Boolean, default=False)  # 是否已处理并加入向量库
     process_error = Column(Text, nullable=True)  # 处理错误信息
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 多用户归属（向后兼容，旧数据为 NULL）
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=True)
+    knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True)
+    source_binding_id = Column(Integer, ForeignKey("source_bindings.id"), index=True, nullable=True)
+
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
 
 class UserSession(Base):
@@ -72,8 +83,8 @@ class UserSession(Base):
 
     # 状态
     is_valid = Column(Boolean, default=True)
-    last_active_at = Column(DateTime, default=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    last_active_at = Column(DateTime, default=_utc_now)
+    created_at = Column(DateTime, default=_utc_now)
 
 
 class SystemUser(Base):
@@ -87,8 +98,8 @@ class SystemUser(Base):
     display_name = Column(String(100), nullable=False)
     avatar_url = Column(String(500), nullable=True)
     status = Column(String(20), default="active", nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
 
 class SystemSession(Base):
@@ -101,8 +112,8 @@ class SystemSession(Base):
     session_token_hash = Column(String(128), unique=True, index=True, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_seen_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
+    last_seen_at = Column(DateTime, default=_utc_now)
 
 
 class Workspace(Base):
@@ -115,8 +126,8 @@ class Workspace(Base):
     owner_user_id = Column(
         Integer, ForeignKey("system_users.id"), index=True, nullable=False
     )
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
 
 class WorkspaceMember(Base):
@@ -133,7 +144,7 @@ class WorkspaceMember(Base):
     )
     user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
     role = Column(String(20), default="owner", nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
 
 
 class KnowledgeBase(Base):
@@ -150,8 +161,8 @@ class KnowledgeBase(Base):
     created_by = Column(
         Integer, ForeignKey("system_users.id"), index=True, nullable=False
     )
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
 
 class SourceBinding(Base):
@@ -169,8 +180,8 @@ class SourceBinding(Base):
     external_account_name = Column(String(200), nullable=True)
     external_avatar_url = Column(String(500), nullable=True)
     status = Column(String(20), default="active", nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
     last_verified_at = Column(DateTime, nullable=True)
 
 
@@ -188,8 +199,21 @@ class SourceCredential(Base):
     encryption_version = Column(String(20), default="fernet-v1", nullable=False)
     expires_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
+
+
+class VerificationCode(Base):
+    """邮箱验证码表"""
+
+    __tablename__ = "verification_codes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), index=True, nullable=False)
+    code_hash = Column(String(128), nullable=False)  # SHA-256 哈希
+    attempts = Column(Integer, default=0)  # 错误尝试次数
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_utc_now)
 
 
 class FavoriteFolder(Base):
@@ -210,8 +234,13 @@ class FavoriteFolder(Base):
     is_selected = Column(Boolean, default=True)  # 是否选中用于知识库
     last_sync_at = Column(DateTime, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 多用户归属（向后兼容，旧数据为 NULL）
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=True)
+    knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True)
+    source_binding_id = Column(Integer, ForeignKey("source_bindings.id"), index=True, nullable=True)
+
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
 
 class FavoriteVideo(Base):
@@ -226,7 +255,35 @@ class FavoriteVideo(Base):
     # 是否选中（用户可以取消选中某些视频）
     is_selected = Column(Boolean, default=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 多用户归属（向后兼容，旧数据为 NULL）
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=True)
+    knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True)
+    source_binding_id = Column(Integer, ForeignKey("source_bindings.id"), index=True, nullable=True)
+
+    created_at = Column(DateTime, default=_utc_now)
+
+
+class IngestionTask(Base):
+    """入库任务表"""
+
+    __tablename__ = "ingestion_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(64), unique=True, index=True, nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=False)
+    knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=False)
+    source_binding_id = Column(Integer, ForeignKey("source_bindings.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("system_users.id"), nullable=False)
+
+    status = Column(String(20), default="pending", nullable=False)
+    progress = Column(Integer, default=0)
+    current_step = Column(String(500), nullable=True)
+    total_items = Column(Integer, default=0)
+    processed_items = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
 
 # ==================== Pydantic 模型 (API 用) ====================
@@ -245,6 +302,7 @@ class SystemRegisterRequest(BaseModel):
     email: str
     password: str
     display_name: str
+    code: str
 
 
 class SystemLoginRequest(BaseModel):

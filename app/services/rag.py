@@ -4,6 +4,7 @@ Bilibili RAG 知识库系统
 RAG 服务模块 - 向量存储与问答
 """
 
+import warnings
 from typing import List, Optional
 from loguru import logger
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -259,8 +260,14 @@ class RAGService:
         self, query: str, k: int = 5, bvids: Optional[List[str]] = None
     ) -> List[Document]:
         """
-        检索相关内容
+        检索相关内容（已废弃：无多用户范围，请使用 search_in_knowledge_base）
         """
+        warnings.warn(
+            "RAGService.search() 已废弃，请使用 search_in_knowledge_base() "
+            "以确保多用户数据隔离",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if not query or not query.strip():
             logger.warning("检索查询为空")
             return []
@@ -499,4 +506,23 @@ class RAGService:
             logger.info(f"已删除视频: {bvid}")
         except Exception as e:
             logger.error(f"删除视频失败 [{bvid}]: {e}")
+            raise
+
+    def delete_by_knowledge_base(self, knowledge_base_id: int) -> int:
+        """
+        删除指定知识库的所有向量文档。返回删除前匹配的文档数。
+
+        Args:
+            knowledge_base_id: 知识库 ID
+        """
+        try:
+            where = {"knowledge_base_id": knowledge_base_id}
+            before = self.vectorstore._collection.count()
+            self.vectorstore._collection.delete(where=where)
+            after = self.vectorstore._collection.count()
+            deleted = before - after
+            logger.info(f"已删除知识库 {knowledge_base_id} 的 {deleted} 个向量文档")
+            return deleted
+        except Exception as e:
+            logger.error(f"删除知识库向量失败 [{knowledge_base_id}]: {e}")
             raise

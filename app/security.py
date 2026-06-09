@@ -46,7 +46,7 @@ def set_session_cookie(response: Response, token: str) -> None:
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=not settings.debug,
+        secure=False,  # 本地开发用 HTTP，生产部署需改为 True
         samesite="lax",
         max_age=SESSION_TTL_DAYS * 24 * 60 * 60,
         path="/",

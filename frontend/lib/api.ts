@@ -132,11 +132,16 @@ export interface FolderStatus {
 }
 
 export interface KnowledgeStats {
-  total_documents?: number;
-  total_videos?: number;
-  collection_name?: string;
-  persist_directory?: string;
-  [key: string]: unknown;
+  knowledge_base_id: number;
+  workspace_id: number;
+  total_videos: number;
+  folders: {
+    media_id: number;
+    indexed_count: number;
+    media_count: number;
+    last_sync_at: string | null;
+  }[];
+  scoped: boolean;
 }
 
 export interface OrganizePreviewItem {
@@ -248,7 +253,20 @@ export async function request<T>(
 }
 
 export const systemAuthApi = {
-  register: (data: { email: string; password: string; display_name: string }) =>
+  googleLoginUrl: `${API_BASE_URL}/system-auth/google/login`,
+
+  sendCode: (email: string) =>
+    request<{ message: string; code?: string }>("/system-auth/send-code", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  register: (data: {
+    email: string;
+    password: string;
+    display_name: string;
+    code: string;
+  }) =>
     request<SystemAuthResponse>("/system-auth/register", {
       method: "POST",
       body: JSON.stringify(data),
@@ -282,6 +300,58 @@ export const sourceBindingApi = {
   pollBilibiliQRCode: (qrcodeKey: string) =>
     request<LoginStatusResponse>(
       `/source-bindings/bilibili/qrcode/poll/${qrcodeKey}`,
+    ),
+
+  // 通过绑定获取收藏夹（替代旧 favoritesApi）
+  getFavorites: (bindingId: number) =>
+    request<FavoriteFolder[]>(`/source-bindings/${bindingId}/favorites`),
+
+  getFavoriteVideos: (
+    bindingId: number,
+    mediaId: number,
+    page = 1,
+    pageSize = 20,
+  ) =>
+    request<{
+      folder_info: Record<string, unknown>;
+      videos: Video[];
+      has_more: boolean;
+      page: number;
+      page_size: number;
+    }>(
+      `/source-bindings/${bindingId}/favorites/${mediaId}/videos?page=${page}&page_size=${pageSize}`,
+    ),
+
+  getAllFavoriteVideos: (bindingId: number, mediaId: number) =>
+    request<{ total: number; valid: number; videos: Video[] }>(
+      `/source-bindings/${bindingId}/favorites/${mediaId}/all-videos`,
+    ),
+
+  organizePreview: (bindingId: number, folderId: number) =>
+    request<OrganizePreviewResponse>(
+      `/source-bindings/${bindingId}/favorites/organize-preview?folder_id=${folderId}`,
+    ),
+
+  cleanInvalid: (bindingId: number, folderId: number) =>
+    request<{ ok: boolean }>(
+      `/source-bindings/${bindingId}/favorites/${folderId}/clean-invalid`,
+      { method: "POST" },
+    ),
+
+  organizeExecute: (
+    bindingId: number,
+    data: {
+      default_folder_id: number;
+      moves: {
+        resource_id: number;
+        resource_type: number;
+        target_folder_id: number;
+      }[];
+    },
+  ) =>
+    request<{ message: string; moved: number; groups: number }>(
+      `/source-bindings/${bindingId}/favorites/organize-execute`,
+      { method: "POST", body: JSON.stringify(data) },
     ),
 };
 
@@ -322,6 +392,17 @@ export const knowledgeBaseApi = {
         method: "POST",
         body: JSON.stringify(data),
       },
+    ),
+
+  getBuildStatus: (knowledgeBaseId: number, taskId: string) =>
+    request<BuildStatus>(
+      `/knowledge-bases/${knowledgeBaseId}/build/status/${taskId}`,
+    ),
+
+  delete: (knowledgeBaseId: number) =>
+    request<{ ok: boolean; deleted_vectors: number }>(
+      `/knowledge-bases/${knowledgeBaseId}`,
+      { method: "DELETE" },
     ),
 };
 

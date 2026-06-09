@@ -4,12 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   OrganizePreviewResponse,
   OrganizePreviewItem,
-  favoritesApi,
+  sourceBindingApi,
 } from "@/lib/api";
 
 interface Props {
   open: boolean;
-  sessionId: string;
+  bindingId: number;
   preview: OrganizePreviewResponse | null;
   loading?: boolean;
   errorMessage?: string | null;
@@ -19,7 +19,7 @@ interface Props {
 
 export default function OrganizePreviewModal({
   open,
-  sessionId,
+  bindingId,
   preview,
   loading = false,
   errorMessage = null,
@@ -54,13 +54,13 @@ export default function OrganizePreviewModal({
     const next = targetId ? Number(targetId) : null;
     setItems((prev) =>
       prev.map((item) =>
-        item.bvid === bvid ? { ...item, target_folder_id: next } : item
-      )
+        item.bvid === bvid ? { ...item, target_folder_id: next } : item,
+      ),
     );
   };
 
   const handleExecute = async () => {
-    if (!preview || !sessionId) return;
+    if (!preview) return;
     setSubmitting(true);
     setMessage(null);
     try {
@@ -72,13 +72,10 @@ export default function OrganizePreviewModal({
           target_folder_id: item.target_folder_id as number,
         }));
 
-      const res = await favoritesApi.organizeExecute(
-        {
-          default_folder_id: preview.default_folder_id,
-          moves,
-        },
-        sessionId
-      );
+      const res = await sourceBindingApi.organizeExecute(bindingId, {
+        default_folder_id: preview.default_folder_id,
+        moves,
+      });
       setMessage(`已移动 ${res.moved} 条内容`);
       onApplied?.();
       onClose();
@@ -90,11 +87,11 @@ export default function OrganizePreviewModal({
   };
 
   const handleClean = async () => {
-    if (!preview || !sessionId) return;
+    if (!preview) return;
     setCleaning(true);
     setMessage(null);
     try {
-      await favoritesApi.cleanInvalid(preview.default_folder_id, sessionId);
+      await sourceBindingApi.cleanInvalid(bindingId, preview.default_folder_id);
       setMessage("已清理失效内容");
       onApplied?.();
     } catch {
@@ -108,7 +105,10 @@ export default function OrganizePreviewModal({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card organize-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-card organize-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="organize-header">
           <div>
             <div className="modal-title">一键整理预览</div>
@@ -153,9 +153,7 @@ export default function OrganizePreviewModal({
                     value={item.target_folder_id ?? ""}
                     onChange={(e) => updateTarget(item.bvid, e.target.value)}
                   >
-                    <option value="">
-                      留在 {defaultFolderTitle}
-                    </option>
+                    <option value="">留在 {defaultFolderTitle}</option>
                     {folders.map((folder) => (
                       <option key={folder.media_id} value={folder.media_id}>
                         {folder.title}

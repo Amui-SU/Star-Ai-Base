@@ -50,6 +50,10 @@ async def client(monkeypatch, db_session_factory) -> AsyncIterator[AsyncClient]:
 
     monkeypatch.setattr(database, "async_session_factory", db_session_factory)
 
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "debug", True)
+
     from app.main import app
 
     missing_override = object()

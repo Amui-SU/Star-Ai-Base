@@ -9,12 +9,17 @@ async def test_protected_knowledge_base_list_requires_login(client):
 
 @pytest.mark.asyncio
 async def test_user_can_create_and_list_own_knowledge_base(client):
+    code_resp = await client.post("/system-auth/send-code", json={"email": "alice@example.com"})
+    assert code_resp.status_code == 200
+    code = code_resp.json()["code"]
+
     await client.post(
         "/system-auth/register",
         json={
             "email": "alice@example.com",
             "password": "correct horse battery staple",
             "display_name": "Alice",
+            "code": code,
         },
     )
 
