@@ -15,6 +15,14 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.models import Base
+from app.routers.system_auth import _ip_rate_limit
+
+
+@pytest.fixture(autouse=True)
+def isolate_auth_ip_rate_limit() -> Iterator[None]:
+    _ip_rate_limit.clear()
+    yield
+    _ip_rate_limit.clear()
 
 
 @pytest.fixture()
