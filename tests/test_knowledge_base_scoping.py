@@ -1,6 +1,9 @@
+import json
+
 import pytest
 
-from app.models import SourceBinding
+from app.models import SourceBinding, SourceCredential
+from app.security import encrypt_text
 
 
 async def _get_code(client, email: str) -> str:
@@ -50,6 +53,22 @@ async def create_source_binding(
             status=status,
         )
         session.add(binding)
+        await session.flush()
+        session.add(
+            SourceCredential(
+                user_id=user_id,
+                source_binding_id=binding.id,
+                encrypted_payload=encrypt_text(
+                    json.dumps(
+                        {
+                            "SESSDATA": "test-session",
+                            "bili_jct": "test-csrf",
+                            "DedeUserID": str(user_id),
+                        }
+                    )
+                ),
+            )
+        )
         await session.commit()
         await session.refresh(binding)
         return binding
@@ -305,7 +324,42 @@ async def test_scoped_build_rejects_unknown_source_binding(client):
 
 
 @pytest.mark.asyncio
-async def test_scoped_build_records_scope_metadata(client, db_session_factory):
+async def test_scoped_build_records_scope_metadata(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    class FakeBilibiliService:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def close(self):
+            pass
+
+    async def fake_run_scoped_build(**_kwargs):
+        pass
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.BilibiliService",
+        FakeBilibiliService,
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.ASRService",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.ContentFetcher",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._run_scoped_build",
+        fake_run_scoped_build,
+    )
+
     auth = await register_user(client, "alice@example.com", "Alice")
     knowledge_base = await create_knowledge_base(client, "Build Metadata KB")
     binding = await create_source_binding(
