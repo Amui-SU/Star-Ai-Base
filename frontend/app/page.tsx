@@ -10,13 +10,14 @@ import {
 import AuthPage from "@/components/AuthPage";
 import UserMenu from "@/components/UserMenu";
 import KnowledgeBasePanel from "@/components/KnowledgeBasePanel";
-import LoginModal from "@/components/LoginModal";
+import ImportModal from "@/components/ImportModal";
 import SourcesPanel from "@/components/SourcesPanel";
 import ChatPanel from "@/components/ChatPanel";
-import { SystemUser, systemAuthApi, sourceBindingApi } from "@/lib/api";
+import { systemAuthApi, sourceBindingApi } from "@/lib/api";
+import type { KnowledgeBase, SystemUser } from "@/lib/api";
 
 export default function Home() {
-  const MIN_SIDEBAR_WIDTH = 280;
+  const MIN_SIDEBAR_WIDTH = 310;
   const [systemUser, setSystemUser] = useState<SystemUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [activeBindingId, setActiveBindingId] = useState<number | null>(null);
@@ -25,17 +26,50 @@ export default function Home() {
     const raw = localStorage.getItem("active_kb_id");
     return raw ? Number(raw) : null;
   });
+  const [activeKnowledgeBase, setActiveKnowledgeBase] =
+    useState<KnowledgeBase | null>(null);
   const [kbRefreshKey, setKbRefreshKey] = useState(0);
-  const [showLogin, setShowLogin] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [statsKey, setStatsKey] = useState(0);
-  const [selectedFolderIds, setSelectedFolderIds] = useState<number[]>([]);
+  const [knowledgeBuilding, setKnowledgeBuilding] = useState(false);
+
+  // 主题
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const saved = localStorage.getItem("theme");
+    return saved !== "light";
+  });
+  const [themeReady, setThemeReady] = useState(false);
 
   // 拖拽调整宽度
-  const [leftWidth, setLeftWidth] = useState(320);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [leftWidth, setLeftWidth] = useState(() => {
+    if (typeof window === "undefined") return 320;
+    const raw = Number(localStorage.getItem("sidebar_width"));
+    return Number.isFinite(raw) && raw >= MIN_SIDEBAR_WIDTH ? raw : 320;
+  });
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("sidebar_open") !== "false";
+  });
   const [isDragging, setIsDragging] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const [themeReady, setThemeReady] = useState(false);
+
+  // 主题初始化（默认深色）
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const t = window.setTimeout(() => setThemeReady(true), 0);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !themeReady) return;
+    if (isDarkMode) {
+      document.documentElement.classList.remove("light");
+      localStorage.setItem("theme", "dark");
+    } else {
+      document.documentElement.classList.add("light");
+      localStorage.setItem("theme", "light");
+    }
+  }, [isDarkMode, themeReady]);
 
   // 检查系统登录态
   useEffect(() => {
@@ -43,7 +77,6 @@ export default function Home() {
       .me()
       .then(async (user) => {
         setSystemUser(user);
-        // 获取活跃的 B 站绑定
         try {
           const bindings = await sourceBindingApi.list();
           const active = bindings.find((b) => b.status === "active");
@@ -56,38 +89,6 @@ export default function Home() {
       .finally(() => setAuthChecking(false));
   }, []);
 
-  // 主题初始化
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const savedTheme = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia?.(
-      "(prefers-color-scheme: dark)",
-    ).matches;
-    const nextDark =
-      savedTheme === "dark" ||
-      (savedTheme !== "light" &&
-        (document.documentElement.classList.contains("dark") || !!prefersDark));
-    const timer = window.setTimeout(() => {
-      setIsDarkMode(nextDark);
-      setThemeReady(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !themeReady) return;
-    if (isDarkMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-      return;
-    }
-    document.documentElement.classList.remove("dark");
-    localStorage.setItem("theme", "light");
-  }, [isDarkMode, themeReady]);
-
-  const toggleDarkMode = () => {
-    setIsDarkMode((prev) => !prev);
-  };
   const containerRef = useRef<HTMLElement>(null);
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -110,6 +111,16 @@ export default function Home() {
     setIsDragging(false);
   }, []);
 
+  const toggleSidebar = useCallback(() => {
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        localStorage.setItem("sidebar_open", String(next));
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (isDragging) {
       window.addEventListener("mousemove", handleMouseMove);
@@ -126,23 +137,22 @@ export default function Home() {
     };
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || isDragging) return;
+    localStorage.setItem("sidebar_width", String(leftWidth));
+  }, [isDragging, leftWidth]);
+
   const onAuthSuccess = (user: SystemUser) => {
     setSystemUser(user);
     setKbRefreshKey((v) => v + 1);
   };
 
   const onBiliBound = async () => {
-    setShowLogin(false);
+    setShowImport(false);
     try {
       const bindings = await sourceBindingApi.list();
-      console.log("绑定的账号列表:", bindings);
       const active = bindings.find((b) => b.status === "active");
-      if (active) {
-        console.log("活跃绑定 ID:", active.id);
-        setActiveBindingId(active.id);
-      } else {
-        console.log("没有活跃的绑定");
-      }
+      if (active) setActiveBindingId(active.id);
     } catch (e) {
       console.error("获取绑定列表失败:", e);
     }
@@ -156,7 +166,18 @@ export default function Home() {
     localStorage.removeItem("bili_user_face");
     localStorage.removeItem("active_kb_id");
     setActiveKbId(null);
+    setActiveKnowledgeBase(null);
   };
+
+  const handleKnowledgeBaseSelect = useCallback((kb: KnowledgeBase | null) => {
+    setActiveKnowledgeBase(kb);
+    setActiveKbId(kb?.id ?? null);
+    if (kb) {
+      localStorage.setItem("active_kb_id", String(kb.id));
+    } else {
+      localStorage.removeItem("active_kb_id");
+    }
+  }, []);
 
   // 加载中
   if (authChecking) {
@@ -182,159 +203,173 @@ export default function Home() {
   return (
     <div className="app-shell">
       <main className="app-main">
-        <section className="workspace relative" ref={containerRef}>
-          {/* 侧边栏折叠按钮 */}
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className={`absolute top-4 z-10 w-8 h-8 flex items-center justify-center rounded-full shadow-md border border-(--border) bg-(--paper-2) text-(--ink-soft) hover:bg-(--paper-3) transition-all ${isSidebarOpen ? "left-[calc(var(--sidebar-width)-16px)]" : "left-4"}`}
-            style={sidebarHandleStyle}
-            title={isSidebarOpen ? "收起收藏夹" : "展开收藏夹"}
-          >
-            <svg
-              className={`w-4 h-4 transition-transform ${isSidebarOpen ? "" : "rotate-180"}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-          </button>
-
-          {/* 收藏夹侧栏 */}
-          <div
-            className={`sidebar-shell ${isSidebarOpen ? "open" : "closed"}`}
-            style={
-              { "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties
-            }
-          >
-            <aside
-              className="panel panel-sources"
-              style={{
-                width: sidebarWidth,
-                opacity: isSidebarOpen ? 1 : 0,
-                transform: isSidebarOpen
-                  ? "translateX(0) scale(1)"
-                  : "translateX(-14px) scale(0.985)",
-                pointerEvents: isSidebarOpen ? "auto" : "none",
-                transition:
-                  "transform 340ms cubic-bezier(0.22,1,0.36,1), opacity 240ms ease",
-              }}
-            >
-              {/* 知识库选择 */}
-              <KnowledgeBasePanel
-                activeId={activeKbId}
-                onSelect={(id) => {
-                  setActiveKbId(id);
-                  localStorage.setItem(
-                    "active_kb_id",
-                    id === null ? "" : String(id),
-                  );
-                }}
-                refreshKey={kbRefreshKey}
-              />
-
-              {/* B 站绑定状态 */}
-              {!activeBindingId && (
-                <div className="px-4 pt-4 pb-3 border-b border-(--border)">
-                  <button
-                    onClick={() => setShowLogin(true)}
-                    className="w-full py-2 px-3 rounded-lg bg-(--paper-2) border border-(--border) text-sm text-(--accent-strong) hover:bg-(--paper-3) transition-colors font-medium"
-                  >
-                    绑定 B 站账号以导入收藏夹
-                  </button>
-                </div>
+        <section className="workspace-card relative" ref={containerRef}>
+          <header className="workspace-topbar">
+            <div className="workspace-brand">
+              <span className="workspace-brand-mark">◇</span>
+              <span>智库云</span>
+            </div>
+            <div className="workspace-top-actions">
+              {themeReady && (
+                <button
+                  onClick={() => setIsDarkMode((p) => !p)}
+                  className="workspace-icon-btn"
+                  title={isDarkMode ? "切换到白天模式" : "切换到夜间模式"}
+                >
+                  {isDarkMode ? (
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+                      />
+                    </svg>
+                  ) : (
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+                      />
+                    </svg>
+                  )}
+                </button>
               )}
-              {activeBindingId ? (
-                <SourcesPanel
-                  sourceBindingId={activeBindingId}
-                  knowledgeBaseId={activeKbId ?? 0}
-                  onBuildDone={() => setStatsKey((v) => v + 1)}
-                  onSelectionChange={setSelectedFolderIds}
+              <UserMenu user={systemUser} onLogout={onLogout} />
+            </div>
+          </header>
+
+          <div className="workspace">
+            {/* 侧边栏折叠按钮 */}
+            <button
+              onClick={toggleSidebar}
+              className={`workspace-sidebar-toggle ${
+                isSidebarOpen
+                  ? "left-[calc(var(--sidebar-width)-16px)]"
+                  : "left-1"
+              }`}
+              style={sidebarHandleStyle}
+              title={isSidebarOpen ? "收起收藏夹" : "展开收藏夹"}
+            >
+              <svg
+                className={`w-4 h-4 transition-transform ${isSidebarOpen ? "" : "rotate-180"}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 19l-7-7 7-7"
                 />
-              ) : (
-                <div className="flex-1 flex items-center justify-center p-6 text-center text-sm text-(--muted)">
-                  绑定 B 站账号后即可查看收藏夹并构建知识库
-                </div>
-              )}
-            </aside>
-          </div>
+              </svg>
+            </button>
 
-          {/* 拖拽分隔条 */}
-          <div
-            className={`resizer transition-[width,opacity] duration-300 ${isSidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-            onMouseDown={handleMouseDown}
-            style={{ cursor: "col-resize", width: isSidebarOpen ? 8 : 0 }}
-          />
+            {/* 收藏夹侧栏 */}
+            <div
+              className={`sidebar-shell ${isSidebarOpen ? "open" : "closed"}`}
+              style={
+                {
+                  "--sidebar-width": `${sidebarWidth}px`,
+                } as React.CSSProperties
+              }
+            >
+              <aside
+                className="panel panel-sources"
+                style={{
+                  width: sidebarWidth,
+                  opacity: isSidebarOpen ? 1 : 0,
+                  transform: isSidebarOpen
+                    ? "translateX(0) scale(1)"
+                    : "translateX(-14px) scale(0.985)",
+                  pointerEvents: isSidebarOpen ? "auto" : "none",
+                  transition:
+                    "transform 340ms cubic-bezier(0.22,1,0.36,1), opacity 240ms ease",
+                }}
+              >
+                {/* 知识库选择 */}
+                <KnowledgeBasePanel
+                  activeId={activeKbId}
+                  onSelect={handleKnowledgeBaseSelect}
+                  onActiveKnowledgeBase={setActiveKnowledgeBase}
+                  refreshKey={kbRefreshKey}
+                  disabled={knowledgeBuilding}
+                />
 
-          <section
-            className={`panel-chat-embedded ${isSidebarOpen ? "" : "full-width"}`}
-            style={{ flex: 1 }}
-          >
-            <ChatPanel
-              statsKey={statsKey}
-              folderIds={selectedFolderIds}
-              sidebarOpen={isSidebarOpen}
-              knowledgeBaseId={activeKbId}
+                {/* 导入入口 */}
+                {!activeBindingId && (
+                  <div className="import-sidebar-entry">
+                    <button
+                      onClick={() => setShowImport(true)}
+                      className="import-sidebar-btn"
+                    >
+                      + 导入
+                    </button>
+                    <p>选择 B 站收藏夹、视频 URL 或更多平台导入资料</p>
+                  </div>
+                )}
+                {activeBindingId ? (
+                  <SourcesPanel
+                    sourceBindingId={activeBindingId}
+                    knowledgeBaseId={activeKbId ?? 0}
+                    knowledgeBaseName={activeKnowledgeBase?.name}
+                    onImportClick={() => setShowImport(true)}
+                    onBuildDone={() => setStatsKey((v) => v + 1)}
+                    onBuildingChange={setKnowledgeBuilding}
+                  />
+                ) : (
+                  <div className="flex-1 flex items-center justify-center p-6 text-center text-sm text-(--muted)">
+                    点击「导入」选择资料来源
+                  </div>
+                )}
+              </aside>
+            </div>
+
+            {/* 拖拽分隔条 */}
+            <div
+              className={`resizer transition-[width,opacity] duration-300 ${
+                isSidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+              }`}
+              onMouseDown={handleMouseDown}
+              style={{ cursor: "col-resize", width: isSidebarOpen ? 8 : 0 }}
             />
-          </section>
+
+            <section
+              className={`panel-chat-embedded ${isSidebarOpen ? "" : "full-width"}`}
+              style={{ flex: 1 }}
+            >
+              <ChatPanel
+                statsKey={statsKey}
+                sidebarOpen={isSidebarOpen}
+                sidebarWidth={sidebarWidth}
+                knowledgeBaseId={activeKbId}
+                knowledgeBaseName={activeKnowledgeBase?.name}
+              />
+            </section>
+          </div>
         </section>
       </main>
 
-      {/* 右上角用户菜单 */}
-      <div className="fixed top-4 right-4 z-50 flex items-center gap-3">
-        <UserMenu user={systemUser} onLogout={onLogout} />
-
-        {/* 黑夜模式切换按钮 */}
-        <button
-          onClick={toggleDarkMode}
-          className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg border transition-all ${
-            isDarkMode
-              ? "bg-gray-800 text-gray-200 border-(--border) hover:bg-gray-700"
-              : "bg-[rgba(217,139,43,0.16)] text-[#8a5a22] border-[rgba(217,139,43,0.3)] hover:bg-[rgba(217,139,43,0.22)]"
-          }`}
-          title={isDarkMode ? "当前：黑夜模式" : "当前：白天模式"}
-        >
-          {isDarkMode ? (
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-              />
-            </svg>
-          ) : (
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-              />
-            </svg>
-          )}
-        </button>
-      </div>
-
-      <LoginModal
-        isOpen={showLogin}
-        onClose={() => setShowLogin(false)}
+      <ImportModal
+        open={showImport}
+        knowledgeBaseId={activeKbId}
+        hasBilibiliBinding={!!activeBindingId}
+        onClose={() => setShowImport(false)}
         onBound={onBiliBound}
+        onImported={() => setStatsKey((v) => v + 1)}
       />
     </div>
   );

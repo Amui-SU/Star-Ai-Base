@@ -8,26 +8,34 @@
 
 ## 目录
 
-- [核心价值](#核心价值)
-- [功能一览](#功能一览)
-- [技术栈](#技术栈)
-- [系统要求](#系统要求)
-- [快速开始](#快速开始)
-- [Windows：启动器补充](#windows-one-click-extras)
-- [环境变量](#环境变量)
-- [启动与访问地址](#启动与访问地址)
-- [多模型提供方](#多模型提供方)
-- [工作流程](#工作流程)
-- [目录结构](#目录结构)
-- [OpenClaw Skill](#openclaw-skill)
-- [测试与诊断脚本](#测试与诊断脚本)
-- [ASR 与音频兜底](#asr-与音频兜底)
-- [费用说明](#费用说明)
-- [相关文档](#相关文档)
-- [常见问题](#常见问题)
-- [免责声明](#免责声明)
-- [License](#license)
-- [路线图](#路线图)
+- [收藏夹知识库-bilibili版块](#收藏夹知识库-bilibili版块)
+  - [目录](#目录)
+  - [核心价值](#核心价值)
+  - [功能一览](#功能一览)
+  - [技术栈](#技术栈)
+  - [系统要求](#系统要求)
+  - [快速开始](#快速开始)
+    - [Windows（推荐：仓库内置启动器）](#windows推荐仓库内置启动器)
+    - [Windows：启动器补充](#windows启动器补充)
+    - [手动安装（全平台）](#手动安装全平台)
+  - [环境变量](#环境变量)
+    - [应用与存储](#应用与存储)
+    - [LLM 路由](#llm-路由)
+    - [DashScope（默认对话 / Embedding / ASR）](#dashscope默认对话--embedding--asr)
+    - [其他可选提供方（与 `LLM_PROVIDER` 对应）](#其他可选提供方与-llm_provider-对应)
+  - [启动与访问地址](#启动与访问地址)
+  - [多模型提供方](#多模型提供方)
+  - [工作流程](#工作流程)
+  - [目录结构](#目录结构)
+  - [OpenClaw Skill](#openclaw-skill)
+  - [测试与诊断脚本](#测试与诊断脚本)
+  - [ASR 与音频兜底](#asr-与音频兜底)
+  - [费用说明](#费用说明)
+  - [相关文档](#相关文档)
+  - [常见问题](#常见问题)
+  - [免责声明](#免责声明)
+  - [License](#license)
+  - [路线图](#路线图)
 
 ---
 
@@ -94,11 +102,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 stop
 
 **双击运行（不手敲命令）**：在资源管理器中双击仓库根目录下的这些脚本：
 
-- `setup_dependencies.bat`
-- `start.bat`
-- `stop.bat`
-- `status.bat`
-- `logs.bat`
+- `安装依赖.bat`
+- `启动.bat`
+- `停止.bat`
+- `状态.bat`
+- `日志.bat`
 
 ---
 
@@ -106,7 +114,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 stop
 
 ### Windows：启动器补充
 
-仓库内置的 `scripts\dev.ps1` 与根目录 BAT 是 Windows 主流程，适合团队协作和新克隆仓库使用。旧的外层 `.bat` / `.vbs` 脚本属于本机便利脚本，不随仓库分发；若你的工作区仍保留这些历史脚本，可以继续按需自用，但建议优先迁移到仓库内置的 `setup_dependencies.bat`、`start.bat`、`stop.bat`、`status.bat` 和 `logs.bat`。
+仓库内置的 `scripts\dev.ps1` 与根目录 BAT 是 Windows 主流程，适合团队协作和新克隆仓库使用。旧的外层 `.bat` / `.vbs` 脚本属于本机便利脚本，不随仓库分发；若你的工作区仍保留这些历史脚本，可以继续按需自用，但建议优先迁移到仓库内置的 `安装依赖.bat`、`启动.bat`、`停止.bat`、`状态.bat` 和 `日志.bat`。
 
 如需指定 Python，可将用户环境变量 **`BILIBILI_RAG_PYTHON`** 设置为目标 `python.exe` 的完整路径，再运行：
 

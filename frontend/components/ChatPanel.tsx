@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Image from "next/image";
+import ChatScopePicker from "@/components/ChatScopePicker";
 import {
   chatApi,
   knowledgeBaseApi,
@@ -11,7 +12,16 @@ import {
   LLMHealthResponse,
   LLMConfigResponse,
   LLMProvider,
+  KnowledgeBaseChatRequest,
+  KnowledgeScopeOptions,
 } from "@/lib/api";
+import {
+  EMPTY_CHAT_SCOPE,
+  type ChatScopeSelection,
+  scopeEquals,
+  scopeSummary,
+  toScopePayload,
+} from "@/lib/chatScope";
 
 interface Message {
   id: string;
@@ -24,9 +34,10 @@ type Reaction = "like" | "dislike" | null;
 
 interface Props {
   statsKey?: number;
-  folderIds?: number[];
   sidebarOpen?: boolean;
+  sidebarWidth?: number;
   knowledgeBaseId?: number | null;
+  knowledgeBaseName?: string;
 }
 
 function MarkdownCode({
@@ -97,9 +108,8 @@ function MarkdownCode({
 
 export default function ChatPanel({
   statsKey,
-  folderIds,
-  sidebarOpen = true,
   knowledgeBaseId,
+  knowledgeBaseName,
 }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -117,6 +127,12 @@ export default function ChatPanel({
   >({});
   const [reactionMap, setReactionMap] = useState<Record<string, Reaction>>({});
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
+  const [scopeOptions, setScopeOptions] = useState<KnowledgeScopeOptions>({
+    folders: [],
+  });
+  const [chatScope, setChatScope] =
+    useState<ChatScopeSelection>(EMPTY_CHAT_SCOPE);
+  const [scopeNotice, setScopeNotice] = useState("");
   const [llmHealth, setLlmHealth] = useState<LLMHealthResponse | null>(null);
   const [llmChecking, setLlmChecking] = useState(false);
   const [llmConfig, setLlmConfig] = useState<LLMConfigResponse | null>(null);
@@ -137,6 +153,7 @@ export default function ChatPanel({
   const endRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
+  const scopeNoticeTimerRef = useRef<number | null>(null);
   const sourcesMarker = "[[SOURCES_JSON]]";
   const thinkingMarker = "[[THINKING_JSON]]";
   const THINKING_PREVIEW_LIMIT = 220;
@@ -308,6 +325,13 @@ export default function ChatPanel({
   const fetchAssistantAnswer = async (q: string, assistantId: string) => {
     const abortController = new AbortController();
     streamAbortRef.current = abortController;
+    const scopedPayload: KnowledgeBaseChatRequest = {
+      question: q,
+      k: 5,
+      smart_search: smartSearchEnabled,
+      deep_think: deepThinkEnabled,
+      ...toScopePayload(chatScope),
+    };
     let streamTimedOut = false;
     const streamTimeout = window.setTimeout(() => {
       streamTimedOut = true;
@@ -316,17 +340,11 @@ export default function ChatPanel({
     try {
       if (!knowledgeBaseId) return;
       const streamUrl = knowledgeBaseApi.chatStreamUrl(knowledgeBaseId);
-      const streamBody = JSON.stringify({
-        question: q,
-        k: 5,
-        smart_search: smartSearchEnabled,
-        deep_think: deepThinkEnabled,
-      });
       const response = await fetch(streamUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: abortController.signal,
-        body: streamBody,
+        body: JSON.stringify(scopedPayload),
       });
 
       if (!response.ok || !response.body) {
@@ -441,12 +459,7 @@ export default function ChatPanel({
       }
       try {
         if (!knowledgeBaseId) return;
-        const res = await knowledgeBaseApi.chat(knowledgeBaseId, {
-          question: q,
-          k: 5,
-          smart_search: smartSearchEnabled,
-          deep_think: deepThinkEnabled,
-        });
+        const res = await knowledgeBaseApi.chat(knowledgeBaseId, scopedPayload);
         const extracted = extractThinkingFromContent(res.answer || "");
         const finalThinking = (res.thinking || extracted.thinking || "").trim();
         const finalAnswer = res.thinking
@@ -492,6 +505,64 @@ export default function ChatPanel({
     setRegeneratingMessageId(null);
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    setLoading(false);
+    setRegeneratingMessageId(null);
+    setMessages([]);
+    setChatScope(EMPTY_CHAT_SCOPE);
+    setScopeNotice("");
+    if (scopeNoticeTimerRef.current) {
+      window.clearTimeout(scopeNoticeTimerRef.current);
+      scopeNoticeTimerRef.current = null;
+    }
+
+    if (!knowledgeBaseId) {
+      setScopeOptions({ folders: [] });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    knowledgeBaseApi
+      .getScopeOptions(knowledgeBaseId)
+      .then((options) => {
+        if (!cancelled) setScopeOptions(options);
+      })
+      .catch(() => {
+        if (!cancelled) setScopeOptions({ folders: [] });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [knowledgeBaseId]);
+
+  useEffect(() => {
+    return () => {
+      if (scopeNoticeTimerRef.current) {
+        window.clearTimeout(scopeNoticeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleScopeChange = (next: ChatScopeSelection) => {
+    if (scopeEquals(chatScope, next)) return;
+    stopGenerating();
+    setMessages([]);
+    setChatScope(next);
+    setScopeNotice(`提问范围已更新：${scopeSummary(next)}`);
+    if (scopeNoticeTimerRef.current) {
+      window.clearTimeout(scopeNoticeTimerRef.current);
+    }
+    scopeNoticeTimerRef.current = window.setTimeout(() => {
+      setScopeNotice("");
+      scopeNoticeTimerRef.current = null;
+    }, 2200);
+  };
+
   const extractThinkingFromContent = (
     rawText: string,
   ): { thinking: string; answer: string } => {
@@ -513,9 +584,9 @@ export default function ChatPanel({
     const textarea = el || inputRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 74), 220);
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 54), 180);
     textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > 220 ? "auto" : "hidden";
+    textarea.style.overflowY = textarea.scrollHeight > 180 ? "auto" : "hidden";
   };
 
   const handleComposerChange = (
@@ -662,6 +733,16 @@ export default function ChatPanel({
   const activeProvider = providersForMenu.find(
     (p) => p.provider === currentProvider,
   );
+  const modelReady = llmHealth?.status === "ok" || llmHealth?.status === "up";
+  const modelStatusText = llmChecking
+    ? "检查中"
+    : modelReady
+      ? "模型就绪"
+      : "模型异常";
+  const modelLatencyText =
+    !llmChecking && llmHealth?.latency_ms != null
+      ? `${llmHealth.latency_ms}ms`
+      : "-- ms";
 
   useEffect(() => {
     adjustComposerHeight();
@@ -669,25 +750,36 @@ export default function ChatPanel({
 
   return (
     <div className="panel-inner">
-      {/* 聊天区域外顶部工具栏：同一行，向中部靠拢 */}
-      <div
-        className={`fixed top-4 z-40 w-[calc(100vw-160px)] max-w-[960px] flex items-center justify-between ${
-          sidebarOpen
-            ? "left-1/2 -translate-x-1/2"
-            : "left-[calc(50%-220px)] -translate-x-1/2"
-        }`}
-      >
-        <div className="flex flex-col items-start gap-1.5">
-          <div className="inline-flex items-center gap-0 rounded-full border border-(--border) bg-(--paper-2) p-0.5 shadow-sm">
+      <div className="chat-context-row">
+        <div className="chat-kb-context">
+          {knowledgeBaseName || "选择知识库"}
+          {stats && (stats.total_videos ?? 0) > 0 && (
+            <span> · {stats.total_videos} 个视频</span>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="model-status-card">
             <span
-              className={`status-pill ${llmChecking ? "empty" : llmHealth?.status === "ok" ? "ok" : "alert"} px-1.5 py-0.5 text-[10px]`}
+              className={`status-pill model-health-pill ${
+                llmChecking ? "empty" : modelReady ? "ok" : "alert"
+              }`}
               title={llmHealth?.message || "模型状态检查中"}
             >
-              {llmChecking
-                ? "模型检查中"
-                : llmHealth?.status === "ok"
-                  ? `${llmHealth.latency_ms != null ? `${llmHealth.latency_ms}ms` : "-- ms"}`
-                  : "模型异常"}
+              {activeProvider && (
+                <Image
+                  src={
+                    providerLogoMap[activeProvider.provider] ||
+                    "/logos/qwen-icon.png"
+                  }
+                  alt={`${activeProvider.label} logo`}
+                  width={14}
+                  height={14}
+                  unoptimized
+                  className="model-health-logo"
+                />
+              )}
+              <span>{modelStatusText}</span>
+              <span className="model-latency">{modelLatencyText}</span>
             </span>
             <span className="mx-1 h-4 w-px bg-(--border)" aria-hidden="true" />
             <div className="relative" ref={modelMenuRef}>
@@ -809,17 +901,11 @@ export default function ChatPanel({
               )}
             </div>
           </div>
-
-          {stats && (stats.total_videos ?? 0) > 0 && (
-            <span className="block relative left-4 text-[11px] text-(--muted) leading-none">
-              已收录 {stats.total_videos} 个视频
-            </span>
-          )}
         </div>
       </div>
 
       {messages.length > 0 && (
-        <div className="fixed top-4 right-[120px] z-40">
+        <div className="fixed top-4 right-4 z-40">
           <button
             onClick={() => setMessages([])}
             className="btn btn-ghost"
@@ -834,10 +920,10 @@ export default function ChatPanel({
         <div className="chat-scroll">
           {messages.length === 0 ? (
             <div className="empty-state">
-              <div>
-                <div className="status-pill">检索就绪</div>
-                <p className="text-sm text-(--muted) mt-3">
-                  把收藏夹变成可提问的知识库
+              <div className="empty-hero">
+                <h1 className="empty-hero-title">探索你的收藏</h1>
+                <p className="empty-hero-copy">
+                  基于当前提问范围回答，可切换整个知识库、收藏夹或单个视频。
                 </p>
               </div>
               <div className="prompt-grid">
@@ -1217,6 +1303,11 @@ export default function ChatPanel({
 
       <div className="panel-footer border-transparent bg-transparent flex flex-col items-center gap-2">
         <div className="w-full max-w-3xl mx-auto mt-1">
+          {scopeNotice && (
+            <div className="scope-notice" aria-live="polite">
+              {scopeNotice}
+            </div>
+          )}
           <div className="relative composer-shell">
             <textarea
               ref={inputRef}
@@ -1236,30 +1327,12 @@ export default function ChatPanel({
               disabled={!knowledgeBaseId}
             />
             <div className="composer-mode-row">
-              <div className="composer-chip-group">
-                <button
-                  type="button"
-                  className={`mode-chip ${deepThinkEnabled ? "active" : ""}`}
-                  onClick={() => setDeepThinkEnabled((v) => !v)}
-                  title="启用深度思考模式"
-                >
-                  <span className="mode-chip-check" aria-hidden="true">
-                    {deepThinkEnabled ? "✓" : ""}
-                  </span>
-                  思考
-                </button>
-                <button
-                  type="button"
-                  className={`mode-chip ${smartSearchEnabled ? "active" : ""}`}
-                  onClick={() => setSmartSearchEnabled((v) => !v)}
-                  title="启用智能搜索模式（模型支持时联网）"
-                >
-                  <span className="mode-chip-check" aria-hidden="true">
-                    {smartSearchEnabled ? "✓" : ""}
-                  </span>
-                  联网
-                </button>
-              </div>
+              <ChatScopePicker
+                options={scopeOptions}
+                value={chatScope}
+                onChange={handleScopeChange}
+                disabled={!knowledgeBaseId}
+              />
               <button
                 onClick={isGenerating ? stopGenerating : send}
                 disabled={!canSend && !isGenerating}
@@ -1297,6 +1370,32 @@ export default function ChatPanel({
                   </>
                 )}
               </button>
+            </div>
+            <div className="composer-secondary-row" aria-label="增强模式">
+              <div className="composer-chip-group">
+                <button
+                  type="button"
+                  className={`mode-chip ${deepThinkEnabled ? "active" : ""}`}
+                  onClick={() => setDeepThinkEnabled((v) => !v)}
+                  title="启用深度思考模式"
+                >
+                  <span className="mode-chip-check" aria-hidden="true">
+                    {deepThinkEnabled ? "✓" : ""}
+                  </span>
+                  思考
+                </button>
+                <button
+                  type="button"
+                  className={`mode-chip ${smartSearchEnabled ? "active" : ""}`}
+                  onClick={() => setSmartSearchEnabled((v) => !v)}
+                  title="启用智能搜索模式（模型支持时联网）"
+                >
+                  <span className="mode-chip-check" aria-hidden="true">
+                    {smartSearchEnabled ? "✓" : ""}
+                  </span>
+                  联网
+                </button>
+              </div>
             </div>
           </div>
         </div>

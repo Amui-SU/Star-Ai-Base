@@ -1,16 +1,10 @@
 import type { Metadata } from "next";
-import { ZCOOL_XiaoWei, Noto_Sans_SC } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const display = ZCOOL_XiaoWei({
+const body = Inter({
   subsets: ["latin"],
-  weight: "400",
-  variable: "--font-display",
-});
-
-const body = Noto_Sans_SC({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-body",
 });
 
@@ -29,9 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body className={`${display.variable} ${body.variable} antialiased`}>
-        {children}
-      </body>
+      <body className={`${body.variable} antialiased`}>{children}</body>
     </html>
   );
 }

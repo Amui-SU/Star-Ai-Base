@@ -16,6 +16,7 @@ from app.routers import (
     auth,
     chat,
     favorites,
+    imports,
     knowledge,
     knowledge_bases,
     source_bindings,
@@ -90,6 +91,7 @@ app.add_middleware(
 app.include_router(system_auth.router)
 app.include_router(knowledge_bases.router)
 app.include_router(source_bindings.router)
+app.include_router(imports.router)
 app.include_router(auth.router)
 app.include_router(favorites.router)
 app.include_router(knowledge.router)

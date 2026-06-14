@@ -189,6 +189,23 @@ export interface ChatSource {
   url: string;
 }
 
+export interface ImportMethod {
+  id: string;
+  label: string;
+  description: string;
+  status: "available" | "coming_soon" | string;
+  level: number;
+}
+
+export interface ImportUrlResponse {
+  ok: boolean;
+  status: string;
+  source_type: string;
+  message: string;
+  task_id?: string | null;
+  bvid?: string | null;
+}
+
 export interface ChatResponse {
   answer: string;
   sources: ChatSource[];
@@ -430,6 +447,20 @@ export const knowledgeBaseApi = {
       `/knowledge-bases/${knowledgeBaseId}`,
       { method: "DELETE" },
     ),
+};
+
+export const importApi = {
+  methods: () => request<{ methods: ImportMethod[] }>("/imports/methods"),
+
+  importUrl: (data: {
+    url: string;
+    source_type?: string;
+    knowledge_base_id?: number | null;
+  }) =>
+    request<ImportUrlResponse>("/imports/url", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };
 
 export const authApi = {
