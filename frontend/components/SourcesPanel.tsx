@@ -42,6 +42,7 @@ export default function SourcesPanel({
     })[]
   >([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selectedVideos, setSelectedVideos] = useState<Set<string>>(new Set());
   const [customVideoNames, setCustomVideoNames] = useState<
     Record<string, string>
   >({});
@@ -121,6 +122,7 @@ export default function SourcesPanel({
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setSelected(new Set());
+      setSelectedVideos(new Set());
       setProgress(null);
       setMessage(null);
     }, 0);
@@ -271,21 +273,63 @@ export default function SourcesPanel({
       s.delete(id);
     } else {
       s.add(id);
+      const folder = folders.find((f) => f.media_id === id);
+      if (folder?.videos?.length) {
+        setSelectedVideos((prev) => {
+          const next = new Set(prev);
+          folder.videos?.forEach((video) => next.delete(video.bvid));
+          return next;
+        });
+      }
     }
     setSelected(s);
   };
 
+  const toggleVideoSelect = (folderId: number, bvid: string) => {
+    if (selected.has(folderId)) {
+      const nextFolders = new Set(selected);
+      nextFolders.delete(folderId);
+      setSelected(nextFolders);
+    }
+    setSelectedVideos((prev) => {
+      const next = new Set(prev);
+      if (next.has(bvid)) {
+        next.delete(bvid);
+      } else {
+        next.add(bvid);
+      }
+      return next;
+    });
+  };
+
+  const getSelectedVideoFolderIds = () => {
+    const folderIds = new Set<number>();
+    folders.forEach((folder) => {
+      folder.videos?.forEach((video) => {
+        if (selectedVideos.has(video.bvid) && !selected.has(folder.media_id)) {
+          folderIds.add(folder.media_id);
+        }
+      });
+    });
+    return Array.from(folderIds);
+  };
+
   // 构建/更新知识库（统一操作）
   const buildKnowledge = async () => {
-    if (selected.size === 0) return;
+    if (selected.size === 0 && selectedVideos.size === 0) return;
     setBuilding(true);
     setMessage(null);
     setProgress(null);
 
     try {
+      const selectedVideoBvids = Array.from(selectedVideos);
+      const videoFolderIds = getSelectedVideoFolderIds();
       const res = await knowledgeBaseApi.build(knowledgeBaseId, {
         source_binding_id: sourceBindingId,
         folder_ids: Array.from(selected),
+        ...(selectedVideoBvids.length > 0
+          ? { video_folder_ids: videoFolderIds, bvids: selectedVideoBvids }
+          : {}),
         ...(excludeBvids.length > 0 ? { exclude_bvids: excludeBvids } : {}),
       } as KnowledgeBaseBuildRequest);
 
@@ -378,7 +422,17 @@ export default function SourcesPanel({
   // 计算按钮文字
   const getButtonText = () => {
     if (building) return progress?.current_step || "处理中...";
-    if (selected.size === 0) return "选择收藏夹";
+    if (selected.size === 0 && selectedVideos.size === 0) {
+      return "选择收藏夹或视频";
+    }
+
+    if (selected.size === 0) {
+      return `入库 ${selectedVideos.size} 个视频到${targetKnowledgeBase}`;
+    }
+
+    if (selectedVideos.size > 0) {
+      return `入库 ${selected.size} 个收藏夹和 ${selectedVideos.size} 个视频到${targetKnowledgeBase}`;
+    }
 
     // 检查选中的是否有未入库的
     const hasUnindexed = Array.from(selected).some((id) => {
@@ -393,8 +447,14 @@ export default function SourcesPanel({
     return `更新 ${selected.size} 个收藏夹到${targetKnowledgeBase}`;
   };
 
+  const isEmptyState = !loading && folders.length === 0;
+
   return (
-    <div className="panel-inner">
+    <div
+      className={
+        isEmptyState ? "panel-inner sources-panel-empty" : "panel-inner"
+      }
+    >
       <div className="sources-panel-head">
         <div className="sources-panel-head-top">
           <div className="sources-panel-title">收藏夹资料</div>
@@ -442,14 +502,33 @@ export default function SourcesPanel({
       </div>
 
       <div className="panel-body">
-        <div className="sources-scroll">
+        <div
+          className={
+            isEmptyState
+              ? "sources-scroll sources-scroll-empty"
+              : "sources-scroll"
+          }
+        >
           {loading ? (
             <div className="text-center text-sm text-(--muted) py-6">
               加载中...
             </div>
           ) : folders.length === 0 ? (
             <div className="sources-empty-state">
-              <div className="sources-empty-copy">暂无收藏夹</div>
+              <div className="sources-empty-card">
+                <div className="sources-empty-kicker">收藏夹资料</div>
+                <div className="sources-empty-title">暂无收藏夹资料</div>
+                <p>当前账号暂未读取到收藏夹，或收藏夹资料还没有完成同步。</p>
+                {onImportClick && (
+                  <button
+                    type="button"
+                    className="sources-empty-action"
+                    onClick={onImportClick}
+                  >
+                    导入更多资料
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             <div className="sources-folder-list">
@@ -525,6 +604,19 @@ export default function SourcesPanel({
 
                             return (
                               <div key={v.bvid} className="video-card">
+                                <input
+                                  type="checkbox"
+                                  className="video-checkbox"
+                                  checked={
+                                    selected.has(f.media_id) ||
+                                    selectedVideos.has(v.bvid)
+                                  }
+                                  onChange={() =>
+                                    toggleVideoSelect(f.media_id, v.bvid)
+                                  }
+                                  onClick={(event) => event.stopPropagation()}
+                                  aria-label={`选择视频 ${displayTitle}`}
+                                />
                                 <button
                                   type="button"
                                   className="video-play-btn"
@@ -683,9 +775,15 @@ export default function SourcesPanel({
         {/* 主按钮 */}
         <button
           onClick={buildKnowledge}
-          disabled={selected.size === 0 || building || !knowledgeBaseId}
+          disabled={
+            (selected.size === 0 && selectedVideos.size === 0) ||
+            building ||
+            !knowledgeBaseId
+          }
           className={`sources-ingest-button ${
-            selected.size > 0 && knowledgeBaseId ? "active" : "idle"
+            (selected.size > 0 || selectedVideos.size > 0) && knowledgeBaseId
+              ? "active"
+              : "idle"
           }`}
         >
           {knowledgeBaseId ? getButtonText() : "请先在侧栏创建知识库"}

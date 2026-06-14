@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
 
 
@@ -443,7 +443,9 @@ class KnowledgeScopeOptionsResponse(BaseModel):
 
 class KnowledgeBaseBuildRequest(BaseModel):
     source_binding_id: int
-    folder_ids: list[int]
+    folder_ids: list[int] = Field(default_factory=list)
+    video_folder_ids: Optional[list[int]] = None
+    bvids: Optional[list[str]] = None
     exclude_bvids: Optional[list[str]] = None
 
 

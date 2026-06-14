@@ -1528,7 +1528,7 @@ html.light .sources-empty-card {
 
 .video-card {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-columns: 18px 22px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
@@ -1539,6 +1539,13 @@ html.light .sources-empty-card {
   transition:
     background 0.18s ease,
     border-color 0.18s ease;
+}
+
+.video-checkbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .video-card:hover {
@@ -4489,12 +4496,12 @@ html.light .status-pill.empty {
   }
 
   .video-card {
-    grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-columns: 18px 22px minmax(0, 1fr);
     align-items: flex-start;
   }
 
   .video-card-actions {
-    grid-column: 2;
+    grid-column: 3;
     justify-content: flex-start;
     opacity: 1;
   }

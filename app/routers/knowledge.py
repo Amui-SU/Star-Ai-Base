@@ -3,6 +3,7 @@ Bilibili RAG 知识库系统
 
 知识库路由 - 构建和管理知识库
 """
+
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
 from loguru import logger
@@ -13,7 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_db_context
 from app.config import settings
-from app.models import FavoriteFolder, FavoriteVideo, VideoCache, UserSession, ContentSource, VideoContent
+from app.models import (
+    FavoriteFolder,
+    FavoriteVideo,
+    VideoCache,
+    UserSession,
+    ContentSource,
+    VideoContent,
+)
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
 from app.services.asr import ASRService
@@ -29,7 +37,9 @@ _rag_service: Optional[RAGService] = None
 build_tasks = {}
 
 
-def get_collection_stats_without_embeddings(collection_name: str = "bilibili_videos") -> dict:
+def get_collection_stats_without_embeddings(
+    collection_name: str = "bilibili_videos",
+) -> dict:
     """读取 Chroma 统计信息，不初始化 embedding/LLM 客户端。"""
     try:
         import chromadb
@@ -67,12 +77,14 @@ def get_rag_service() -> RAGService:
 
 class BuildRequest(BaseModel):
     """知识库构建请求"""
+
     folder_ids: List[int]  # 要处理的收藏夹 ID 列表
     exclude_bvids: Optional[List[str]] = None  # 排除的视频
 
 
 class BuildStatus(BaseModel):
     """构建状态"""
+
     task_id: str
     status: str  # pending / running / completed / failed
     progress: int  # 0-100
@@ -84,6 +96,7 @@ class BuildStatus(BaseModel):
 
 class FolderStatus(BaseModel):
     """收藏夹入库状态"""
+
     media_id: int
     indexed_count: int
     media_count: Optional[int] = None
@@ -92,11 +105,13 @@ class FolderStatus(BaseModel):
 
 class SyncRequest(BaseModel):
     """同步请求"""
+
     folder_ids: Optional[List[int]] = None
 
 
 class SyncResult(BaseModel):
     """同步结果"""
+
     folder_id: int
     total: int
     added: int
@@ -212,6 +227,7 @@ async def _sync_folder(
     session_id: str,
     folder_id: int,
     exclude_bvids: Optional[set[str]] = None,
+    include_bvids: Optional[set[str]] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
     workspace_id: Optional[int] = None,
     knowledge_base_id: Optional[int] = None,
@@ -233,8 +249,9 @@ async def _sync_folder(
         if total_in_folder and total_in_folder > 0:
             logger.warning(f"[{folder_id}] 收藏夹返回空列表，跳过删除逻辑")
             existing_count = await db.scalar(
-                select(func.count(FavoriteVideo.bvid))
-                .where(FavoriteVideo.folder_id == folder_id)
+                select(func.count(FavoriteVideo.bvid)).where(
+                    FavoriteVideo.folder_id == folder_id
+                )
             )
             return {
                 "folder_id": folder_id,
@@ -252,9 +269,11 @@ async def _sync_folder(
         bvid, title, cid = _extract_video_info(media)
         if not bvid:
             continue
+        if include_bvids is not None and bvid not in include_bvids:
+            continue
         if exclude_bvids and bvid in exclude_bvids:
             continue
-        
+
         # 过滤失效视频（被删除、下架等）
         # attr 字段: 0=正常, 9=已失效, 1=私密等
         attr = media.get("attr", 0)
@@ -262,7 +281,7 @@ async def _sync_folder(
             skipped_invalid += 1
             logger.debug(f"跳过失效视频: {bvid} - {title}")
             continue
-        
+
         owner = media.get("upper") or {}
         video_map[bvid] = {
             "title": title,
@@ -273,7 +292,7 @@ async def _sync_folder(
             "owner_name": owner.get("name"),
             "owner_mid": owner.get("mid"),
         }
-    
+
     if skipped_invalid > 0:
         logger.info(f"[{folder_id}] 过滤了 {skipped_invalid} 个失效视频")
 
@@ -303,12 +322,14 @@ async def _sync_folder(
     existing_bvids = {row[0] for row in existing_rows.fetchall()}
 
     added = current_bvids - existing_bvids
-    removed = existing_bvids - current_bvids
+    removed = set() if include_bvids is not None else existing_bvids - current_bvids
 
     # 写入标题/简介等信息（含多用户范围）
     for bvid, meta in video_map.items():
         await _upsert_video_cache(
-            db, bvid, meta,
+            db,
+            bvid,
+            meta,
             workspace_id=workspace_id,
             knowledge_base_id=knowledge_base_id,
             source_binding_id=source_binding_id,
@@ -322,7 +343,9 @@ async def _sync_folder(
     }
 
     def _is_better_source(new_source: str, old_source: Optional[str]) -> bool:
-        return source_priority.get(new_source, 0) > source_priority.get(old_source or "", 0)
+        return source_priority.get(new_source, 0) > source_priority.get(
+            old_source or "", 0
+        )
 
     def _should_refresh_cache(cache: Optional[VideoCache]) -> bool:
         if not cache:
@@ -360,11 +383,13 @@ async def _sync_folder(
         progress_callback("准备处理", processed_targets, total_targets)
     for bvid in targets:
         meta = video_map[bvid]
-        
+
         # 尝试添加到向量库（可能失败，但不影响记录入库）
         try:
             global_count = await db.scalar(
-                select(func.count()).select_from(FavoriteVideo).where(FavoriteVideo.bvid == bvid)
+                select(func.count())
+                .select_from(FavoriteVideo)
+                .where(FavoriteVideo.bvid == bvid)
             )
             # 检查缓存内容是否缺失
             result = await db.execute(select(VideoCache).where(VideoCache.bvid == bvid))
@@ -423,7 +448,9 @@ async def _sync_folder(
                             cache.content_source = content.source.value
                             cache.outline_json = content.outline
                             cache.is_processed = True
-                            logger.info(f"[{bvid}] 已写入缓存: source={cache.content_source}")
+                            logger.info(
+                                f"[{bvid}] 已写入缓存: source={cache.content_source}"
+                            )
                 try:
                     rag.delete_video(bvid)
                 except Exception as e:
@@ -439,7 +466,7 @@ async def _sync_folder(
                 logger.info(f"[{bvid}] 内容未变化或无需升级，跳过向量化")
         except Exception as e:
             logger.warning(f"添加向量失败 [{bvid}]: {e} (仍会记录到数据库)")
-        
+
         # 无论向量是否添加成功，都写入 FavoriteVideo 记录
         try:
             exists_row = await db.execute(
@@ -449,7 +476,11 @@ async def _sync_folder(
                 )
             )
             if exists_row.scalar_one_or_none() is None:
-                fav_kwargs: dict = {"folder_id": folder.id, "bvid": bvid, "is_selected": True}
+                fav_kwargs: dict = {
+                    "folder_id": folder.id,
+                    "bvid": bvid,
+                    "is_selected": True,
+                }
                 if workspace_id is not None:
                     fav_kwargs["workspace_id"] = workspace_id
                 if knowledge_base_id is not None:
@@ -520,22 +551,22 @@ async def get_folder_status(
     db: AsyncSession = Depends(get_db),
 ):
     """获取收藏夹入库状态（跨 Session 查找同一用户的数据）"""
-    
+
     # 1. 先查当前 Session 对应的用户 MID
     result = await db.execute(
         select(UserSession.bili_mid).where(UserSession.session_id == session_id)
     )
     mid = result.scalar()
-    
+
     target_session_ids = [session_id]
-    
+
     if mid:
         # 2. 如果有 MID，查找该用户所有的 Session ID
         result = await db.execute(
             select(UserSession.session_id).where(UserSession.bili_mid == mid)
         )
         target_session_ids = [row[0] for row in result.fetchall()]
-    
+
     # 3. 查询所有关联 Session 的收藏夹状态
     # 使用 group_by media_id 来去重，取最新的那个
     rows = await db.execute(
@@ -543,19 +574,19 @@ async def get_folder_status(
         .where(FavoriteFolder.session_id.in_(target_session_ids))
         .order_by(FavoriteFolder.updated_at.desc())
     )
-    
+
     # 手动按 media_id 去重，保留最新的
     folders_map = {}
     for row in rows.fetchall():
         fid, media_id, last_sync = row
         if media_id not in folders_map:
             folders_map[media_id] = (fid, last_sync)
-            
+
     if not folders_map:
         return []
 
     folder_ids = [v[0] for v in folders_map.values()]
-    
+
     # 4. 统计视频数量
     counts = await db.execute(
         select(FavoriteVideo.folder_id, func.count(func.distinct(FavoriteVideo.bvid)))
@@ -657,6 +688,7 @@ async def build_knowledge_base(
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
     import uuid
+
     task_id = str(uuid.uuid4())
 
     build_tasks[task_id] = {
@@ -719,7 +751,9 @@ async def _build_knowledge_base_task(
                 for idx, folder_id in enumerate(folder_ids, start=1):
                     build_tasks[task_id]["current_step"] = f"同步收藏夹 {folder_id}"
 
-                    def progress_cb(title: str, processed_count: int = 0, total_count: int = 0):
+                    def progress_cb(
+                        title: str, processed_count: int = 0, total_count: int = 0
+                    ):
                         build_tasks[task_id]["current_step"] = f"处理: {title}"
                         if total_count:
                             build_tasks[task_id]["total_videos"] = total_count
@@ -727,7 +761,11 @@ async def _build_knowledge_base_task(
                             build_tasks[task_id]["processed_videos"] = processed_count
                             if build_tasks[task_id]["total_videos"]:
                                 build_tasks[task_id]["progress"] = int(
-                                    (processed_count / build_tasks[task_id]["total_videos"]) * 100
+                                    (
+                                        processed_count
+                                        / build_tasks[task_id]["total_videos"]
+                                    )
+                                    * 100
                                 )
 
                     result = await _sync_folder(
@@ -749,7 +787,9 @@ async def _build_knowledge_base_task(
             build_tasks[task_id]["progress"] = 100
             build_tasks[task_id]["processed_videos"] = total_folders
             build_tasks[task_id]["current_step"] = "完成"
-            build_tasks[task_id]["message"] = f"同步完成：新增 {total_added}，移除 {total_removed}"
+            build_tasks[task_id][
+                "message"
+            ] = f"同步完成：新增 {total_added}，移除 {total_removed}"
 
             logger.info(f"知识库构建完成: 新增 {total_added}，移除 {total_removed}")
         finally:
@@ -795,7 +835,9 @@ async def clear_knowledge_base():
 @router.delete("/video/{bvid}", deprecated=True)
 async def delete_video_from_knowledge(bvid: str):
     """从知识库中删除指定视频（已废弃：无多用户范围，请使用知识库范围接口）"""
-    logger.warning("调用了已废弃的全局 /knowledge/video/{bvid}，建议迁移到知识库范围接口")
+    logger.warning(
+        "调用了已废弃的全局 /knowledge/video/{bvid}，建议迁移到知识库范围接口"
+    )
     try:
         rag = get_rag_service()
         rag.delete_video(bvid)

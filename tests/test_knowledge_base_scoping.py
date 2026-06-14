@@ -2,12 +2,15 @@ import json
 from datetime import datetime
 
 import pytest
+from sqlalchemy import select
 
 from app.models import (
+    ContentSource,
     FavoriteFolder,
     FavoriteVideo,
     SourceBinding,
     SourceCredential,
+    VideoContent,
     VideoCache,
 )
 from app.security import encrypt_text
@@ -736,6 +739,197 @@ async def test_scoped_build_records_scope_metadata(
     assert body["knowledge_base_id"] == knowledge_base["id"]
     assert body["source_binding_id"] == binding.id
     assert body["task_id"]
+
+
+@pytest.mark.asyncio
+async def test_scoped_build_accepts_single_video_selection(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    class FakeBilibiliService:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def close(self):
+            pass
+
+    captured = {}
+
+    async def fake_run_scoped_build(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.BilibiliService",
+        FakeBilibiliService,
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.ASRService",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.ContentFetcher",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._run_scoped_build",
+        fake_run_scoped_build,
+    )
+
+    auth = await register_user(client, "video-build@example.com", "Video Build")
+    knowledge_base = await create_knowledge_base(client, "Video Build KB")
+    binding = await create_source_binding(
+        db_session_factory,
+        user_id=auth["user"]["id"],
+        workspace_id=auth["workspace"]["id"],
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/build",
+        json={
+            "source_binding_id": binding.id,
+            "folder_ids": [],
+            "video_folder_ids": [10],
+            "bvids": ["BV1ONLY"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["folder_ids"] == []
+    assert captured["video_folder_ids"] == [10]
+    assert captured["include_bvids"] == {"BV1ONLY"}
+
+
+@pytest.mark.asyncio
+async def test_scoped_build_starts_when_vector_service_is_unavailable(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    class FakeBilibiliService:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def close(self):
+            pass
+
+    captured = {}
+
+    async def fake_run_scoped_build(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.BilibiliService",
+        FakeBilibiliService,
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.ASRService",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.ContentFetcher",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: (_ for _ in ()).throw(RuntimeError("missing embedding key")),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._run_scoped_build",
+        fake_run_scoped_build,
+    )
+
+    auth = await register_user(client, "no-vector-build@example.com", "No Vector")
+    knowledge_base = await create_knowledge_base(client, "No Vector KB")
+    binding = await create_source_binding(
+        db_session_factory,
+        user_id=auth["user"]["id"],
+        workspace_id=auth["workspace"]["id"],
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/build",
+        json={"source_binding_id": binding.id, "folder_ids": [10]},
+    )
+
+    assert response.status_code == 200
+    assert captured["rag"].add_video_content(object()) == 0
+
+
+@pytest.mark.asyncio
+async def test_partial_folder_sync_keeps_existing_unselected_videos(
+    db_session_factory,
+):
+    from app.routers.knowledge import _sync_folder
+
+    class FakeBilibili:
+        async def get_favorite_content(self, folder_id, pn=1, ps=1):
+            return {"info": {"title": "Folder A", "media_count": 2}}
+
+        async def get_all_favorite_videos(self, folder_id):
+            return [
+                {"bvid": "BV1ONLY", "title": "Video one", "attr": 0},
+                {"bvid": "BV1SKIP", "title": "Video two", "attr": 0},
+            ]
+
+    class FakeContentFetcher:
+        async def fetch_content(self, bvid, cid=None, title=None):
+            return VideoContent(
+                bvid=bvid,
+                title=title or bvid,
+                content="selected video content " * 5,
+                source=ContentSource.BASIC_INFO,
+            )
+
+    class FakeRag:
+        def delete_video(self, bvid):
+            pass
+
+        def add_video_content(self, *args, **kwargs):
+            return 1
+
+    async with db_session_factory() as session:
+        folder = FavoriteFolder(
+            session_id="",
+            media_id=10,
+            title="Folder A",
+            media_count=2,
+            last_sync_at=datetime(2026, 6, 14),
+        )
+        session.add(folder)
+        await session.flush()
+        session.add(FavoriteVideo(folder_id=folder.id, bvid="BV1OLD"))
+        session.add(
+            VideoCache(
+                bvid="BV1OLD",
+                title="Old video",
+                content="old content " * 8,
+                content_source=ContentSource.BASIC_INFO.value,
+                is_processed=True,
+            )
+        )
+        await session.commit()
+
+        result = await _sync_folder(
+            db=session,
+            bili=FakeBilibili(),
+            rag=FakeRag(),
+            content_fetcher=FakeContentFetcher(),
+            session_id="",
+            folder_id=10,
+            include_bvids={"BV1ONLY"},
+        )
+
+        rows = await session.execute(
+            select(FavoriteVideo.bvid).where(FavoriteVideo.folder_id == folder.id)
+        )
+
+    assert result["removed"] == 0
+    assert set(rows.scalars().all()) == {"BV1OLD", "BV1ONLY"}
 
 
 @pytest.mark.asyncio

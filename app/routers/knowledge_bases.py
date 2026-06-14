@@ -88,6 +88,32 @@ def _source_from_document(document) -> dict:
     }
 
 
+def _dedupe_ints(values: list[int] | None) -> list[int]:
+    return list(dict.fromkeys(values or []))
+
+
+def _dedupe_strings(values: list[str] | None) -> list[str]:
+    return list(dict.fromkeys(item for item in (values or []) if item))
+
+
+class _NoopRAGService:
+    def delete_video(self, *_args, **_kwargs):
+        return None
+
+    def add_video_content(self, *_args, **_kwargs):
+        return 0
+
+
+def _get_rag_service_for_build():
+    try:
+        return get_rag_service()
+    except Exception as exc:
+        logger.warning(
+            f"知识库向量服务不可用，入库将仅写入数据库内容并跳过向量化: {exc}"
+        )
+        return _NoopRAGService()
+
+
 def _answer_from_documents(question: str, documents: list) -> ChatResponse:
     if not documents:
         return ChatResponse(
@@ -357,7 +383,11 @@ async def build_knowledge_base(
     ):
         raise HTTPException(status_code=404, detail="Source binding not found")
 
-    if not payload.folder_ids:
+    folder_ids = _dedupe_ints(payload.folder_ids)
+    video_folder_ids = _dedupe_ints(payload.video_folder_ids)
+    include_bvids = set(_dedupe_strings(payload.bvids))
+
+    if not folder_ids and not (video_folder_ids and include_bvids):
         raise HTTPException(status_code=400, detail="folder_ids cannot be empty")
 
     # 获取加密凭据
@@ -396,7 +426,7 @@ async def build_knowledge_base(
     )
     asr_service = ASRService()
     content_fetcher = ContentFetcher(bili, asr_service)
-    rag = get_rag_service()
+    rag = _get_rag_service_for_build()
     exclude_bvids = set(payload.exclude_bvids) if payload.exclude_bvids else set()
 
     background_tasks.add_task(
@@ -405,7 +435,9 @@ async def build_knowledge_base(
         bili=bili,
         rag=rag,
         content_fetcher=content_fetcher,
-        folder_ids=payload.folder_ids,
+        folder_ids=folder_ids,
+        video_folder_ids=video_folder_ids,
+        include_bvids=include_bvids,
         exclude_bvids=exclude_bvids,
         workspace_id=current_workspace.id,
         knowledge_base_id=knowledge_base.id,
@@ -427,6 +459,8 @@ async def _run_scoped_build(
     rag,
     content_fetcher: ContentFetcher,
     folder_ids: list[int],
+    video_folder_ids: list[int] | None,
+    include_bvids: set[str] | None,
     exclude_bvids: set[str],
     workspace_id: int,
     knowledge_base_id: int,
@@ -450,8 +484,21 @@ async def _run_scoped_build(
         await _update_task(status="running", current_step="同步收藏夹...")
 
         async with get_db_context() as db:
-            total_folders = len(folder_ids)
-            for idx, folder_id in enumerate(folder_ids, start=1):
+            full_folder_ids = _dedupe_ints(folder_ids)
+            full_folder_set = set(full_folder_ids)
+            partial_folder_ids = [
+                folder_id
+                for folder_id in _dedupe_ints(video_folder_ids)
+                if folder_id not in full_folder_set
+            ]
+            steps = [(folder_id, None) for folder_id in full_folder_ids]
+            if include_bvids:
+                steps.extend(
+                    (folder_id, include_bvids) for folder_id in partial_folder_ids
+                )
+
+            total_folders = len(steps) or 1
+            for idx, (folder_id, folder_include_bvids) in enumerate(steps, start=1):
                 await _update_task(
                     current_step=f"同步收藏夹 {folder_id} ({idx}/{total_folders})",
                     progress=int((idx - 1) / total_folders * 100),
@@ -465,6 +512,7 @@ async def _run_scoped_build(
                     session_id="",
                     folder_id=folder_id,
                     exclude_bvids=exclude_bvids,
+                    include_bvids=folder_include_bvids,
                     workspace_id=workspace_id,
                     knowledge_base_id=knowledge_base_id,
                     source_binding_id=source_binding_id,

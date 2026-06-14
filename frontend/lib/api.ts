@@ -116,6 +116,8 @@ export interface KnowledgeBaseChatRequest extends KnowledgeScopeRequest {
 export interface KnowledgeBaseBuildRequest {
   source_binding_id: number;
   folder_ids: number[];
+  video_folder_ids?: number[];
+  bvids?: string[];
   exclude_bvids?: string[];
 }
 
