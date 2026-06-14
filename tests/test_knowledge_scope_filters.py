@@ -18,6 +18,7 @@ async def _add_folder(
     media_id: int,
     title: str,
     synced: bool = True,
+    updated_at: datetime | None = None,
 ) -> FavoriteFolder:
     folder = FavoriteFolder(
         session_id=f"session-{knowledge_base_id}",
@@ -25,6 +26,7 @@ async def _add_folder(
         media_id=media_id,
         title=title,
         last_sync_at=datetime(2026, 6, 13) if synced else None,
+        updated_at=updated_at,
     )
     session.add(folder)
     await session.flush()
@@ -186,6 +188,125 @@ async def test_list_scope_options_only_returns_processed_videos_from_knowledge_b
     assert result.folders[1].video_count == 0
     assert result.folders[2].videos == []
     assert result.folders[2].video_count == 0
+
+
+@pytest.mark.asyncio
+async def test_scope_membership_ignores_overwritten_video_cache_knowledge_base(
+    db_session_factory,
+):
+    from app.services.knowledge_scope import list_scope_options, resolve_scope_bvids
+
+    async with db_session_factory() as session:
+        folder = await _add_folder(
+            session,
+            knowledge_base_id=1,
+            media_id=10,
+            title="Current",
+        )
+        await _add_video(
+            session,
+            folder=folder,
+            bvid="BV1SHARED",
+            title="Shared cache",
+            cache_knowledge_base_id=2,
+        )
+        await session.commit()
+
+        options = await list_scope_options(session, knowledge_base_id=1)
+        folder_scope = await resolve_scope_bvids(
+            session,
+            knowledge_base_id=1,
+            folder_media_ids=[10],
+            requested_bvids=None,
+        )
+        explicit_scope = await resolve_scope_bvids(
+            session,
+            knowledge_base_id=1,
+            folder_media_ids=None,
+            requested_bvids=["BV1SHARED"],
+        )
+
+    assert [(video.bvid, video.title) for video in options.folders[0].videos] == [
+        ("BV1SHARED", "Shared cache")
+    ]
+    assert folder_scope == ["BV1SHARED"]
+    assert explicit_scope == ["BV1SHARED"]
+
+
+@pytest.mark.asyncio
+async def test_scope_uses_latest_synced_folder_for_each_media_id(
+    db_session_factory,
+):
+    from app.services.knowledge_scope import (
+        InvalidKnowledgeScope,
+        list_scope_options,
+        resolve_scope_bvids,
+    )
+
+    async with db_session_factory() as session:
+        old = await _add_folder(
+            session,
+            knowledge_base_id=1,
+            media_id=10,
+            title="Old",
+            updated_at=datetime(2026, 6, 11),
+        )
+        superseded_tie = await _add_folder(
+            session,
+            knowledge_base_id=1,
+            media_id=10,
+            title="Superseded tie",
+            updated_at=datetime(2026, 6, 13),
+        )
+        latest = await _add_folder(
+            session,
+            knowledge_base_id=1,
+            media_id=10,
+            title="Latest",
+            updated_at=datetime(2026, 6, 13),
+        )
+        await _add_video(
+            session,
+            folder=old,
+            bvid="BV1OLD",
+            title="Old video",
+        )
+        await _add_video(
+            session,
+            folder=superseded_tie,
+            bvid="BV1TIE",
+            title="Superseded tie video",
+        )
+        await _add_video(
+            session,
+            folder=latest,
+            bvid="BV1LATEST",
+            title="Latest video",
+        )
+        await session.commit()
+
+        options = await list_scope_options(session, knowledge_base_id=1)
+        folder_scope = await resolve_scope_bvids(
+            session,
+            knowledge_base_id=1,
+            folder_media_ids=[10],
+            requested_bvids=None,
+        )
+        with pytest.raises(InvalidKnowledgeScope) as exc_info:
+            await resolve_scope_bvids(
+                session,
+                knowledge_base_id=1,
+                folder_media_ids=None,
+                requested_bvids=["BV1OLD", "BV1TIE"],
+            )
+
+    assert len(options.folders) == 1
+    assert options.folders[0].media_id == 10
+    assert options.folders[0].title == "Latest"
+    assert [video.bvid for video in options.folders[0].videos] == ["BV1LATEST"]
+    assert folder_scope == ["BV1LATEST"]
+    assert "BV1OLD" in str(exc_info.value)
+    assert "BV1TIE" in str(exc_info.value)
 
 
 @pytest.mark.asyncio

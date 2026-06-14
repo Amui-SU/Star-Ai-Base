@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -17,37 +17,53 @@ class InvalidKnowledgeScope(ValueError):
     """Raised when a requested chat scope is outside the knowledge base."""
 
 
-async def list_scope_options(
+async def _list_current_synced_folders(
     db: AsyncSession,
     *,
     knowledge_base_id: int,
-) -> KnowledgeScopeOptionsResponse:
+) -> list[FavoriteFolder]:
     folder_result = await db.execute(
         select(FavoriteFolder)
         .where(
             FavoriteFolder.knowledge_base_id == knowledge_base_id,
             FavoriteFolder.last_sync_at.is_not(None),
         )
-        .order_by(FavoriteFolder.media_id, FavoriteFolder.id)
+        .order_by(
+            FavoriteFolder.media_id,
+            FavoriteFolder.updated_at.desc(),
+            FavoriteFolder.id.desc(),
+        )
     )
-    folders = list(folder_result.scalars())
+
+    current_folders: list[FavoriteFolder] = []
+    seen_media_ids: set[int] = set()
+    for folder in folder_result.scalars():
+        if folder.media_id in seen_media_ids:
+            continue
+        seen_media_ids.add(folder.media_id)
+        current_folders.append(folder)
+    return current_folders
+
+
+async def list_scope_options(
+    db: AsyncSession,
+    *,
+    knowledge_base_id: int,
+) -> KnowledgeScopeOptionsResponse:
+    folders = await _list_current_synced_folders(
+        db,
+        knowledge_base_id=knowledge_base_id,
+    )
     if not folders:
         return KnowledgeScopeOptionsResponse(folders=[])
 
     folder_ids = [folder.id for folder in folders]
     video_result = await db.execute(
         select(FavoriteVideo.folder_id, VideoCache.bvid, VideoCache.title)
-        .join(
-            VideoCache,
-            and_(
-                VideoCache.bvid == FavoriteVideo.bvid,
-                VideoCache.knowledge_base_id == knowledge_base_id,
-            ),
-        )
+        .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid)
         .where(
             FavoriteVideo.folder_id.in_(folder_ids),
             FavoriteVideo.knowledge_base_id == knowledge_base_id,
-            VideoCache.knowledge_base_id == knowledge_base_id,
             VideoCache.is_processed.is_(True),
         )
         .order_by(FavoriteVideo.folder_id, VideoCache.bvid)
@@ -88,63 +104,56 @@ async def resolve_scope_bvids(
         return None
 
     resolved_bvids: set[str] = set()
-    selected_folder_row_ids: list[int] = []
+    current_folders = await _list_current_synced_folders(
+        db,
+        knowledge_base_id=knowledge_base_id,
+    )
+    current_folders_by_media_id = {
+        folder.media_id: folder for folder in current_folders
+    }
+    current_folder_row_ids = [folder.id for folder in current_folders]
 
     if requested_folder_ids:
-        folder_result = await db.execute(
-            select(FavoriteFolder.id, FavoriteFolder.media_id).where(
-                FavoriteFolder.knowledge_base_id == knowledge_base_id,
-                FavoriteFolder.last_sync_at.is_not(None),
-                FavoriteFolder.media_id.in_(requested_folder_ids),
-            )
+        valid_folder_ids = set(current_folders_by_media_id).intersection(
+            requested_folder_ids
         )
-        selected_folders = list(folder_result)
-        valid_folder_ids = {media_id for _, media_id in selected_folders}
         invalid_folder_ids = sorted(set(requested_folder_ids) - valid_folder_ids)
         if invalid_folder_ids:
             invalid = ", ".join(str(media_id) for media_id in invalid_folder_ids)
             raise InvalidKnowledgeScope(f"Invalid folder_ids: {invalid}")
 
-        selected_folder_row_ids = [folder_id for folder_id, _ in selected_folders]
+        selected_folder_row_ids = [
+            current_folders_by_media_id[media_id].id
+            for media_id in requested_folder_ids
+        ]
         folder_video_result = await db.execute(
             select(VideoCache.bvid)
             .select_from(FavoriteVideo)
-            .join(
-                VideoCache,
-                and_(
-                    VideoCache.bvid == FavoriteVideo.bvid,
-                    VideoCache.knowledge_base_id == knowledge_base_id,
-                ),
-            )
+            .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid)
             .where(
                 FavoriteVideo.folder_id.in_(selected_folder_row_ids),
                 FavoriteVideo.knowledge_base_id == knowledge_base_id,
-                VideoCache.knowledge_base_id == knowledge_base_id,
                 VideoCache.is_processed.is_(True),
             )
         )
         resolved_bvids.update(folder_video_result.scalars())
 
     if requested_video_ids:
-        video_result = await db.execute(
-            select(VideoCache.bvid)
-            .select_from(FavoriteVideo)
-            .join(
-                VideoCache,
-                and_(
-                    VideoCache.bvid == FavoriteVideo.bvid,
-                    VideoCache.knowledge_base_id == knowledge_base_id,
-                ),
+        valid_bvids: set[str] = set()
+        if current_folder_row_ids:
+            video_result = await db.execute(
+                select(VideoCache.bvid)
+                .select_from(FavoriteVideo)
+                .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid)
+                .where(
+                    FavoriteVideo.folder_id.in_(current_folder_row_ids),
+                    FavoriteVideo.knowledge_base_id == knowledge_base_id,
+                    VideoCache.bvid.in_(requested_video_ids),
+                    VideoCache.is_processed.is_(True),
+                )
+                .distinct()
             )
-            .where(
-                FavoriteVideo.knowledge_base_id == knowledge_base_id,
-                VideoCache.knowledge_base_id == knowledge_base_id,
-                VideoCache.bvid.in_(requested_video_ids),
-                VideoCache.is_processed.is_(True),
-            )
-            .distinct()
-        )
-        valid_bvids = set(video_result.scalars())
+            valid_bvids.update(video_result.scalars())
         invalid_bvids = sorted(set(requested_video_ids) - valid_bvids)
         if invalid_bvids:
             raise InvalidKnowledgeScope(f"Invalid bvids: {', '.join(invalid_bvids)}")
