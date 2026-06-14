@@ -708,6 +708,18 @@ html.light .panel-sources {
   margin: 0 auto;
 }
 
+.panel-chat-embedded .chat-scroll:has(.empty-state) {
+  padding-top: clamp(8px, 2vh, 22px);
+}
+
+.panel-chat-embedded .empty-state {
+  transform: translateY(-18px);
+}
+
+html.light .panel-chat-embedded .empty-state {
+  transform: translateY(-16px);
+}
+
 /* ── Scrollbar ── */
 .panel-chat-embedded .panel-body::-webkit-scrollbar,
 .sources-scroll::-webkit-scrollbar,
