@@ -2,6 +2,7 @@
 Bilibili RAG 知识库系统
 对话路由 - 智能问答
 """
+
 import re
 import json
 import time
@@ -17,7 +18,13 @@ from langchain.schema import Document
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.models import ChatRequest, ChatResponse, FavoriteFolder, FavoriteVideo, VideoCache
+from app.models import (
+    ChatRequest,
+    ChatResponse,
+    FavoriteFolder,
+    FavoriteVideo,
+    VideoCache,
+)
 from app.config import settings
 from app.routers.knowledge import get_rag_service
 
@@ -63,7 +70,12 @@ PROVIDER_META = {
     },
 }
 SUPPORTED_LLM_PROVIDERS = set(PROVIDER_META.keys())
-_current_llm_provider = settings.llm_provider if settings.llm_provider in SUPPORTED_LLM_PROVIDERS else "dashscope"
+_current_llm_provider = (
+    settings.llm_provider
+    if settings.llm_provider in SUPPORTED_LLM_PROVIDERS
+    else "dashscope"
+)
+THINKING_DELTA_MARKER = "[[THINKING_DELTA]]"
 
 
 class LLMProviderUpdateRequest(BaseModel):
@@ -72,9 +84,11 @@ class LLMProviderUpdateRequest(BaseModel):
 
 class LLMProviderConfigRequest(BaseModel):
     provider: str
-    api_key: str
+    api_key: Optional[str] = None
     base_url: Optional[str] = None
     model: Optional[str] = None
+    thinking_mode: str = "off"
+    thinking_config: Optional[dict] = None
 
 
 PROVIDER_ENV_FIELDS = {
@@ -82,31 +96,37 @@ PROVIDER_ENV_FIELDS = {
         "api_key": "DASHSCOPE_API_KEY",
         "base_url": "OPENAI_BASE_URL",
         "model": "LLM_MODEL",
+        "thinking_config": "DASHSCOPE_THINKING_CONFIG",
     },
     "deepseek": {
         "api_key": "DEEPSEEK_API_KEY",
         "base_url": "DEEPSEEK_BASE_URL",
         "model": "DEEPSEEK_MODEL",
+        "thinking_config": "DEEPSEEK_THINKING_CONFIG",
     },
     "openai": {
         "api_key": "OPENAI_NATIVE_API_KEY",
         "base_url": "OPENAI_NATIVE_BASE_URL",
         "model": "OPENAI_NATIVE_MODEL",
+        "thinking_config": "OPENAI_NATIVE_THINKING_CONFIG",
     },
     "kimi": {
         "api_key": "KIMI_API_KEY",
         "base_url": "KIMI_BASE_URL",
         "model": "KIMI_MODEL",
+        "thinking_config": "KIMI_THINKING_CONFIG",
     },
     "siliconflow": {
         "api_key": "SILICONFLOW_API_KEY",
         "base_url": "SILICONFLOW_BASE_URL",
         "model": "SILICONFLOW_MODEL",
+        "thinking_config": "SILICONFLOW_THINKING_CONFIG",
     },
     "zhipu": {
         "api_key": "ZHIPU_API_KEY",
         "base_url": "ZHIPU_BASE_URL",
         "model": "ZHIPU_MODEL",
+        "thinking_config": "ZHIPU_THINKING_CONFIG",
     },
 }
 
@@ -116,21 +136,48 @@ SETTINGS_FIELD_BY_ENV = {
     "DASHSCOPE_API_KEY": "openai_api_key",
     "OPENAI_BASE_URL": "openai_base_url",
     "LLM_MODEL": "llm_model",
+    "DASHSCOPE_THINKING_CONFIG": "dashscope_thinking_config",
     "DEEPSEEK_API_KEY": "deepseek_api_key",
     "DEEPSEEK_BASE_URL": "deepseek_base_url",
     "DEEPSEEK_MODEL": "deepseek_model",
+    "DEEPSEEK_THINKING_CONFIG": "deepseek_thinking_config",
     "OPENAI_NATIVE_API_KEY": "openai_native_api_key",
     "OPENAI_NATIVE_BASE_URL": "openai_native_base_url",
     "OPENAI_NATIVE_MODEL": "openai_native_model",
+    "OPENAI_NATIVE_THINKING_CONFIG": "openai_native_thinking_config",
     "KIMI_API_KEY": "kimi_api_key",
     "KIMI_BASE_URL": "kimi_base_url",
     "KIMI_MODEL": "kimi_model",
+    "KIMI_THINKING_CONFIG": "kimi_thinking_config",
     "SILICONFLOW_API_KEY": "siliconflow_api_key",
     "SILICONFLOW_BASE_URL": "siliconflow_base_url",
     "SILICONFLOW_MODEL": "siliconflow_model",
+    "SILICONFLOW_THINKING_CONFIG": "siliconflow_thinking_config",
     "ZHIPU_API_KEY": "zhipu_api_key",
     "ZHIPU_BASE_URL": "zhipu_base_url",
     "ZHIPU_MODEL": "zhipu_model",
+    "ZHIPU_THINKING_CONFIG": "zhipu_thinking_config",
+}
+
+PROVIDER_THINKING_SETTINGS_FIELDS = {
+    "dashscope": "dashscope_thinking_config",
+    "deepseek": "deepseek_thinking_config",
+    "openai": "openai_native_thinking_config",
+    "kimi": "kimi_thinking_config",
+    "siliconflow": "siliconflow_thinking_config",
+    "zhipu": "zhipu_thinking_config",
+}
+
+PROVIDER_THINKING_TEMPLATES = {
+    "dashscope": {"enable_thinking": True},
+    "deepseek": {
+        "thinking": {"type": "enabled"},
+        "reasoning_effort": "high",
+    },
+    "openai": {"reasoning_effort": "medium"},
+    "kimi": {},
+    "siliconflow": {"enable_thinking": True},
+    "zhipu": {"thinking": {"type": "enabled"}},
 }
 
 
@@ -154,7 +201,33 @@ def _resolve_llm_config(provider: Optional[str] = None) -> Dict[str, str]:
         "api_key": meta["api_key"](),
         "base_url": meta["base_url"](),
         "model": meta["model"](),
+        "thinking_config": _get_provider_thinking_config(normalized),
     }
+
+
+def _get_provider_thinking_template(provider: str) -> dict:
+    return dict(PROVIDER_THINKING_TEMPLATES.get(provider, {}))
+
+
+def _parse_thinking_config(raw_config) -> dict:
+    if raw_config in (None, ""):
+        return {}
+    if isinstance(raw_config, dict):
+        return raw_config
+    try:
+        parsed = json.loads(str(raw_config))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="思考配置 JSON 格式错误") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="思考配置必须是 JSON 对象")
+    return parsed
+
+
+def _get_provider_thinking_config(provider: str) -> dict:
+    field = PROVIDER_THINKING_SETTINGS_FIELDS.get(provider)
+    if not field:
+        return {}
+    return _parse_thinking_config(getattr(settings, field, ""))
 
 
 def _env_file_path() -> Path:
@@ -221,6 +294,8 @@ async def get_llm_config():
                 "enabled": bool(meta["api_key"]()),
                 "model": meta["model"](),
                 "base_url": meta["base_url"](),
+                "thinking_config": _get_provider_thinking_config(provider),
+                "thinking_template": _get_provider_thinking_template(provider),
             }
         )
     return {
@@ -231,7 +306,7 @@ async def get_llm_config():
 
 @router.post("/llm/provider-config")
 async def save_llm_provider_config(body: LLMProviderConfigRequest):
-    """保存模型提供方配置到 .env.local，并立即应用到当前进程。"""
+    """验证并保存模型提供方配置到 .env.local。"""
     global _current_llm_provider
 
     provider = _normalize_provider(body.provider)
@@ -239,19 +314,51 @@ async def save_llm_provider_config(body: LLMProviderConfigRequest):
     if not env_fields:
         raise HTTPException(status_code=400, detail=f"不支持的模型提供方: {provider}")
 
-    api_key = body.api_key.strip()
+    current = _resolve_llm_config(provider)
+    api_key = (body.api_key or "").strip() or current["api_key"]
     if not api_key:
         raise HTTPException(status_code=400, detail="API Key 不能为空")
+
+    thinking_mode = body.thinking_mode.strip().lower()
+    if thinking_mode not in {"off", "standard", "custom"}:
+        raise HTTPException(status_code=400, detail="不支持的思考配置模式")
+    if thinking_mode == "off":
+        thinking_config = {}
+    elif thinking_mode == "standard":
+        thinking_config = _get_provider_thinking_template(provider)
+        if not thinking_config:
+            raise HTTPException(
+                status_code=400,
+                detail="该提供商没有通用标准模板，请使用自定义 JSON",
+            )
+    else:
+        thinking_config = _parse_thinking_config(body.thinking_config)
+        if not thinking_config:
+            raise HTTPException(status_code=400, detail="自定义思考配置不能为空")
+
+    base_url = (body.base_url or "").strip() or current["base_url"]
+    model = (body.model or "").strip() or current["model"]
+    pending_config = {
+        "provider": provider,
+        "provider_label": current["provider_label"],
+        "api_key": api_key,
+        "base_url": base_url,
+        "model": model,
+        "thinking_config": thinking_config,
+    }
+    latency_ms = _verify_provider_configuration(pending_config)
 
     updates = {
         "LLM_PROVIDER": provider,
         env_fields["api_key"]: api_key,
+        env_fields["base_url"]: base_url,
+        env_fields["model"]: model,
+        env_fields["thinking_config"]: json.dumps(
+            thinking_config,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
     }
-
-    if body.base_url is not None and body.base_url.strip():
-        updates[env_fields["base_url"]] = body.base_url.strip()
-    if body.model is not None and body.model.strip():
-        updates[env_fields["model"]] = body.model.strip()
 
     _write_env_values(updates)
     _current_llm_provider = provider
@@ -270,6 +377,10 @@ async def save_llm_provider_config(body: LLMProviderConfigRequest):
         "current_provider": provider,
         "model": llm_config["model"],
         "provider_label": llm_config["provider_label"],
+        "thinking_config": llm_config["thinking_config"],
+        "thinking_template": _get_provider_thinking_template(provider),
+        "verified": True,
+        "latency_ms": latency_ms,
     }
 
 
@@ -284,7 +395,9 @@ async def set_llm_config(body: LLMProviderUpdateRequest):
             detail=f"{llm_config['provider_label']} API Key 未配置，请先在 .env 中配置后重启后端。",
         )
     _current_llm_provider = llm_config["provider"]
-    logger.info(f"已切换 LLM 提供方: {_current_llm_provider} / model={llm_config['model']}")
+    logger.info(
+        f"已切换 LLM 提供方: {_current_llm_provider} / model={llm_config['model']}"
+    )
     return {
         "ok": True,
         "current_provider": _current_llm_provider,
@@ -335,6 +448,7 @@ async def llm_health_check():
             "provider": llm_config["provider"],
         }
 
+
 def _get_llm_client(llm_config: Optional[Dict[str, str]] = None) -> OpenAI:
     """获取 LLM 客户端"""
     cfg = llm_config or _resolve_llm_config()
@@ -347,12 +461,14 @@ def _get_llm_client(llm_config: Optional[Dict[str, str]] = None) -> OpenAI:
         max_retries=2,
     )
 
+
 def _is_llm_connection_error(err: Exception) -> bool:
     """判断是否为上游模型连接/超时问题"""
     if isinstance(err, (APIConnectionError, APITimeoutError)):
         return True
     text = str(err).lower()
     return "connection error" in text or "timed out" in text or "timeout" in text
+
 
 def _build_llm_unavailable_answer() -> str:
     """模型不可用时的用户可读兜底回答"""
@@ -363,6 +479,7 @@ def _build_llm_unavailable_answer() -> str:
         "2. 检查后端网络与模型服务配置（API Key / Base URL）；\n"
         "3. 先在左侧完成收藏夹入库，稍后再问。"
     )
+
 
 def _build_overview_messages(context: str, question: str) -> list[dict]:
     system = (
@@ -378,6 +495,7 @@ def _build_overview_messages(context: str, question: str) -> list[dict]:
         {"role": "user", "content": question},
     ]
 
+
 def _build_rag_messages(context: str, question: str) -> list[dict]:
     system = (
         "你是一个知识库助手，基于用户收藏的视频内容回答问题。\n"
@@ -392,6 +510,7 @@ def _build_rag_messages(context: str, question: str) -> list[dict]:
         {"role": "user", "content": question},
     ]
 
+
 def _build_fallback_messages(context: str, question: str) -> list[dict]:
     system = (
         "你是一个收藏夹知识库助手。\n"
@@ -401,23 +520,24 @@ def _build_fallback_messages(context: str, question: str) -> list[dict]:
         "请根据以上信息（如果有）：\n"
         "1. 尝试回答用户问题\n"
         "2. 如果没有任何视频信息，礼貌地告诉用户需要先在左侧选择收藏夹并点击「入库」或者「更新」\n"
-        "3. 保持像真人助手一样的语气，不要显示这是\"备选方案\""
+        '3. 保持像真人助手一样的语气，不要显示这是"备选方案"'
     )
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": question},
     ]
 
+
 def _build_direct_messages(question: str) -> list[dict]:
     """通用回答（不查库）"""
     system = (
-        "你是一个知识库问答助手。\n"
-        "请直接回答用户问题，避免引入收藏夹或知识库内容。"
+        "你是一个知识库问答助手。\n" "请直接回答用户问题，避免引入收藏夹或知识库内容。"
     )
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": question},
     ]
+
 
 def _build_direct_messages_with_context(context: str, question: str) -> list[dict]:
     """带收藏夹上下文的通用回答（引导用户提问）"""
@@ -432,11 +552,13 @@ def _build_direct_messages_with_context(context: str, question: str) -> list[dic
         {"role": "user", "content": question},
     ]
 
+
 def _log_final_payload(route: str, messages: list[dict], sources: list[dict]) -> None:
     """记录最终发送给 LLM 的内容与来源"""
     logger.info(f"最终路由: {route}")
     logger.info(f"最终消息: {messages}")
     logger.info(f"最终来源数量: {len(sources)}")
+
 
 def _enforce_markdown_output(messages: list[dict]) -> list[dict]:
     """统一要求模型输出 Markdown，便于前端结构化渲染。"""
@@ -466,27 +588,23 @@ def _enforce_markdown_output(messages: list[dict]) -> list[dict]:
         if "Markdown" not in content and "markdown" not in content:
             first["content"] = f"{content}\n\n{markdown_instruction}"
     else:
-        normalized_messages.insert(0, {"role": "system", "content": markdown_instruction})
+        normalized_messages.insert(
+            0, {"role": "system", "content": markdown_instruction}
+        )
     return normalized_messages
 
-def _apply_mode_instructions(messages: list[dict], smart_search: bool, deep_think: bool) -> list[dict]:
-    """根据前端开关补充模式指令。"""
-    if not smart_search and not deep_think:
+
+def _apply_mode_instructions(
+    messages: list[dict], thinking_enabled: bool
+) -> list[dict]:
+    """根据当前模型配置补充思考模式指令。"""
+    if not thinking_enabled:
         return messages
 
-    mode_lines = []
-    if smart_search:
-        mode_lines.append(
-            "已开启智能搜索模式：如果当前模型支持联网检索，请优先使用最新网络信息并给出结论；"
-            "如果不支持联网，请基于已有知识明确说明“无法联网实时检索”。"
-        )
-    if deep_think:
-        mode_lines.append(
-            "已开启深度思考模式：如果模型支持 reasoning/thinking 通道，请输出思考过程；"
-            "若不支持通道，请在正文前使用 <thinking>...</thinking> 输出简要思考，再给最终回答。"
-        )
-
-    mode_instruction = "\n".join(mode_lines)
+    mode_instruction = (
+        "已开启深度思考模式。请使用模型原生 reasoning/thinking 通道进行推理，"
+        "最终回答保持清晰简洁；不要在正文中伪造或重复思考过程。"
+    )
     normalized = [dict(message) for message in messages]
     first = normalized[0] if normalized else None
     if first and first.get("role") == "system":
@@ -495,7 +613,82 @@ def _apply_mode_instructions(messages: list[dict], smart_search: bool, deep_thin
         normalized.insert(0, {"role": "system", "content": mode_instruction})
     return normalized
 
-def _extract_thinking_and_answer(raw_answer: str, reasoning_content: Optional[str] = None) -> tuple[str, str]:
+
+def _build_thinking_completion_options(llm_config: dict) -> dict:
+    """把已保存的请求体 JSON 注入 OpenAI 兼容客户端。"""
+    thinking_config = llm_config.get("thinking_config") or {}
+    if not thinking_config:
+        return {}
+    return {"extra_body": thinking_config}
+
+
+def _verify_provider_configuration(llm_config: dict) -> int:
+    start = time.perf_counter()
+    client = _get_llm_client(llm_config)
+    try:
+        client.chat.completions.create(
+            model=llm_config["model"],
+            messages=[{"role": "user", "content": "请只回复 OK"}],
+            max_tokens=16,
+            stream=False,
+            **_build_thinking_completion_options(llm_config),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"模型配置验证失败: {str(exc)}",
+        ) from exc
+    return int((time.perf_counter() - start) * 1000)
+
+
+def _encode_thinking_delta(content: str) -> str:
+    return f"{THINKING_DELTA_MARKER}{json.dumps(content, ensure_ascii=False)}\n"
+
+
+def _stream_llm_events(messages: list[dict]):
+    """Yield native thinking and answer deltas from the configured model."""
+    llm_config = _resolve_llm_config()
+    client = _get_llm_client(llm_config)
+    stream = client.chat.completions.create(
+        model=llm_config["model"],
+        messages=messages,
+        temperature=0.5,
+        stream=True,
+        **_build_thinking_completion_options(llm_config),
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        reasoning_piece = getattr(delta, "reasoning_content", None)
+        if reasoning_piece:
+            yield "thinking", reasoning_piece
+        if delta and delta.content:
+            yield "answer", delta.content
+
+
+def _complete_llm_answer(
+    messages: list[dict],
+) -> tuple[str, str]:
+    llm_config = _resolve_llm_config()
+    client = _get_llm_client(llm_config)
+    response = client.chat.completions.create(
+        model=llm_config["model"],
+        messages=messages,
+        temperature=0.5,
+        **_build_thinking_completion_options(llm_config),
+    )
+    message = response.choices[0].message
+    thinking, answer = _extract_thinking_and_answer(
+        message.content or "",
+        getattr(message, "reasoning_content", None),
+    )
+    return answer, thinking
+
+
+def _extract_thinking_and_answer(
+    raw_answer: str, reasoning_content: Optional[str] = None
+) -> tuple[str, str]:
     """提取思考内容与最终回答。优先使用原生 reasoning 字段。"""
     thinking = (reasoning_content or "").strip()
     answer = (raw_answer or "").strip()
@@ -504,7 +697,9 @@ def _extract_thinking_and_answer(raw_answer: str, reasoning_content: Optional[st
         return thinking, answer
 
     # 兼容提示词回退：<thinking>...</thinking> 或 <think>...</think>
-    pattern = re.compile(r"<(?:thinking|think)>(.*?)</(?:thinking|think)>", re.IGNORECASE | re.DOTALL)
+    pattern = re.compile(
+        r"<(?:thinking|think)>(.*?)</(?:thinking|think)>", re.IGNORECASE | re.DOTALL
+    )
     match = pattern.search(answer)
     if not match:
         return "", answer
@@ -512,6 +707,7 @@ def _extract_thinking_and_answer(raw_answer: str, reasoning_content: Optional[st
     extracted = (match.group(1) or "").strip()
     cleaned = pattern.sub("", answer).strip()
     return extracted, cleaned
+
 
 def _build_db_list_messages(context: str, question: str) -> list[dict]:
     """仅用标题/简介回答列表类问题"""
@@ -529,6 +725,7 @@ def _build_db_list_messages(context: str, question: str) -> list[dict]:
         {"role": "user", "content": question},
     ]
 
+
 def _build_db_summary_messages(context: str, question: str) -> list[dict]:
     """仅用数据库内容回答总结类问题"""
     system = (
@@ -545,19 +742,61 @@ def _build_db_summary_messages(context: str, question: str) -> list[dict]:
         {"role": "user", "content": question},
     ]
 
+
 def _is_list_question(question: str) -> bool:
     """列表/清单类问题"""
-    list_terms = ["有哪些", "有什么", "列表", "清单", "目录", "都有哪些", "列出", "罗列", "多少个", "几个"]
+    list_terms = [
+        "有哪些",
+        "有什么",
+        "列表",
+        "清单",
+        "目录",
+        "都有哪些",
+        "列出",
+        "罗列",
+        "多少个",
+        "几个",
+    ]
     return any(term in question for term in list_terms)
+
 
 def _is_summary_question(question: str) -> bool:
     """总结/概括类问题"""
-    summary_terms = ["总结", "概述", "概括", "分析", "梳理", "提炼", "回顾", "复盘", "要点", "重点", "关键点", "核心", "讲了什么", "讲些什么"]
+    summary_terms = [
+        "总结",
+        "概述",
+        "概括",
+        "分析",
+        "梳理",
+        "提炼",
+        "回顾",
+        "复盘",
+        "要点",
+        "重点",
+        "关键点",
+        "核心",
+        "讲了什么",
+        "讲些什么",
+    ]
     return any(term in question for term in summary_terms)
+
 
 def _is_general_question(question: str) -> bool:
     """通用闲聊/与收藏无关的问题"""
-    general_terms = ["你好", "嗨", "哈喽", "hello", "hi", "在吗", "你是谁", "你能做什么", "谢谢", "晚安", "早安", "早上好"]
+    general_terms = [
+        "你好",
+        "嗨",
+        "哈喽",
+        "hello",
+        "hi",
+        "在吗",
+        "你是谁",
+        "你能做什么",
+        "谢谢",
+        "晚安",
+        "早安",
+        "早上好",
+    ]
     cleaned = re.sub(r"[\\W_]+", "", question, flags=re.UNICODE)
     lowered = cleaned.lower()
     residual = lowered
@@ -565,14 +804,32 @@ def _is_general_question(question: str) -> bool:
         residual = residual.replace(term.lower(), "")
     return residual == ""
 
+
 def _is_collection_intent(question: str) -> bool:
     """是否显式指向收藏/视频/知识库"""
-    terms = ["收藏", "收藏夹", "视频", "合集", "up主", "BV", "bv", "分P", "字幕", "知识库", "入库", "同步", "向量", "检索"]
+    terms = [
+        "收藏",
+        "收藏夹",
+        "视频",
+        "合集",
+        "up主",
+        "BV",
+        "bv",
+        "分P",
+        "字幕",
+        "知识库",
+        "入库",
+        "同步",
+        "向量",
+        "检索",
+    ]
     return any(term in question for term in terms)
+
 
 def _is_overview_question(question: str) -> bool:
     """概览类问题（列表或总结）"""
     return _is_list_question(question) or _is_summary_question(question)
+
 
 def _route_with_rules(question: str, is_collection_intent: bool, related: bool) -> str:
     """规则路由兜底"""
@@ -585,6 +842,7 @@ def _route_with_rules(question: str, is_collection_intent: bool, related: bool) 
     if not related and not is_collection_intent:
         return "direct"
     return "vector"
+
 
 def _route_with_llm(question: str) -> tuple[Optional[str], str]:
     """使用 LLM 进行路由判断"""
@@ -618,12 +876,38 @@ def _route_with_llm(question: str) -> tuple[Optional[str], str]:
         logger.warning(f"LLM 路由失败: {e}")
         return None, ""
 
+
 def _extract_keywords(question: str) -> List[str]:
     """提取用于过滤的关键词"""
     stopwords = {
-        "什么", "怎么", "如何", "是否", "可以", "哪个", "哪些", "请问", "一下", "为什么",
-        "有没有", "能不能", "能否", "是不是", "是什么", "多少", "哪里", "讲讲", "介绍",
-        "总结", "概括", "分析", "解释", "说明", "评价", "区别", "内容", "视频",
+        "什么",
+        "怎么",
+        "如何",
+        "是否",
+        "可以",
+        "哪个",
+        "哪些",
+        "请问",
+        "一下",
+        "为什么",
+        "有没有",
+        "能不能",
+        "能否",
+        "是不是",
+        "是什么",
+        "多少",
+        "哪里",
+        "讲讲",
+        "介绍",
+        "总结",
+        "概括",
+        "分析",
+        "解释",
+        "说明",
+        "评价",
+        "区别",
+        "内容",
+        "视频",
     }
     keywords: List[str] = []
     for kw in re.findall(r"[\u4e00-\u9fff]{2,}", question):
@@ -633,6 +917,7 @@ def _extract_keywords(question: str) -> List[str]:
         if kw not in keywords:
             keywords.append(kw)
     return keywords
+
 
 def _filter_docs_by_keywords(docs: List[Document], question: str) -> List[Document]:
     """根据关键词过滤召回内容，减少噪声"""
@@ -648,7 +933,10 @@ def _filter_docs_by_keywords(docs: List[Document], question: str) -> List[Docume
             filtered.append(doc)
     return filtered
 
-async def _is_related_to_collection(db: AsyncSession, folder_ids: List[int], question: str) -> bool:
+
+async def _is_related_to_collection(
+    db: AsyncSession, folder_ids: List[int], question: str
+) -> bool:
     """判断问题是否与收藏夹内容有关"""
     if not folder_ids:
         return False
@@ -671,16 +959,24 @@ async def _is_related_to_collection(db: AsyncSession, folder_ids: List[int], que
     count = await db.scalar(stmt)
     return (count or 0) > 0
 
-async def _get_folder_ids_for_session(db: AsyncSession, session_id: str, media_ids: Optional[List[int]]) -> List[int]:
+
+async def _get_folder_ids_for_session(
+    db: AsyncSession, session_id: str, media_ids: Optional[List[int]]
+) -> List[int]:
     """根据 session 和 media_id 获取内部 folder_id（支持跨 session 查找同用户数据）"""
     from app.models import UserSession
+
     # 1. 尝试获取当前 session 的 mid
-    mid_result = await db.execute(select(UserSession.bili_mid).where(UserSession.session_id == session_id))
+    mid_result = await db.execute(
+        select(UserSession.bili_mid).where(UserSession.session_id == session_id)
+    )
     mid = mid_result.scalar()
     target_session_ids = [session_id]
     if mid:
         # 查找该用户所有的 Session ID
-        sessions_result = await db.execute(select(UserSession.session_id).where(UserSession.bili_mid == mid))
+        sessions_result = await db.execute(
+            select(UserSession.session_id).where(UserSession.bili_mid == mid)
+        )
         target_session_ids = [row[0] for row in sessions_result.fetchall()]
     # 构建查询：按 media_id 去重，只保留最新的一条
     stmt = (
@@ -697,11 +993,16 @@ async def _get_folder_ids_for_session(db: AsyncSession, session_id: str, media_i
             dedup[media_id] = folder_id
     return list(dedup.values())
 
-async def _get_bvids_by_folder_ids(db: AsyncSession, folder_ids: List[int]) -> List[str]:
+
+async def _get_bvids_by_folder_ids(
+    db: AsyncSession, folder_ids: List[int]
+) -> List[str]:
     """获取指定收藏夹的视频 BV 列表"""
     if not folder_ids:
         return []
-    rows = await db.execute(select(FavoriteVideo.bvid).where(FavoriteVideo.folder_id.in_(folder_ids)))
+    rows = await db.execute(
+        select(FavoriteVideo.bvid).where(FavoriteVideo.folder_id.in_(folder_ids))
+    )
     bvids = []
     seen = set()
     for (bvid,) in rows.fetchall():
@@ -711,7 +1012,13 @@ async def _get_bvids_by_folder_ids(db: AsyncSession, folder_ids: List[int]) -> L
         bvids.append(bvid)
     return bvids
 
-async def _get_video_context(db: AsyncSession, folder_ids: List[int], include_content: bool = False, limit: Optional[int] = 50) -> tuple[str, List[dict]]:
+
+async def _get_video_context(
+    db: AsyncSession,
+    folder_ids: List[int],
+    include_content: bool = False,
+    limit: Optional[int] = 50,
+) -> tuple[str, List[dict]]:
     """获取视频上下文信息"""
     if not folder_ids:
         return "", []
@@ -754,18 +1061,34 @@ async def _get_video_context(db: AsyncSession, folder_ids: List[int], include_co
             video_info += f" ({short_desc})"
         grouped[folder_name].append(video_info)
         seen_bvids.add(bvid)
-        sources.append({"bvid": bvid, "title": title, "url": f"https://www.bilibili.com/video/{bvid}"})
+        sources.append(
+            {
+                "bvid": bvid,
+                "title": title,
+                "url": f"https://www.bilibili.com/video/{bvid}",
+            }
+        )
     # 构建上下文文本
-    context_parts = [f"【{folder_name}】\n" + "\n".join(videos) for folder_name, videos in grouped.items()]
+    context_parts = [
+        f"【{folder_name}】\n" + "\n".join(videos)
+        for folder_name, videos in grouped.items()
+    ]
     context = "\n\n".join(context_parts)
     return context, sources
 
-async def _get_video_titles_context(db: AsyncSession, folder_ids: List[int], limit: int = 50) -> str:
+
+async def _get_video_titles_context(
+    db: AsyncSession, folder_ids: List[int], limit: int = 50
+) -> str:
     """获取收藏夹名称与视频标题（用于引导问题）"""
     if not folder_ids:
         return ""
     query = (
-        select(FavoriteFolder.title.label("folder_title"), VideoCache.bvid, VideoCache.title)
+        select(
+            FavoriteFolder.title.label("folder_title"),
+            VideoCache.bvid,
+            VideoCache.title,
+        )
         .join(FavoriteVideo, FavoriteVideo.folder_id == FavoriteFolder.id)
         .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid, isouter=True)
         .where(FavoriteFolder.id.in_(folder_ids))
@@ -785,16 +1108,24 @@ async def _get_video_titles_context(db: AsyncSession, folder_ids: List[int], lim
         seen_bvids.add(bvid)
         folder_name = folder_title or "默认收藏夹"
         grouped.setdefault(folder_name, []).append(f"- 《{title}》")
-    context_parts = [f"【{folder_name}】\n" + "\n".join(videos) for folder_name, videos in grouped.items()]
+    context_parts = [
+        f"【{folder_name}】\n" + "\n".join(videos)
+        for folder_name, videos in grouped.items()
+    ]
     return "\n\n".join(context_parts)
 
-async def _prepare_messages(request: ChatRequest, db: AsyncSession) -> tuple[list[dict], List[dict], str]:
+
+async def _prepare_messages(
+    request: ChatRequest, db: AsyncSession
+) -> tuple[list[dict], List[dict], str]:
     """准备 LLM 消息与来源信息"""
     question = request.question.strip()
     rag = get_rag_service()
     folder_ids = []
     if request.session_id:
-        folder_ids = await _get_folder_ids_for_session(db, request.session_id, request.folder_ids)
+        folder_ids = await _get_folder_ids_for_session(
+            db, request.session_id, request.folder_ids
+        )
         logger.info(f"Session: {request.session_id}, 关联 FolderIDs: {folder_ids}")
     bvids = await _get_bvids_by_folder_ids(db, folder_ids) if folder_ids else []
     has_data = len(bvids) > 0
@@ -803,7 +1134,9 @@ async def _prepare_messages(request: ChatRequest, db: AsyncSession) -> tuple[lis
     if request.folder_ids:
         is_collection_intent = True
     # 1) LLM 路由优先，失败时降级规则路由
-    logger.info(f"路由输入: question={question} folder_ids={folder_ids} has_data={has_data} is_collection_intent={is_collection_intent}")
+    logger.info(
+        f"路由输入: question={question} folder_ids={folder_ids} has_data={has_data} is_collection_intent={is_collection_intent}"
+    )
     route, route_raw = _route_with_llm(question)
     route_source = "LLM"
     related: Optional[bool] = None
@@ -818,7 +1151,9 @@ async def _prepare_messages(request: ChatRequest, db: AsyncSession) -> tuple[lis
     # 2) 无数据时处理
     if not has_data:
         if is_collection_intent:
-            context, sources = await _get_video_context(db, folder_ids, include_content=False, limit=50)
+            context, sources = await _get_video_context(
+                db, folder_ids, include_content=False, limit=50
+            )
             if not context:
                 context = "（暂无已入库的视频信息，请提醒用户可能需要先进行入库操作）"
             messages = _build_fallback_messages(context, question)
@@ -828,7 +1163,11 @@ async def _prepare_messages(request: ChatRequest, db: AsyncSession) -> tuple[lis
     # 3) 直接回答
     if route == "direct":
         title_context = await _get_video_titles_context(db, folder_ids, limit=50)
-        messages = _build_direct_messages_with_context(title_context, question) if title_context else _build_direct_messages(question)
+        messages = (
+            _build_direct_messages_with_context(title_context, question)
+            if title_context
+            else _build_direct_messages(question)
+        )
         return messages, [], question
     # 4) 列表类问题
     if route == "db_list":
@@ -836,9 +1175,15 @@ async def _prepare_messages(request: ChatRequest, db: AsyncSession) -> tuple[lis
             related = await _is_related_to_collection(db, folder_ids, question)
         if not related and not is_collection_intent:
             return _build_direct_messages(question), [], question
-        context, sources = await _get_video_context(db, folder_ids, include_content=False, limit=50)
+        context, sources = await _get_video_context(
+            db, folder_ids, include_content=False, limit=50
+        )
         if not context:
-            return _build_fallback_messages("（暂无信息，请入库）", question), sources, question
+            return (
+                _build_fallback_messages("（暂无信息，请入库）", question),
+                sources,
+                question,
+            )
         return _build_db_list_messages(context, question), sources, question
     # 5) 总结类问题
     if route == "db_content":
@@ -846,9 +1191,15 @@ async def _prepare_messages(request: ChatRequest, db: AsyncSession) -> tuple[lis
             related = await _is_related_to_collection(db, folder_ids, question)
         if not related and not is_collection_intent:
             return _build_direct_messages(question), [], question
-        context, sources = await _get_video_context(db, folder_ids, include_content=True, limit=None)
+        context, sources = await _get_video_context(
+            db, folder_ids, include_content=True, limit=None
+        )
         if not context:
-            return _build_fallback_messages("（暂无信息，请入库）", question), sources, question
+            return (
+                _build_fallback_messages("（暂无信息，请入库）", question),
+                sources,
+                question,
+            )
         return _build_db_summary_messages(context, question), sources, question
     # 6) 检查相关性
     if related is None:
@@ -866,15 +1217,37 @@ async def _prepare_messages(request: ChatRequest, db: AsyncSession) -> tuple[lis
         docs = filtered_docs if filtered_docs else docs
         context_parts, sources, seen_bvids = [], [], set()
         for doc in docs:
-            bvid, title, content = doc.metadata.get("bvid", ""), doc.metadata.get("title", ""), doc.page_content.strip()
-            if content: context_parts.append(f"【{title}】\n{content}")
+            bvid, title, content = (
+                doc.metadata.get("bvid", ""),
+                doc.metadata.get("title", ""),
+                doc.page_content.strip(),
+            )
+            if content:
+                context_parts.append(f"【{title}】\n{content}")
             if bvid and bvid not in seen_bvids:
                 seen_bvids.add(bvid)
-                sources.append({"bvid": bvid, "title": title, "url": f"https://www.bilibili.com/video/{bvid}"})
-        return _build_rag_messages("\n\n---\n\n".join(context_parts), question), sources, question
+                sources.append(
+                    {
+                        "bvid": bvid,
+                        "title": title,
+                        "url": f"https://www.bilibili.com/video/{bvid}",
+                    }
+                )
+        return (
+            _build_rag_messages("\n\n---\n\n".join(context_parts), question),
+            sources,
+            question,
+        )
     # 兜底
-    context, sources = await _get_video_context(db, folder_ids, include_content=False, limit=50)
-    return _build_fallback_messages(context or "（暂无入库信息）", question), sources, question
+    context, sources = await _get_video_context(
+        db, folder_ids, include_content=False, limit=50
+    )
+    return (
+        _build_fallback_messages(context or "（暂无入库信息）", question),
+        sources,
+        question,
+    )
+
 
 @router.post("/ask", response_model=ChatResponse)
 async def ask_question(request: ChatRequest, db: AsyncSession = Depends(get_db)):
@@ -882,27 +1255,43 @@ async def ask_question(request: ChatRequest, db: AsyncSession = Depends(get_db))
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
+        llm_config = _resolve_llm_config()
         messages, sources, _ = await _prepare_messages(request, db)
         messages = _enforce_markdown_output(messages)
-        messages = _apply_mode_instructions(messages, request.smart_search, request.deep_think)
-        llm_config = _resolve_llm_config()
+        messages = _apply_mode_instructions(
+            messages,
+            bool(llm_config["thinking_config"]),
+        )
         client = _get_llm_client(llm_config)
         try:
-            response = client.chat.completions.create(model=llm_config["model"], messages=messages, temperature=0.5)
+            response = client.chat.completions.create(
+                model=llm_config["model"],
+                messages=messages,
+                temperature=0.5,
+                **_build_thinking_completion_options(llm_config),
+            )
             message = response.choices[0].message
             raw_answer = message.content or ""
             reasoning = getattr(message, "reasoning_content", None)
             thinking, answer = _extract_thinking_and_answer(raw_answer, reasoning)
-            return ChatResponse(answer=answer, sources=sources[:5], thinking=thinking or None)
+            return ChatResponse(
+                answer=answer, sources=sources[:5], thinking=thinking or None
+            )
         except Exception as e:
             if _is_llm_connection_error(e):
                 logger.warning(f"模型连接异常，使用降级回答: {e}")
-                return ChatResponse(answer=_build_llm_unavailable_answer(), sources=sources[:5], thinking=None)
+                return ChatResponse(
+                    answer=_build_llm_unavailable_answer(),
+                    sources=sources[:5],
+                    thinking=None,
+                )
             raise
-    except HTTPException: raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"问答失败: {e}")
         raise HTTPException(status_code=500, detail=f"问答失败: {str(e)}")
+
 
 @router.post("/ask/stream")
 async def ask_question_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)):
@@ -910,27 +1299,23 @@ async def ask_question_stream(request: ChatRequest, db: AsyncSession = Depends(g
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
+        llm_config = _resolve_llm_config()
         messages, sources, _ = await _prepare_messages(request, db)
         messages = _enforce_markdown_output(messages)
-        messages = _apply_mode_instructions(messages, request.smart_search, request.deep_think)
-        llm_config = _resolve_llm_config()
-        client = _get_llm_client(llm_config)
+        messages = _apply_mode_instructions(
+            messages,
+            bool(llm_config["thinking_config"]),
+        )
+
         def generate():
             thinking_parts: list[str] = []
             try:
-                stream = client.chat.completions.create(
-                    model=llm_config["model"],
-                    messages=messages,
-                    temperature=0.5,
-                    stream=True,
-                )
-                for chunk in stream:
-                    delta = chunk.choices[0].delta
-                    reasoning_piece = getattr(delta, "reasoning_content", None)
-                    if reasoning_piece:
-                        thinking_parts.append(reasoning_piece)
-                    if delta and delta.content:
-                        yield delta.content
+                for event_type, content in _stream_llm_events(messages):
+                    if event_type == "thinking":
+                        thinking_parts.append(content)
+                        yield _encode_thinking_delta(content)
+                    else:
+                        yield content
             except Exception as e:
                 if _is_llm_connection_error(e):
                     logger.warning(f"流式模型连接异常，使用降级回答: {e}")
@@ -940,11 +1325,14 @@ async def ask_question_stream(request: ChatRequest, db: AsyncSession = Depends(g
             if thinking_parts:
                 yield f"\n[[THINKING_JSON]]{json.dumps(''.join(thinking_parts), ensure_ascii=False)}"
             yield f"\n[[SOURCES_JSON]]{json.dumps(sources, ensure_ascii=False)}"
+
         return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
-    except HTTPException: raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"流式问答失败: {e}")
         raise HTTPException(status_code=500, detail=f"流式问答失败: {str(e)}")
+
 
 @router.post("/search")
 async def search_videos(query: str, k: int = 5):
@@ -957,14 +1345,21 @@ async def search_videos(query: str, k: int = 5):
         results, seen_bvids = [], set()
         for doc in docs:
             bvid = doc.metadata.get("bvid", "")
-            if bvid in seen_bvids: continue
+            if bvid in seen_bvids:
+                continue
             seen_bvids.add(bvid)
-            results.append({
-                "bvid": bvid,
-                "title": doc.metadata.get("title", ""),
-                "url": doc.metadata.get("url", ""),
-                "content_preview": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
-            })
+            results.append(
+                {
+                    "bvid": bvid,
+                    "title": doc.metadata.get("title", ""),
+                    "url": doc.metadata.get("url", ""),
+                    "content_preview": (
+                        doc.page_content[:200] + "..."
+                        if len(doc.page_content) > 200
+                        else doc.page_content
+                    ),
+                }
+            )
         return {"results": results}
     except Exception as e:
         logger.error(f"搜索失败: {e}")

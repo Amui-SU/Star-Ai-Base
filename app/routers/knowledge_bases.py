@@ -37,6 +37,14 @@ from app.models import (
     Workspace,
 )
 from app.routers.knowledge import _sync_folder, get_rag_service
+from app.routers.chat import (
+    _apply_mode_instructions,
+    _complete_llm_answer,
+    _encode_thinking_delta,
+    _enforce_markdown_output,
+    _resolve_llm_config,
+    _stream_llm_events,
+)
 from app.security import decrypt_text
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
@@ -89,6 +97,58 @@ def _answer_from_documents(question: str, documents: list) -> ChatResponse:
     return ChatResponse(
         answer=f"基于当前知识库内容，关于“{question}”可以参考：\n\n{context}",
         sources=[_source_from_document(document) for document in documents],
+    )
+
+
+def _build_knowledge_base_messages(
+    question: str,
+    documents: list,
+) -> list[dict]:
+    context = "\n\n---\n\n".join(
+        f"【{document.metadata.get('title') or '未命名资料'}】\n{document.page_content}"
+        for document in documents
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是知识库问答助手。请仅根据给定资料回答；"
+                "资料不足时明确说明，不要编造。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"资料：\n{context}\n\n问题：{question}",
+        },
+    ]
+    return _apply_mode_instructions(
+        _enforce_markdown_output(messages),
+        bool(_resolve_llm_config()["thinking_config"]),
+    )
+
+
+async def _load_scoped_chat_documents(
+    payload: KnowledgeBaseChatRequest,
+    knowledge_base: KnowledgeBase,
+    current_workspace: Workspace,
+    db: AsyncSession,
+) -> list:
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    bvids = await _resolve_request_scope(
+        db,
+        knowledge_base_id=knowledge_base.id,
+        folder_ids=payload.folder_ids,
+        bvids=payload.bvids,
+    )
+    return get_rag_service().search_in_knowledge_base(
+        question,
+        workspace_id=current_workspace.id,
+        knowledge_base_id=knowledge_base.id,
+        k=max(1, min(payload.k, 20)),
+        bvids=bvids,
     )
 
 
@@ -426,25 +486,29 @@ async def chat_with_knowledge_base(
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
     question = payload.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Question cannot be empty")
-
-    bvids = await _resolve_request_scope(
+    documents = await _load_scoped_chat_documents(
+        payload,
+        knowledge_base,
+        current_workspace,
         db,
-        knowledge_base_id=knowledge_base.id,
-        folder_ids=payload.folder_ids,
-        bvids=payload.bvids,
     )
-    k = max(1, min(payload.k, 20))
-    rag = get_rag_service()
-    documents = rag.search_in_knowledge_base(
+    if not documents:
+        return _answer_from_documents(question, documents)
+
+    messages = _build_knowledge_base_messages(
         question,
-        workspace_id=current_workspace.id,
-        knowledge_base_id=knowledge_base.id,
-        k=k,
-        bvids=bvids,
+        documents,
     )
-    return _answer_from_documents(question, documents)
+    try:
+        answer, thinking = _complete_llm_answer(messages)
+    except Exception as exc:
+        logger.warning(f"知识库模型回答失败，回退到检索内容: {exc}")
+        return _answer_from_documents(question, documents)
+    return ChatResponse(
+        answer=answer,
+        thinking=thinking or None,
+        sources=[_source_from_document(document) for document in documents],
+    )
 
 
 @router.post("/{knowledge_base_id}/chat/stream")
@@ -454,20 +518,44 @@ async def stream_chat_with_knowledge_base(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
-    response = await chat_with_knowledge_base(
-        payload=payload,
-        knowledge_base=knowledge_base,
-        current_workspace=current_workspace,
-        db=db,
+    question = payload.question.strip()
+    documents = await _load_scoped_chat_documents(
+        payload,
+        knowledge_base,
+        current_workspace,
+        db,
     )
+    sources = [_source_from_document(document) for document in documents]
 
     def generate():
-        yield response.answer
-        if response.thinking:
+        if not documents:
+            yield _answer_from_documents(question, documents).answer
+            yield "\n[[SOURCES_JSON]][]"
+            return
+
+        messages = _build_knowledge_base_messages(
+            question,
+            documents,
+        )
+        thinking_parts: list[str] = []
+        answer_started = False
+        try:
+            for event_type, content in _stream_llm_events(messages):
+                if event_type == "thinking":
+                    thinking_parts.append(content)
+                    yield _encode_thinking_delta(content)
+                else:
+                    answer_started = True
+                    yield content
+        except Exception as exc:
+            logger.warning(f"知识库流式模型回答失败，回退到检索内容: {exc}")
+            if not answer_started:
+                yield _answer_from_documents(question, documents).answer
+        if thinking_parts:
             yield "\n[[THINKING_JSON]]"
-            yield json.dumps(response.thinking, ensure_ascii=False)
+            yield json.dumps("".join(thinking_parts), ensure_ascii=False)
         yield "\n[[SOURCES_JSON]]"
-        yield json.dumps(response.sources, ensure_ascii=False)
+        yield json.dumps(sources, ensure_ascii=False)
 
     return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
 

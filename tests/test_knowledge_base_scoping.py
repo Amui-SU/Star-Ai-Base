@@ -316,19 +316,30 @@ async def test_scoped_chat_stream_json_encodes_thinking(client, monkeypatch):
     await register_user(client, "alice@example.com", "Alice")
     knowledge_base = await create_knowledge_base(client, "Thinking Stream KB")
 
-    async def fake_chat_with_knowledge_base(
-        payload,
-        knowledge_base,
-        current_workspace,
-        db,
-    ):
-        from app.models import ChatResponse
+    class FakeRAGService:
+        def search_in_knowledge_base(self, *args, **kwargs):
+            return [
+                type(
+                    "FakeDocument",
+                    (),
+                    {
+                        "page_content": "context",
+                        "metadata": {"bvid": "BV1", "title": "Source"},
+                    },
+                )()
+            ]
 
-        return ChatResponse(answer="done", sources=[], thinking="思考")
+    def fake_stream_llm_events(messages):
+        yield "thinking", "思考"
+        yield "answer", "done"
 
     monkeypatch.setattr(
-        "app.routers.knowledge_bases.chat_with_knowledge_base",
-        fake_chat_with_knowledge_base,
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._stream_llm_events",
+        fake_stream_llm_events,
     )
 
     response = await client.post(
@@ -338,6 +349,61 @@ async def test_scoped_chat_stream_json_encodes_thinking(client, monkeypatch):
 
     assert response.status_code == 200
     assert '[[THINKING_JSON]]"思考"' in response.text
+
+
+@pytest.mark.asyncio
+async def test_scoped_chat_stream_uses_configured_thinking(client, monkeypatch):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Native Thinking KB")
+    captured = {}
+
+    class FakeRAGService:
+        def search_in_knowledge_base(self, *args, **kwargs):
+            return [
+                type(
+                    "FakeDocument",
+                    (),
+                    {
+                        "page_content": "知识库上下文",
+                        "metadata": {
+                            "bvid": "BV1thinking",
+                            "title": "Thinking Source",
+                            "url": "https://www.bilibili.com/video/BV1thinking",
+                        },
+                    },
+                )()
+            ]
+
+    def fake_stream_llm_events(messages):
+        captured["messages"] = messages
+        yield "thinking", "先分析"
+        yield "answer", "模型答案"
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._stream_llm_events",
+        fake_stream_llm_events,
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._resolve_llm_config",
+        lambda: {
+            "thinking_config": {"thinking": {"type": "enabled"}},
+        },
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat/stream",
+        json={"question": "请回答"},
+    )
+
+    assert response.status_code == 200
+    assert "知识库上下文" in str(captured["messages"])
+    assert "原生 reasoning/thinking" in str(captured["messages"])
+    assert '[[THINKING_DELTA]]"先分析"' in response.text
+    assert "模型答案" in response.text
 
 
 @pytest.mark.asyncio

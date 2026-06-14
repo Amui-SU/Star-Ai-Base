@@ -418,8 +418,6 @@ class KnowledgeBaseSearchResponse(BaseModel):
 class KnowledgeBaseChatRequest(BaseModel):
     question: str
     k: int = 5
-    smart_search: bool = False
-    deep_think: bool = False
     folder_ids: Optional[list[int]] = None
     bvids: Optional[list[str]] = None
 
@@ -522,8 +520,6 @@ class ChatRequest(BaseModel):
     question: str
     session_id: Optional[str] = None
     folder_ids: Optional[list[int]] = None  # 指定收藏夹，None 表示全部
-    smart_search: bool = False  # 是否启用联网搜索模式（模型支持时生效）
-    deep_think: bool = False  # 是否启用深度思考模式（模型支持时生效）
 
 
 class ChatResponse(BaseModel):

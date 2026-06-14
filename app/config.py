@@ -3,6 +3,7 @@ Bilibili RAG 知识库系统
 
 核心配置模块
 """
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, AliasChoices, field_validator
 from typing import Optional
@@ -17,63 +18,98 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
-    
+
     # OpenAI / LLM 配置
     llm_provider: str = Field(default="dashscope", env="LLM_PROVIDER")
     openai_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("DASHSCOPE_API_KEY", "OPENAI_API_KEY"),
     )
-    openai_base_url: str = Field(default="https://api.openai.com/v1", env="OPENAI_BASE_URL")
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1", env="OPENAI_BASE_URL"
+    )
     llm_model: str = Field(default="gpt-4-turbo", env="LLM_MODEL")
     deepseek_api_key: str = Field(default="", env="DEEPSEEK_API_KEY")
-    deepseek_base_url: str = Field(default="https://api.deepseek.com/v1", env="DEEPSEEK_BASE_URL")
+    deepseek_base_url: str = Field(
+        default="https://api.deepseek.com/v1", env="DEEPSEEK_BASE_URL"
+    )
     deepseek_model: str = Field(default="deepseek-chat", env="DEEPSEEK_MODEL")
+    deepseek_thinking_config: str = Field(default="", env="DEEPSEEK_THINKING_CONFIG")
     openai_native_api_key: str = Field(default="", env="OPENAI_NATIVE_API_KEY")
-    openai_native_base_url: str = Field(default="https://api.openai.com/v1", env="OPENAI_NATIVE_BASE_URL")
+    openai_native_base_url: str = Field(
+        default="https://api.openai.com/v1", env="OPENAI_NATIVE_BASE_URL"
+    )
     openai_native_model: str = Field(default="gpt-4o-mini", env="OPENAI_NATIVE_MODEL")
+    openai_native_thinking_config: str = Field(
+        default="", env="OPENAI_NATIVE_THINKING_CONFIG"
+    )
     kimi_api_key: str = Field(default="", env="KIMI_API_KEY")
-    kimi_base_url: str = Field(default="https://api.moonshot.cn/v1", env="KIMI_BASE_URL")
+    kimi_base_url: str = Field(
+        default="https://api.moonshot.cn/v1", env="KIMI_BASE_URL"
+    )
     kimi_model: str = Field(default="moonshot-v1-8k", env="KIMI_MODEL")
+    kimi_thinking_config: str = Field(default="", env="KIMI_THINKING_CONFIG")
     siliconflow_api_key: str = Field(default="", env="SILICONFLOW_API_KEY")
-    siliconflow_base_url: str = Field(default="https://api.siliconflow.cn/v1", env="SILICONFLOW_BASE_URL")
-    siliconflow_model: str = Field(default="Qwen/Qwen2.5-7B-Instruct", env="SILICONFLOW_MODEL")
+    siliconflow_base_url: str = Field(
+        default="https://api.siliconflow.cn/v1", env="SILICONFLOW_BASE_URL"
+    )
+    siliconflow_model: str = Field(
+        default="Qwen/Qwen2.5-7B-Instruct", env="SILICONFLOW_MODEL"
+    )
+    siliconflow_thinking_config: str = Field(
+        default="", env="SILICONFLOW_THINKING_CONFIG"
+    )
     zhipu_api_key: str = Field(default="", env="ZHIPU_API_KEY")
-    zhipu_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4", env="ZHIPU_BASE_URL")
+    zhipu_base_url: str = Field(
+        default="https://open.bigmodel.cn/api/paas/v4", env="ZHIPU_BASE_URL"
+    )
     zhipu_model: str = Field(default="glm-4-flash", env="ZHIPU_MODEL")
-    embedding_model: str = Field(default="text-embedding-3-small", env="EMBEDDING_MODEL")
+    zhipu_thinking_config: str = Field(default="", env="ZHIPU_THINKING_CONFIG")
+    dashscope_thinking_config: str = Field(default="", env="DASHSCOPE_THINKING_CONFIG")
+    embedding_model: str = Field(
+        default="text-embedding-3-small", env="EMBEDDING_MODEL"
+    )
 
     # DashScope ASR
     dashscope_base_url: str = Field(
-        default="https://dashscope.aliyuncs.com/api/v1",
-        env="DASHSCOPE_BASE_URL"
+        default="https://dashscope.aliyuncs.com/api/v1", env="DASHSCOPE_BASE_URL"
     )
     asr_model: str = Field(default="paraformer-v2", env="ASR_MODEL")
     asr_timeout: int = Field(default=600, env="ASR_TIMEOUT")
-    asr_model_local: str = Field(default="paraformer-realtime-v2", env="ASR_MODEL_LOCAL")
+    asr_model_local: str = Field(
+        default="paraformer-realtime-v2", env="ASR_MODEL_LOCAL"
+    )
     asr_input_format: str = Field(default="pcm", env="ASR_INPUT_FORMAT")
-    
+
     # 应用配置
     app_host: str = Field(default="0.0.0.0", env="APP_HOST")
     app_port: int = Field(default=8000, env="APP_PORT")
     debug: bool = Field(default=True, env="DEBUG")
-    
+
     # 数据库
     database_url: str = Field(
-        default="sqlite+aiosqlite:///./data/bilibili_rag.db",
-        env="DATABASE_URL"
+        default="sqlite+aiosqlite:///./data/bilibili_rag.db", env="DATABASE_URL"
     )
-    
+
     # ChromaDB
     chroma_persist_directory: str = Field(
-        default="./data/chroma_db",
-        env="CHROMA_PERSIST_DIRECTORY"
+        default="./data/chroma_db", env="CHROMA_PERSIST_DIRECTORY"
     )
-    
+
     # Google OAuth
     google_client_id: str = Field(default="", env="GOOGLE_CLIENT_ID")
     google_client_secret: str = Field(default="", env="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str = Field(default="", env="GOOGLE_REDIRECT_URI")
+
+    # WeChat OAuth
+    wechat_client_id: str = Field(default="", env="WECHAT_CLIENT_ID")
+    wechat_client_secret: str = Field(default="", env="WECHAT_CLIENT_SECRET")
+    wechat_redirect_uri: str = Field(default="", env="WECHAT_REDIRECT_URI")
+
+    # QQ OAuth
+    qq_client_id: str = Field(default="", env="QQ_CLIENT_ID")
+    qq_client_secret: str = Field(default="", env="QQ_CLIENT_SECRET")
+    qq_redirect_uri: str = Field(default="", env="QQ_REDIRECT_URI")
 
     # HTTP 代理（访问 Google 等境外服务时需要）
     http_proxy: str = Field(default="", env="HTTP_PROXY")
@@ -110,10 +146,6 @@ settings = Settings()
 
 def ensure_directories():
     """确保必要的目录存在"""
-    dirs = [
-        "data",
-        settings.chroma_persist_directory,
-        "logs"
-    ]
+    dirs = ["data", settings.chroma_persist_directory, "logs"]
     for d in dirs:
         os.makedirs(d, exist_ok=True)

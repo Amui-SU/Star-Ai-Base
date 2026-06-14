@@ -1,5 +1,14 @@
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const resolveApiBaseUrl = () => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window === "undefined") return "http://localhost:8000";
+
+  const { protocol, hostname } = window.location;
+  return `${protocol}//${hostname}:8000`;
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
+
+export type OAuthProvider = "google" | "wechat" | "qq";
 
 export interface UserInfo {
   mid: number | string;
@@ -98,8 +107,6 @@ export interface KnowledgeBaseSearchResponse {
 export interface KnowledgeBaseChatRequest extends KnowledgeScopeRequest {
   question: string;
   k?: number;
-  smart_search?: boolean;
-  deep_think?: boolean;
 }
 
 export interface KnowledgeBaseBuildRequest {
@@ -234,6 +241,8 @@ export interface LLMProviderInfo {
   enabled: boolean;
   model: string;
   base_url?: string;
+  thinking_config: Record<string, unknown>;
+  thinking_template: Record<string, unknown>;
 }
 
 export interface LLMConfigResponse {
@@ -297,7 +306,16 @@ export async function request<T>(
 }
 
 export const systemAuthApi = {
-  googleLoginUrl: `${API_BASE_URL}/system-auth/google/login`,
+  getOAuthLoginUrl: (provider: OAuthProvider) => {
+    const frontendUrl =
+      typeof window === "undefined" ? "" : window.location.origin;
+    const params = new URLSearchParams();
+    if (frontendUrl) params.set("frontend_url", frontendUrl);
+    const query = params.toString();
+    return `${API_BASE_URL}/system-auth/${provider}/login${query ? `?${query}` : ""}`;
+  },
+
+  getGoogleLoginUrl: () => systemAuthApi.getOAuthLoginUrl("google"),
 
   sendCode: (email: string) =>
     request<{ message: string; code?: string }>("/system-auth/send-code", {
@@ -582,21 +600,13 @@ export const knowledgeApi = {
 };
 
 export const chatApi = {
-  ask: (
-    question: string,
-    sessionId?: string | null,
-    folderIds?: number[],
-    smartSearch = false,
-    deepThink = false,
-  ) =>
+  ask: (question: string, sessionId?: string | null, folderIds?: number[]) =>
     request<ChatResponse>("/chat/ask", {
       method: "POST",
       body: JSON.stringify({
         question,
         session_id: sessionId,
         folder_ids: folderIds,
-        smart_search: smartSearch,
-        deep_think: deepThink,
       }),
     }),
 
@@ -613,15 +623,21 @@ export const chatApi = {
 
   saveModelProviderConfig: (data: {
     provider: string;
-    api_key: string;
+    api_key?: string;
     base_url?: string;
     model?: string;
+    thinking_mode: "off" | "standard" | "custom";
+    thinking_config?: Record<string, unknown>;
   }) =>
     request<{
       ok: boolean;
       current_provider: string;
       model: string;
       provider_label: string;
+      thinking_config: Record<string, unknown>;
+      thinking_template: Record<string, unknown>;
+      verified: boolean;
+      latency_ms: number;
     }>("/chat/llm/provider-config", {
       method: "POST",
       body: JSON.stringify(data),
