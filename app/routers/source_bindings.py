@@ -12,13 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, get_current_workspace
 from app.models import (
+    FavoriteFolder,
     FavoriteFolderInfo,
+    FavoriteVideo,
     LoginStatusResponse,
     QRCodeResponse,
     SourceBinding,
     SourceBindingResponse,
     SourceCredential,
     SystemUser,
+    VideoTitleOverride,
     Workspace,
 )
 from app.routers.auth import (
@@ -31,6 +34,65 @@ from app.security import decrypt_text, encrypt_text
 from app.services.bilibili import BilibiliService
 
 router = APIRouter(prefix="/source-bindings", tags=["source-bindings"])
+
+
+class VideoTitleUpdateRequest(BaseModel):
+    bvid: str
+    title: str | None = None
+    knowledge_base_id: int
+
+
+def _normalize_bvid(value: str) -> str:
+    bvid = (value or "").strip()
+    if not bvid:
+        raise HTTPException(status_code=400, detail="bvid cannot be empty")
+    return bvid
+
+
+def _normalize_custom_title(value: str | None) -> str | None:
+    title = (value or "").strip()
+    if not title:
+        return None
+    if len(title) > 120:
+        raise HTTPException(status_code=400, detail="title cannot exceed 120 chars")
+    return title
+
+
+async def _get_video_title_overrides(
+    db: AsyncSession,
+    *,
+    workspace_id: int,
+    knowledge_base_id: int | None,
+    source_binding_id: int,
+    bvids: list[str],
+) -> dict[str, str]:
+    if not knowledge_base_id or not bvids:
+        return {}
+    result = await db.execute(
+        select(VideoTitleOverride)
+        .where(VideoTitleOverride.workspace_id == workspace_id)
+        .where(VideoTitleOverride.knowledge_base_id == knowledge_base_id)
+        .where(VideoTitleOverride.source_binding_id == source_binding_id)
+        .where(VideoTitleOverride.bvid.in_(bvids))
+        .order_by(VideoTitleOverride.id.desc())
+    )
+    overrides: dict[str, str] = {}
+    for item in result.scalars().all():
+        overrides.setdefault(item.bvid, item.custom_title)
+    return overrides
+
+
+def _with_display_title(video: dict, overrides: dict[str, str]) -> dict:
+    bvid = video.get("bvid") or ""
+    original_title = video.get("title") or bvid
+    custom_title = overrides.get(bvid)
+    return {
+        **video,
+        "title": custom_title or original_title,
+        "display_title": custom_title or original_title,
+        "original_title": original_title,
+        "custom_title": custom_title,
+    }
 
 
 def _response(binding: SourceBinding) -> SourceBindingResponse:
@@ -273,6 +335,7 @@ async def list_favorite_videos_by_binding(
     media_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=20),
+    knowledge_base_id: int | None = Query(None),
     current_user: SystemUser = Depends(get_current_user),
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
@@ -301,9 +364,17 @@ async def list_favorite_videos_by_binding(
             }
         )
 
+    overrides = await _get_video_title_overrides(
+        db,
+        workspace_id=current_workspace.id,
+        knowledge_base_id=knowledge_base_id,
+        source_binding_id=binding_id,
+        bvids=[video["bvid"] for video in videos if video.get("bvid")],
+    )
+
     return {
         "folder_info": result.get("info"),
-        "videos": videos,
+        "videos": [_with_display_title(video, overrides) for video in videos],
         "has_more": result.get("has_more", False),
         "page": page,
         "page_size": page_size,
@@ -314,6 +385,7 @@ async def list_favorite_videos_by_binding(
 async def list_all_favorite_videos_by_binding(
     binding_id: int,
     media_id: int,
+    knowledge_base_id: int | None = Query(None),
     current_user: SystemUser = Depends(get_current_user),
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
@@ -348,10 +420,90 @@ async def list_all_favorite_videos_by_binding(
             }
         )
 
+    overrides = await _get_video_title_overrides(
+        db,
+        workspace_id=current_workspace.id,
+        knowledge_base_id=knowledge_base_id,
+        source_binding_id=binding_id,
+        bvids=[video["bvid"] for video in videos],
+    )
+
     return {
         "total": len(all_videos),
         "valid": len(videos),
-        "videos": videos,
+        "videos": [_with_display_title(video, overrides) for video in videos],
+    }
+
+
+@router.put("/{binding_id}/videos/title")
+async def update_video_title_by_binding(
+    binding_id: int,
+    payload: VideoTitleUpdateRequest,
+    current_user: SystemUser = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    binding = await db.get(SourceBinding, binding_id)
+    if (
+        binding is None
+        or binding.user_id != current_user.id
+        or binding.workspace_id != current_workspace.id
+        or binding.status != "active"
+    ):
+        raise HTTPException(status_code=404, detail="Source binding not found")
+
+    bvid = _normalize_bvid(payload.bvid)
+    custom_title = _normalize_custom_title(payload.title)
+
+    membership = await db.execute(
+        select(FavoriteVideo.id)
+        .join(FavoriteFolder, FavoriteFolder.id == FavoriteVideo.folder_id)
+        .where(FavoriteVideo.workspace_id == current_workspace.id)
+        .where(FavoriteVideo.knowledge_base_id == payload.knowledge_base_id)
+        .where(FavoriteVideo.source_binding_id == binding.id)
+        .where(FavoriteVideo.bvid == bvid)
+        .where(FavoriteFolder.knowledge_base_id == payload.knowledge_base_id)
+    )
+    if membership.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Video not found in knowledge base")
+
+    existing_result = await db.execute(
+        select(VideoTitleOverride)
+        .where(VideoTitleOverride.workspace_id == current_workspace.id)
+        .where(VideoTitleOverride.knowledge_base_id == payload.knowledge_base_id)
+        .where(VideoTitleOverride.source_binding_id == binding.id)
+        .where(VideoTitleOverride.bvid == bvid)
+    )
+    existing = existing_result.scalar_one_or_none()
+
+    if custom_title is None:
+        if existing is not None:
+            await db.delete(existing)
+            await db.commit()
+        return {
+            "ok": True,
+            "bvid": bvid,
+            "custom_title": None,
+        }
+
+    if existing is None:
+        existing = VideoTitleOverride(
+            workspace_id=current_workspace.id,
+            knowledge_base_id=payload.knowledge_base_id,
+            source_binding_id=binding.id,
+            bvid=bvid,
+            custom_title=custom_title,
+            created_by=current_user.id,
+        )
+        db.add(existing)
+    else:
+        existing.custom_title = custom_title
+    await db.commit()
+
+    return {
+        "ok": True,
+        "bvid": bvid,
+        "custom_title": custom_title,
     }
 
 

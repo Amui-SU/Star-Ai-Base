@@ -1,19 +1,91 @@
 "use client";
 
 import Image from "next/image";
-import { SystemUser } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { systemAuthApi, SystemUser } from "@/lib/api";
 
 interface Props {
   user: SystemUser;
+  onUserChange: (user: SystemUser) => void;
   onLogout: () => void;
 }
 
-export default function UserMenu({ user, onLogout }: Props) {
+export default function UserMenu({ user, onUserChange, onLogout }: Props) {
   const initial = user.display_name?.charAt(0)?.toUpperCase() || "?";
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [displayName, setDisplayName] = useState(user.display_name);
+  const [savingName, setSavingName] = useState(false);
+  const [nameError, setNameError] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [open]);
+
+  const copyEmail = async () => {
+    try {
+      await navigator.clipboard.writeText(user.email);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setOpen(false);
+    onLogout();
+  };
+
+  const saveDisplayName = async () => {
+    const nextName = displayName.trim();
+    if (!nextName) {
+      setNameError("用户名不能为空");
+      return;
+    }
+    if (nextName === user.display_name) {
+      setEditingName(false);
+      setNameError("");
+      return;
+    }
+    setSavingName(true);
+    setNameError("");
+    try {
+      const nextUser = await systemAuthApi.updateDisplayName(nextName);
+      onUserChange(nextUser);
+      setEditingName(false);
+      setDisplayName(nextUser.display_name);
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : "用户名保存失败");
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   return (
-    <div className="relative group">
-      <button className="w-9 h-9 rounded-full bg-(--paper-2) text-(--ink-soft) flex items-center justify-center font-semibold text-sm border border-(--border) hover:border-(--accent) transition-all duration-200">
+    <div className="user-menu" ref={menuRef}>
+      <button
+        type="button"
+        className="user-menu-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={user.display_name}
+        onClick={() => {
+          setDisplayName(user.display_name);
+          setNameError("");
+          setEditingName(false);
+          setOpen((value) => !value);
+        }}
+      >
         {user.avatar_url ? (
           <Image
             src={user.avatar_url}
@@ -21,46 +93,135 @@ export default function UserMenu({ user, onLogout }: Props) {
             width={36}
             height={36}
             unoptimized
-            className="w-full h-full rounded-full object-cover"
+            className="user-menu-avatar"
             referrerPolicy="no-referrer"
           />
         ) : (
-          initial
+          <span className="user-menu-initial">{initial}</span>
         )}
       </button>
 
-      <div className="pointer-events-none absolute top-full right-0 mt-2 w-40 rounded-2xl border border-(--border) bg-(--panel-bg) shadow-[0_14px_30px_rgba(0,0,0,0.35)] backdrop-blur-md opacity-0 translate-y-1.5 scale-[0.98] origin-top-right transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-hover:translate-y-0 group-hover:scale-100">
-        <div className="px-4 pt-3.5 pb-4 text-center">
-          <div className="text-[10px] tracking-[0.08em] text-(--muted) mb-1">
-            当前账号
+      {open && (
+        <div className="user-menu-popover" role="menu">
+          <div className="user-menu-profile">
+            <div className="user-menu-profile-avatar">
+              {user.avatar_url ? (
+                <Image
+                  src={user.avatar_url}
+                  alt={`${user.display_name} 的头像`}
+                  width={42}
+                  height={42}
+                  unoptimized
+                  className="user-menu-avatar"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span className="user-menu-initial">{initial}</span>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="user-menu-eyebrow">当前账号</div>
+              {editingName ? (
+                <input
+                  className="user-menu-name-input"
+                  value={displayName}
+                  autoFocus
+                  maxLength={100}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      void saveDisplayName();
+                    }
+                    if (event.key === "Escape") {
+                      setEditingName(false);
+                      setDisplayName(user.display_name);
+                      setNameError("");
+                    }
+                  }}
+                />
+              ) : (
+                <div className="user-menu-name">{user.display_name}</div>
+              )}
+              <div className="user-menu-email" title={user.email}>
+                {user.email}
+              </div>
+              {nameError && <div className="user-menu-error">{nameError}</div>}
+            </div>
           </div>
-          <div className="text-sm font-semibold truncate text-(--ink-soft)">
-            {user.display_name}
+
+          <div className="user-menu-actions">
+            <button
+              type="button"
+              className="user-menu-action"
+              onClick={copyEmail}
+            >
+              <span>复制邮箱</span>
+              <span className="user-menu-action-hint">
+                {copied ? "已复制" : "Copy"}
+              </span>
+            </button>
+            {editingName ? (
+              <div className="user-menu-edit-actions">
+                <button
+                  type="button"
+                  className="user-menu-action primary"
+                  onClick={() => void saveDisplayName()}
+                  disabled={savingName}
+                >
+                  <span>{savingName ? "保存中" : "保存用户名"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="user-menu-action"
+                  onClick={() => {
+                    setEditingName(false);
+                    setDisplayName(user.display_name);
+                    setNameError("");
+                  }}
+                  disabled={savingName}
+                >
+                  <span>取消</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="user-menu-action"
+                onClick={() => {
+                  setEditingName(true);
+                  setDisplayName(user.display_name);
+                  setNameError("");
+                }}
+              >
+                <span>更改用户名</span>
+                <span className="user-menu-action-hint">Edit</span>
+              </button>
+            )}
           </div>
-          <div className="text-[10px] text-(--muted) truncate mt-0.5">
-            {user.email}
-          </div>
-        </div>
-        <button
-          onClick={onLogout}
-          className="w-full px-4 py-2.5 text-xs font-medium text-(--danger) hover:bg-(--paper-2) rounded-b-2xl transition-colors flex items-center justify-center gap-2 border-t border-(--border)"
-        >
-          <svg
-            className="w-3.5 h-3.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="user-menu-logout"
+            role="menuitem"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-            />
-          </svg>
-          退出登录
-        </button>
-      </div>
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+              />
+            </svg>
+            退出登录
+          </button>
+        </div>
+      )}
     </div>
   );
 }

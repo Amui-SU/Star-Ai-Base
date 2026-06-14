@@ -18,6 +18,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import (
     SystemAuthResponse,
+    SystemDisplayNameUpdateRequest,
     SystemLoginRequest,
     SystemRegisterRequest,
     SystemSession,
@@ -43,19 +44,23 @@ from app.security import (
 router = APIRouter(prefix="/system-auth", tags=["系统认证"])
 
 MAX_BCRYPT_PASSWORD_BYTES = 72
-_EMAIL_RE = __import__("re").compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+_EMAIL_RE = __import__("re").compile(
+    r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+)
 _CODE_TTL_SECONDS = 300  # 5 分钟有效
 _MAX_ATTEMPTS = 5  # 验证码最多错误尝试次数
 
 # IP 级别频率限制（内存）
 _ip_rate_limit: dict[str, tuple[int, float]] = {}  # ip -> (count, window_start)
-_IP_RATE_MAX = 3       # 每窗口最多 3 次
-_IP_RATE_WINDOW = 60   # 窗口 60 秒
+_IP_RATE_MAX = 3  # 每窗口最多 3 次
+_IP_RATE_WINDOW = 60  # 窗口 60 秒
 
 
 def _cleanup_rate_limits():
     now = time.time()
-    expired = [ip for ip, (_, start) in _ip_rate_limit.items() if now - start > _IP_RATE_WINDOW]
+    expired = [
+        ip for ip, (_, start) in _ip_rate_limit.items() if now - start > _IP_RATE_WINDOW
+    ]
     for ip in expired:
         del _ip_rate_limit[ip]
 
@@ -219,16 +224,20 @@ async def send_verification_code(
         )
     )
     if existing.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=429, detail="验证码已发送，请查收邮箱或等待过期后重试")
+        raise HTTPException(
+            status_code=429, detail="验证码已发送，请查收邮箱或等待过期后重试"
+        )
 
     code = f"{secrets.randbelow(1000000):06d}"
     expires_at = now_naive + timedelta(seconds=_CODE_TTL_SECONDS)
 
-    db.add(VerificationCode(
-        email=email,
-        code_hash=_hash_code(code),
-        expires_at=expires_at,
-    ))
+    db.add(
+        VerificationCode(
+            email=email,
+            code_hash=_hash_code(code),
+            expires_at=expires_at,
+        )
+    )
     await db.commit()
 
     resp: dict = {"message": "验证码已发送"}
@@ -278,7 +287,9 @@ async def register(
         code_row.attempts += 1
         await db.commit()
         remaining = _MAX_ATTEMPTS - code_row.attempts
-        raise HTTPException(status_code=400, detail=f"验证码错误，还剩 {remaining} 次尝试")
+        raise HTTPException(
+            status_code=400, detail=f"验证码错误，还剩 {remaining} 次尝试"
+        )
 
     await db.delete(code_row)  # 验证通过后删除
     await db.commit()
@@ -385,6 +396,25 @@ async def me(
     return _user_response(user)
 
 
+@router.put("/me/display-name", response_model=SystemUserResponse)
+async def update_display_name(
+    payload: SystemDisplayNameUpdateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> SystemUserResponse:
+    user = await _get_current_user(request, db)
+    display_name = payload.display_name.strip()
+    if not display_name:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    if len(display_name) > 100:
+        raise HTTPException(status_code=400, detail="用户名不能超过 100 个字符")
+
+    user.display_name = display_name
+    await db.commit()
+    await db.refresh(user)
+    return _user_response(user)
+
+
 # ── Google OAuth ──────────────────────────────────────────────
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -400,9 +430,16 @@ def _make_oauth_state() -> str:
     import hashlib
     import hmac
     import json
-    payload = json.dumps({"exp": int(time.time()) + _OAUTH_STATE_TTL, "rnd": secrets.token_hex(8)})
+
+    payload = json.dumps(
+        {"exp": int(time.time()) + _OAUTH_STATE_TTL, "rnd": secrets.token_hex(8)}
+    )
     payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-    key = hashlib.sha256(settings.google_client_secret.encode() if settings.google_client_secret else b"dev").digest()
+    key = hashlib.sha256(
+        settings.google_client_secret.encode()
+        if settings.google_client_secret
+        else b"dev"
+    ).digest()
     sig = hmac.new(key, payload_b64.encode(), hashlib.sha256).hexdigest()[:16]
     return f"{payload_b64}.{sig}"
 
@@ -414,9 +451,14 @@ def _verify_oauth_state(state: str) -> bool:
     import hmac
     import json
     from loguru import logger
+
     try:
         payload_b64, sig = state.rsplit(".", 1)
-        key = hashlib.sha256(settings.google_client_secret.encode() if settings.google_client_secret else b"dev").digest()
+        key = hashlib.sha256(
+            settings.google_client_secret.encode()
+            if settings.google_client_secret
+            else b"dev"
+        ).digest()
         expected = hmac.new(key, payload_b64.encode(), hashlib.sha256).hexdigest()[:16]
         if not hmac.compare_digest(sig, expected):
             logger.warning("OAuth state 签名不匹配")
@@ -425,7 +467,9 @@ def _verify_oauth_state(state: str) -> bool:
         data = json.loads(base64.urlsafe_b64decode(padded.encode()))
         ok = time.time() <= data["exp"]
         if not ok:
-            logger.warning(f"OAuth state 已过期: exp={data['exp']}, now={int(time.time())}")
+            logger.warning(
+                f"OAuth state 已过期: exp={data['exp']}, now={int(time.time())}"
+            )
         return ok
     except Exception as e:
         logger.warning(f"OAuth state 解析失败: {type(e).__name__}: {e}")
@@ -486,6 +530,7 @@ async def google_callback(
     if not proxy:
         try:
             from urllib.request import getproxies
+
             sys_proxy = getproxies().get("https") or getproxies().get("http") or ""
             if sys_proxy and sys_proxy.startswith("http"):
                 proxy = sys_proxy
@@ -527,10 +572,12 @@ async def google_callback(
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         logger.error(f"Google OAuth httpx 阶段异常: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"Google 登录异常: {type(e).__name__}: {e}")
-
+        raise HTTPException(
+            status_code=500, detail=f"Google 登录异常: {type(e).__name__}: {e}"
+        )
 
     try:
         # 校验邮箱已验证
@@ -561,17 +608,23 @@ async def google_callback(
             workspace = Workspace(name=f"{name} 的个人空间", owner_user_id=user.id)
             db.add(workspace)
             await db.flush()
-            db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role="owner"))
+            db.add(
+                WorkspaceMember(
+                    workspace_id=workspace.id, user_id=user.id, role="owner"
+                )
+            )
         elif picture and not user.avatar_url:
             user.avatar_url = picture
 
         # 创建会话并设置 Cookie
         token = create_session_token()
-        db.add(SystemSession(
-            user_id=user.id,
-            session_token_hash=hash_token(token),
-            expires_at=session_expires_at().replace(tzinfo=None),
-        ))
+        db.add(
+            SystemSession(
+                user_id=user.id,
+                session_token_hash=hash_token(token),
+                expires_at=session_expires_at().replace(tzinfo=None),
+            )
+        )
         await db.commit()
 
         frontend_url = "http://localhost:3000"
@@ -582,6 +635,9 @@ async def google_callback(
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         logger.error(f"Google OAuth 回调异常: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"Google 登录异常: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Google 登录异常: {type(e).__name__}: {e}"
+        )

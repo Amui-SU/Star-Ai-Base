@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { DevIndicatorGuard } from "@/components/DevIndicatorGuard";
 import "./globals.css";
 
 const body = Inter({
@@ -23,7 +24,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body className={`${body.variable} antialiased`}>{children}</body>
+      <body className={`${body.variable} antialiased`}>
+        <DevIndicatorGuard />
+        {children}
+      </body>
     </html>
   );
 }

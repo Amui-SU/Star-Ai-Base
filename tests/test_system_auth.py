@@ -42,6 +42,34 @@ async def test_register_login_and_me(client):
 
 
 @pytest.mark.asyncio
+async def test_update_display_name(client):
+    code = await _send_code(client, "renamer@example.com")
+    assert code is not None
+
+    register_response = await client.post(
+        "/system-auth/register",
+        json={
+            "email": "renamer@example.com",
+            "password": "correct horse battery staple",
+            "display_name": "Old Name",
+            "code": code,
+        },
+    )
+    assert register_response.status_code == 200
+
+    update_response = await client.put(
+        "/system-auth/me/display-name",
+        json={"display_name": "New Name"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["display_name"] == "New Name"
+
+    me_response = await client.get("/system-auth/me")
+    assert me_response.status_code == 200
+    assert me_response.json()["display_name"] == "New Name"
+
+
+@pytest.mark.asyncio
 async def test_register_rejects_invalid_email(client):
     response = await client.post(
         "/system-auth/register",
@@ -184,5 +212,3 @@ async def test_code_attempts_limit(client):
     )
     assert resp.status_code == 400
     assert "次数过多" in resp.json()["detail"]
-
-

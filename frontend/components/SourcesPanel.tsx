@@ -45,6 +45,9 @@ export default function SourcesPanel({
   const [customVideoNames, setCustomVideoNames] = useState<
     Record<string, string>
   >({});
+  const [editingVideoId, setEditingVideoId] = useState<string | null>(null);
+  const [editingVideoName, setEditingVideoName] = useState("");
+  const [savingVideoId, setSavingVideoId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [building, setBuilding] = useState(false);
   const [progress, setProgress] = useState<BuildStatus | null>(null);
@@ -129,42 +132,71 @@ export default function SourcesPanel({
     return () => onBuildingChange?.(false);
   }, [building, onBuildingChange]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      try {
-        const raw = localStorage.getItem("custom_video_names");
-        if (raw) {
-          const parsed = JSON.parse(raw) as Record<string, string>;
-          setCustomVideoNames(parsed || {});
-        }
-      } catch {
-        // 忽略本地解析异常
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+  const getVideoTitle = (video: Video) =>
+    customVideoNames[video.bvid] ||
+    video.display_title ||
+    video.custom_title ||
+    video.title;
 
-  const saveCustomNames = (next: Record<string, string>) => {
-    setCustomVideoNames(next);
-    try {
-      localStorage.setItem("custom_video_names", JSON.stringify(next));
-    } catch {
-      // 忽略本地存储异常
-    }
+  const getOriginalVideoTitle = (video: Video) =>
+    video.original_title || video.title || video.bvid;
+
+  const startRenameVideo = (video: Video) => {
+    setEditingVideoId(video.bvid);
+    setEditingVideoName(getVideoTitle(video));
   };
 
-  const renameVideo = (video: Video) => {
-    const current = customVideoNames[video.bvid] || video.title;
-    const nextName = window.prompt("请输入自定义视频名称", current);
-    if (nextName === null) return;
-    const trimmed = nextName.trim();
-    const nextMap = { ...customVideoNames };
-    if (!trimmed || trimmed === video.title) {
-      delete nextMap[video.bvid];
-    } else {
-      nextMap[video.bvid] = trimmed;
+  const applyVideoTitle = (
+    videos: Video[] | undefined,
+    bvid: string,
+    customTitle: string | null,
+  ) =>
+    videos?.map((video) =>
+      video.bvid === bvid
+        ? {
+            ...video,
+            custom_title: customTitle,
+            display_title: customTitle || getOriginalVideoTitle(video),
+            title: customTitle || getOriginalVideoTitle(video),
+          }
+        : video,
+    );
+
+  const saveVideoTitle = async (video: Video, title: string) => {
+    const originalTitle = getOriginalVideoTitle(video);
+    const trimmed = title.trim();
+    const customTitle = !trimmed || trimmed === originalTitle ? null : trimmed;
+    setSavingVideoId(video.bvid);
+    try {
+      const res = await sourceBindingApi.updateVideoTitle(sourceBindingId, {
+        bvid: video.bvid,
+        title: customTitle,
+        knowledge_base_id: knowledgeBaseId,
+      });
+      const nextCustomTitle = res.custom_title ?? null;
+      setCustomVideoNames((prev) => {
+        const next = { ...prev };
+        if (nextCustomTitle) {
+          next[video.bvid] = nextCustomTitle;
+        } else {
+          delete next[video.bvid];
+        }
+        return next;
+      });
+      setFolders((prev) =>
+        prev.map((folder) => ({
+          ...folder,
+          videos: applyVideoTitle(folder.videos, video.bvid, nextCustomTitle),
+        })),
+      );
+      setEditingVideoId(null);
+      setEditingVideoName("");
+      setMessage(nextCustomTitle ? "已保存自定义视频名" : "已恢复原始视频名");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "保存视频名称失败");
+    } finally {
+      setSavingVideoId(null);
     }
-    saveCustomNames(nextMap);
   };
 
   // 刷新
@@ -209,6 +241,7 @@ export default function SourcesPanel({
         const res = await sourceBindingApi.getAllFavoriteVideos(
           sourceBindingId,
           id,
+          knowledgeBaseId,
         );
         setFolders((prev) =>
           prev.map((f) =>
@@ -484,54 +517,131 @@ export default function SourcesPanel({
                         ) : f.videos?.length === 0 ? (
                           <div className="text-xs text-(--muted)">暂无视频</div>
                         ) : (
-                          f.videos?.map((v) => (
-                            <div key={v.bvid} className="video-item">
-                              <button
-                                type="button"
-                                className="video-play-btn"
-                                onClick={() =>
-                                  setPlayingVideo({
-                                    bvid: v.bvid,
-                                    title: customVideoNames[v.bvid] || v.title,
-                                  })
-                                }
-                                title="在线播放"
-                                aria-label={`播放 ${customVideoNames[v.bvid] || v.title}`}
-                              >
-                                ▶
-                              </button>
-                              <button
-                                type="button"
-                                className="video-rename-btn"
-                                title="重命名"
-                                aria-label={`重命名 ${customVideoNames[v.bvid] || v.title}`}
-                                onClick={() => renameVideo(v)}
-                              >
-                                <svg
-                                  className="w-3 h-3"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
+                          f.videos?.map((v) => {
+                            const displayTitle = getVideoTitle(v);
+                            const originalTitle = getOriginalVideoTitle(v);
+                            const isEditing = editingVideoId === v.bvid;
+                            const isSaving = savingVideoId === v.bvid;
+
+                            return (
+                              <div key={v.bvid} className="video-card">
+                                <button
+                                  type="button"
+                                  className="video-play-btn"
+                                  onClick={() =>
+                                    setPlayingVideo({
+                                      bvid: v.bvid,
+                                      title: displayTitle,
+                                    })
+                                  }
+                                  title="在线播放"
+                                  aria-label={`播放 ${displayTitle}`}
                                 >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M15.232 5.232l3.536 3.536M9 11l6.768-6.768a2.5 2.5 0 013.536 0l.232.232a2.5 2.5 0 010 3.536L12.768 14.768A2 2 0 0111.354 15H9v-2.354A2 2 0 019.586 11.939zM5 19h14"
-                                  />
-                                </svg>
-                              </button>
-                              <a
-                                href={`https://www.bilibili.com/video/${v.bvid}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="truncate"
-                                aria-label={customVideoNames[v.bvid] || v.title}
-                              >
-                                {customVideoNames[v.bvid] || v.title}
-                              </a>
-                            </div>
-                          ))
+                                  ▶
+                                </button>
+                                <div className="video-card-body">
+                                  {isEditing ? (
+                                    <input
+                                      className="video-title-input"
+                                      value={editingVideoName}
+                                      onChange={(event) =>
+                                        setEditingVideoName(event.target.value)
+                                      }
+                                      autoFocus
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          void saveVideoTitle(
+                                            v,
+                                            editingVideoName,
+                                          );
+                                        }
+                                        if (event.key === "Escape") {
+                                          setEditingVideoId(null);
+                                          setEditingVideoName("");
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    <a
+                                      href={`https://www.bilibili.com/video/${v.bvid}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="video-card-title truncate"
+                                      aria-label={displayTitle}
+                                    >
+                                      {displayTitle}
+                                    </a>
+                                  )}
+                                  <div className="video-card-meta">
+                                    <span title={originalTitle}>
+                                      {originalTitle}
+                                    </span>
+                                    {v.custom_title &&
+                                      v.custom_title !== originalTitle && (
+                                        <span className="video-card-badge">
+                                          自定义
+                                        </span>
+                                      )}
+                                  </div>
+                                </div>
+                                <div className="video-card-actions">
+                                  {isEditing ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="video-card-action primary"
+                                        onClick={() =>
+                                          void saveVideoTitle(
+                                            v,
+                                            editingVideoName,
+                                          )
+                                        }
+                                        disabled={isSaving}
+                                      >
+                                        {isSaving ? "保存中" : "保存"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="video-card-action"
+                                        onClick={() => {
+                                          setEditingVideoId(null);
+                                          setEditingVideoName("");
+                                        }}
+                                        disabled={isSaving}
+                                      >
+                                        取消
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="video-card-action"
+                                        onClick={() => startRenameVideo(v)}
+                                      >
+                                        重命名
+                                      </button>
+                                      {(v.custom_title ||
+                                        getVideoTitle(v) !== originalTitle) && (
+                                        <button
+                                          type="button"
+                                          className="video-card-action"
+                                          onClick={() =>
+                                            void saveVideoTitle(
+                                              v,
+                                              originalTitle,
+                                            )
+                                          }
+                                        >
+                                          恢复
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
                         )}
                       </div>
                     </div>
@@ -574,17 +684,19 @@ export default function SourcesPanel({
         <button
           onClick={buildKnowledge}
           disabled={selected.size === 0 || building || !knowledgeBaseId}
-          className="btn glass-action-btn w-full"
+          className={`sources-ingest-button ${
+            selected.size > 0 && knowledgeBaseId ? "active" : "idle"
+          }`}
         >
           {knowledgeBaseId ? getButtonText() : "请先在侧栏创建知识库"}
         </button>
 
         {knowledgeBaseId ? (
-          <p className="text-xs text-(--muted) text-center mt-2">
+          <p className="sources-ingest-hint">
             入库到 {targetKnowledgeBase} 后，可在右侧选择收藏夹或视频提问
           </p>
         ) : (
-          <p className="text-xs text-(--muted) text-center mt-2">
+          <p className="sources-ingest-hint">
             创建知识库后即可将收藏夹内容入库
           </p>
         )}

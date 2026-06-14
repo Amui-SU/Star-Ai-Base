@@ -743,6 +743,9 @@ export default function ChatPanel({
     !llmChecking && llmHealth?.latency_ms != null
       ? `${llmHealth.latency_ms}ms`
       : "-- ms";
+  const modelStatusTitle = activeProvider
+    ? `${modelStatusText} · ${modelLatencyText} · ${activeProvider.label} · ${activeProvider.model}`
+    : `${modelStatusText} · ${modelLatencyText}`;
 
   useEffect(() => {
     adjustComposerHeight();
@@ -759,79 +762,39 @@ export default function ChatPanel({
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="model-status-card">
-            <span
-              className={`status-pill model-health-pill ${
-                llmChecking ? "empty" : modelReady ? "ok" : "alert"
-              }`}
-              title={llmHealth?.message || "模型状态检查中"}
-            >
-              {activeProvider && (
-                <Image
-                  src={
-                    providerLogoMap[activeProvider.provider] ||
-                    "/logos/qwen-icon.png"
-                  }
-                  alt={`${activeProvider.label} logo`}
-                  width={14}
-                  height={14}
-                  unoptimized
-                  className="model-health-logo"
-                />
-              )}
-              <span>{modelStatusText}</span>
-              <span className="model-latency">{modelLatencyText}</span>
-            </span>
-            <span className="mx-1 h-4 w-px bg-(--border)" aria-hidden="true" />
             <div className="relative" ref={modelMenuRef}>
               <button
                 type="button"
                 disabled={llmSwitching}
                 onClick={() => setModelMenuOpen((v) => !v)}
-                className="inline-flex items-center gap-1 rounded-full bg-transparent hover:bg-(--paper-3) h-[26px] px-2 transition disabled:opacity-50"
-                title={
-                  activeProvider
-                    ? `${activeProvider.label} · ${activeProvider.model}`
-                    : "模型选择"
-                }
+                className={`model-selector-trigger ${
+                  llmChecking ? "empty" : modelReady ? "ok" : "alert"
+                }`}
+                title={modelStatusTitle}
                 aria-label="模型选择"
               >
-                {activeProvider && (
-                  <>
-                    <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-sm">
-                      <Image
-                        src={
-                          providerLogoMap[activeProvider.provider] ||
-                          "/logos/qwen-icon.png"
-                        }
-                        alt={`${activeProvider.label} logo`}
-                        width={12}
-                        height={12}
-                        unoptimized
-                        className="rounded-sm object-contain"
-                      />
-                    </span>
-                    <span className="text-[10px] text-(--ink-soft) leading-none max-w-[96px] truncate">
-                      {activeProvider.label}
-                    </span>
-                    <svg
-                      className="w-2.5 h-2.5 text-(--muted)"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 9l-7 7-7-7"
-                      />
-                    </svg>
-                  </>
-                )}
+                <Image
+                  src={
+                    activeProvider
+                      ? providerLogoMap[activeProvider.provider] ||
+                        "/logos/qwen-icon.png"
+                      : "/logos/qwen-icon.png"
+                  }
+                  alt={
+                    activeProvider
+                      ? `${activeProvider.label} logo`
+                      : "model logo"
+                  }
+                  width={16}
+                  height={16}
+                  unoptimized
+                  className="model-health-logo"
+                />
+                <span className="model-latency">{modelLatencyText}</span>
               </button>
 
               {modelMenuOpen && (
-                <div className="absolute top-[34px] left-1/2 -translate-x-1/2 z-20 w-[198px] max-w-[calc(100vw-32px)] rounded-xl border border-(--border) bg-(--paper-2) shadow-xl p-2 flex flex-col gap-2.5 backdrop-blur-sm">
+                <div className="model-provider-menu">
                   {providersForMenu.map((p) => (
                     <button
                       key={p.provider}
@@ -845,18 +808,16 @@ export default function ChatPanel({
                         }
                         setModelMenuOpen(false);
                       }}
-                      className={`w-full inline-flex items-center min-h-[44px] rounded-lg px-1.5 py-2.5 text-left overflow-hidden transition ${
-                        p.provider === currentProvider
-                          ? "bg-(--paper-3) text-(--ink-soft) ring-1 ring-[rgba(95,163,255,0.55)] shadow-[inset_0_0_0_1px_rgba(95,163,255,0.18)]"
-                          : "text-(--muted) hover:bg-(--paper-3)"
-                      } disabled:opacity-45`}
+                      className={`model-provider-option ${
+                        p.provider === currentProvider ? "active" : ""
+                      }`}
                       title={
                         p.enabled
                           ? `${p.label} · ${p.model}`
                           : `${p.label}（未配置）`
                       }
                     >
-                      <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 translate-x-4">
+                      <span className="inline-flex min-w-0 flex-1 items-center gap-1.5">
                         <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-(--paper)">
                           <Image
                             src={
@@ -879,21 +840,22 @@ export default function ChatPanel({
                           </span>
                         </span>
                       </span>
-                      <span className="inline-flex shrink-0 items-center gap-1 -translate-x-4">
-                        {p.enabled ? (
-                          <span className="whitespace-nowrap text-[8px] px-1 py-0.5 rounded-full bg-[rgba(47,124,120,0.12)] text-[#1f7a75] border border-[rgba(47,124,120,0.28)]">
-                            就绪
-                          </span>
-                        ) : (
-                          <span className="whitespace-nowrap text-[8px] px-1 py-0.5 rounded-full bg-(--paper) text-(--accent-strong) border border-[rgba(217,139,43,0.35)]">
-                            未配置
-                          </span>
-                        )}
-                        {p.provider === currentProvider && p.enabled && (
-                          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[rgba(95,163,255,0.18)] text-(--accent-strong) text-[10px]">
-                            ✓
-                          </span>
-                        )}
+                      <span className="inline-flex shrink-0 items-center gap-1">
+                        <span
+                          className={`status-pill ${
+                            p.enabled
+                              ? p.provider === currentProvider
+                                ? "ok"
+                                : "empty"
+                              : "partial"
+                          }`}
+                        >
+                          {p.enabled
+                            ? p.provider === currentProvider
+                              ? "当前"
+                              : "就绪"
+                            : "未配置"}
+                        </span>
                       </span>
                     </button>
                   ))}

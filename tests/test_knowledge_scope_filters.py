@@ -8,6 +8,7 @@ from app.models import (
     KnowledgeBaseChatRequest,
     KnowledgeBaseSearchRequest,
     VideoCache,
+    VideoTitleOverride,
 )
 
 
@@ -41,6 +42,8 @@ async def _add_video(
     title: str,
     processed: bool = True,
     favorite_knowledge_base_id: int | None = None,
+    workspace_id: int | None = None,
+    source_binding_id: int | None = None,
     cache_knowledge_base_id: int | None = None,
 ) -> None:
     session.add(
@@ -52,6 +55,8 @@ async def _add_video(
                 if favorite_knowledge_base_id is None
                 else favorite_knowledge_base_id
             ),
+            workspace_id=workspace_id,
+            source_binding_id=source_binding_id,
         )
     )
     session.add(
@@ -231,6 +236,45 @@ async def test_scope_membership_ignores_overwritten_video_cache_knowledge_base(
     ]
     assert folder_scope == ["BV1SHARED"]
     assert explicit_scope == ["BV1SHARED"]
+
+
+@pytest.mark.asyncio
+async def test_list_scope_options_uses_custom_video_title(db_session_factory):
+    from app.services.knowledge_scope import list_scope_options
+
+    async with db_session_factory() as session:
+        folder = await _add_folder(
+            session,
+            knowledge_base_id=1,
+            media_id=10,
+            title="Current",
+        )
+        await _add_video(
+            session,
+            folder=folder,
+            bvid="BV1CUSTOM",
+            title="Original video",
+            workspace_id=1,
+        )
+        session.add(
+            VideoTitleOverride(
+                workspace_id=1,
+                knowledge_base_id=1,
+                source_binding_id=None,
+                bvid="BV1CUSTOM",
+                custom_title="Custom video",
+                created_by=1,
+            )
+        )
+        await session.commit()
+
+        options = await list_scope_options(session, knowledge_base_id=1)
+
+    video = options.folders[0].videos[0]
+    assert video.title == "Custom video"
+    assert video.display_title == "Custom video"
+    assert video.original_title == "Original video"
+    assert video.custom_title == "Custom video"
 
 
 @pytest.mark.asyncio

@@ -58,6 +58,9 @@ export interface KnowledgeBase {
 export interface KnowledgeScopeVideo {
   bvid: string;
   title: string;
+  original_title?: string | null;
+  custom_title?: string | null;
+  display_title?: string | null;
 }
 
 export interface KnowledgeScopeFolder {
@@ -124,6 +127,9 @@ export interface FavoriteFolder {
 export interface Video {
   bvid: string;
   title: string;
+  display_title?: string | null;
+  original_title?: string | null;
+  custom_title?: string | null;
   cover?: string;
   duration?: number;
   owner?: string;
@@ -322,6 +328,12 @@ export const systemAuthApi = {
     }),
 
   me: () => request<SystemUser>("/system-auth/me"),
+
+  updateDisplayName: (display_name: string) =>
+    request<SystemUser>("/system-auth/me/display-name", {
+      method: "PUT",
+      body: JSON.stringify({ display_name }),
+    }),
 };
 
 export const sourceBindingApi = {
@@ -347,6 +359,7 @@ export const sourceBindingApi = {
   getFavoriteVideos: (
     bindingId: number,
     mediaId: number,
+    knowledgeBaseId?: number | null,
     page = 1,
     pageSize = 20,
   ) =>
@@ -357,12 +370,29 @@ export const sourceBindingApi = {
       page: number;
       page_size: number;
     }>(
-      `/source-bindings/${bindingId}/favorites/${mediaId}/videos?page=${page}&page_size=${pageSize}`,
+      `/source-bindings/${bindingId}/favorites/${mediaId}/videos?page=${page}&page_size=${pageSize}${
+        knowledgeBaseId ? `&knowledge_base_id=${knowledgeBaseId}` : ""
+      }`,
     ),
 
-  getAllFavoriteVideos: (bindingId: number, mediaId: number) =>
+  getAllFavoriteVideos: (
+    bindingId: number,
+    mediaId: number,
+    knowledgeBaseId?: number | null,
+  ) =>
     request<{ total: number; valid: number; videos: Video[] }>(
-      `/source-bindings/${bindingId}/favorites/${mediaId}/all-videos`,
+      `/source-bindings/${bindingId}/favorites/${mediaId}/all-videos${
+        knowledgeBaseId ? `?knowledge_base_id=${knowledgeBaseId}` : ""
+      }`,
+    ),
+
+  updateVideoTitle: (
+    bindingId: number,
+    data: { bvid: string; title?: string | null; knowledge_base_id: number },
+  ) =>
+    request<{ ok: boolean; bvid: string; custom_title?: string | null }>(
+      `/source-bindings/${bindingId}/videos/title`,
+      { method: "PUT", body: JSON.stringify(data) },
     ),
 
   organizePreview: (bindingId: number, folderId: number) =>
@@ -443,7 +473,7 @@ export const knowledgeBaseApi = {
     ),
 
   delete: (knowledgeBaseId: number) =>
-    request<{ ok: boolean; deleted_vectors: number }>(
+    request<{ ok: boolean; deleted_vectors: number; warning?: string }>(
       `/knowledge-bases/${knowledgeBaseId}`,
       { method: "DELETE" },
     ),

@@ -247,7 +247,11 @@ export default function Home() {
                   )}
                 </button>
               )}
-              <UserMenu user={systemUser} onLogout={onLogout} />
+              <UserMenu
+                user={systemUser}
+                onUserChange={setSystemUser}
+                onLogout={onLogout}
+              />
             </div>
           </header>
 

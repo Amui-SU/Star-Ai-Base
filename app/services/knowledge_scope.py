@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -10,6 +10,7 @@ from app.models import (
     KnowledgeScopeOptionsResponse,
     KnowledgeScopeVideo,
     VideoCache,
+    VideoTitleOverride,
 )
 
 
@@ -59,25 +60,61 @@ async def list_scope_options(
 
     folder_ids = [folder.id for folder in folders]
     video_result = await db.execute(
-        select(FavoriteVideo.folder_id, VideoCache.bvid, VideoCache.title)
+        select(
+            FavoriteVideo.folder_id,
+            VideoCache.bvid,
+            VideoCache.title,
+            VideoTitleOverride.custom_title,
+        )
         .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid)
+        .join(
+            VideoTitleOverride,
+            (VideoTitleOverride.workspace_id == FavoriteVideo.workspace_id)
+            & (VideoTitleOverride.knowledge_base_id == FavoriteVideo.knowledge_base_id)
+            & or_(
+                VideoTitleOverride.source_binding_id == FavoriteVideo.source_binding_id,
+                and_(
+                    VideoTitleOverride.source_binding_id.is_(None),
+                    FavoriteVideo.source_binding_id.is_(None),
+                ),
+            )
+            & (VideoTitleOverride.bvid == FavoriteVideo.bvid),
+            isouter=True,
+        )
         .where(
             FavoriteVideo.folder_id.in_(folder_ids),
             FavoriteVideo.knowledge_base_id == knowledge_base_id,
             VideoCache.is_processed.is_(True),
         )
-        .order_by(FavoriteVideo.folder_id, VideoCache.bvid)
+        .order_by(
+            FavoriteVideo.folder_id,
+            VideoCache.bvid,
+            VideoTitleOverride.id.desc(),
+        )
     )
 
     videos_by_folder: dict[int, list[KnowledgeScopeVideo]] = {
         folder_id: [] for folder_id in folder_ids
     }
     seen_by_folder: dict[int, set[str]] = {folder_id: set() for folder_id in folder_ids}
-    for folder_id, bvid, title in video_result:
+    for folder_id, bvid, title, custom_title in video_result:
         if bvid in seen_by_folder[folder_id]:
             continue
         seen_by_folder[folder_id].add(bvid)
-        videos_by_folder[folder_id].append(KnowledgeScopeVideo(bvid=bvid, title=title))
+        if custom_title:
+            videos_by_folder[folder_id].append(
+                KnowledgeScopeVideo(
+                    bvid=bvid,
+                    title=custom_title,
+                    original_title=title,
+                    custom_title=custom_title,
+                    display_title=custom_title,
+                )
+            )
+        else:
+            videos_by_folder[folder_id].append(
+                KnowledgeScopeVideo(bvid=bvid, title=title)
+            )
 
     return KnowledgeScopeOptionsResponse(
         folders=[

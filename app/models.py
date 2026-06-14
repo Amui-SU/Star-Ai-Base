@@ -281,6 +281,37 @@ class FavoriteVideo(Base):
     created_at = Column(DateTime, default=_utc_now)
 
 
+class VideoTitleOverride(Base):
+    """用户自定义视频标题"""
+
+    __tablename__ = "video_title_overrides"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "knowledge_base_id",
+            "source_binding_id",
+            "bvid",
+            name="uq_video_title_override_scope",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id"), index=True, nullable=False
+    )
+    knowledge_base_id = Column(
+        Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=False
+    )
+    source_binding_id = Column(
+        Integer, ForeignKey("source_bindings.id"), index=True, nullable=True
+    )
+    bvid = Column(String(20), index=True, nullable=False)
+    custom_title = Column(String(500), nullable=False)
+    created_by = Column(Integer, ForeignKey("system_users.id"), nullable=False)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
+
+
 class IngestionTask(Base):
     """入库任务表"""
 
@@ -330,6 +361,10 @@ class SystemRegisterRequest(BaseModel):
 class SystemLoginRequest(BaseModel):
     email: str
     password: str
+
+
+class SystemDisplayNameUpdateRequest(BaseModel):
+    display_name: str
 
 
 class SystemUserResponse(BaseModel):
@@ -392,6 +427,9 @@ class KnowledgeBaseChatRequest(BaseModel):
 class KnowledgeScopeVideo(BaseModel):
     bvid: str
     title: str
+    original_title: Optional[str] = None
+    custom_title: Optional[str] = None
+    display_title: Optional[str] = None
 
 
 class KnowledgeScopeFolder(BaseModel):

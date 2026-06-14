@@ -32,6 +32,8 @@ from app.models import (
     SourceBinding,
     SourceCredential,
     SystemUser,
+    VideoCache,
+    VideoTitleOverride,
     Workspace,
 )
 from app.routers.knowledge import _sync_folder, get_rag_service
@@ -205,6 +207,7 @@ async def get_knowledge_base_stats(
 @router.get(
     "/{knowledge_base_id}/scope-options",
     response_model=KnowledgeScopeOptionsResponse,
+    response_model_exclude_none=True,
 )
 async def get_knowledge_scope_options(
     knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
@@ -475,20 +478,44 @@ async def delete_knowledge_base(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """删除知识库及其所有向量数据。"""
+    """删除知识库及其相关数据。"""
     kb_id = knowledge_base.id
 
-    # 删除向量
+    deleted_vectors = 0
+    warning: str | None = None
     try:
         rag = get_rag_service()
-        deleted = rag.delete_by_knowledge_base(kb_id)
-        logger.info(f"已删除知识库 {kb_id}（{knowledge_base.name}）的 {deleted} 个向量")
-    except Exception as e:
-        logger.error(f"删除知识库向量失败 [{kb_id}]: {e}")
-        raise HTTPException(status_code=500, detail=f"删除向量数据失败: {e}")
+        deleted_vectors = rag.delete_by_knowledge_base(kb_id)
+        logger.info(
+            f"已删除知识库 {kb_id}（{knowledge_base.name}）的 {deleted_vectors} 个向量"
+        )
+    except Exception as exc:
+        warning = f"向量清理失败，知识库记录已删除：{exc}"
+        logger.warning(f"删除知识库向量失败 [{kb_id}]: {exc}")
 
-    # 删除数据库记录
+    await db.execute(
+        IngestionTask.__table__.delete().where(IngestionTask.knowledge_base_id == kb_id)
+    )
+    await db.execute(
+        FavoriteFolder.__table__.delete().where(
+            FavoriteFolder.knowledge_base_id == kb_id
+        )
+    )
+    await db.execute(
+        FavoriteVideo.__table__.delete().where(FavoriteVideo.knowledge_base_id == kb_id)
+    )
+    await db.execute(
+        VideoCache.__table__.delete().where(VideoCache.knowledge_base_id == kb_id)
+    )
+    await db.execute(
+        VideoTitleOverride.__table__.delete().where(
+            VideoTitleOverride.knowledge_base_id == kb_id
+        )
+    )
     await db.delete(knowledge_base)
     await db.commit()
 
-    return {"ok": True, "deleted_vectors": deleted}
+    result: dict[str, object] = {"ok": True, "deleted_vectors": deleted_vectors}
+    if warning:
+        result["warning"] = warning
+    return result

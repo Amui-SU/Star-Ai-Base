@@ -130,3 +130,51 @@ def test_scoped_rag_search_keeps_legacy_filter_for_empty_scope(bvids):
             {"knowledge_base_id": 20},
         ]
     }
+
+
+@pytest.mark.asyncio
+async def test_delete_knowledge_base_continues_when_vector_cleanup_fails(
+    client, monkeypatch
+):
+    code_resp = await client.post(
+        "/system-auth/send-code", json={"email": "delete@example.com"}
+    )
+    assert code_resp.status_code == 200
+    code = code_resp.json()["code"]
+
+    register_response = await client.post(
+        "/system-auth/register",
+        json={
+            "email": "delete@example.com",
+            "password": "correct horse battery staple",
+            "display_name": "Delete User",
+            "code": code,
+        },
+    )
+    assert register_response.status_code == 200
+
+    create_response = await client.post(
+        "/knowledge-bases",
+        json={"name": "Delete Target"},
+    )
+    assert create_response.status_code == 200
+    knowledge_base = create_response.json()
+
+    class BrokenRag:
+        def delete_by_knowledge_base(self, knowledge_base_id: int):
+            raise RuntimeError("missing api key")
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service", lambda: BrokenRag()
+    )
+
+    delete_response = await client.delete(f"/knowledge-bases/{knowledge_base['id']}")
+    assert delete_response.status_code == 200
+    payload = delete_response.json()
+    assert payload["ok"] is True
+    assert payload["deleted_vectors"] == 0
+    assert "missing api key" in payload["warning"]
+
+    list_response = await client.get("/knowledge-bases")
+    assert list_response.status_code == 200
+    assert all(item["id"] != knowledge_base["id"] for item in list_response.json())
