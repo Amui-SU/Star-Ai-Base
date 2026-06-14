@@ -1,5 +1,5 @@
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export interface UserInfo {
   mid: number | string;
@@ -55,7 +55,28 @@ export interface KnowledgeBase {
   description?: string;
 }
 
-export interface KnowledgeBaseSearchRequest {
+export interface KnowledgeScopeVideo {
+  bvid: string;
+  title: string;
+}
+
+export interface KnowledgeScopeFolder {
+  media_id: number;
+  title: string;
+  video_count: number;
+  videos: KnowledgeScopeVideo[];
+}
+
+export interface KnowledgeScopeOptions {
+  folders: KnowledgeScopeFolder[];
+}
+
+export interface KnowledgeScopeRequest {
+  folder_ids?: number[];
+  bvids?: string[];
+}
+
+export interface KnowledgeBaseSearchRequest extends KnowledgeScopeRequest {
   query: string;
   k?: number;
 }
@@ -71,7 +92,7 @@ export interface KnowledgeBaseSearchResponse {
   results: KnowledgeBaseSearchResult[];
 }
 
-export interface KnowledgeBaseChatRequest {
+export interface KnowledgeBaseChatRequest extends KnowledgeScopeRequest {
   question: string;
   k?: number;
   smart_search?: boolean;
@@ -366,6 +387,11 @@ export const knowledgeBaseApi = {
 
   stats: (knowledgeBaseId: number) =>
     request<KnowledgeStats>(`/knowledge-bases/${knowledgeBaseId}/stats`),
+
+  getScopeOptions: (knowledgeBaseId: number) =>
+    request<KnowledgeScopeOptions>(
+      `/knowledge-bases/${knowledgeBaseId}/scope-options`,
+    ),
 
   search: (knowledgeBaseId: number, data: KnowledgeBaseSearchRequest) =>
     request<KnowledgeBaseSearchResponse>(
