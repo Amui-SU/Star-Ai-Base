@@ -28,6 +28,7 @@ from app.models import (
     KnowledgeBaseSearchRequest,
     KnowledgeBaseSearchResponse,
     KnowledgeBaseSearchResult,
+    KnowledgeScopeOptionsResponse,
     SourceBinding,
     SourceCredential,
     SystemUser,
@@ -38,6 +39,11 @@ from app.security import decrypt_text
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
+from app.services.knowledge_scope import (
+    InvalidKnowledgeScope,
+    list_scope_options,
+    resolve_scope_bvids,
+)
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
 
@@ -82,6 +88,24 @@ def _answer_from_documents(question: str, documents: list) -> ChatResponse:
         answer=f"基于当前知识库内容，关于“{question}”可以参考：\n\n{context}",
         sources=[_source_from_document(document) for document in documents],
     )
+
+
+async def _resolve_request_scope(
+    db: AsyncSession,
+    *,
+    knowledge_base_id: int,
+    folder_ids: list[int] | None,
+    bvids: list[str] | None,
+) -> list[str] | None:
+    try:
+        return await resolve_scope_bvids(
+            db,
+            knowledge_base_id=knowledge_base_id,
+            folder_media_ids=folder_ids,
+            requested_bvids=bvids,
+        )
+    except InvalidKnowledgeScope as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[KnowledgeBaseResponse])
@@ -132,7 +156,12 @@ async def get_knowledge_base_stats(
     """知识库统计信息（含文件夹入库状态）。"""
     # 查询该知识库下的收藏夹状态
     folder_rows = await db.execute(
-        select(FavoriteFolder.id, FavoriteFolder.media_id, FavoriteFolder.last_sync_at, FavoriteFolder.media_count)
+        select(
+            FavoriteFolder.id,
+            FavoriteFolder.media_id,
+            FavoriteFolder.last_sync_at,
+            FavoriteFolder.media_count,
+        )
         .where(FavoriteFolder.knowledge_base_id == knowledge_base.id)
         .where(FavoriteFolder.last_sync_at.isnot(None))
         .order_by(FavoriteFolder.updated_at.desc())
@@ -142,21 +171,25 @@ async def get_knowledge_base_stats(
         fid, media_id, last_sync, media_count = row
         # 统计已入库视频数
         count_result = await db.execute(
-            select(func.count(func.distinct(FavoriteVideo.bvid)))
-            .where(FavoriteVideo.folder_id == fid)
+            select(func.count(func.distinct(FavoriteVideo.bvid))).where(
+                FavoriteVideo.folder_id == fid
+            )
         )
         indexed = count_result.scalar() or 0
-        folders_data.append({
-            "media_id": media_id,
-            "indexed_count": indexed,
-            "media_count": media_count,
-            "last_sync_at": last_sync.isoformat() if last_sync else None,
-        })
+        folders_data.append(
+            {
+                "media_id": media_id,
+                "indexed_count": indexed,
+                "media_count": media_count,
+                "last_sync_at": last_sync.isoformat() if last_sync else None,
+            }
+        )
 
     # 总视频数
     total_result = await db.execute(
-        select(func.count(func.distinct(FavoriteVideo.bvid)))
-        .where(FavoriteVideo.knowledge_base_id == knowledge_base.id)
+        select(func.count(func.distinct(FavoriteVideo.bvid))).where(
+            FavoriteVideo.knowledge_base_id == knowledge_base.id
+        )
     )
     total_videos = total_result.scalar() or 0
 
@@ -167,6 +200,17 @@ async def get_knowledge_base_stats(
         "folders": folders_data,
         "scoped": True,
     }
+
+
+@router.get(
+    "/{knowledge_base_id}/scope-options",
+    response_model=KnowledgeScopeOptionsResponse,
+)
+async def get_knowledge_scope_options(
+    knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeScopeOptionsResponse:
+    return await list_scope_options(db, knowledge_base_id=knowledge_base.id)
 
 
 @router.post("/{knowledge_base_id}/build", response_model=KnowledgeBaseBuildResponse)
@@ -345,11 +389,18 @@ async def search_knowledge_base(
     payload: KnowledgeBaseSearchRequest,
     knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
     current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
 ) -> KnowledgeBaseSearchResponse:
     query = payload.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Search query cannot be empty")
 
+    bvids = await _resolve_request_scope(
+        db,
+        knowledge_base_id=knowledge_base.id,
+        folder_ids=payload.folder_ids,
+        bvids=payload.bvids,
+    )
     k = max(1, min(payload.k, 20))
     rag = get_rag_service()
     documents = rag.search_in_knowledge_base(
@@ -357,6 +408,7 @@ async def search_knowledge_base(
         workspace_id=current_workspace.id,
         knowledge_base_id=knowledge_base.id,
         k=k,
+        bvids=bvids,
     )
     return KnowledgeBaseSearchResponse(
         results=[_search_result(document) for document in documents]
@@ -368,11 +420,18 @@ async def chat_with_knowledge_base(
     payload: KnowledgeBaseChatRequest,
     knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
     current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
+    bvids = await _resolve_request_scope(
+        db,
+        knowledge_base_id=knowledge_base.id,
+        folder_ids=payload.folder_ids,
+        bvids=payload.bvids,
+    )
     k = max(1, min(payload.k, 20))
     rag = get_rag_service()
     documents = rag.search_in_knowledge_base(
@@ -380,6 +439,7 @@ async def chat_with_knowledge_base(
         workspace_id=current_workspace.id,
         knowledge_base_id=knowledge_base.id,
         k=k,
+        bvids=bvids,
     )
     return _answer_from_documents(question, documents)
 
@@ -389,11 +449,13 @@ async def stream_chat_with_knowledge_base(
     payload: KnowledgeBaseChatRequest,
     knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
     current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
 ):
     response = await chat_with_knowledge_base(
         payload=payload,
         knowledge_base=knowledge_base,
         current_workspace=current_workspace,
+        db=db,
     )
 
     def generate():
