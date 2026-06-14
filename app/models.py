@@ -55,9 +55,15 @@ class VideoCache(Base):
     process_error = Column(Text, nullable=True)  # 处理错误信息
 
     # 多用户归属（向后兼容，旧数据为 NULL）
-    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=True)
-    knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True)
-    source_binding_id = Column(Integer, ForeignKey("source_bindings.id"), index=True, nullable=True)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id"), index=True, nullable=True
+    )
+    knowledge_base_id = Column(
+        Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True
+    )
+    source_binding_id = Column(
+        Integer, ForeignKey("source_bindings.id"), index=True, nullable=True
+    )
 
     created_at = Column(DateTime, default=_utc_now)
     updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
@@ -235,9 +241,15 @@ class FavoriteFolder(Base):
     last_sync_at = Column(DateTime, nullable=True)
 
     # 多用户归属（向后兼容，旧数据为 NULL）
-    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=True)
-    knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True)
-    source_binding_id = Column(Integer, ForeignKey("source_bindings.id"), index=True, nullable=True)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id"), index=True, nullable=True
+    )
+    knowledge_base_id = Column(
+        Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True
+    )
+    source_binding_id = Column(
+        Integer, ForeignKey("source_bindings.id"), index=True, nullable=True
+    )
 
     created_at = Column(DateTime, default=_utc_now)
     updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
@@ -256,9 +268,15 @@ class FavoriteVideo(Base):
     is_selected = Column(Boolean, default=True)
 
     # 多用户归属（向后兼容，旧数据为 NULL）
-    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=True)
-    knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True)
-    source_binding_id = Column(Integer, ForeignKey("source_bindings.id"), index=True, nullable=True)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id"), index=True, nullable=True
+    )
+    knowledge_base_id = Column(
+        Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True
+    )
+    source_binding_id = Column(
+        Integer, ForeignKey("source_bindings.id"), index=True, nullable=True
+    )
 
     created_at = Column(DateTime, default=_utc_now)
 
@@ -270,8 +288,12 @@ class IngestionTask(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     task_id = Column(String(64), unique=True, index=True, nullable=False)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id"), index=True, nullable=False)
-    knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=False)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id"), index=True, nullable=False
+    )
+    knowledge_base_id = Column(
+        Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=False
+    )
     source_binding_id = Column(Integer, ForeignKey("source_bindings.id"), nullable=True)
     created_by = Column(Integer, ForeignKey("system_users.id"), nullable=False)
 
@@ -343,6 +365,8 @@ class KnowledgeBaseResponse(BaseModel):
 class KnowledgeBaseSearchRequest(BaseModel):
     query: str
     k: int = 5
+    folder_ids: Optional[list[int]] = None
+    bvids: Optional[list[str]] = None
 
 
 class KnowledgeBaseSearchResult(BaseModel):
@@ -361,6 +385,24 @@ class KnowledgeBaseChatRequest(BaseModel):
     k: int = 5
     smart_search: bool = False
     deep_think: bool = False
+    folder_ids: Optional[list[int]] = None
+    bvids: Optional[list[str]] = None
+
+
+class KnowledgeScopeVideo(BaseModel):
+    bvid: str
+    title: str
+
+
+class KnowledgeScopeFolder(BaseModel):
+    media_id: int
+    title: str
+    video_count: int
+    videos: list[KnowledgeScopeVideo]
+
+
+class KnowledgeScopeOptionsResponse(BaseModel):
+    folders: list[KnowledgeScopeFolder]
 
 
 class KnowledgeBaseBuildRequest(BaseModel):
