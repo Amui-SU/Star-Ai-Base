@@ -1,12 +1,12 @@
 export interface ChatScopeSelection {
-  folderIds: number[];
-  bvids: string[];
+  folderIds: readonly number[];
+  bvids: readonly string[];
 }
 
-export const EMPTY_CHAT_SCOPE: ChatScopeSelection = {
-  folderIds: [],
-  bvids: [],
-};
+export const EMPTY_CHAT_SCOPE: ChatScopeSelection = Object.freeze({
+  folderIds: Object.freeze<number[]>([]),
+  bvids: Object.freeze<string[]>([]),
+});
 
 export function normalizeScope(scope: ChatScopeSelection): ChatScopeSelection {
   return {
@@ -58,8 +58,8 @@ export function toScopePayload(scope: ChatScopeSelection): {
 
   return {
     ...(normalized.folderIds.length > 0
-      ? { folder_ids: normalized.folderIds }
+      ? { folder_ids: [...normalized.folderIds] }
       : {}),
-    ...(normalized.bvids.length > 0 ? { bvids: normalized.bvids } : {}),
+    ...(normalized.bvids.length > 0 ? { bvids: [...normalized.bvids] } : {}),
   };
 }

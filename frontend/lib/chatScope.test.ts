@@ -16,6 +16,20 @@ describe("chat scope contracts", () => {
     expect(toScopePayload(EMPTY_CHAT_SCOPE)).toEqual({});
   });
 
+  it("deeply freezes the shared empty selection against mutation", () => {
+    expect(Object.isFrozen(EMPTY_CHAT_SCOPE)).toBe(true);
+    expect(Object.isFrozen(EMPTY_CHAT_SCOPE.folderIds)).toBe(true);
+    expect(Object.isFrozen(EMPTY_CHAT_SCOPE.bvids)).toBe(true);
+
+    expect(() => (EMPTY_CHAT_SCOPE.folderIds as number[]).push(1)).toThrow(
+      TypeError,
+    );
+    expect(() => (EMPTY_CHAT_SCOPE.bvids as string[]).push("BV1")).toThrow(
+      TypeError,
+    );
+    expect(EMPTY_CHAT_SCOPE).toEqual({ folderIds: [], bvids: [] });
+  });
+
   it("normalizes duplicate and unordered selections without mutating input", () => {
     const scope = {
       folderIds: [30, 10, 20, 10],
