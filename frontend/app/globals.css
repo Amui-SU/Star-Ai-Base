@@ -3506,7 +3506,11 @@ html.light .model-status-card {
   padding: 12px 14px;
   background: var(--input-bg);
   color: var(--ink);
-  font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font:
+    12px/1.65 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
   outline: none;
 }
 
@@ -4963,7 +4967,7 @@ html.light .status-pill.empty {
   .panel-chat-embedded .panel-inner {
     width: 100%;
     min-width: 0;
-    padding: 8px 12px max(10px, env(safe-area-inset-bottom));
+    padding: 10px 14px max(12px, env(safe-area-inset-bottom));
   }
 
   .panel-chat-embedded .panel-body {
@@ -4980,8 +4984,27 @@ html.light .status-pill.empty {
 
   .chat-context-row {
     min-height: 26px;
-    margin-bottom: 4px;
+    margin-bottom: 12px;
     padding-left: 34px;
+  }
+
+  .panel-chat-embedded .chat-scroll {
+    gap: 24px;
+    padding-top: 2px;
+  }
+
+  .panel-chat-embedded .chat-window {
+    gap: 18px;
+    padding-right: 8px;
+  }
+
+  .message.user .message-main {
+    align-items: flex-end;
+    padding-right: clamp(12px, 4vw, 34px);
+  }
+
+  .message.user .message-bubble {
+    max-width: min(82%, 600px);
   }
 
   .panel-chat-embedded .chat-scroll:has(.empty-state) {
@@ -5093,13 +5116,22 @@ html.light .status-pill.empty {
   }
 
   .panel-chat-embedded .panel-inner {
-    padding: 7px 9px max(8px, env(safe-area-inset-bottom));
+    padding: 9px 11px max(10px, env(safe-area-inset-bottom));
   }
 
   .chat-context-row {
     min-height: 24px;
-    margin-bottom: 2px;
+    margin-bottom: 10px;
     padding-left: 32px;
+  }
+
+  .panel-chat-embedded .chat-window {
+    gap: 17px;
+    padding-right: 6px;
+  }
+
+  .message.user .message-main {
+    padding-right: clamp(14px, 5vw, 28px);
   }
 
   .empty-state {

@@ -1,8 +1,12 @@
 const resolveApiBaseUrl = () => {
-  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (configuredApiUrl) return configuredApiUrl;
   if (typeof window === "undefined") return "http://localhost:8000";
 
   const { protocol, hostname } = window.location;
+  if (protocol !== "http:" && protocol !== "https:") {
+    return "http://localhost:8000";
+  }
   return `${protocol}//${hostname}:8000`;
 };
 
@@ -278,14 +282,22 @@ export async function request<T>(
   path: string,
   { query, headers, ...init }: RequestOptions = {},
 ): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${withQuery(path, query)}`, {
-    credentials: "include",
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${withQuery(path, query)}`, {
+      credentials: "include",
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+      },
+    });
+  } catch (error) {
+    throw new Error(
+      `无法连接到后端服务（${API_BASE_URL}）。请确认后端已启动，且接口地址可访问。`,
+      { cause: error },
+    );
+  }
 
   if (!response.ok) {
     let message = response.statusText || "Request failed";

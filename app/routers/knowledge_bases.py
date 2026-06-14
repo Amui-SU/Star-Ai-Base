@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from langchain.schema import Document
 from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -127,6 +128,53 @@ def _build_knowledge_base_messages(
     )
 
 
+async def _load_db_fallback_documents(
+    db: AsyncSession,
+    *,
+    knowledge_base_id: int,
+    bvids: list[str] | None,
+    k: int,
+) -> list:
+    stmt = (
+        select(
+            VideoCache.bvid,
+            VideoCache.title,
+            VideoCache.description,
+            VideoCache.content,
+        )
+        .join(FavoriteVideo, FavoriteVideo.bvid == VideoCache.bvid)
+        .where(FavoriteVideo.knowledge_base_id == knowledge_base_id)
+        .where(VideoCache.is_processed.is_(True))
+    )
+    if bvids is not None:
+        if not bvids:
+            return []
+        stmt = stmt.where(FavoriteVideo.bvid.in_(bvids))
+    stmt = stmt.limit(max(1, k))
+
+    rows = await db.execute(stmt)
+    documents = []
+    seen_bvids = set()
+    for bvid, title, description, content in rows.fetchall():
+        if not bvid or bvid in seen_bvids:
+            continue
+        text = (content or description or title or "").strip()
+        if not text:
+            continue
+        seen_bvids.add(bvid)
+        documents.append(
+            Document(
+                page_content=text,
+                metadata={
+                    "bvid": bvid,
+                    "title": title or bvid,
+                    "url": f"https://www.bilibili.com/video/{bvid}",
+                },
+            )
+        )
+    return documents
+
+
 async def _load_scoped_chat_documents(
     payload: KnowledgeBaseChatRequest,
     knowledge_base: KnowledgeBase,
@@ -143,12 +191,27 @@ async def _load_scoped_chat_documents(
         folder_ids=payload.folder_ids,
         bvids=payload.bvids,
     )
-    return get_rag_service().search_in_knowledge_base(
-        question,
-        workspace_id=current_workspace.id,
+    k = max(1, min(payload.k, 20))
+    try:
+        documents = get_rag_service().search_in_knowledge_base(
+            question,
+            workspace_id=current_workspace.id,
+            knowledge_base_id=knowledge_base.id,
+            k=k,
+            bvids=bvids,
+        )
+        if documents:
+            return documents
+    except Exception as exc:
+        logger.warning(
+            f"知识库向量检索不可用 [{knowledge_base.id}]，回退到数据库内容: {exc}"
+        )
+
+    return await _load_db_fallback_documents(
+        db,
         knowledge_base_id=knowledge_base.id,
-        k=max(1, min(payload.k, 20)),
         bvids=bvids,
+        k=k,
     )
 
 

@@ -209,7 +209,9 @@ export default function ChatPanel({
     const mode = inferThinkingMode(thinkingConfig, thinkingTemplate);
     setConfigThinkingMode(mode);
     setConfigThinkingJson(
-      formatThinkingConfig(mode === "standard" ? thinkingTemplate : thinkingConfig),
+      formatThinkingConfig(
+        mode === "standard" ? thinkingTemplate : thinkingConfig,
+      ),
     );
     setConfigError("");
     setModelMenuOpen(false);
@@ -401,6 +403,7 @@ export default function ChatPanel({
       const streamUrl = knowledgeBaseApi.chatStreamUrl(knowledgeBaseId);
       const response = await fetch(streamUrl, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         signal: abortController.signal,
         body: JSON.stringify(scopedPayload),
@@ -441,7 +444,11 @@ export default function ChatPanel({
 
       const parsed = parseChatStream(buffer);
       const extracted = extractThinkingFromContent(parsed.answer);
-      const finalThinking = (parsed.thinking || extracted.thinking || "").trim();
+      const finalThinking = (
+        parsed.thinking ||
+        extracted.thinking ||
+        ""
+      ).trim();
       const finalAnswer = extracted.answer;
 
       setMessages((prev) =>
@@ -896,18 +903,6 @@ export default function ChatPanel({
           </div>
         </div>
       </div>
-
-      {messages.length > 0 && (
-        <div className="fixed top-4 right-4 z-40">
-          <button
-            onClick={() => setMessages([])}
-            className="btn btn-ghost"
-            title="清空"
-          >
-            清空对话
-          </button>
-        </div>
-      )}
 
       <div className="panel-body">
         <div className="chat-scroll">
@@ -1485,7 +1480,8 @@ export default function ChatPanel({
                   </label>
                 )}
                 <p className="thinking-config-help">
-                  保存时会发送最小测试请求。验证成功后才写入 .env.local，并自动应用到后续对话。
+                  保存时会发送最小测试请求。验证成功后才写入
+                  .env.local，并自动应用到后续对话。
                 </p>
               </fieldset>
 
