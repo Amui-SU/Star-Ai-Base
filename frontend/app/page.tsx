@@ -16,6 +16,16 @@ import ChatPanel from "@/components/ChatPanel";
 import { systemAuthApi, sourceBindingApi } from "@/lib/api";
 import type { KnowledgeBase, SystemUser } from "@/lib/api";
 
+const isMobileViewport = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia("(max-width: 1024px)").matches;
+
+const getInitialSidebarOpen = () => {
+  if (typeof window === "undefined") return true;
+  const saved = localStorage.getItem("sidebar_open");
+  if (saved !== null) return saved === "true";
+  return !isMobileViewport();
+};
 export default function Home() {
   const MIN_SIDEBAR_WIDTH = 310;
   const [systemUser, setSystemUser] = useState<SystemUser | null>(null);
@@ -47,10 +57,7 @@ export default function Home() {
     const raw = Number(localStorage.getItem("sidebar_width"));
     return Number.isFinite(raw) && raw >= MIN_SIDEBAR_WIDTH ? raw : 320;
   });
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return localStorage.getItem("sidebar_open") !== "false";
-  });
+  const [isSidebarOpen, setIsSidebarOpen] = useState(getInitialSidebarOpen);
   const [isDragging, setIsDragging] = useState(false);
 
   // 主题初始化（默认深色）
@@ -199,9 +206,21 @@ export default function Home() {
     {
       "--sidebar-width": `${sidebarWidth}px`,
     };
+  const sidebarPanelStyle: CSSProperties = isMobileViewport()
+    ? {}
+    : {
+        width: sidebarWidth,
+        opacity: isSidebarOpen ? 1 : 0,
+        transform: isSidebarOpen
+          ? "translateX(0) scale(1)"
+          : "translateX(-14px) scale(0.985)",
+        pointerEvents: isSidebarOpen ? "auto" : "none",
+        transition:
+          "transform 340ms cubic-bezier(0.22,1,0.36,1), opacity 240ms ease",
+      };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isSidebarOpen ? "sidebar-open" : "sidebar-closed"}`}>
       <main className="app-main">
         <section className="workspace-card relative" ref={containerRef}>
           <header className="workspace-topbar">
@@ -266,6 +285,7 @@ export default function Home() {
               }`}
               style={sidebarHandleStyle}
               title={isSidebarOpen ? "收起收藏夹" : "展开收藏夹"}
+              aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
             >
               <svg
                 className={`w-4 h-4 transition-transform ${isSidebarOpen ? "" : "rotate-180"}`}
@@ -293,16 +313,8 @@ export default function Home() {
             >
               <aside
                 className="panel panel-sources"
-                style={{
-                  width: sidebarWidth,
-                  opacity: isSidebarOpen ? 1 : 0,
-                  transform: isSidebarOpen
-                    ? "translateX(0) scale(1)"
-                    : "translateX(-14px) scale(0.985)",
-                  pointerEvents: isSidebarOpen ? "auto" : "none",
-                  transition:
-                    "transform 340ms cubic-bezier(0.22,1,0.36,1), opacity 240ms ease",
-                }}
+                style={sidebarPanelStyle}
+
               >
                 {/* 知识库选择 */}
                 <KnowledgeBasePanel
@@ -335,8 +347,22 @@ export default function Home() {
                     onBuildingChange={setKnowledgeBuilding}
                   />
                 ) : (
-                  <div className="flex-1 flex items-center justify-center p-6 text-center text-sm text-(--muted)">
-                    点击「导入」选择资料来源
+                  <div className="sources-initial-empty">
+                    <div className="sources-empty-card">
+                      <div className="sources-empty-kicker">收藏夹资料</div>
+                      <div className="sources-empty-title">暂无收藏夹资料</div>
+                      <p>
+                        导入 B 站收藏夹、视频 URL
+                        或更多平台资料后，会显示在这里。
+                      </p>
+                      <button
+                        type="button"
+                        className="sources-empty-action"
+                        onClick={() => setShowImport(true)}
+                      >
+                        选择资料来源
+                      </button>
+                    </div>
                   </div>
                 )}
               </aside>

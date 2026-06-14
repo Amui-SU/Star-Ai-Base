@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Image from "next/image";
 import ChatScopePicker from "@/components/ChatScopePicker";
+import ThinkingProcess from "@/components/ThinkingProcess";
 import {
   chatApi,
   knowledgeBaseApi,
@@ -22,12 +23,22 @@ import {
   scopeSummary,
   toScopePayload,
 } from "@/lib/chatScope";
+import { parseChatStream } from "@/lib/chatStream";
+import {
+  formatThinkingConfig,
+  inferThinkingMode,
+  parseThinkingConfig,
+  type ThinkingMode,
+} from "@/lib/thinkingConfig";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   thinking?: string;
+  thinkingActive?: boolean;
+  thinkingStartedAt?: number;
+  thinkingDurationMs?: number;
   sources?: Array<{ bvid: string; title: string; url: string }>;
 }
 type Reaction = "like" | "dislike" | null;
@@ -120,11 +131,6 @@ export default function ChatPanel({
   >(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingQuestion, setEditingQuestion] = useState("");
-  const [smartSearchEnabled, setSmartSearchEnabled] = useState(false);
-  const [deepThinkEnabled, setDeepThinkEnabled] = useState(false);
-  const [thinkingExpandedMap, setThinkingExpandedMap] = useState<
-    Record<string, boolean>
-  >({});
   const [reactionMap, setReactionMap] = useState<Record<string, Reaction>>({});
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
   const [scopeOptions, setScopeOptions] = useState<KnowledgeScopeOptions>({
@@ -143,10 +149,16 @@ export default function ChatPanel({
     label: string;
     model: string;
     base_url?: string;
+    enabled?: boolean;
+    thinking_config?: Record<string, unknown>;
+    thinking_template?: Record<string, unknown>;
   } | null>(null);
   const [configApiKey, setConfigApiKey] = useState("");
   const [configBaseUrl, setConfigBaseUrl] = useState("");
   const [configModel, setConfigModel] = useState("");
+  const [configThinkingMode, setConfigThinkingMode] =
+    useState<ThinkingMode>("off");
+  const [configThinkingJson, setConfigThinkingJson] = useState("{}");
   const [configSaving, setConfigSaving] = useState(false);
   const [configError, setConfigError] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -154,9 +166,6 @@ export default function ChatPanel({
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   const scopeNoticeTimerRef = useRef<number | null>(null);
-  const sourcesMarker = "[[SOURCES_JSON]]";
-  const thinkingMarker = "[[THINKING_JSON]]";
-  const THINKING_PREVIEW_LIMIT = 220;
   const providerLogoMap: Record<string, string> = {
     deepseek: "/logos/deepseek-icon.png",
     dashscope: "/logos/dashscope-icon.png",
@@ -187,11 +196,21 @@ export default function ChatPanel({
     label: string;
     model: string;
     base_url?: string;
+    enabled?: boolean;
+    thinking_config?: Record<string, unknown>;
+    thinking_template?: Record<string, unknown>;
   }) => {
     setConfigProvider(provider);
     setConfigApiKey("");
     setConfigBaseUrl(provider.base_url || "");
     setConfigModel(provider.model || "");
+    const thinkingConfig = provider.thinking_config || {};
+    const thinkingTemplate = provider.thinking_template || {};
+    const mode = inferThinkingMode(thinkingConfig, thinkingTemplate);
+    setConfigThinkingMode(mode);
+    setConfigThinkingJson(
+      formatThinkingConfig(mode === "standard" ? thinkingTemplate : thinkingConfig),
+    );
     setConfigError("");
     setModelMenuOpen(false);
   };
@@ -202,23 +221,36 @@ export default function ChatPanel({
     setConfigApiKey("");
     setConfigBaseUrl("");
     setConfigModel("");
+    setConfigThinkingMode("off");
+    setConfigThinkingJson("{}");
     setConfigError("");
   };
 
   const handleSaveProviderConfig = async () => {
     if (!configProvider || configSaving) return;
-    if (!configApiKey.trim()) {
+    if (!configProvider.enabled && !configApiKey.trim()) {
       setConfigError("请填写 API Key");
       return;
+    }
+    let thinkingConfig: Record<string, unknown> | undefined;
+    if (configThinkingMode === "custom") {
+      try {
+        thinkingConfig = parseThinkingConfig(configThinkingJson);
+      } catch (err) {
+        setConfigError(err instanceof Error ? err.message : "思考配置无效");
+        return;
+      }
     }
     setConfigSaving(true);
     setConfigError("");
     try {
-      await chatApi.saveModelProviderConfig({
+      const saved = await chatApi.saveModelProviderConfig({
         provider: configProvider.provider,
-        api_key: configApiKey.trim(),
+        api_key: configApiKey.trim() || undefined,
         base_url: configBaseUrl.trim() || undefined,
         model: configModel.trim() || undefined,
+        thinking_mode: configThinkingMode,
+        thinking_config: thinkingConfig,
       });
       const [cfg, health] = await Promise.all([
         chatApi.getModelConfig(),
@@ -226,6 +258,14 @@ export default function ChatPanel({
       ]);
       setLlmConfig(cfg);
       setLlmHealth(health);
+      setScopeNotice(`模型与思考配置验证成功 · ${saved.latency_ms}ms`);
+      if (scopeNoticeTimerRef.current) {
+        window.clearTimeout(scopeNoticeTimerRef.current);
+      }
+      scopeNoticeTimerRef.current = window.setTimeout(() => {
+        setScopeNotice("");
+        scopeNoticeTimerRef.current = null;
+      }, 2600);
       closeProviderConfig(true);
     } catch (err) {
       setConfigError(err instanceof Error ? err.message : "保存失败");
@@ -325,11 +365,30 @@ export default function ChatPanel({
   const fetchAssistantAnswer = async (q: string, assistantId: string) => {
     const abortController = new AbortController();
     streamAbortRef.current = abortController;
+    const configuredProvider = llmConfig?.providers.find(
+      (provider) => provider.provider === llmConfig.current_provider,
+    );
+    const thinkingConfigured =
+      Object.keys(configuredProvider?.thinking_config || {}).length > 0;
+    const thinkingStartedAt = Date.now();
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === assistantId
+          ? {
+              ...message,
+              thinking: thinkingConfigured ? "" : undefined,
+              thinkingActive: thinkingConfigured,
+              thinkingStartedAt: thinkingConfigured
+                ? thinkingStartedAt
+                : undefined,
+              thinkingDurationMs: undefined,
+            }
+          : message,
+      ),
+    );
     const scopedPayload: KnowledgeBaseChatRequest = {
       question: q,
       k: 5,
-      smart_search: smartSearchEnabled,
-      deep_think: deepThinkEnabled,
       ...toScopePayload(chatScope),
     };
     let streamTimedOut = false;
@@ -363,81 +422,27 @@ export default function ChatPanel({
           const chunk = decoder.decode(value, { stream: !done });
           if (chunk) {
             buffer += chunk;
-            const markerIndexes = [
-              buffer.indexOf(thinkingMarker),
-              buffer.indexOf(sourcesMarker),
-            ].filter((idx) => idx >= 0);
-            const firstMarkerIndex =
-              markerIndexes.length > 0 ? Math.min(...markerIndexes) : -1;
-            const visibleText =
-              firstMarkerIndex >= 0
-                ? buffer.slice(0, firstMarkerIndex)
-                : buffer;
+            const parsed = parseChatStream(buffer);
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantId ? { ...m, content: visibleText } : m,
+                m.id === assistantId
+                  ? {
+                      ...m,
+                      content: parsed.answer,
+                      thinking: parsed.thinking || m.thinking,
+                      sources: parsed.complete ? parsed.sources : m.sources,
+                    }
+                  : m,
               ),
             );
           }
         }
       }
 
-      const extractMarkerJson = (
-        fullText: string,
-        marker: string,
-        nextMarker?: string,
-      ) => {
-        const start = fullText.indexOf(marker);
-        if (start < 0) return "";
-        const from = start + marker.length;
-        if (!nextMarker) return fullText.slice(from).trim();
-        const next = fullText.indexOf(nextMarker, from);
-        if (next < 0) return fullText.slice(from).trim();
-        return fullText.slice(from, next).trim();
-      };
-
-      const thinkingJson = extractMarkerJson(
-        buffer,
-        thinkingMarker,
-        sourcesMarker,
-      );
-      const sourcesJson = extractMarkerJson(buffer, sourcesMarker);
-      const contentEndIndexes = [
-        buffer.indexOf(thinkingMarker),
-        buffer.indexOf(sourcesMarker),
-      ].filter((idx) => idx >= 0);
-      const contentEnd =
-        contentEndIndexes.length > 0
-          ? Math.min(...contentEndIndexes)
-          : buffer.length;
-      const finalContent = buffer.slice(0, contentEnd);
-
-      let parsedThinking = "";
-      if (thinkingJson) {
-        try {
-          parsedThinking = JSON.parse(thinkingJson);
-        } catch {
-          parsedThinking = "";
-        }
-      }
-
-      let parsedSources: Array<{ bvid: string; title: string; url: string }> =
-        [];
-      if (sourcesJson) {
-        try {
-          const parsed = JSON.parse(sourcesJson);
-          if (Array.isArray(parsed)) parsedSources = parsed;
-        } catch {
-          parsedSources = [];
-        }
-      }
-
-      const extracted = extractThinkingFromContent(finalContent);
-      const finalThinking = (parsedThinking || extracted.thinking || "").trim();
-      const finalAnswer = parsedThinking
-        ? finalContent.trim() ||
-          (finalThinking ? "（已生成思考过程，展开查看）" : "")
-        : extracted.answer;
+      const parsed = parseChatStream(buffer);
+      const extracted = extractThinkingFromContent(parsed.answer);
+      const finalThinking = (parsed.thinking || extracted.thinking || "").trim();
+      const finalAnswer = extracted.answer;
 
       setMessages((prev) =>
         prev.map((m) =>
@@ -446,7 +451,7 @@ export default function ChatPanel({
                 ...m,
                 content: finalAnswer,
                 thinking: finalThinking || undefined,
-                sources: parsedSources,
+                sources: parsed.sources,
               }
             : m,
         ),
@@ -478,13 +483,13 @@ export default function ChatPanel({
               : m,
           ),
         );
-      } catch (err) {
+      } catch (fallbackError) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? {
                   ...m,
-                  content: `错误: ${err instanceof Error ? err.message : "请求失败"}`,
+                  content: `错误: ${fallbackError instanceof Error ? fallbackError.message : "请求失败"}`,
                 }
               : m,
           ),
@@ -492,6 +497,20 @@ export default function ChatPanel({
       }
     } finally {
       window.clearTimeout(streamTimeout);
+      if (thinkingConfigured) {
+        const thinkingDurationMs = Date.now() - thinkingStartedAt;
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantId
+              ? {
+                  ...message,
+                  thinkingActive: false,
+                  thinkingDurationMs,
+                }
+              : message,
+          ),
+        );
+      }
       if (streamAbortRef.current === abortController) {
         streamAbortRef.current = null;
       }
@@ -722,6 +741,8 @@ export default function ChatPanel({
         enabled: remote?.enabled ?? false,
         model: remote?.model ?? base.model,
         base_url: remote?.base_url,
+        thinking_config: remote?.thinking_config ?? {},
+        thinking_template: remote?.thinking_template ?? {},
       };
     }),
     ...remoteProviders.filter(
@@ -796,51 +817,50 @@ export default function ChatPanel({
               {modelMenuOpen && (
                 <div className="model-provider-menu">
                   {providersForMenu.map((p) => (
-                    <button
-                      key={p.provider}
-                      type="button"
-                      disabled={llmSwitching || !llmConfig}
-                      onClick={() => {
-                        if (p.enabled) {
-                          void handleSwitchProvider(p.provider);
-                        } else {
-                          openProviderConfig(p);
+                    <div key={p.provider} className="model-provider-row">
+                      <button
+                        type="button"
+                        disabled={llmSwitching || !llmConfig}
+                        onClick={() => {
+                          if (p.enabled) {
+                            void handleSwitchProvider(p.provider);
+                          } else {
+                            openProviderConfig(p);
+                          }
+                          setModelMenuOpen(false);
+                        }}
+                        className={`model-provider-option ${
+                          p.provider === currentProvider ? "active" : ""
+                        }`}
+                        title={
+                          p.enabled
+                            ? `${p.label} · ${p.model}`
+                            : `${p.label}（未配置）`
                         }
-                        setModelMenuOpen(false);
-                      }}
-                      className={`model-provider-option ${
-                        p.provider === currentProvider ? "active" : ""
-                      }`}
-                      title={
-                        p.enabled
-                          ? `${p.label} · ${p.model}`
-                          : `${p.label}（未配置）`
-                      }
-                    >
-                      <span className="inline-flex min-w-0 flex-1 items-center gap-1.5">
-                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-(--paper)">
-                          <Image
-                            src={
-                              providerLogoMap[p.provider] ||
-                              "/logos/qwen-icon.png"
-                            }
-                            alt={`${p.label} logo`}
-                            width={12}
-                            height={12}
-                            unoptimized
-                            className="rounded-sm object-contain"
-                          />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-[10px] font-semibold text-(--ink-soft) leading-tight truncate">
-                            {p.label}
+                      >
+                        <span className="inline-flex min-w-0 flex-1 items-center gap-1.5">
+                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-(--paper)">
+                            <Image
+                              src={
+                                providerLogoMap[p.provider] ||
+                                "/logos/qwen-icon.png"
+                              }
+                              alt={`${p.label} logo`}
+                              width={12}
+                              height={12}
+                              unoptimized
+                              className="rounded-sm object-contain"
+                            />
                           </span>
-                          <span className="block text-[9px] text-(--muted) leading-tight truncate mt-1">
-                            {p.model}
+                          <span className="min-w-0">
+                            <span className="block text-[10px] font-semibold text-(--ink-soft) leading-tight truncate">
+                              {p.label}
+                            </span>
+                            <span className="block text-[9px] text-(--muted) leading-tight truncate mt-1">
+                              {p.model}
+                            </span>
                           </span>
                         </span>
-                      </span>
-                      <span className="inline-flex shrink-0 items-center gap-1">
                         <span
                           className={`status-pill ${
                             p.enabled
@@ -856,8 +876,19 @@ export default function ChatPanel({
                               : "就绪"
                             : "未配置"}
                         </span>
-                      </span>
-                    </button>
+                      </button>
+                      {p.enabled && (
+                        <button
+                          type="button"
+                          className="model-provider-config-btn"
+                          onClick={() => openProviderConfig(p)}
+                          title={`配置 ${p.label}`}
+                          aria-label={`配置 ${p.label}`}
+                        >
+                          配置
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -915,6 +946,15 @@ export default function ChatPanel({
                     <div
                       className={`message-bubble ${m.role === "user" && editingMessageId === m.id ? "editing" : ""}`}
                     >
+                      {m.role === "assistant" && m.thinkingStartedAt && (
+                        <ThinkingProcess
+                          key={m.thinkingStartedAt}
+                          active={Boolean(m.thinkingActive)}
+                          startedAt={m.thinkingStartedAt}
+                          durationMs={m.thinkingDurationMs}
+                          thinking={m.thinking}
+                        />
+                      )}
                       {m.role === "user" && editingMessageId === m.id ? (
                         <div className="inline-edit-wrap">
                           <textarea
@@ -971,33 +1011,6 @@ export default function ChatPanel({
                           {m.content}
                         </ReactMarkdown>
                       )}
-                      {m.role === "assistant" &&
-                        m.thinking &&
-                        m.thinking.trim() && (
-                          <div className="thinking-block">
-                            <div className="thinking-header">思考过程</div>
-                            <div className="thinking-content">
-                              {thinkingExpandedMap[m.id] ||
-                              m.thinking.length <= THINKING_PREVIEW_LIMIT
-                                ? m.thinking
-                                : `${m.thinking.slice(0, THINKING_PREVIEW_LIMIT)}...`}
-                            </div>
-                            {m.thinking.length > THINKING_PREVIEW_LIMIT && (
-                              <button
-                                type="button"
-                                className="thinking-toggle"
-                                onClick={() =>
-                                  setThinkingExpandedMap((prev) => ({
-                                    ...prev,
-                                    [m.id]: !prev[m.id],
-                                  }))
-                                }
-                              >
-                                {thinkingExpandedMap[m.id] ? "收起" : "展开"}
-                              </button>
-                            )}
-                          </div>
-                        )}
                       {m.sources && m.sources.length > 0 && (
                         <details className="source-details">
                           <summary className="source-summary">
@@ -1298,7 +1311,7 @@ export default function ChatPanel({
               <button
                 onClick={isGenerating ? stopGenerating : send}
                 disabled={!canSend && !isGenerating}
-                className={`mode-chip mode-chip-send ${canSend || isGenerating ? "active" : "disabled"} ${isGenerating ? "generating" : ""}`}
+                className={`composer-send-button ${canSend || isGenerating ? "active" : "disabled"} ${isGenerating ? "generating" : ""}`}
                 title={isGenerating ? "停止生成" : "发送"}
                 aria-label={isGenerating ? "停止生成" : "发送"}
                 type="button"
@@ -1324,40 +1337,14 @@ export default function ChatPanel({
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M3 11.5L20 4l-5 16-3.5-6L3 11.5z"
+                        strokeWidth={2.35}
+                        d="M12 19V5m0 0-6 6m6-6 6 6"
                       />
                     </svg>
                     发送
                   </>
                 )}
               </button>
-            </div>
-            <div className="composer-secondary-row" aria-label="增强模式">
-              <div className="composer-chip-group">
-                <button
-                  type="button"
-                  className={`mode-chip ${deepThinkEnabled ? "active" : ""}`}
-                  onClick={() => setDeepThinkEnabled((v) => !v)}
-                  title="启用深度思考模式"
-                >
-                  <span className="mode-chip-check" aria-hidden="true">
-                    {deepThinkEnabled ? "✓" : ""}
-                  </span>
-                  思考
-                </button>
-                <button
-                  type="button"
-                  className={`mode-chip ${smartSearchEnabled ? "active" : ""}`}
-                  onClick={() => setSmartSearchEnabled((v) => !v)}
-                  title="启用智能搜索模式（模型支持时联网）"
-                >
-                  <span className="mode-chip-check" aria-hidden="true">
-                    {smartSearchEnabled ? "✓" : ""}
-                  </span>
-                  联网
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -1372,7 +1359,7 @@ export default function ChatPanel({
           onMouseDown={() => closeProviderConfig()}
         >
           <div
-            className="modal-card w-[min(540px,94vw)] p-8"
+            className="modal-card thinking-provider-modal w-[min(640px,94vw)] p-8"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
@@ -1403,7 +1390,11 @@ export default function ChatPanel({
                   value={configApiKey}
                   onChange={(e) => setConfigApiKey(e.target.value)}
                   className="input w-full h-14 rounded-2xl border-2 px-5 text-center text-base"
-                  placeholder="粘贴对应平台的 API Key"
+                  placeholder={
+                    configProvider.enabled
+                      ? "留空沿用已保存的 API Key"
+                      : "粘贴对应平台的 API Key"
+                  }
                   autoFocus
                 />
               </label>
@@ -1429,6 +1420,74 @@ export default function ChatPanel({
                   placeholder={configProvider.model}
                 />
               </label>
+
+              <fieldset className="thinking-config-fieldset">
+                <legend>思考配置</legend>
+                <div className="thinking-mode-options">
+                  {(
+                    [
+                      ["off", "关闭"],
+                      ["standard", "标准模板"],
+                      ["custom", "自定义 JSON"],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`thinking-mode-option ${
+                        configThinkingMode === mode ? "active" : ""
+                      }`}
+                      onClick={() => {
+                        setConfigThinkingMode(mode);
+                        if (mode === "off") {
+                          setConfigThinkingJson("{}");
+                        } else if (mode === "standard") {
+                          setConfigThinkingJson(
+                            formatThinkingConfig(
+                              configProvider.thinking_template || {},
+                            ),
+                          );
+                        } else if (configThinkingJson === "{}") {
+                          setConfigThinkingJson(
+                            formatThinkingConfig(
+                              configProvider.thinking_template || {},
+                            ),
+                          );
+                        }
+                        setConfigError("");
+                      }}
+                      disabled={
+                        mode === "standard" &&
+                        Object.keys(configProvider.thinking_template || {})
+                          .length === 0
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {configThinkingMode !== "off" && (
+                  <label className="thinking-json-editor">
+                    <span>
+                      请求体 JSON
+                      {configThinkingMode === "standard" && "（标准模板）"}
+                    </span>
+                    <textarea
+                      value={configThinkingJson}
+                      onChange={(event) =>
+                        setConfigThinkingJson(event.target.value)
+                      }
+                      readOnly={configThinkingMode === "standard"}
+                      spellCheck={false}
+                      rows={7}
+                    />
+                  </label>
+                )}
+                <p className="thinking-config-help">
+                  保存时会发送最小测试请求。验证成功后才写入 .env.local，并自动应用到后续对话。
+                </p>
+              </fieldset>
 
               {configError && (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">

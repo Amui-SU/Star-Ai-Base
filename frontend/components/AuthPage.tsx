@@ -10,6 +10,9 @@ interface Props {
 type Step = "email" | "login" | "register";
 const CODE_COUNTDOWN = 60;
 
+const isLocalhost = (host: string) =>
+  host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+
 export default function AuthPage({ onAuthSuccess }: Props) {
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
@@ -23,6 +26,11 @@ export default function AuthPage({ onAuthSuccess }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [googleLoginSupported] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return isLocalhost(window.location.hostname);
+  });
+  const [oauthNotice, setOauthNotice] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ─── 演示流程状态 ───
@@ -50,6 +58,16 @@ export default function AuthPage({ onAuthSuccess }: Props) {
   useEffect(() => {
     const t = window.setTimeout(() => setVisible(true), 80);
     return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.add("auth-page-active");
+    document.body.classList.add("auth-page-active");
+
+    return () => {
+      document.documentElement.classList.remove("auth-page-active");
+      document.body.classList.remove("auth-page-active");
+    };
   }, []);
 
   useEffect(() => {
@@ -198,65 +216,168 @@ export default function AuthPage({ onAuthSuccess }: Props) {
 
   const inputStyle: React.CSSProperties = {
     width: "100%",
-    height: 66,
-    borderRadius: 10,
+    height: "var(--auth-control-height)",
+    borderRadius: "var(--auth-control-radius)",
     border: "1px solid #484744",
     background: "#30302e",
     color: "#f5f3ee",
-    padding: "0 20px",
-    fontSize: 22,
+    padding: "0 var(--auth-control-x)",
+    fontSize: "var(--auth-control-font)",
     outline: "none",
     boxSizing: "border-box",
     transition: "all .2s",
   };
   const btnStyle: React.CSSProperties = {
     width: "100%",
-    height: 66,
-    borderRadius: 10,
+    height: "var(--auth-control-height)",
+    borderRadius: "var(--auth-control-radius)",
     border: 0,
     background: "#f5f3ee",
     color: "#3b3935",
-    fontSize: 22,
+    fontSize: "var(--auth-control-font)",
     fontWeight: 650,
     cursor: "pointer",
     transition: "all .2s",
   };
-  const googleBtnStyle: React.CSSProperties = {
+  const oauthButtons = [
+    {
+      provider: "google" as const,
+      label: "Google",
+    },
+    {
+      provider: "wechat" as const,
+      label: "WeChat",
+    },
+    { provider: "qq" as const, label: "QQ" },
+  ];
+
+  const renderOAuthIcon = (
+    provider: (typeof oauthButtons)[number]["provider"],
+  ) => {
+    if (provider === "google") {
+      return (
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          focusable="false"
+          style={{ width: "100%", height: "100%", display: "block" }}
+        >
+          <path
+            fill="#4285F4"
+            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1Z"
+          />
+          <path
+            fill="#34A853"
+            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A10.99 10.99 0 0 0 12 23Z"
+          />
+          <path
+            fill="#FBBC05"
+            d="M5.84 14.09A6.6 6.6 0 0 1 5.49 12c0-.73.13-1.43.35-2.09V7.07H2.18A10.99 10.99 0 0 0 1 12c0 1.78.43 3.45 1.18 4.93l3.66-2.84Z"
+          />
+          <path
+            fill="#EA4335"
+            d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A10.99 10.99 0 0 0 2.18 7.07l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38Z"
+          />
+        </svg>
+      );
+    }
+
+    if (provider === "wechat") {
+      return (
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          focusable="false"
+          style={{ width: "100%", height: "100%", display: "block" }}
+        >
+          <circle cx="12" cy="12" r="11" fill="#07C160" />
+          <path
+            fill="#FFFFFF"
+            d="M10.2 7.2c-3.18 0-5.76 2.02-5.76 4.52 0 1.42.83 2.67 2.13 3.5l-.46 1.39 1.76-.81c.72.28 1.5.43 2.33.43h.3a4.32 4.32 0 0 1-.17-1.2c0-2.23 2.2-4.04 4.9-4.04.22 0 .44.01.65.04-.45-2.16-2.84-3.83-5.68-3.83Zm-1.94 2.35a.68.68 0 1 1 0 1.36.68.68 0 0 1 0-1.36Zm3.75 0a.68.68 0 1 1 0 1.36.68.68 0 0 1 0-1.36Z"
+          />
+          <path
+            fill="#FFFFFF"
+            d="M15.23 11.9c-2.4 0-4.35 1.48-4.35 3.31s1.95 3.31 4.35 3.31c.61 0 1.19-.1 1.72-.27l1.39.64-.35-1.09c.97-.62 1.59-1.55 1.59-2.59 0-1.83-1.95-3.31-4.35-3.31Zm-1.46 1.81a.52.52 0 1 1 0 1.04.52.52 0 0 1 0-1.04Zm2.92 0a.52.52 0 1 1 0 1.04.52.52 0 0 1 0-1.04Z"
+          />
+        </svg>
+      );
+    }
+
+    return (
+      <img
+        src="/icons/qq-app-icon.jpg"
+        alt=""
+        aria-hidden="true"
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "block",
+          borderRadius: 6,
+          objectFit: "cover",
+        }}
+      />
+    );
+  };
+
+  const isOAuthAvailable = (provider: (typeof oauthButtons)[number]["provider"]) =>
+    provider === "google" && googleLoginSupported;
+
+  const handleOAuthClick = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    provider: (typeof oauthButtons)[number]["provider"],
+  ) => {
+    if (isOAuthAvailable(provider)) return;
+    event.preventDefault();
+    setOauthNotice(
+      provider === "google"
+        ? "Google login requires an HTTPS public callback. Use email login in local mobile preview."
+        : "WeChat and QQ login are not configured yet. Use email login for now.",
+    );
+  };
+
+  const oauthButtonStyle: React.CSSProperties = {
     width: "100%",
-    height: 64,
-    borderRadius: 10,
-    border: "1px solid #484744",
-    background: "transparent",
+    height: "clamp(34px, 3.8vw, 42px)",
+    borderRadius: 12,
+    border: "1px solid rgba(250, 249, 245, 0.14)",
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025))",
     color: "#faf9f5",
-    fontSize: 22,
-    fontWeight: 650,
+    fontSize: "clamp(11px, 1.15vw, 13px)",
+    fontWeight: 640,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: 13,
+    gap: 6,
     cursor: "pointer",
     transition: "all .2s",
     textDecoration: "none",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
   };
 
   return (
-    <div className="min-h-screen bg-[#141413] text-[#faf9f5] font-sans">
+    <div className="auth-page min-h-screen bg-[#141413] text-[#faf9f5] font-sans">
       {/* 固定顶部 Header */}
       <header
-        className="fixed z-50 bg-[#141413]"
-        style={{ left: 0, right: 0, top: 0, height: "5.25rem" }}
+        className="auth-header fixed z-50 bg-[#141413]"
+        style={{
+          left: 0,
+          right: 0,
+          top: 0,
+          height: "var(--auth-header-height)",
+        }}
       >
         <div
           className="h-full flex items-center"
           style={{
             margin: "0 auto",
-            width: "calc(100% - 2 * clamp(2rem, 1.43rem + 2.86vw, 4rem))",
+            width: "var(--auth-container-width)",
             maxWidth: "90rem",
           }}
         >
           <div className="flex items-center gap-2.5">
             <svg
-              className="w-7 h-7 text-[#d97757]"
+              className="auth-brand-icon w-7 h-7 text-[#d97757]"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -264,7 +385,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
             >
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
             </svg>
-            <span className="font-[Noto_Serif_SC,Georgia,serif] text-[34px] font-semibold tracking-[-0.03em] text-[#faf9f5]">
+            <span className="auth-brand-title font-[Noto_Serif_SC,Georgia,serif] text-[34px] font-semibold tracking-[-0.03em] text-[#faf9f5]">
               智库云
             </span>
           </div>
@@ -273,40 +394,34 @@ export default function AuthPage({ onAuthSuccess }: Props) {
 
       {/* 主内容区 */}
       <main
-        className="relative grid grid-cols-1 gap-4 xl:grid-cols-2"
+        className="auth-main relative grid grid-cols-1 gap-4 xl:grid-cols-2"
         style={{
           marginLeft: "auto",
           marginRight: "auto",
-          paddingTop: "5.25rem",
-          width: "calc(100% - 2 * clamp(2rem, 1.43rem + 2.86vw, 4rem))",
+          paddingTop: "var(--auth-header-height)",
+          width: "var(--auth-container-width)",
           maxWidth: "90rem",
         }}
       >
         {/* 左侧登录区 */}
         <section
-          className="flex items-center justify-center py-6"
-          style={{ minHeight: "calc(100vh - 5.25rem)" }}
+          className="auth-form-section flex items-center justify-center py-6"
+          style={{ minHeight: "calc(100svh - var(--auth-header-height))" }}
         >
           <div
             className={`flex flex-col items-center text-center transition-all duration-800 ease-out ${
               visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
             }`}
-            style={{ width: 654, maxWidth: "100%" }}
+            style={{ width: "min(604px, 100%)", maxWidth: "100%" }}
           >
-            <h1
-              className="m-0 font-[Noto_Serif_SC,Songti_SC,Georgia,serif] leading-[0.98] font-medium tracking-[-0.08em] text-[#faf9f5]"
-              style={{ fontSize: 68 }}
-            >
+            <h1 className="auth-title m-0 font-[Noto_Serif_SC,Songti_SC,Georgia,serif] leading-[0.98] font-medium tracking-[-0.08em] text-[#faf9f5]">
               {step === "email"
                 ? "欢迎回来"
                 : step === "login"
                   ? "输入密码"
                   : "创建账号"}
             </h1>
-            <p
-              className="mb-0 font-[Noto_Serif_SC,Songti_SC,Georgia,serif] leading-[1.35] text-[#dedbd4]"
-              style={{ marginTop: 10, fontSize: 24 }}
-            >
+            <p className="auth-subtitle mb-0 font-[Noto_Serif_SC,Songti_SC,Georgia,serif] leading-[1.35] text-[#dedbd4]">
               {step === "email"
                 ? "登录以继续你的知识探索"
                 : step === "login"
@@ -316,13 +431,13 @@ export default function AuthPage({ onAuthSuccess }: Props) {
 
             {/* 卡片 */}
             <div
-              className="border border-[#333230] bg-transparent box-border text-left"
+              className="auth-card border border-[#333230] bg-transparent box-border text-left"
               style={{
-                marginTop: 44,
-                width: 672,
+                marginTop: "var(--auth-card-gap)",
+                width: "min(620px, 100%)",
                 maxWidth: "100%",
-                padding: "42px 43px 40px",
-                borderRadius: 42,
+                padding: "var(--auth-card-padding)",
+                borderRadius: "var(--auth-card-radius)",
               }}
             >
               {step === "email" && (
@@ -332,42 +447,75 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                       {error}
                     </div>
                   )}
-                  <div
-                    style={{ width: 586, maxWidth: "100%", margin: "0 auto" }}
-                  >
-                    <a
-                      href={systemAuthApi.googleLoginUrl}
-                      style={googleBtnStyle}
-                    >
-                      <svg className="w-5 h-5" viewBox="0 0 24 24">
-                        <path
-                          fill="#4285F4"
-                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                        />
-                        <path
-                          fill="#EA4335"
-                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                        />
-                      </svg>
-                      <span>使用 Google 继续</span>
-                    </a>
-
+                  <div className="auth-form-inner">
                     <div
                       style={{
-                        margin: "23px 0",
+                        display: "grid",
+                        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                        gap: "clamp(7px, 1.2vw, 10px)",
+                      }}
+                    >
+                      {oauthButtons.map((button) => {
+                        const available = isOAuthAvailable(button.provider);
+
+                        return (
+                          <a
+                            key={button.provider}
+                            href={
+                              available
+                                ? systemAuthApi.getOAuthLoginUrl(button.provider)
+                                : "#"
+                            }
+                            aria-disabled={!available}
+                            onClick={(event) =>
+                              handleOAuthClick(event, button.provider)
+                            }
+                            style={{
+                              ...oauthButtonStyle,
+                              cursor: available ? "pointer" : "help",
+                              opacity: available ? 1 : 0.82,
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: button.provider === "google" ? 20 : 22,
+                                height: button.provider === "google" ? 20 : 22,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                lineHeight: 1,
+                              }}
+                            >
+                              {renderOAuthIcon(button.provider)}
+                            </span>
+                            <span>{button.label}</span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                    {oauthNotice && (
+                      <div
+                        role="status"
+                        style={{
+                          marginTop: 10,
+                          color: "#c9c1b4",
+                          fontSize: 12,
+                          lineHeight: 1.55,
+                          textAlign: "center",
+                        }}
+                      >
+                        {oauthNotice}
+                      </div>
+                    )}
+                    <div
+                      className="auth-separator"
+                      style={{
+                        margin: "var(--auth-separator-margin)",
                         display: "flex",
                         alignItems: "center",
-                        gap: 22,
+                        gap: "var(--auth-separator-gap)",
                         color: "#c4c0b8",
-                        fontSize: 20,
+                        fontSize: "var(--auth-separator-font)",
                         lineHeight: 1,
                       }}
                     >
@@ -387,7 +535,6 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                         }}
                       />
                     </div>
-
                     <input
                       type="email"
                       value={email}
@@ -400,15 +547,18 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                     <button
                       type="submit"
                       disabled={submitting}
-                      style={{ ...btnStyle, marginTop: 24 }}
+                      style={{
+                        ...btnStyle,
+                        marginTop: "var(--auth-field-gap)",
+                      }}
                     >
                       继续
                     </button>
                     <p
                       style={{
-                        margin: "18px auto 0",
+                        margin: "var(--auth-help-gap) auto 0",
                         color: "#a8a49c",
-                        fontSize: 18,
+                        fontSize: "var(--auth-help-font)",
                         lineHeight: 1.55,
                         textAlign: "center",
                       }}
@@ -426,9 +576,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                       {error}
                     </div>
                   )}
-                  <div
-                    style={{ width: 586, maxWidth: "100%", margin: "0 auto" }}
-                  >
+                  <div className="auth-form-inner">
                     <input
                       type="password"
                       value={password}
@@ -441,7 +589,10 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                     <button
                       type="submit"
                       disabled={submitting}
-                      style={{ ...btnStyle, marginTop: 24 }}
+                      style={{
+                        ...btnStyle,
+                        marginTop: "var(--auth-field-gap)",
+                      }}
                     >
                       {submitting ? "登录中..." : "继续"}
                     </button>
@@ -477,9 +628,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                       {error}
                     </div>
                   )}
-                  <div
-                    style={{ width: 586, maxWidth: "100%", margin: "0 auto" }}
-                  >
+                  <div className="auth-form-inner">
                     <input
                       type="text"
                       value={displayName}
@@ -489,7 +638,14 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                       autoComplete="name"
                       autoFocus
                     />
-                    <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+                    <div
+                      className="auth-code-row"
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        marginTop: "var(--auth-field-gap)",
+                      }}
+                    >
                       <input
                         type="text"
                         value={verificationCode}
@@ -504,9 +660,9 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                         onClick={handleSendCode}
                         disabled={sendingCode || codeCountdown > 0}
                         style={{
-                          height: 66,
-                          padding: "0 20px",
-                          borderRadius: 10,
+                          height: "var(--auth-control-height)",
+                          padding: "0 var(--auth-code-button-x)",
+                          borderRadius: "var(--auth-control-radius)",
                           border: "1px solid #484744",
                           background: "transparent",
                           color: "#dedbd4",
@@ -536,7 +692,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                           color: "#8cc8b8",
                           wordBreak: "break-all",
                           textAlign: "center",
-                          marginTop: 20,
+                          marginTop: "var(--auth-field-gap)",
                         }}
                       >
                         {codeHint}
@@ -546,7 +702,10 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                       type="password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      style={{ ...inputStyle, marginTop: 20 }}
+                      style={{
+                        ...inputStyle,
+                        marginTop: "var(--auth-field-gap)",
+                      }}
                       placeholder="设置密码"
                       autoComplete="new-password"
                     />
@@ -554,14 +713,20 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                       type="password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      style={{ ...inputStyle, marginTop: 20 }}
+                      style={{
+                        ...inputStyle,
+                        marginTop: "var(--auth-field-gap)",
+                      }}
                       placeholder="确认密码"
                       autoComplete="new-password"
                     />
                     <button
                       type="submit"
                       disabled={submitting}
-                      style={{ ...btnStyle, marginTop: 24 }}
+                      style={{
+                        ...btnStyle,
+                        marginTop: "var(--auth-field-gap)",
+                      }}
                     >
                       {submitting ? "创建中..." : "创建账号"}
                     </button>
@@ -590,7 +755,9 @@ export default function AuthPage({ onAuthSuccess }: Props) {
         {/* 右侧视觉面板 */}
         <section
           className="hidden lg:flex items-center justify-center bg-[#262624] relative overflow-hidden rounded-[42px]"
-          style={{ height: "calc(100vh - 5.25rem - 1.5rem)" }}
+          style={{
+            height: "calc(100svh - var(--auth-header-height) - 1.5rem)",
+          }}
         >
           <div
             className="rounded-[34px] bg-[#f5f3ee] text-[#222220] box-border transition-all duration-1000 ease-out"
