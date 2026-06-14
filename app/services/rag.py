@@ -300,18 +300,23 @@ class RAGService:
         workspace_id: int,
         knowledge_base_id: int,
         k: int = 5,
+        bvids: Optional[List[str]] = None,
     ) -> List[Document]:
         if not query or not query.strip():
             return []
+
+        filters = [
+            {"workspace_id": workspace_id},
+            {"knowledge_base_id": knowledge_base_id},
+        ]
+        normalized_bvids = sorted(set(bvids or []))
+        if normalized_bvids:
+            filters.append({"bvid": {"$in": normalized_bvids}})
+
         return self.vectorstore.similarity_search(
             query,
             k=k,
-            filter={
-                "$and": [
-                    {"workspace_id": workspace_id},
-                    {"knowledge_base_id": knowledge_base_id},
-                ]
-            },
+            filter={"$and": filters},
         )
 
     async def _fallback_answer(self, question: str, reason: str = "") -> dict:

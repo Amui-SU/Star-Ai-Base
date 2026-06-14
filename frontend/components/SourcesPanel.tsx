@@ -17,15 +17,21 @@ import OrganizePreviewModal from "@/components/OrganizePreviewModal";
 interface Props {
   sourceBindingId: number;
   knowledgeBaseId: number;
+  knowledgeBaseName?: string;
+  excludeBvids?: string[];
+  onImportClick?: () => void;
   onBuildDone?: () => void;
-  onSelectionChange?: (folderIds: number[]) => void;
+  onBuildingChange?: (building: boolean) => void;
 }
 
 export default function SourcesPanel({
   sourceBindingId,
   knowledgeBaseId,
+  knowledgeBaseName,
+  excludeBvids = [],
+  onImportClick,
   onBuildDone,
-  onSelectionChange,
+  onBuildingChange,
 }: Props) {
   const [folders, setFolders] = useState<
     (FavoriteFolder & {
@@ -53,6 +59,9 @@ export default function SourcesPanel({
     bvid: string;
     title: string;
   } | null>(null);
+  const targetKnowledgeBase = knowledgeBaseName
+    ? `「${knowledgeBaseName}」`
+    : "当前知识库";
 
   // 加载收藏夹列表（从B站获取）
   const loadFolders = useCallback(async () => {
@@ -105,6 +114,20 @@ export default function SourcesPanel({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadFolders, loadStatuses]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSelected(new Set());
+      setProgress(null);
+      setMessage(null);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [sourceBindingId, knowledgeBaseId]);
+
+  useEffect(() => {
+    onBuildingChange?.(building);
+    return () => onBuildingChange?.(false);
+  }, [building, onBuildingChange]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -217,7 +240,6 @@ export default function SourcesPanel({
       s.add(id);
     }
     setSelected(s);
-    onSelectionChange?.(Array.from(s));
   };
 
   // 构建/更新知识库（统一操作）
@@ -231,6 +253,7 @@ export default function SourcesPanel({
       const res = await knowledgeBaseApi.build(knowledgeBaseId, {
         source_binding_id: sourceBindingId,
         folder_ids: Array.from(selected),
+        ...(excludeBvids.length > 0 ? { exclude_bvids: excludeBvids } : {}),
       } as KnowledgeBaseBuildRequest);
 
       const poll = async () => {
@@ -332,78 +355,56 @@ export default function SourcesPanel({
     });
 
     if (hasUnindexed) {
-      return `入库 (${selected.size})`;
+      return `入库 ${selected.size} 个收藏夹到${targetKnowledgeBase}`;
     }
-    return `更新 (${selected.size})`;
+    return `更新 ${selected.size} 个收藏夹到${targetKnowledgeBase}`;
   };
 
   return (
     <div className="panel-inner">
-      <div className="panel-header items-start flex-wrap gap-y-2">
-        <div className="flex items-center gap-2 ml-1 mt-0.5 min-w-[88px]">
-          <div className="w-7 h-7 rounded-lg border border-(--border) bg-[rgba(217,139,43,0.16)] flex items-center justify-center shrink-0">
-            <svg
-              className="w-4 h-4 text-(--accent-strong)"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.9}
-                d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
-              />
-            </svg>
-          </div>
-          <div className="flex flex-col items-center justify-center">
-            <div className="panel-title whitespace-nowrap text-sm leading-4">
-              收藏夹
-            </div>
-            <div className="panel-subtitle text-[11px] leading-4 text-center mt-1">
-              {folders.length} 个
-            </div>
-          </div>
+      <div className="sources-panel-head">
+        <div className="sources-panel-head-top">
+          <div className="sources-panel-title">收藏夹资料</div>
+          <button
+            type="button"
+            className="sources-panel-action import-action"
+            onClick={onImportClick}
+          >
+            + 导入
+          </button>
         </div>
-        <div className="panel-actions ml-auto gap-2">
-          <button
-            onClick={() => {
-              const def = folders.find(
-                (f) => f.is_default || f.title === "默认收藏夹",
-              );
-              if (def) {
-                openOrganizePreview(def.media_id);
-              } else {
-                setOrganizeMessage("未找到默认收藏夹");
-              }
-            }}
-            className="btn btn-ghost btn-sm px-3 whitespace-nowrap"
-            title="快速整理默认收藏夹"
-            disabled={loading || organizeLoading}
-          >
-            {organizeLoading ? "整理中..." : "快速整理"}
-          </button>
-          <button
-            onClick={refresh}
-            className="btn btn-ghost btn-sm px-0! w-8 h-8"
-            disabled={loading}
-            title={loading ? "加载中..." : "刷新"}
-            aria-label={loading ? "加载中..." : "刷新"}
-          >
-            <svg
-              className={`w-5 h-5 ${loading ? "animate-spin" : ""}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+        <div className="sources-panel-head-bottom">
+          <div className="sources-panel-subtitle">
+            勾选后入库到{targetKnowledgeBase}
+          </div>
+          <div className="sources-panel-actions">
+            <button
+              onClick={() => {
+                const def = folders.find(
+                  (f) => f.is_default || f.title === "默认收藏夹",
+                );
+                if (def) {
+                  openOrganizePreview(def.media_id);
+                } else {
+                  setOrganizeMessage("未找到默认收藏夹");
+                }
+              }}
+              className="sources-panel-action"
+              title="快速整理默认收藏夹"
+              disabled={loading || organizeLoading}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.9}
-                d="M21 12a9 9 0 11-2.2-5.9l1.7 1.9h-3.1"
-              />
-            </svg>
-          </button>
+              {organizeLoading ? "整理中" : "整理"}
+            </button>
+            <button
+              onClick={refresh}
+              className="sources-panel-action"
+              disabled={loading}
+              title={loading ? "加载中..." : "刷新"}
+              aria-label={loading ? "加载中..." : "刷新"}
+            >
+              {loading ? "刷新中" : "刷新"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -414,11 +415,11 @@ export default function SourcesPanel({
               加载中...
             </div>
           ) : folders.length === 0 ? (
-            <div className="text-center text-sm text-(--muted) py-6">
-              暂无收藏夹
+            <div className="sources-empty-state">
+              <div className="sources-empty-copy">暂无收藏夹</div>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="sources-folder-list">
               {folders.map((f) => {
                 const status = getFolderStatus(f.media_id, f.media_count);
                 const lastSync = formatTime(
@@ -580,7 +581,7 @@ export default function SourcesPanel({
 
         {knowledgeBaseId ? (
           <p className="text-xs text-(--muted) text-center mt-2">
-            入库后可在右侧进行问答
+            入库到 {targetKnowledgeBase} 后，可在右侧选择收藏夹或视频提问
           </p>
         ) : (
           <p className="text-xs text-(--muted) text-center mt-2">

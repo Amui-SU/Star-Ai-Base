@@ -1,6 +1,16 @@
+import json
+from datetime import datetime
+
 import pytest
 
-from app.models import SourceBinding
+from app.models import (
+    FavoriteFolder,
+    FavoriteVideo,
+    SourceBinding,
+    SourceCredential,
+    VideoCache,
+)
+from app.security import encrypt_text
 
 
 async def _get_code(client, email: str) -> str:
@@ -50,9 +60,66 @@ async def create_source_binding(
             status=status,
         )
         session.add(binding)
+        await session.flush()
+        session.add(
+            SourceCredential(
+                user_id=user_id,
+                source_binding_id=binding.id,
+                encrypted_payload=encrypt_text(
+                    json.dumps(
+                        {
+                            "SESSDATA": "test-session",
+                            "bili_jct": "test-csrf",
+                            "DedeUserID": str(user_id),
+                        }
+                    )
+                ),
+            )
+        )
         await session.commit()
         await session.refresh(binding)
         return binding
+
+
+async def seed_scope_folder(
+    db_session_factory,
+    *,
+    knowledge_base: dict,
+    media_id: int,
+    title: str,
+    videos: list[tuple[str, str]],
+) -> None:
+    async with db_session_factory() as session:
+        folder = FavoriteFolder(
+            session_id=f"scope-{knowledge_base['id']}-{media_id}",
+            workspace_id=knowledge_base["workspace_id"],
+            knowledge_base_id=knowledge_base["id"],
+            media_id=media_id,
+            title=title,
+            last_sync_at=datetime(2026, 6, 14),
+            updated_at=datetime(2026, 6, 14),
+        )
+        session.add(folder)
+        await session.flush()
+        for bvid, video_title in videos:
+            session.add(
+                FavoriteVideo(
+                    folder_id=folder.id,
+                    bvid=bvid,
+                    workspace_id=knowledge_base["workspace_id"],
+                    knowledge_base_id=knowledge_base["id"],
+                )
+            )
+            session.add(
+                VideoCache(
+                    bvid=bvid,
+                    title=video_title,
+                    is_processed=True,
+                    workspace_id=knowledge_base["workspace_id"],
+                    knowledge_base_id=knowledge_base["id"],
+                )
+            )
+        await session.commit()
 
 
 @pytest.mark.asyncio
@@ -89,11 +156,13 @@ async def test_scoped_search_uses_workspace_and_knowledge_base_filter(
             workspace_id,
             knowledge_base_id,
             k=5,
+            bvids=None,
         ):
             captured["query"] = query
             captured["workspace_id"] = workspace_id
             captured["knowledge_base_id"] = knowledge_base_id
             captured["k"] = k
+            captured["bvids"] = bvids
             return [
                 type(
                     "FakeDocument",
@@ -126,6 +195,7 @@ async def test_scoped_search_uses_workspace_and_knowledge_base_filter(
         "workspace_id": knowledge_base["workspace_id"],
         "knowledge_base_id": knowledge_base["id"],
         "k": 3,
+        "bvids": None,
     }
 
 
@@ -142,11 +212,13 @@ async def test_scoped_chat_uses_scoped_retrieval(client, monkeypatch):
             workspace_id,
             knowledge_base_id,
             k=5,
+            bvids=None,
         ):
             captured["query"] = query
             captured["workspace_id"] = workspace_id
             captured["knowledge_base_id"] = knowledge_base_id
             captured["k"] = k
+            captured["bvids"] = bvids
             return [
                 type(
                     "FakeDocument",
@@ -207,6 +279,7 @@ async def test_scoped_chat_stream_returns_answer_for_owner(client, monkeypatch):
             workspace_id,
             knowledge_base_id,
             k=5,
+            bvids=None,
         ):
             return [
                 type(
@@ -243,7 +316,12 @@ async def test_scoped_chat_stream_json_encodes_thinking(client, monkeypatch):
     await register_user(client, "alice@example.com", "Alice")
     knowledge_base = await create_knowledge_base(client, "Thinking Stream KB")
 
-    async def fake_chat_with_knowledge_base(payload, knowledge_base, current_workspace):
+    async def fake_chat_with_knowledge_base(
+        payload,
+        knowledge_base,
+        current_workspace,
+        db,
+    ):
         from app.models import ChatResponse
 
         return ChatResponse(answer="done", sources=[], thinking="思考")
@@ -274,6 +352,7 @@ async def test_scoped_chat_stream_emits_empty_sources_trailer(client, monkeypatc
             workspace_id,
             knowledge_base_id,
             k=5,
+            bvids=None,
         ):
             return []
 
@@ -292,6 +371,236 @@ async def test_scoped_chat_stream_emits_empty_sources_trailer(client, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_scoped_chat_unions_folder_and_explicit_video_scope(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Scoped Chat KB")
+    await seed_scope_folder(
+        db_session_factory,
+        knowledge_base=knowledge_base,
+        media_id=10,
+        title="Selected folder",
+        videos=[("BV1FOLDER", "Folder video")],
+    )
+    await seed_scope_folder(
+        db_session_factory,
+        knowledge_base=knowledge_base,
+        media_id=20,
+        title="Explicit video folder",
+        videos=[("BV1EXPLICIT", "Explicit video")],
+    )
+    captured = {}
+
+    class FakeRAGService:
+        def search_in_knowledge_base(
+            self,
+            query,
+            workspace_id,
+            knowledge_base_id,
+            k=5,
+            bvids=None,
+        ):
+            captured["bvids"] = bvids
+            return []
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat",
+        json={
+            "question": "scope this",
+            "folder_ids": [10],
+            "bvids": ["BV1EXPLICIT"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["bvids"] == ["BV1EXPLICIT", "BV1FOLDER"]
+
+
+@pytest.mark.asyncio
+async def test_scoped_search_passes_resolved_video_scope(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Scoped Search KB")
+    await seed_scope_folder(
+        db_session_factory,
+        knowledge_base=knowledge_base,
+        media_id=10,
+        title="Selected folder",
+        videos=[("BV1SEARCH", "Search video")],
+    )
+    captured = {}
+
+    class FakeRAGService:
+        def search_in_knowledge_base(
+            self,
+            query,
+            workspace_id,
+            knowledge_base_id,
+            k=5,
+            bvids=None,
+        ):
+            captured["bvids"] = bvids
+            return []
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/search",
+        json={"query": "scope this", "folder_ids": [10]},
+    )
+
+    assert response.status_code == 200
+    assert captured["bvids"] == ["BV1SEARCH"]
+
+
+@pytest.mark.asyncio
+async def test_scoped_chat_stream_uses_same_resolved_scope(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Scoped Stream KB")
+    await seed_scope_folder(
+        db_session_factory,
+        knowledge_base=knowledge_base,
+        media_id=10,
+        title="Selected folder",
+        videos=[("BV1STREAM", "Stream video")],
+    )
+    captured = {}
+
+    class FakeRAGService:
+        def search_in_knowledge_base(
+            self,
+            query,
+            workspace_id,
+            knowledge_base_id,
+            k=5,
+            bvids=None,
+        ):
+            captured["bvids"] = bvids
+            return []
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat/stream",
+        json={"question": "scope this", "folder_ids": [10]},
+    )
+
+    assert response.status_code == 200
+    assert captured["bvids"] == ["BV1STREAM"]
+
+
+@pytest.mark.asyncio
+async def test_scoped_chat_rejects_external_bvid(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Alice KB")
+    other_knowledge_base = await create_knowledge_base(client, "Other KB")
+    await seed_scope_folder(
+        db_session_factory,
+        knowledge_base=other_knowledge_base,
+        media_id=20,
+        title="External folder",
+        videos=[("BV2EXTERNAL", "External video")],
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: object(),
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat",
+        json={"question": "scope this", "bvids": ["BV2EXTERNAL"]},
+    )
+
+    assert response.status_code == 400
+    assert "BV2EXTERNAL" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_scope_options_only_returns_current_knowledge_base(
+    client,
+    db_session_factory,
+):
+    await register_user(client, "alice@example.com", "Alice")
+    knowledge_base = await create_knowledge_base(client, "Alice KB")
+    other_knowledge_base = await create_knowledge_base(client, "Other KB")
+    await seed_scope_folder(
+        db_session_factory,
+        knowledge_base=knowledge_base,
+        media_id=10,
+        title="Current folder",
+        videos=[("BV1CURRENT", "Current video")],
+    )
+    await seed_scope_folder(
+        db_session_factory,
+        knowledge_base=other_knowledge_base,
+        media_id=20,
+        title="External folder",
+        videos=[("BV2EXTERNAL", "External video")],
+    )
+
+    response = await client.get(
+        f"/knowledge-bases/{knowledge_base['id']}/scope-options"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "folders": [
+            {
+                "media_id": 10,
+                "title": "Current folder",
+                "video_count": 1,
+                "videos": [
+                    {"bvid": "BV1CURRENT", "title": "Current video"},
+                ],
+            }
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_scope_options_requires_login(client):
+    response = await client.get("/knowledge-bases/1/scope-options")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_scope_options_hides_other_users_knowledge_base(client):
+    await register_user(client, "alice@example.com", "Alice")
+    alice_kb = await create_knowledge_base(client, "Alice KB")
+    await client.post("/system-auth/logout")
+
+    await register_user(client, "bob@example.com", "Bob")
+    response = await client.get(f"/knowledge-bases/{alice_kb['id']}/scope-options")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_scoped_build_rejects_unknown_source_binding(client):
     await register_user(client, "alice@example.com", "Alice")
     knowledge_base = await create_knowledge_base(client, "Build KB")
@@ -305,7 +614,42 @@ async def test_scoped_build_rejects_unknown_source_binding(client):
 
 
 @pytest.mark.asyncio
-async def test_scoped_build_records_scope_metadata(client, db_session_factory):
+async def test_scoped_build_records_scope_metadata(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    class FakeBilibiliService:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def close(self):
+            pass
+
+    async def fake_run_scoped_build(**_kwargs):
+        pass
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.BilibiliService",
+        FakeBilibiliService,
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.ASRService",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.ContentFetcher",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._run_scoped_build",
+        fake_run_scoped_build,
+    )
+
     auth = await register_user(client, "alice@example.com", "Alice")
     knowledge_base = await create_knowledge_base(client, "Build Metadata KB")
     binding = await create_source_binding(

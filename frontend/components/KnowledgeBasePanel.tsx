@@ -1,18 +1,22 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { knowledgeBaseApi, KnowledgeBase } from "@/lib/api";
+import { knowledgeBaseApi, type KnowledgeBase } from "@/lib/api";
 
 interface Props {
   activeId: number | null;
-  onSelect: (id: number | null) => void;
+  onSelect: (kb: KnowledgeBase | null) => void;
+  onActiveKnowledgeBase?: (kb: KnowledgeBase | null) => void;
   refreshKey?: number;
+  disabled?: boolean;
 }
 
 export default function KnowledgeBasePanel({
   activeId,
   onSelect,
+  onActiveKnowledgeBase,
   refreshKey,
+  disabled = false,
 }: Props) {
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +45,16 @@ export default function KnowledgeBasePanel({
     };
   }, [refreshKey]);
 
+  useEffect(() => {
+    if (!activeId) {
+      onActiveKnowledgeBase?.(null);
+      return;
+    }
+    onActiveKnowledgeBase?.(kbs.find((kb) => kb.id === activeId) ?? null);
+  }, [activeId, kbs, onActiveKnowledgeBase]);
+
   const handleDelete = async (kb: KnowledgeBase) => {
+    if (disabled) return;
     if (!window.confirm(`确定要删除知识库「${kb.name}」吗？此操作不可撤销。`))
       return;
     try {
@@ -54,16 +67,18 @@ export default function KnowledgeBasePanel({
   };
 
   const handleCreate = async () => {
+    if (disabled) return;
     if (!newName.trim()) return;
     try {
       setError(null);
-      await knowledgeBaseApi.create({
+      const created = await knowledgeBaseApi.create({
         name: newName.trim(),
         description: newDesc.trim() || undefined,
       });
       setNewName("");
       setNewDesc("");
       setCreating(false);
+      onSelect(created);
       setLoading(true);
       try {
         const data = await knowledgeBaseApi.list();
@@ -78,24 +93,24 @@ export default function KnowledgeBasePanel({
   const itemClass = (active: boolean) =>
     `w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition-all duration-200 ${
       active
-        ? "bg-(--paper) text-(--ink) shadow-[0_1px_3px_rgba(28,23,18,0.06)] ring-1 ring-(--border)"
+        ? "bg-(--paper-2) text-(--ink) ring-1 ring-(--border)"
         : "text-(--ink-soft) hover:bg-(--paper-2) active:scale-[0.98]"
     }`;
 
   const inputClass =
-    "w-full px-2.5 py-1.5 rounded-lg border border-(--border) bg-(--paper) text-(--ink) text-xs placeholder:text-(--muted)/50 focus:outline-none focus:ring-2 focus:ring-(--accent)/25 focus:border-(--accent) transition-all duration-200";
+    "w-full px-2.5 py-1.5 rounded-lg border border-(--border) bg-(--input-bg) text-(--ink) text-xs placeholder:text-(--muted-weak) focus:outline-none focus:ring-2 focus:ring-(--accent)/25 focus:border-(--accent) transition-all duration-200";
 
   return (
-    <div className="px-3 py-3 border-b border-(--border)">
-      <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[10px] font-bold text-(--muted) tracking-widest uppercase select-none">
-          知识库
-        </span>
+    <div className="knowledge-panel px-3 py-3 border-b border-(--border)">
+      <div className="knowledge-panel-head">
+        <span className="knowledge-panel-label">当前知识库</span>
         <button
           onClick={() => {
+            if (disabled) return;
             setCreating(!creating);
             setError(null);
           }}
+          disabled={disabled}
           className={`text-[11px] font-semibold transition-colors duration-200 ${
             creating
               ? "text-(--danger)"
@@ -126,7 +141,7 @@ export default function KnowledgeBasePanel({
           />
           <button
             onClick={handleCreate}
-            disabled={!newName.trim()}
+            disabled={disabled || !newName.trim()}
             className="w-full py-1.5 rounded-lg bg-(--ink) text-white text-xs font-semibold hover:opacity-90 disabled:opacity-30 transition-opacity duration-200 active:scale-[0.98]"
           >
             创建知识库
@@ -146,20 +161,24 @@ export default function KnowledgeBasePanel({
           <span className="text-xs text-(--muted)">加载中...</span>
         </div>
       ) : kbs.length === 0 ? (
-        <div className="text-xs text-(--muted) py-1.5 leading-relaxed">
-          暂无知识库
-          <br />
-          <span className="text-[11px] opacity-70">
-            点击「+ 新建」创建第一个
-          </span>
+        <div>
+          <div
+            className="knowledge-item knowledge-empty-card"
+            aria-disabled="true"
+          >
+            <div className="knowledge-empty-title">暂无知识库</div>
+          </div>
+          <div className="knowledge-empty-hint">点击「+ 新建」创建第一个</div>
         </div>
       ) : (
         <div className="space-y-1 max-h-52 overflow-y-auto">
           {kbs.map((kb) => (
             <div key={kb.id} className="flex items-center gap-0.5">
               <button
-                onClick={() => onSelect(kb.id)}
-                className={`flex-1 ${itemClass(activeId === kb.id)}`}
+                onClick={() => onSelect(kb)}
+                disabled={disabled}
+                className={`knowledge-item flex-1 ${itemClass(activeId === kb.id)}`}
+                title={disabled ? "入库处理中，暂不能切换知识库" : kb.name}
               >
                 <span className="flex items-center gap-2 truncate">
                   <span
@@ -171,9 +190,13 @@ export default function KnowledgeBasePanel({
                   />
                   <span className="truncate">{kb.name}</span>
                 </span>
+                {activeId === kb.id && (
+                  <span className="knowledge-active-hint">用于当前聊天</span>
+                )}
               </button>
               <button
                 onClick={() => handleDelete(kb)}
+                disabled={disabled}
                 className="shrink-0 w-6 h-7 rounded-lg flex items-center justify-center text-[11px] text-(--muted) hover:text-(--danger) hover:bg-(--danger)/8 transition-colors"
                 title="删除知识库"
               >

@@ -609,7 +609,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                 检索流程演示
               </h3>
               <p className="m-0 mb-5 text-[15px] text-[#8a8680]">
-                慢速演示：理解"提问 → 检索 → 回答"
+                慢速演示：理解&quot;提问 → 检索 → 回答&quot;
               </p>
 
               {/* 提问输入框 */}

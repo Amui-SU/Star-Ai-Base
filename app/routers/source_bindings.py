@@ -21,7 +21,12 @@ from app.models import (
     SystemUser,
     Workspace,
 )
-from app.routers.auth import login_sessions, QRCODE_SESSION_TTL, _set_session, _get_session
+from app.routers.auth import (
+    login_sessions,
+    QRCODE_SESSION_TTL,
+    _set_session,
+    _get_session,
+)
 from app.security import decrypt_text, encrypt_text
 from app.services.bilibili import BilibiliService
 
@@ -84,11 +89,15 @@ async def generate_bilibili_binding_qrcode(
     finally:
         await bili.close()
 
-    _set_session(result["qrcode_key"], {
-        "status": "waiting",
-        "purpose": "source_binding",
-        "user_id": current_user.id,
-    }, QRCODE_SESSION_TTL)
+    _set_session(
+        result["qrcode_key"],
+        {
+            "status": "waiting",
+            "purpose": "source_binding",
+            "user_id": current_user.id,
+        },
+        QRCODE_SESSION_TTL,
+    )
     return QRCodeResponse(
         qrcode_key=result["qrcode_key"],
         qrcode_url=result["qrcode_url"],
@@ -279,16 +288,18 @@ async def list_favorite_videos_by_binding(
 
     videos = []
     for media in result.get("medias", []):
-        videos.append({
-            "bvid": media.get("bvid") or media.get("bv_id"),
-            "title": media.get("title"),
-            "cover": media.get("cover"),
-            "duration": media.get("duration"),
-            "owner": (media.get("upper") or {}).get("name"),
-            "play_count": (media.get("cnt_info") or {}).get("play"),
-            "intro": media.get("intro"),
-            "is_selected": True,
-        })
+        videos.append(
+            {
+                "bvid": media.get("bvid") or media.get("bv_id"),
+                "title": media.get("title"),
+                "cover": media.get("cover"),
+                "duration": media.get("duration"),
+                "owner": (media.get("upper") or {}).get("name"),
+                "play_count": (media.get("cnt_info") or {}).get("play"),
+                "intro": media.get("intro"),
+                "is_selected": True,
+            }
+        )
 
     return {
         "folder_info": result.get("info"),
@@ -325,15 +336,17 @@ async def list_all_favorite_videos_by_binding(
         attr = media.get("attr", 0)
         if attr == 9 or title in ["已失效视频", "已删除视频"]:
             continue
-        videos.append({
-            "bvid": bvid,
-            "title": title,
-            "cover": media.get("cover"),
-            "duration": media.get("duration"),
-            "owner": (media.get("upper") or {}).get("name"),
-            "intro": media.get("intro"),
-            "is_selected": True,
-        })
+        videos.append(
+            {
+                "bvid": bvid,
+                "title": title,
+                "cover": media.get("cover"),
+                "duration": media.get("duration"),
+                "owner": (media.get("upper") or {}).get("name"),
+                "intro": media.get("intro"),
+                "is_selected": True,
+            }
+        )
 
     return {
         "total": len(all_videos),
@@ -360,11 +373,17 @@ async def organize_preview_by_binding(
         folders = await bili.get_user_favorites(mid=mid)
 
         default_folder = next(
-            (f for f in folders if (
-                f.get("is_default") or f.get("type") == 1
-                or f.get("fav_state") == 1
-                or (f.get("title") or "").strip() == "默认收藏夹"
-            )), None
+            (
+                f
+                for f in folders
+                if (
+                    f.get("is_default")
+                    or f.get("type") == 1
+                    or f.get("fav_state") == 1
+                    or (f.get("title") or "").strip() == "默认收藏夹"
+                )
+            ),
+            None,
         )
         if not default_folder:
             raise HTTPException(status_code=400, detail="未找到默认收藏夹")
@@ -388,15 +407,17 @@ async def organize_preview_by_binding(
             rid = media.get("id") or media.get("aid") or media.get("avid")
             if not rid:
                 continue
-            items.append({
-                "bvid": bvid,
-                "title": title,
-                "resource_id": int(rid),
-                "resource_type": int(media.get("type") or 2),
-                "target_folder_id": None,
-                "target_folder_title": default_folder.get("title", "默认收藏夹"),
-                "reason": "待手动分类",
-            })
+            items.append(
+                {
+                    "bvid": bvid,
+                    "title": title,
+                    "resource_id": int(rid),
+                    "resource_type": int(media.get("type") or 2),
+                    "target_folder_id": None,
+                    "target_folder_title": default_folder.get("title", "默认收藏夹"),
+                    "reason": "待手动分类",
+                }
+            )
 
         # 去重：同一个资源只保留一条
         seen = set()
@@ -412,8 +433,12 @@ async def organize_preview_by_binding(
             "default_folder_id": default_folder_id,
             "default_folder_title": default_folder.get("title", "默认收藏夹"),
             "folders": [
-                {"media_id": f["id"], "title": f["title"],
-                 "media_count": f.get("media_count", 0), "is_selected": True}
+                {
+                    "media_id": f["id"],
+                    "title": f["title"],
+                    "media_count": f.get("media_count", 0),
+                    "is_selected": True,
+                }
                 for f in candidate_folders
             ],
             "items": deduped,
@@ -482,7 +507,7 @@ async def clean_invalid_by_binding(
         binding_id, current_user, current_workspace, db
     )
     try:
-        await bili.clean_invalid_resources(folder_id)
-        return {"ok": True}
+        data = await bili.clean_favorite_resources(folder_id)
+        return {"ok": True, "data": data}
     finally:
         await bili.close()
