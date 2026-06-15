@@ -1397,9 +1397,9 @@ html.light .sources-empty-card {
 }
 
 .folder-card .status-pill {
-  padding: 0;
-  border: 0;
-  background: transparent;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   font-size: 9px;
   line-height: 1.2;
   font-weight: 600;
@@ -1407,21 +1407,21 @@ html.light .sources-empty-card {
 }
 
 .folder-card .status-pill.ok {
-  background: transparent;
-  border: 0;
-  color: #9bbda3;
+  background: rgba(72, 187, 120, 0.16);
+  border-color: rgba(110, 231, 143, 0.34);
+  color: #a7efb8;
 }
 
 .folder-card .status-pill.partial {
-  background: transparent;
-  border: 0;
-  color: #d99477;
+  background: rgba(217, 119, 87, 0.14);
+  border-color: rgba(240, 161, 131, 0.34);
+  color: #f0a183;
 }
 
 .folder-card .status-pill.empty {
-  background: transparent;
-  border: 0;
-  color: var(--muted);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #aaa69e;
 }
 
 .folder-list {
@@ -2746,6 +2746,11 @@ html.light .folder-card:hover {
 html.light .folder-card {
   border-color: rgba(205, 187, 159, 0.72);
   background: rgba(255, 255, 255, 0.16);
+}
+
+html.light .folder-card .status-pill {
+  background: transparent;
+  border-color: transparent;
 }
 
 html.light .folder-card .status-pill.ok {
