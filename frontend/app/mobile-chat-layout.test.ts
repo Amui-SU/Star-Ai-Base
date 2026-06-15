@@ -9,6 +9,12 @@ const stylesheet = readFileSync(
 );
 
 describe("mobile chat message layout", () => {
+  it("uses the warm accent palette for light-theme user messages", () => {
+    expect(stylesheet).toMatch(
+      /html\.light\s*\{[^}]*--user-bubble-bg:\s*linear-gradient\(135deg,\s*#a85d12,\s*#8f4f12\);[^}]*--user-bubble-color:\s*#fffaf2;/s,
+    );
+  });
+
   it("allows the user menu to escape the expanded mobile topbar", () => {
     expect(stylesheet).toMatch(
       /\.app-shell\.sidebar-open \.workspace-topbar\s*\{[^}]*overflow:\s*visible;/s,

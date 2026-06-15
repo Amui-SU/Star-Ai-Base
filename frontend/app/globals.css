@@ -64,8 +64,8 @@ html.light {
   --scrollbar-track: rgba(220, 203, 180, 0.5);
   --scrollbar-thumb: rgba(123, 113, 103, 0.55);
   --scrollbar-thumb-hover: rgba(107, 97, 87, 0.7);
-  --user-bubble-bg: linear-gradient(135deg, #2f7c78, #1f5b57);
-  --user-bubble-color: #f8f4ec;
+  --user-bubble-bg: linear-gradient(135deg, #a85d12, #8f4f12);
+  --user-bubble-color: #fffaf2;
   --composer-gradient: rgba(247, 241, 232, 0.98);
   --markdown-code-bg: rgba(0, 0, 0, 0.08);
   --markdown-hr: rgba(0, 0, 0, 0.14);
