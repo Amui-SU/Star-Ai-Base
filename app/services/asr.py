@@ -3,6 +3,7 @@ Bilibili RAG 知识库系统
 
 ASR 服务 - 使用 DashScope 录音文件识别
 """
+
 import asyncio
 import json
 import os
@@ -33,7 +34,7 @@ class ASRService:
         model: Optional[str] = None,
         timeout: Optional[int] = None,
     ):
-        self.api_key = api_key or settings.openai_api_key
+        self.api_key = api_key or settings.dashscope_api_key
         self.base_url = base_url or getattr(settings, "dashscope_base_url", None)
         self.model = model or getattr(settings, "asr_model", "fun-asr")
         self.timeout = timeout or getattr(settings, "asr_timeout", 600)
@@ -63,11 +64,16 @@ class ASRService:
         cmd = [
             ffmpeg,
             "-y",
-            "-i", file_path,
-            "-f", "s16le",
-            "-acodec", "pcm_s16le",
-            "-ac", "1",
-            "-ar", "16000",
+            "-i",
+            file_path,
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
             pcm_path,
         ]
         try:
@@ -97,9 +103,12 @@ class ASRService:
         cmd = [
             ffmpeg,
             "-y",
-            "-i", file_path,
-            "-ac", "1",
-            "-ar", "16000",
+            "-i",
+            file_path,
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
             "-vn",
             wav_path,
         ]
@@ -212,7 +221,9 @@ class ASRService:
             base_url = "https://dashscope.aliyuncs.com/api/v1"
         return join_url(base_url, *parts)
 
-    def _submit_transcription_task_restful(self, audio_url: str, model: str) -> Optional[str]:
+    def _submit_transcription_task_restful(
+        self, audio_url: str, model: str
+    ) -> Optional[str]:
         url = self._build_api_url("services", "audio", "asr", "transcription")
         headers = {
             **default_headers(self.api_key),
@@ -233,7 +244,9 @@ class ASRService:
             return None
 
         if resp.status_code != HTTPStatus.OK:
-            logger.warning(f"ASR RESTful 提交失败: status_code={resp.status_code}, body={resp.text[:300]}")
+            logger.warning(
+                f"ASR RESTful 提交失败: status_code={resp.status_code}, body={resp.text[:300]}"
+            )
             return None
 
         data = resp.json()
@@ -254,7 +267,9 @@ class ASRService:
             return None
 
         if resp.status_code != HTTPStatus.OK:
-            logger.warning(f"ASR RESTful 查询失败: status_code={resp.status_code}, body={resp.text[:300]}")
+            logger.warning(
+                f"ASR RESTful 查询失败: status_code={resp.status_code}, body={resp.text[:300]}"
+            )
             return None
 
         data = resp.json()
@@ -384,7 +399,9 @@ class ASRService:
         logger.warning("ASR 未返回有效转写结果")
         return None
 
-    def _upload_temp_file(self, file_path: str, model: Optional[str] = None) -> Optional[str]:
+    def _upload_temp_file(
+        self, file_path: str, model: Optional[str] = None
+    ) -> Optional[str]:
         """上传本地文件到 DashScope 临时 OSS，返回 oss:// URL"""
         self._configure()
         if not os.path.exists(file_path):

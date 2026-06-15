@@ -14,6 +14,7 @@ from app.dependencies import (
     get_current_user,
     get_current_workspace,
     get_knowledge_base_for_user,
+    get_knowledge_base_for_user_readonly,
 )
 from app.models import (
     ChatResponse,
@@ -533,7 +534,7 @@ async def _run_scoped_build(
 @router.get("/{knowledge_base_id}/build/status/{task_id}")
 async def get_build_status(
     task_id: str,
-    knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
+    knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user_readonly),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """获取构建任务状态（按知识库校验）。"""

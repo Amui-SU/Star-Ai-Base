@@ -3,6 +3,7 @@ Bilibili RAG 知识库系统
 
 视频内容获取服务 - 二级降级策略
 """
+
 from typing import Optional
 from urllib.parse import urlparse
 import asyncio
@@ -21,61 +22,107 @@ from app.services.asr import ASRService
 class ContentFetcher:
     """
     视频内容获取器
-    
+
     采用二级降级策略：
     1. 音频转写（ASR）
     2. 视频基本信息 (兜底)
     """
-    
+
     def __init__(self, bilibili_service: BilibiliService, asr_service: ASRService):
         self.bili = bilibili_service
         self.asr = asr_service
-    
-    async def fetch_content(self, bvid: str, cid: int = None, title: str = None) -> VideoContent:
+
+    async def fetch_content(
+        self, bvid: str, cid: int = None, title: str = None
+    ) -> VideoContent:
         """
         获取视频内容，自动降级
-        
+
         Args:
             bvid: 视频 BV 号
             cid: 视频 cid (如果没有会自动获取)
             title: 视频标题 (如果没有会自动获取)
-            
+
         Returns:
             VideoContent 对象
         """
-        # 获取视频基本信息
+        # 获取视频基本信息。即使收藏夹列表已给出 cid/title，也需要详情里的
+        # aid、owner、desc 和字幕列表，后续摘要/字幕/简介都依赖这些字段。
         video_info = None
-        if not cid or not title:
-            try:
-                video_info = await self.bili.get_video_info(bvid)
-                if not cid:
-                    cid = video_info.get("cid")
-                if not title:
-                    title = video_info.get("title", "未知标题")
-            except Exception as e:
+        try:
+            video_info = await self.bili.get_video_info(bvid)
+            if not cid:
+                cid = video_info.get("cid")
+            if not title:
+                title = video_info.get("title", "未知标题")
+        except Exception as e:
+            if not cid or not title:
                 logger.error(f"获取视频信息失败 [{bvid}]: {e}")
                 return VideoContent(
                     bvid=bvid,
                     title=title or "未知标题",
                     content="无法获取视频信息",
-                    source=ContentSource.BASIC_INFO
+                    source=ContentSource.BASIC_INFO,
                 )
-        
+            logger.debug(f"[{bvid}] 获取视频信息失败，继续使用收藏夹元数据: {e}")
+
         description = video_info.get("desc", "") if video_info else ""
-        
-        # Level 1: 跳过 AI 摘要，优先使用 ASR
-        logger.info(f"[{bvid}] 已跳过 AI 摘要，优先使用 ASR")
+
+        # Level 1: B 站 AI 摘要
+        if cid:
+            owner = (video_info or {}).get("owner") or {}
+            up_mid = owner.get("mid") or (video_info or {}).get("owner_mid")
+            summary = await self._try_ai_summary(bvid, cid, up_mid=up_mid)
+            if summary:
+                parts = [f"AI 摘要：{summary['summary']}"]
+                if summary.get("outline"):
+                    outline_lines = []
+                    for item in summary["outline"]:
+                        title_text = item.get("title") or "未命名片段"
+                        timestamp = item.get("timestamp")
+                        prefix = (
+                            f"- {title_text} ({timestamp}s)"
+                            if timestamp
+                            else f"- {title_text}"
+                        )
+                        outline_lines.append(prefix)
+                        for point in item.get("points") or []:
+                            point_text = point.get("content")
+                            if point_text:
+                                outline_lines.append(f"  - {point_text}")
+                    if outline_lines:
+                        parts.append("分段提纲：\n" + "\n".join(outline_lines))
+                logger.info(f"[{bvid}] 使用 AI 摘要")
+                return VideoContent(
+                    bvid=bvid,
+                    title=title,
+                    content="\n\n".join(parts),
+                    source=ContentSource.AI_SUMMARY,
+                    outline=summary.get("outline"),
+                )
+
+        # Level 2: 字幕
+        if cid:
+            subtitle_text = await self._try_subtitle(bvid, cid, video_info=video_info)
+            if subtitle_text:
+                logger.info(f"[{bvid}] 使用字幕文本")
+                return VideoContent(
+                    bvid=bvid,
+                    title=title,
+                    content=subtitle_text,
+                    source=ContentSource.SUBTITLE,
+                )
+
+        # Level 3: 音频 ASR
+        logger.info(f"[{bvid}] 尝试使用 ASR")
 
         asr_text = await self._try_asr(bvid, cid)
         if asr_text:
             logger.info(f"[{bvid}] 使用 ASR 文本")
             return VideoContent(
-                bvid=bvid,
-                title=title,
-                content=asr_text,
-                source=ContentSource.ASR
+                bvid=bvid, title=title, content=asr_text, source=ContentSource.ASR
             )
-        
+
         # ASR 失败时，补齐基础信息（避免遗漏简介）
         if not video_info:
             try:
@@ -86,17 +133,17 @@ class ContentFetcher:
         if video_info and not description:
             description = video_info.get("desc", "") or description
 
-        # Level 3: 使用基本信息兜底
+        # Level 4: 使用基本信息兜底
         logger.info(f"[{bvid}] 使用基本信息")
         basic_content = f"视频标题：{title}"
         if description:
             basic_content += f"\n\n视频简介：{description}"
-        
+
         return VideoContent(
             bvid=bvid,
             title=title,
             content=basic_content,
-            source=ContentSource.BASIC_INFO
+            source=ContentSource.BASIC_INFO,
         )
 
     async def _try_asr(self, bvid: str, cid: int) -> Optional[str]:
@@ -187,7 +234,9 @@ class ContentFetcher:
         text = await self.asr.transcribe_local_file(file_path)
         if text:
             preview = text[:120].replace("\n", " ").strip()
-            logger.info(f"[{bvid}] Recognition ASR 成功，长度={len(text)}，预览：{preview}")
+            logger.info(
+                f"[{bvid}] Recognition ASR 成功，长度={len(text)}，预览：{preview}"
+            )
         return text
 
     def _transcode_audio_to_wav(self, bvid: str, file_path: str) -> Optional[str]:
@@ -203,9 +252,12 @@ class ContentFetcher:
         cmd = [
             ffmpeg,
             "-y",
-            "-i", file_path,
-            "-ac", "1",
-            "-ar", "16000",
+            "-i",
+            file_path,
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
             "-vn",
             wav_path,
         ]
@@ -237,9 +289,12 @@ class ContentFetcher:
             return None
         cmd = [
             ffprobe,
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             file_path,
         ]
         try:
@@ -256,7 +311,9 @@ class ContentFetcher:
         except Exception:
             return None
 
-    def _split_audio_wav(self, bvid: str, wav_path: str, segment_seconds: int = 1200) -> list[str]:
+    def _split_audio_wav(
+        self, bvid: str, wav_path: str, segment_seconds: int = 1200
+    ) -> list[str]:
         """将较长 wav 切分为多段，提升 ASR 成功率"""
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
@@ -278,11 +335,16 @@ class ContentFetcher:
             cmd = [
                 ffmpeg,
                 "-y",
-                "-i", wav_path,
-                "-ss", str(start),
-                "-t", str(segment_seconds),
-                "-ac", "1",
-                "-ar", "16000",
+                "-i",
+                wav_path,
+                "-ss",
+                str(start),
+                "-t",
+                str(segment_seconds),
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
                 "-vn",
                 out_path,
             ]
@@ -315,65 +377,66 @@ class ContentFetcher:
         return segment_paths
 
     async def _try_ai_summary(
-        self, 
-        bvid: str, 
-        cid: int, 
-        up_mid: int = None
+        self, bvid: str, cid: int, up_mid: int = None
     ) -> Optional[dict]:
         """尝试获取 AI 摘要"""
         try:
             result = await self.bili.get_video_summary(bvid, cid, up_mid)
-            
+
             if not result:
                 return None
-            
+
             # 检查是否有有效摘要
             inner_code = result.get("code", -1)
             if inner_code != 0:
                 logger.debug(f"[{bvid}] AI 摘要不可用: code={inner_code}")
                 return None
-            
+
             model_result = result.get("model_result", {})
             summary = model_result.get("summary", "")
-            
+
             if not summary:
                 logger.debug(f"[{bvid}] AI 摘要为空")
                 return None
-            
+
             # 解析分段提纲
             outline = []
             for item in model_result.get("outline", []):
                 outline_item = {
                     "title": item.get("title", ""),
                     "timestamp": item.get("timestamp", 0),
-                    "points": []
+                    "points": [],
                 }
                 for point in item.get("part_outline", []):
-                    outline_item["points"].append({
-                        "content": point.get("content", ""),
-                        "timestamp": point.get("timestamp", 0)
-                    })
+                    outline_item["points"].append(
+                        {
+                            "content": point.get("content", ""),
+                            "timestamp": point.get("timestamp", 0),
+                        }
+                    )
                 outline.append(outline_item)
-            
-            return {
-                "summary": summary,
-                "outline": outline
-            }
-            
+
+            return {"summary": summary, "outline": outline}
+
         except Exception as e:
             logger.warning(f"[{bvid}] 获取 AI 摘要失败: {e}")
             return None
-    
-    async def _try_subtitle(self, bvid: str, cid: int, video_info: Optional[dict] = None) -> Optional[str]:
+
+    async def _try_subtitle(
+        self, bvid: str, cid: int, video_info: Optional[dict] = None
+    ) -> Optional[str]:
         """尝试获取字幕"""
         try:
+
             def pick_subtitle(subtitles: list) -> Optional[dict]:
                 """优先选中文且人工字幕，没有就回退到中文自动字幕"""
                 if not subtitles:
                     return None
+
                 def is_zh(sub):
                     lan = sub.get("lan", "") or ""
                     return "zh" in lan.lower() or "cn" in lan.lower()
+
                 for sub in subtitles:
                     if is_zh(sub) and str(sub.get("ai_status", "0")) == "0":
                         return sub
@@ -384,7 +447,9 @@ class ContentFetcher:
 
             def extract_subtitles(data: dict) -> list:
                 subtitle_block = (data or {}).get("subtitle", {}) or {}
-                return subtitle_block.get("subtitles") or subtitle_block.get("list") or []
+                return (
+                    subtitle_block.get("subtitles") or subtitle_block.get("list") or []
+                )
 
             def extract_url(sub: dict) -> str:
                 return sub.get("subtitle_url") or sub.get("url") or ""
@@ -404,13 +469,17 @@ class ContentFetcher:
                     subtitle_text = await self.bili.download_subtitle(subtitle_url)
                     if subtitle_text and len(subtitle_text) >= 50:
                         preview = subtitle_text[:120].replace("\n", " ").strip()
-                        logger.info(f"[{bvid}] 字幕获取成功，长度={len(subtitle_text)}，预览：{preview}")
+                        logger.info(
+                            f"[{bvid}] 字幕获取成功，长度={len(subtitle_text)}，预览：{preview}"
+                        )
                         return subtitle_text
                     logger.info(f"[{bvid}] 字幕内容过少，已忽略")
                 else:
                     logger.info(f"[{bvid}] 字幕地址为空，无法下载")
             else:
-                logger.info(f"[{bvid}] 播放器字幕为空（登录态={'已设置' if has_login else '未设置'}）")
+                logger.info(
+                    f"[{bvid}] 播放器字幕为空（登录态={'已设置' if has_login else '未设置'}）"
+                )
 
             # 如果没有 video_info，尝试获取以补齐 aid 与字幕列表
             if not video_info:
@@ -430,10 +499,14 @@ class ContentFetcher:
                         selected_subtitle = pick_subtitle(subtitles)
                         subtitle_url = extract_url(selected_subtitle or {})
                         if subtitle_url:
-                            subtitle_text = await self.bili.download_subtitle(subtitle_url)
+                            subtitle_text = await self.bili.download_subtitle(
+                                subtitle_url
+                            )
                             if subtitle_text and len(subtitle_text) >= 50:
                                 preview = subtitle_text[:120].replace("\n", " ").strip()
-                                logger.info(f"[{bvid}] 字幕获取成功(补aid)，长度={len(subtitle_text)}，预览：{preview}")
+                                logger.info(
+                                    f"[{bvid}] 字幕获取成功(补aid)，长度={len(subtitle_text)}，预览：{preview}"
+                                )
                                 return subtitle_text
                             logger.info(f"[{bvid}] 字幕内容过少，已忽略")
                         else:
@@ -450,7 +523,9 @@ class ContentFetcher:
                     subtitle_text = await self.bili.download_subtitle(subtitle_url)
                     if subtitle_text and len(subtitle_text) >= 50:
                         preview = subtitle_text[:120].replace("\n", " ").strip()
-                        logger.info(f"[{bvid}] 字幕获取成功(view兜底)，长度={len(subtitle_text)}，预览：{preview}")
+                        logger.info(
+                            f"[{bvid}] 字幕获取成功(view兜底)，长度={len(subtitle_text)}，预览：{preview}"
+                        )
                         return subtitle_text
                     logger.info(f"[{bvid}] 字幕内容过少，已忽略")
                 else:
@@ -460,57 +535,57 @@ class ContentFetcher:
 
             logger.info(f"[{bvid}] 没有可用字幕，回退到简介兜底")
             return None
-            
+
         except Exception as e:
             logger.warning(f"[{bvid}] 获取字幕失败: {e}")
             return None
-    
+
     async def fetch_all_videos_content(
-        self, 
-        videos: list, 
-        progress_callback=None
+        self, videos: list, progress_callback=None
     ) -> list[VideoContent]:
         """
         批量获取视频内容
-        
+
         Args:
             videos: 视频列表，每个元素需包含 bvid, title (可选 cid)
             progress_callback: 进度回调函数 callback(current, total, video_title)
-            
+
         Returns:
             VideoContent 列表
         """
         import asyncio
-        
+
         results = []
         total = len(videos)
-        
+
         for i, video in enumerate(videos):
             bvid = video.get("bvid") or video.get("bv_id")
             title = video.get("title", "")
             cid = video.get("cid") or video.get("id")
-            
+
             if not bvid:
                 logger.warning(f"跳过无效视频: {video}")
                 continue
-            
+
             try:
                 content = await self.fetch_content(bvid, cid, title)
                 results.append(content)
-                
+
                 if progress_callback:
                     progress_callback(i + 1, total, title)
-                    
+
             except Exception as e:
                 logger.error(f"处理视频失败 [{bvid}]: {e}")
-                results.append(VideoContent(
-                    bvid=bvid,
-                    title=title or bvid,
-                    content=f"处理失败: {str(e)}",
-                    source=ContentSource.BASIC_INFO
-                ))
-            
+                results.append(
+                    VideoContent(
+                        bvid=bvid,
+                        title=title or bvid,
+                        content=f"处理失败: {str(e)}",
+                        source=ContentSource.BASIC_INFO,
+                    )
+                )
+
             # 控制请求速率
             await asyncio.sleep(0.5)
-        
+
         return results

@@ -25,6 +25,10 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("DASHSCOPE_API_KEY", "OPENAI_API_KEY"),
     )
+    dashscope_api_key: str = Field(
+        default="",
+        validation_alias="DASHSCOPE_API_KEY",
+    )
     openai_base_url: str = Field(
         default="https://api.openai.com/v1", env="OPENAI_BASE_URL"
     )

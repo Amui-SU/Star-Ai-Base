@@ -34,9 +34,11 @@ def _unauthorized() -> HTTPException:
     return HTTPException(status_code=401, detail="Not authenticated")
 
 
-async def get_current_user(
+async def _resolve_current_user(
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession,
+    *,
+    touch_last_seen: bool,
 ) -> SystemUser:
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
@@ -64,9 +66,24 @@ async def get_current_user(
     if user is None:
         raise _unauthorized()
 
-    session.last_seen_at = _utc_now_naive()
-    await db.commit()
+    if touch_last_seen:
+        session.last_seen_at = _utc_now_naive()
+        await db.commit()
     return user
+
+
+async def get_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> SystemUser:
+    return await _resolve_current_user(request, db, touch_last_seen=True)
+
+
+async def get_current_user_readonly(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> SystemUser:
+    return await _resolve_current_user(request, db, touch_last_seen=False)
 
 
 async def get_current_workspace(
@@ -85,9 +102,42 @@ async def get_current_workspace(
     return workspace
 
 
+async def get_current_workspace_readonly(
+    current_user: SystemUser = Depends(get_current_user_readonly),
+    db: AsyncSession = Depends(get_db),
+) -> Workspace:
+    result = await db.execute(
+        select(Workspace)
+        .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+        .where(WorkspaceMember.user_id == current_user.id)
+        .order_by(WorkspaceMember.id)
+    )
+    workspace = result.scalars().first()
+    if workspace is None:
+        raise HTTPException(status_code=403, detail="Workspace access required")
+    return workspace
+
+
 async def get_knowledge_base_for_user(
     knowledge_base_id: int,
     current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeBase:
+    result = await db.execute(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == knowledge_base_id,
+            KnowledgeBase.workspace_id == current_workspace.id,
+        )
+    )
+    knowledge_base = result.scalar_one_or_none()
+    if knowledge_base is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    return knowledge_base
+
+
+async def get_knowledge_base_for_user_readonly(
+    knowledge_base_id: int,
+    current_workspace: Workspace = Depends(get_current_workspace_readonly),
     db: AsyncSession = Depends(get_db),
 ) -> KnowledgeBase:
     result = await db.execute(

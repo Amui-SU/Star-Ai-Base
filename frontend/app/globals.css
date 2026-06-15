@@ -5014,6 +5014,28 @@ html.light .status-pill.empty {
     max-width: min(82%, 600px);
   }
 
+  .message.user .message-bubble.editing {
+    align-self: flex-end;
+    width: min(88%, 600px);
+    max-width: min(88%, 600px);
+  }
+
+  .message.user .message-bubble.editing .inline-edit-wrap {
+    width: 100%;
+    text-align: left;
+  }
+
+  .message.assistant .message-main,
+  .message.assistant .message-bubble {
+    align-items: stretch;
+    text-align: left;
+  }
+
+  .message.assistant .markdown {
+    width: 100%;
+    text-align: left;
+  }
+
   .panel-chat-embedded .chat-scroll:has(.empty-state) {
     min-height: 100%;
     overflow: hidden;
