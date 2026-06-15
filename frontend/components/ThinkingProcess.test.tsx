@@ -24,6 +24,14 @@ describe("ThinkingProcess", () => {
     expect(screen.getByText(/正在思考 · 6\.5 秒/)).toBeInTheDocument();
   });
 
+  it("shows a useful status while waiting for the first thinking delta", () => {
+    render(<ThinkingProcess active startedAt={Date.now()} thinking="" />);
+
+    expect(
+      screen.getByText("正在读取知识库并等待模型返回思考内容"),
+    ).toBeVisible();
+  });
+
   it("starts collapsed after completion and can be expanded", () => {
     render(
       <ThinkingProcess
@@ -41,8 +49,8 @@ describe("ThinkingProcess", () => {
     expect(screen.getByText("完整思考内容")).toBeVisible();
   });
 
-  it("hides an empty completed thinking state", () => {
-    const { container } = render(
+  it("explains when a completed request has no thinking content", () => {
+    render(
       <ThinkingProcess
         active={false}
         startedAt={1_000}
@@ -51,6 +59,6 @@ describe("ThinkingProcess", () => {
       />,
     );
 
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.getByText("已完成生成 · 未返回独立思考内容")).toBeVisible();
   });
 });

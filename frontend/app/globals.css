@@ -1993,6 +1993,10 @@ html.light .video-card:hover {
   cursor: default;
 }
 
+.thinking-process-static {
+  cursor: default;
+}
+
 .thinking-process-chevron {
   display: inline-flex;
   transform: rotate(0deg);
@@ -2016,6 +2020,40 @@ html.light .video-card:hover {
   font-size: 12px;
   line-height: 1.72;
   white-space: pre-wrap;
+}
+
+.thinking-process-content.pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in srgb, var(--muted) 76%, transparent);
+}
+
+.thinking-process-pending-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.thinking-process-pending-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: thinkingDotPulse 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes thinkingDotPulse {
+  from {
+    opacity: 0.28;
+    transform: translateY(1px);
+  }
+
+  to {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
 }
 
 .source-summary {
@@ -4776,6 +4814,12 @@ html.light .status-pill.empty {
     padding: 10px 8px;
   }
 
+  .modal-backdrop:has(> .import-modal) {
+    z-index: 100;
+    align-items: center;
+    padding: 16px;
+  }
+
   .modal-card {
     width: min(100%, calc(100vw - 16px));
     max-height: calc(100dvh - 20px);
@@ -4785,33 +4829,35 @@ html.light .status-pill.empty {
 
   .import-modal,
   .import-modal-step {
-    width: min(100%, calc(100vw - 16px));
-    padding: 22px 18px 20px;
-    border-radius: 22px;
+    width: min(100%, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+    padding: 18px 15px 16px;
+    border-radius: 20px;
   }
 
   .import-modal-head {
-    margin-bottom: 18px;
+    margin-bottom: 14px;
     gap: 10px;
   }
 
   .import-modal .modal-title {
-    font-size: 20px;
+    font-size: 18px;
   }
 
   .import-modal .modal-subtitle {
-    font-size: 12px;
+    margin-top: 6px;
+    font-size: 11px;
   }
 
   .import-method-grid {
-    gap: 10px;
+    gap: 9px;
   }
 
   .import-method-card {
-    min-height: 90px;
-    border-radius: 18px;
-    padding: 15px 16px;
-    gap: 6px;
+    min-height: 78px;
+    border-radius: 16px;
+    padding: 12px 14px;
+    gap: 5px;
   }
 
   .import-method-title {
@@ -4982,6 +5028,12 @@ html.light .status-pill.empty {
 
   .panel-chat-embedded .panel-body {
     padding: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .panel-chat-embedded .panel-body::-webkit-scrollbar {
+    display: none;
   }
 
   .panel-chat-embedded .panel-body:has(.empty-state) {

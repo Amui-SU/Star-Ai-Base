@@ -367,22 +367,15 @@ export default function ChatPanel({
   const fetchAssistantAnswer = async (q: string, assistantId: string) => {
     const abortController = new AbortController();
     streamAbortRef.current = abortController;
-    const configuredProvider = llmConfig?.providers.find(
-      (provider) => provider.provider === llmConfig.current_provider,
-    );
-    const thinkingConfigured =
-      Object.keys(configuredProvider?.thinking_config || {}).length > 0;
     const thinkingStartedAt = Date.now();
     setMessages((prev) =>
       prev.map((message) =>
         message.id === assistantId
           ? {
               ...message,
-              thinking: thinkingConfigured ? "" : undefined,
-              thinkingActive: thinkingConfigured,
-              thinkingStartedAt: thinkingConfigured
-                ? thinkingStartedAt
-                : undefined,
+              thinking: "",
+              thinkingActive: true,
+              thinkingStartedAt,
               thinkingDurationMs: undefined,
             }
           : message,
@@ -504,20 +497,18 @@ export default function ChatPanel({
       }
     } finally {
       window.clearTimeout(streamTimeout);
-      if (thinkingConfigured) {
-        const thinkingDurationMs = Date.now() - thinkingStartedAt;
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantId
-              ? {
-                  ...message,
-                  thinkingActive: false,
-                  thinkingDurationMs,
-                }
-              : message,
-          ),
-        );
-      }
+      const thinkingDurationMs = Date.now() - thinkingStartedAt;
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                thinkingActive: false,
+                thinkingDurationMs,
+              }
+            : message,
+        ),
+      );
       if (streamAbortRef.current === abortController) {
         streamAbortRef.current = null;
       }
@@ -1250,21 +1241,6 @@ export default function ChatPanel({
                   </div>
                 </div>
               ))}
-              {loading && (
-                <div className="message assistant">
-                  <div className="message-bubble">
-                    <div className="flex gap-1">
-                      {[0, 1, 2].map((i) => (
-                        <div
-                          key={i}
-                          className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse"
-                          style={{ animationDelay: `${i * 0.15}s` }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
               <div ref={endRef} />
             </div>
           )}

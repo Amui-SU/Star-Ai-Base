@@ -28,7 +28,15 @@ export default function ThinkingProcess({
     return () => window.clearInterval(timer);
   }, [active, startedAt]);
 
-  if (!active && !thinking.trim()) return null;
+  if (!active && !thinking.trim()) {
+    return (
+      <div className="thinking-process complete empty">
+        <div className="thinking-process-trigger thinking-process-static">
+          已完成生成 · 未返回独立思考内容
+        </div>
+      </div>
+    );
+  }
 
   const elapsed = active ? now - startedAt : (durationMs ?? now - startedAt);
   const label = active
@@ -59,8 +67,30 @@ export default function ThinkingProcess({
           </span>
         )}
       </button>
-      {expanded && thinking.trim() && (
-        <div className="thinking-process-content">{thinking}</div>
+      {expanded && (thinking.trim() || active) && (
+        <div
+          className={`thinking-process-content ${
+            !thinking.trim() ? "pending" : ""
+          }`}
+          aria-live="polite"
+        >
+          {thinking.trim() || (
+            <>
+              <span>正在读取知识库并等待模型返回思考内容</span>
+              <span
+                className="thinking-process-pending-dots"
+                aria-hidden="true"
+              >
+                {[0, 1, 2].map((index) => (
+                  <span
+                    key={index}
+                    style={{ animationDelay: `${index * 0.15}s` }}
+                  />
+                ))}
+              </span>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

@@ -29,4 +29,22 @@ describe("mobile chat message layout", () => {
       /\.message\.assistant \.markdown\s*\{[^}]*text-align:\s*left;/s,
     );
   });
+
+  it("hides the mobile chat scrollbar without disabling scrolling", () => {
+    expect(stylesheet).toMatch(
+      /\.panel-chat-embedded \.panel-body\s*\{[^}]*overflow-y:\s*auto;[^}]*scrollbar-width:\s*none;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.panel-chat-embedded \.panel-body::-webkit-scrollbar\s*\{[^}]*display:\s*none;/s,
+    );
+  });
+
+  it("keeps the mobile import modal above the workspace with screen insets", () => {
+    expect(stylesheet).toMatch(
+      /\.modal-backdrop:has\(>\s*\.import-modal\)\s*\{[^}]*z-index:\s*100;[^}]*align-items:\s*center;[^}]*padding:\s*16px;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.import-modal,\s*\.import-modal-step\s*\{[^}]*width:\s*min\(100%, calc\(100vw - 32px\)\);/s,
+    );
+  });
 });
