@@ -9,6 +9,15 @@ const stylesheet = readFileSync(
 );
 
 describe("mobile chat message layout", () => {
+  it("allows the user menu to escape the expanded mobile topbar", () => {
+    expect(stylesheet).toMatch(
+      /\.app-shell\.sidebar-open \.workspace-topbar\s*\{[^}]*overflow:\s*visible;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.app-shell\.sidebar-open \.workspace-topbar\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*80;/s,
+    );
+  });
+
   it("keeps edited user messages right-aligned and insets assistant replies", () => {
     expect(stylesheet).toMatch(
       /\.message\.user \.message-bubble\.editing\s*\{[^}]*align-self:\s*flex-end;[^}]*width:\s*min\(88%, 600px\);/s,

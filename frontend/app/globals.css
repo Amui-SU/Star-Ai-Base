@@ -4934,6 +4934,9 @@ html.light .status-pill.empty {
     height: 48px;
     border-bottom: 1px solid var(--border);
     opacity: 1;
+    overflow: visible;
+    position: relative;
+    z-index: 80;
     pointer-events: auto;
     transform: translateY(0);
   }
