@@ -5031,9 +5031,13 @@ html.light .status-pill.empty {
     text-align: left;
   }
 
+  .message.assistant .message-main {
+    padding-inline: clamp(12px, 4vw, 24px);
+  }
+
   .message.assistant .markdown {
     width: 100%;
-    text-align: center;
+    text-align: left;
   }
 
   .panel-chat-embedded .chat-scroll:has(.empty-state) {
