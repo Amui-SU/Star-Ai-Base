@@ -5033,7 +5033,7 @@ html.light .status-pill.empty {
 
   .message.assistant .markdown {
     width: 100%;
-    text-align: left;
+    text-align: center;
   }
 
   .panel-chat-embedded .chat-scroll:has(.empty-state) {

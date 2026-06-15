@@ -9,12 +9,12 @@ const stylesheet = readFileSync(
 );
 
 describe("mobile chat message layout", () => {
-  it("keeps edited user messages right-aligned and assistant text left-aligned", () => {
+  it("keeps edited user messages right-aligned and assistant text centered", () => {
     expect(stylesheet).toMatch(
       /\.message\.user \.message-bubble\.editing\s*\{[^}]*align-self:\s*flex-end;[^}]*width:\s*min\(88%, 600px\);/s,
     );
     expect(stylesheet).toMatch(
-      /\.message\.assistant \.markdown\s*\{[^}]*text-align:\s*left;/s,
+      /\.message\.assistant \.markdown\s*\{[^}]*text-align:\s*center;/s,
     );
   });
 });
