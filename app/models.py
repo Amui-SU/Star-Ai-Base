@@ -32,7 +32,7 @@ class VideoCache(Base):
     __tablename__ = "video_cache"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    bvid = Column(String(20), unique=True, index=True, nullable=False)
+    bvid = Column(String(20), index=True, nullable=False)
     cid = Column(Integer, nullable=True)
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)

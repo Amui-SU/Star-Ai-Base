@@ -513,7 +513,32 @@ class RAGService:
             logger.error(f"删除视频失败 [{bvid}]: {e}")
             raise
 
-    def delete_by_knowledge_base(self, knowledge_base_id: int) -> int:
+    def delete_video_in_knowledge_base(
+        self,
+        workspace_id: int,
+        knowledge_base_id: int,
+        bvid: str,
+    ):
+        """Delete one video's vectors inside a single knowledge-base scope."""
+        where = {
+            "$and": [
+                {"workspace_id": workspace_id},
+                {"knowledge_base_id": knowledge_base_id},
+                {"bvid": bvid},
+            ]
+        }
+        try:
+            self.vectorstore._collection.delete(where=where)
+            logger.info(f"宸插垹闄ょ煡璇嗗簱 {knowledge_base_id} 鍐呯殑瑙嗛 {bvid}")
+        except Exception as e:
+            logger.error(f"鍒犻櫎 scoped 瑙嗛澶辫触 [{knowledge_base_id}/{bvid}]: {e}")
+            raise
+
+    def delete_by_knowledge_base(
+        self,
+        knowledge_base_id: int,
+        workspace_id: int | None = None,
+    ) -> int:
         """
         删除指定知识库的所有向量文档。返回删除前匹配的文档数。
 
@@ -521,7 +546,15 @@ class RAGService:
             knowledge_base_id: 知识库 ID
         """
         try:
-            where = {"knowledge_base_id": knowledge_base_id}
+            if workspace_id is None:
+                where = {"knowledge_base_id": knowledge_base_id}
+            else:
+                where = {
+                    "$and": [
+                        {"workspace_id": workspace_id},
+                        {"knowledge_base_id": knowledge_base_id},
+                    ]
+                }
             before = self.vectorstore._collection.count()
             self.vectorstore._collection.delete(where=where)
             after = self.vectorstore._collection.count()

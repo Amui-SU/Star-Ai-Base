@@ -18,6 +18,7 @@ from langchain.schema import Document
 from pydantic import BaseModel
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models import (
     ChatRequest,
     ChatResponse,
@@ -29,6 +30,11 @@ from app.config import settings
 from app.routers.knowledge import get_rag_service
 
 router = APIRouter(prefix="/chat", tags=["对话"])
+LEGACY_SCOPED_API_DETAIL = "旧全局接口已禁用，请使用 /knowledge-bases/* 范围化 API。"
+
+
+def _raise_legacy_scoped_api_required() -> None:
+    raise HTTPException(status_code=410, detail=LEGACY_SCOPED_API_DETAIL)
 
 
 PROVIDER_META = {
@@ -282,7 +288,7 @@ def _write_env_values(updates: Dict[str, str]) -> None:
 
 
 @router.get("/llm/config")
-async def get_llm_config():
+async def get_llm_config(_current_user=Depends(get_current_user)):
     """获取当前模型配置（不返回密钥）"""
     current = _resolve_llm_config()
     providers = []
@@ -305,7 +311,10 @@ async def get_llm_config():
 
 
 @router.post("/llm/provider-config")
-async def save_llm_provider_config(body: LLMProviderConfigRequest):
+async def save_llm_provider_config(
+    body: LLMProviderConfigRequest,
+    _current_user=Depends(get_current_user),
+):
     """验证并保存模型提供方配置到 .env.local。"""
     global _current_llm_provider
 
@@ -385,7 +394,10 @@ async def save_llm_provider_config(body: LLMProviderConfigRequest):
 
 
 @router.post("/llm/config")
-async def set_llm_config(body: LLMProviderUpdateRequest):
+async def set_llm_config(
+    body: LLMProviderUpdateRequest,
+    _current_user=Depends(get_current_user),
+):
     """切换当前问答模型提供方"""
     global _current_llm_provider
     llm_config = _resolve_llm_config(body.provider)
@@ -407,7 +419,7 @@ async def set_llm_config(body: LLMProviderUpdateRequest):
 
 
 @router.get("/health/llm")
-async def llm_health_check():
+async def llm_health_check(_current_user=Depends(get_current_user)):
     """LLM 连通性检查"""
     llm_config = _resolve_llm_config()
     if not llm_config["api_key"]:
@@ -1250,8 +1262,12 @@ async def _prepare_messages(
 
 
 @router.post("/ask", response_model=ChatResponse)
-async def ask_question(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def ask_question(
+    request: Optional[ChatRequest] = None,
+    db: AsyncSession = Depends(get_db),
+):
     """智能问答"""
+    _raise_legacy_scoped_api_required()
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
@@ -1294,8 +1310,12 @@ async def ask_question(request: ChatRequest, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/ask/stream")
-async def ask_question_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def ask_question_stream(
+    request: Optional[ChatRequest] = None,
+    db: AsyncSession = Depends(get_db),
+):
     """流式问答"""
+    _raise_legacy_scoped_api_required()
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
@@ -1335,8 +1355,9 @@ async def ask_question_stream(request: ChatRequest, db: AsyncSession = Depends(g
 
 
 @router.post("/search")
-async def search_videos(query: str, k: int = 5):
+async def search_videos(query: Optional[str] = None, k: int = 5):
     """搜索相关视频片段"""
+    _raise_legacy_scoped_api_required()
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="查询不能为空")
     try:

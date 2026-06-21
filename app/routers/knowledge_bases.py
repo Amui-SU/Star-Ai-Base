@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain.schema import Document
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -97,8 +97,27 @@ def _dedupe_strings(values: list[str] | None) -> list[str]:
     return list(dict.fromkeys(item for item in (values or []) if item))
 
 
+def _nullable_equal(left, right):
+    return or_(left == right, and_(left.is_(None), right.is_(None)))
+
+
+def _video_cache_matches_favorite():
+    return and_(
+        FavoriteVideo.bvid == VideoCache.bvid,
+        _nullable_equal(FavoriteVideo.workspace_id, VideoCache.workspace_id),
+        _nullable_equal(
+            FavoriteVideo.knowledge_base_id,
+            VideoCache.knowledge_base_id,
+        ),
+        _nullable_equal(FavoriteVideo.source_binding_id, VideoCache.source_binding_id),
+    )
+
+
 class _NoopRAGService:
     def delete_video(self, *_args, **_kwargs):
+        return None
+
+    def delete_video_in_knowledge_base(self, *_args, **_kwargs):
         return None
 
     def add_video_content(self, *_args, **_kwargs):
@@ -169,7 +188,7 @@ async def _load_db_fallback_documents(
             VideoCache.description,
             VideoCache.content,
         )
-        .join(FavoriteVideo, FavoriteVideo.bvid == VideoCache.bvid)
+        .join(FavoriteVideo, _video_cache_matches_favorite())
         .where(FavoriteVideo.knowledge_base_id == knowledge_base_id)
         .where(VideoCache.is_processed.is_(True))
     )
@@ -685,7 +704,13 @@ async def delete_knowledge_base(
     warning: str | None = None
     try:
         rag = get_rag_service()
-        deleted_vectors = rag.delete_by_knowledge_base(kb_id)
+        try:
+            deleted_vectors = rag.delete_by_knowledge_base(
+                kb_id,
+                workspace_id=current_workspace.id,
+            )
+        except TypeError:
+            deleted_vectors = rag.delete_by_knowledge_base(kb_id)
         logger.info(
             f"已删除知识库 {kb_id}（{knowledge_base.name}）的 {deleted_vectors} 个向量"
         )

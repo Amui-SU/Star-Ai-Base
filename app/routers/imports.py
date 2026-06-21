@@ -204,7 +204,13 @@ async def _run_bilibili_video_import(
         content = await fetcher.fetch_content(bvid, cid=cid, title=title)
 
         async with get_db_context() as db:
-            result = await db.execute(select(VideoCache).where(VideoCache.bvid == bvid))
+            result = await db.execute(
+                select(VideoCache)
+                .where(VideoCache.bvid == bvid)
+                .where(VideoCache.workspace_id == workspace_id)
+                .where(VideoCache.knowledge_base_id == knowledge_base_id)
+                .where(VideoCache.source_binding_id.is_(None))
+            )
             cache = result.scalar_one_or_none()
             if cache is None:
                 cache = VideoCache(
@@ -217,6 +223,7 @@ async def _run_bilibili_video_import(
                     pic_url=info.get("pic"),
                     workspace_id=workspace_id,
                     knowledge_base_id=knowledge_base_id,
+                    source_binding_id=None,
                     is_processed=True,
                 )
                 db.add(cache)
@@ -227,6 +234,7 @@ async def _run_bilibili_video_import(
             cache.is_processed = True
             cache.workspace_id = workspace_id
             cache.knowledge_base_id = knowledge_base_id
+            cache.source_binding_id = None
 
             folder_result = await db.execute(
                 select(FavoriteFolder)
@@ -272,7 +280,11 @@ async def _run_bilibili_video_import(
 
         await update_task(current_step="写入向量索引...", progress=76)
         try:
-            rag.delete_video(bvid)
+            rag.delete_video_in_knowledge_base(
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                bvid=bvid,
+            )
         except Exception:
             pass
         chunks = rag.add_video_content(

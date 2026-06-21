@@ -29,6 +29,12 @@ from app.services.rag import RAGService
 from app.routers.auth import get_session
 
 router = APIRouter(prefix="/knowledge", tags=["知识库"])
+LEGACY_SCOPED_API_DETAIL = "旧全局接口已禁用，请使用 /knowledge-bases/* 范围化 API。"
+
+
+def _raise_legacy_scoped_api_required() -> None:
+    raise HTTPException(status_code=410, detail=LEGACY_SCOPED_API_DETAIL)
+
 
 # 全局 RAG 服务实例
 _rag_service: Optional[RAGService] = None
@@ -127,14 +133,30 @@ async def _get_or_create_folder(
     media_id: int,
     title: Optional[str] = None,
     media_count: Optional[int] = None,
+    workspace_id: Optional[int] = None,
+    knowledge_base_id: Optional[int] = None,
+    source_binding_id: Optional[int] = None,
 ) -> FavoriteFolder:
     """获取或创建收藏夹记录"""
-    result = await db.execute(
-        select(FavoriteFolder).where(
-            FavoriteFolder.session_id == session_id,
-            FavoriteFolder.media_id == media_id,
-        )
+    stmt = select(FavoriteFolder).where(
+        FavoriteFolder.session_id == session_id,
+        FavoriteFolder.media_id == media_id,
     )
+    if _has_cache_scope(workspace_id, knowledge_base_id):
+        stmt = (
+            stmt.where(FavoriteFolder.workspace_id == workspace_id)
+            .where(FavoriteFolder.knowledge_base_id == knowledge_base_id)
+            .where(
+                FavoriteFolder.source_binding_id.is_(None)
+                if source_binding_id is None
+                else FavoriteFolder.source_binding_id == source_binding_id
+            )
+        )
+    else:
+        stmt = stmt.where(FavoriteFolder.workspace_id.is_(None)).where(
+            FavoriteFolder.knowledge_base_id.is_(None)
+        )
+    result = await db.execute(stmt.order_by(FavoriteFolder.id.asc()).limit(1))
     folder = result.scalar_one_or_none()
 
     if folder is None:
@@ -144,6 +166,9 @@ async def _get_or_create_folder(
             title=title or "",
             media_count=media_count or 0,
             is_selected=True,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            source_binding_id=source_binding_id,
         )
         db.add(folder)
         await db.flush()
@@ -169,6 +194,58 @@ def _extract_video_info(media: dict) -> tuple[str, str, Optional[int]]:
     return bvid, title, cid
 
 
+def _has_cache_scope(
+    workspace_id: Optional[int],
+    knowledge_base_id: Optional[int],
+) -> bool:
+    return workspace_id is not None and knowledge_base_id is not None
+
+
+async def _get_video_cache_for_scope(
+    db: AsyncSession,
+    bvid: str,
+    *,
+    workspace_id: Optional[int] = None,
+    knowledge_base_id: Optional[int] = None,
+    source_binding_id: Optional[int] = None,
+) -> Optional[VideoCache]:
+    stmt = select(VideoCache).where(VideoCache.bvid == bvid)
+    if _has_cache_scope(workspace_id, knowledge_base_id):
+        stmt = (
+            stmt.where(VideoCache.workspace_id == workspace_id)
+            .where(VideoCache.knowledge_base_id == knowledge_base_id)
+            .where(
+                VideoCache.source_binding_id.is_(None)
+                if source_binding_id is None
+                else VideoCache.source_binding_id == source_binding_id
+            )
+        )
+    else:
+        stmt = stmt.where(VideoCache.workspace_id.is_(None)).where(
+            VideoCache.knowledge_base_id.is_(None)
+        )
+    stmt = stmt.order_by(VideoCache.id.asc()).limit(1)
+    result = await db.execute(stmt)
+    return result.scalars().first()
+
+
+def _delete_video_vectors_for_scope(
+    rag: RAGService,
+    bvid: str,
+    *,
+    workspace_id: Optional[int] = None,
+    knowledge_base_id: Optional[int] = None,
+) -> None:
+    if _has_cache_scope(workspace_id, knowledge_base_id):
+        rag.delete_video_in_knowledge_base(
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            bvid=bvid,
+        )
+        return
+    rag.delete_video(bvid)
+
+
 async def _upsert_video_cache(
     db: AsyncSession,
     bvid: str,
@@ -178,8 +255,13 @@ async def _upsert_video_cache(
     source_binding_id: Optional[int] = None,
 ) -> None:
     """写入或更新视频缓存信息"""
-    result = await db.execute(select(VideoCache).where(VideoCache.bvid == bvid))
-    cache = result.scalar_one_or_none()
+    cache = await _get_video_cache_for_scope(
+        db,
+        bvid,
+        workspace_id=workspace_id,
+        knowledge_base_id=knowledge_base_id,
+        source_binding_id=source_binding_id,
+    )
 
     scoped_fields = {}
     if workspace_id is not None:
@@ -306,6 +388,9 @@ async def _sync_folder(
         media_id=folder_id,
         title=info.get("title"),
         media_count=valid_count,
+        workspace_id=workspace_id,
+        knowledge_base_id=knowledge_base_id,
+        source_binding_id=source_binding_id,
     )
 
     # 多用户范围：写入归属字段
@@ -370,8 +455,13 @@ async def _sync_folder(
     for bvid in current_bvids & existing_bvids:
         if bvid in added:
             continue
-        result = await db.execute(select(VideoCache).where(VideoCache.bvid == bvid))
-        cache = result.scalar_one_or_none()
+        cache = await _get_video_cache_for_scope(
+            db,
+            bvid,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            source_binding_id=source_binding_id,
+        )
         if _should_refresh_cache(cache):
             update_candidates.add(bvid)
 
@@ -386,14 +476,32 @@ async def _sync_folder(
 
         # 尝试添加到向量库（可能失败，但不影响记录入库）
         try:
-            global_count = await db.scalar(
+            vector_scope_count_stmt = (
                 select(func.count())
                 .select_from(FavoriteVideo)
                 .where(FavoriteVideo.bvid == bvid)
             )
+            if _has_cache_scope(workspace_id, knowledge_base_id):
+                vector_scope_count_stmt = (
+                    vector_scope_count_stmt.where(
+                        FavoriteVideo.workspace_id == workspace_id
+                    )
+                    .where(FavoriteVideo.knowledge_base_id == knowledge_base_id)
+                    .where(
+                        FavoriteVideo.source_binding_id.is_(None)
+                        if source_binding_id is None
+                        else FavoriteVideo.source_binding_id == source_binding_id
+                    )
+                )
+            vector_scope_count = await db.scalar(vector_scope_count_stmt)
             # 检查缓存内容是否缺失
-            result = await db.execute(select(VideoCache).where(VideoCache.bvid == bvid))
-            cache = result.scalar_one_or_none()
+            cache = await _get_video_cache_for_scope(
+                db,
+                bvid,
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                source_binding_id=source_binding_id,
+            )
             old_content = (cache.content or "").strip() if cache else ""
             old_source = cache.content_source if cache else None
 
@@ -427,7 +535,7 @@ async def _sync_folder(
                     logger.info(f"[{bvid}] 已写入缓存: source={cache.content_source}")
 
             # 需要重建向量：新增/升级/内容变化 或 向量缺失
-            if (global_count == 0) or should_reindex:
+            if (vector_scope_count == 0) or should_reindex:
                 if not content:
                     if _is_asr_cache_usable(cache):
                         content = VideoContent(
@@ -452,7 +560,12 @@ async def _sync_folder(
                                 f"[{bvid}] 已写入缓存: source={cache.content_source}"
                             )
                 try:
-                    rag.delete_video(bvid)
+                    _delete_video_vectors_for_scope(
+                        rag,
+                        bvid,
+                        workspace_id=workspace_id,
+                        knowledge_base_id=knowledge_base_id,
+                    )
                 except Exception as e:
                     logger.warning(f"删除旧向量失败 [{bvid}]: {e}")
                 chunks = rag.add_video_content(
@@ -497,7 +610,7 @@ async def _sync_folder(
     # 删除无效向量
     if removed:
         for bvid in removed:
-            other_count = await db.scalar(
+            other_count_stmt = (
                 select(func.count())
                 .select_from(FavoriteVideo)
                 .where(
@@ -505,9 +618,29 @@ async def _sync_folder(
                     FavoriteVideo.folder_id != folder.id,
                 )
             )
+            if _has_cache_scope(workspace_id, knowledge_base_id):
+                other_count_stmt = (
+                    other_count_stmt.where(FavoriteVideo.workspace_id == workspace_id)
+                    .where(FavoriteVideo.knowledge_base_id == knowledge_base_id)
+                    .where(
+                        FavoriteVideo.source_binding_id.is_(None)
+                        if source_binding_id is None
+                        else FavoriteVideo.source_binding_id == source_binding_id
+                    )
+                )
+            else:
+                other_count_stmt = other_count_stmt.where(
+                    FavoriteVideo.workspace_id.is_(None)
+                ).where(FavoriteVideo.knowledge_base_id.is_(None))
+            other_count = await db.scalar(other_count_stmt)
             if other_count == 0:
                 try:
-                    rag.delete_video(bvid)
+                    _delete_video_vectors_for_scope(
+                        rag,
+                        bvid,
+                        workspace_id=workspace_id,
+                        knowledge_base_id=knowledge_base_id,
+                    )
                 except Exception as e:
                     logger.warning(f"删除向量失败 [{bvid}]: {e}")
 
@@ -542,15 +675,17 @@ async def _sync_folder(
 @router.get("/stats")
 async def get_knowledge_stats():
     """获取知识库统计信息"""
+    _raise_legacy_scoped_api_required()
     return get_collection_stats_without_embeddings()
 
 
 @router.get("/folders/status", response_model=List[FolderStatus])
 async def get_folder_status(
-    session_id: str = Query(..., description="会话ID"),
+    session_id: Optional[str] = Query(None, description="会话ID"),
     db: AsyncSession = Depends(get_db),
 ):
     """获取收藏夹入库状态（跨 Session 查找同一用户的数据）"""
+    _raise_legacy_scoped_api_required()
 
     # 1. 先查当前 Session 对应的用户 MID
     result = await db.execute(
@@ -615,11 +750,12 @@ async def get_folder_status(
 
 @router.post("/folders/sync", response_model=List[SyncResult])
 async def sync_folders(
-    request: SyncRequest,
-    session_id: str = Query(..., description="会话ID"),
+    request: Optional[SyncRequest] = None,
+    session_id: Optional[str] = Query(None, description="会话ID"),
     db: AsyncSession = Depends(get_db),
 ):
     """同步收藏夹到向量库"""
+    _raise_legacy_scoped_api_required()
     session = await get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
@@ -678,11 +814,12 @@ async def sync_folders(
 
 @router.post("/build")
 async def build_knowledge_base(
-    request: BuildRequest,
     background_tasks: BackgroundTasks,
-    session_id: str = Query(..., description="会话ID"),
+    request: Optional[BuildRequest] = None,
+    session_id: Optional[str] = Query(None, description="会话ID"),
 ):
     """构建知识库（后台任务）"""
+    _raise_legacy_scoped_api_required()
     session = await get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
@@ -804,6 +941,7 @@ async def _build_knowledge_base_task(
 @router.get("/build/status/{task_id}", response_model=BuildStatus)
 async def get_build_status(task_id: str):
     """获取构建任务状态"""
+    _raise_legacy_scoped_api_required()
     if task_id not in build_tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
 
@@ -822,6 +960,7 @@ async def get_build_status(task_id: str):
 @router.delete("/clear", deprecated=True)
 async def clear_knowledge_base():
     """清空知识库（已废弃：无多用户范围，请使用对应知识库的清空接口）"""
+    _raise_legacy_scoped_api_required()
     logger.warning("调用了已废弃的全局 /knowledge/clear，建议迁移到知识库范围接口")
     try:
         rag = get_rag_service()
@@ -835,6 +974,7 @@ async def clear_knowledge_base():
 @router.delete("/video/{bvid}", deprecated=True)
 async def delete_video_from_knowledge(bvid: str):
     """从知识库中删除指定视频（已废弃：无多用户范围，请使用知识库范围接口）"""
+    _raise_legacy_scoped_api_required()
     logger.warning(
         "调用了已废弃的全局 /knowledge/video/{bvid}，建议迁移到知识库范围接口"
     )

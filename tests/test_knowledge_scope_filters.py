@@ -20,10 +20,14 @@ async def _add_folder(
     title: str,
     synced: bool = True,
     updated_at: datetime | None = None,
+    workspace_id: int | None = None,
+    source_binding_id: int | None = None,
 ) -> FavoriteFolder:
     folder = FavoriteFolder(
         session_id=f"session-{knowledge_base_id}",
+        workspace_id=workspace_id,
         knowledge_base_id=knowledge_base_id,
+        source_binding_id=source_binding_id,
         media_id=media_id,
         title=title,
         last_sync_at=datetime(2026, 6, 13) if synced else None,
@@ -63,11 +67,13 @@ async def _add_video(
         VideoCache(
             bvid=bvid,
             title=title,
+            workspace_id=workspace_id,
             knowledge_base_id=(
                 folder.knowledge_base_id
                 if cache_knowledge_base_id is None
                 else cache_knowledge_base_id
             ),
+            source_binding_id=source_binding_id,
             is_processed=processed,
         )
     )
@@ -196,10 +202,14 @@ async def test_list_scope_options_only_returns_processed_videos_from_knowledge_b
 
 
 @pytest.mark.asyncio
-async def test_scope_membership_ignores_overwritten_video_cache_knowledge_base(
+async def test_scope_membership_excludes_mismatched_video_cache_scope(
     db_session_factory,
 ):
-    from app.services.knowledge_scope import list_scope_options, resolve_scope_bvids
+    from app.services.knowledge_scope import (
+        InvalidKnowledgeScope,
+        list_scope_options,
+        resolve_scope_bvids,
+    )
 
     async with db_session_factory() as session:
         folder = await _add_folder(
@@ -218,24 +228,24 @@ async def test_scope_membership_ignores_overwritten_video_cache_knowledge_base(
         await session.commit()
 
         options = await list_scope_options(session, knowledge_base_id=1)
-        folder_scope = await resolve_scope_bvids(
-            session,
-            knowledge_base_id=1,
-            folder_media_ids=[10],
-            requested_bvids=None,
-        )
-        explicit_scope = await resolve_scope_bvids(
-            session,
-            knowledge_base_id=1,
-            folder_media_ids=None,
-            requested_bvids=["BV1SHARED"],
-        )
 
-    assert [(video.bvid, video.title) for video in options.folders[0].videos] == [
-        ("BV1SHARED", "Shared cache")
-    ]
-    assert folder_scope == ["BV1SHARED"]
-    assert explicit_scope == ["BV1SHARED"]
+        with pytest.raises(InvalidKnowledgeScope, match="10"):
+            await resolve_scope_bvids(
+                session,
+                knowledge_base_id=1,
+                folder_media_ids=[10],
+                requested_bvids=None,
+            )
+        with pytest.raises(InvalidKnowledgeScope, match="BV1SHARED"):
+            await resolve_scope_bvids(
+                session,
+                knowledge_base_id=1,
+                folder_media_ids=None,
+                requested_bvids=["BV1SHARED"],
+            )
+
+    assert options.folders[0].videos == []
+    assert options.folders[0].video_count == 0
 
 
 @pytest.mark.asyncio
@@ -248,6 +258,7 @@ async def test_list_scope_options_uses_custom_video_title(db_session_factory):
             knowledge_base_id=1,
             media_id=10,
             title="Current",
+            workspace_id=1,
         )
         await _add_video(
             session,

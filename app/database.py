@@ -46,9 +46,20 @@ async def _ensure_sqlite_legacy_columns(conn: AsyncConnection) -> None:
 
     legacy_columns = {
         "video_cache": {
+            "cid": "INTEGER",
+            "description": "TEXT",
+            "owner_name": "VARCHAR(100)",
+            "owner_mid": "INTEGER",
+            "content_source": "VARCHAR(20)",
+            "outline_json": "JSON",
+            "duration": "INTEGER",
+            "pic_url": "VARCHAR(500)",
+            "process_error": "TEXT",
             "workspace_id": "INTEGER",
             "knowledge_base_id": "INTEGER",
             "source_binding_id": "INTEGER",
+            "created_at": "DATETIME",
+            "updated_at": "DATETIME",
         },
         "favorite_folders": {
             "workspace_id": "INTEGER",
@@ -73,18 +84,278 @@ async def _ensure_sqlite_legacy_columns(conn: AsyncConnection) -> None:
     }
 
     def ensure_columns(sync_conn):
-        for table_name, columns in legacy_columns.items():
+        def quote_identifier(value: str) -> str:
+            return '"' + value.replace('"', '""') + '"'
+
+        def table_columns(table_name: str) -> set[str]:
             rows = sync_conn.exec_driver_sql(
-                f"PRAGMA table_info({table_name})"
+                f"PRAGMA table_info({quote_identifier(table_name)})"
             ).fetchall()
-            if not rows:
+            return {row[1] for row in rows}
+
+        for table_name, columns in legacy_columns.items():
+            existing = table_columns(table_name)
+            if not existing:
                 continue
-            existing = {row[1] for row in rows}
             for column_name, column_type in columns.items():
                 if column_name not in existing:
                     sync_conn.exec_driver_sql(
-                        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+                        f"ALTER TABLE {quote_identifier(table_name)} "
+                        f"ADD COLUMN {quote_identifier(column_name)} {column_type}"
                     )
+
+        def has_unique_bvid_index() -> bool:
+            if not table_columns("video_cache"):
+                return False
+            indexes = sync_conn.exec_driver_sql(
+                'PRAGMA index_list("video_cache")'
+            ).fetchall()
+            for index in indexes:
+                index_name = index[1]
+                is_unique = bool(index[2])
+                if not is_unique:
+                    continue
+                indexed_columns = [
+                    row[2]
+                    for row in sync_conn.exec_driver_sql(
+                        f"PRAGMA index_info({quote_identifier(index_name)})"
+                    ).fetchall()
+                    if row[2] is not None
+                ]
+                if indexed_columns == ["bvid"]:
+                    return True
+            return False
+
+        def select_expr(
+            existing: set[str], column_name: str, fallback: str = "NULL"
+        ) -> str:
+            return (
+                quote_identifier(column_name) if column_name in existing else fallback
+            )
+
+        def rebuild_video_cache_without_unique_bvid() -> None:
+            existing = table_columns("video_cache")
+            if not existing or not has_unique_bvid_index():
+                return
+
+            sync_conn.exec_driver_sql('DROP TABLE IF EXISTS "video_cache_new"')
+            sync_conn.exec_driver_sql(
+                """
+                CREATE TABLE "video_cache_new" (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bvid VARCHAR(20) NOT NULL,
+                    cid INTEGER,
+                    title VARCHAR(500) NOT NULL,
+                    description TEXT,
+                    owner_name VARCHAR(100),
+                    owner_mid INTEGER,
+                    content TEXT,
+                    content_source VARCHAR(20),
+                    outline_json JSON,
+                    duration INTEGER,
+                    pic_url VARCHAR(500),
+                    is_processed BOOLEAN,
+                    process_error TEXT,
+                    workspace_id INTEGER,
+                    knowledge_base_id INTEGER,
+                    source_binding_id INTEGER,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+                """
+            )
+
+            columns = [
+                "id",
+                "bvid",
+                "cid",
+                "title",
+                "description",
+                "owner_name",
+                "owner_mid",
+                "content",
+                "content_source",
+                "outline_json",
+                "duration",
+                "pic_url",
+                "is_processed",
+                "process_error",
+                "workspace_id",
+                "knowledge_base_id",
+                "source_binding_id",
+                "created_at",
+                "updated_at",
+            ]
+            expressions = [
+                select_expr(existing, "id"),
+                select_expr(existing, "bvid"),
+                select_expr(existing, "cid"),
+                select_expr(existing, "title", "COALESCE(bvid, '')"),
+                select_expr(existing, "description"),
+                select_expr(existing, "owner_name"),
+                select_expr(existing, "owner_mid"),
+                select_expr(existing, "content"),
+                select_expr(existing, "content_source"),
+                select_expr(existing, "outline_json"),
+                select_expr(existing, "duration"),
+                select_expr(existing, "pic_url"),
+                select_expr(existing, "is_processed", "0"),
+                select_expr(existing, "process_error"),
+                select_expr(existing, "workspace_id"),
+                select_expr(existing, "knowledge_base_id"),
+                select_expr(existing, "source_binding_id"),
+                select_expr(existing, "created_at", "CURRENT_TIMESTAMP"),
+                select_expr(existing, "updated_at", "CURRENT_TIMESTAMP"),
+            ]
+            sync_conn.exec_driver_sql(
+                f"""
+                INSERT INTO "video_cache_new" ({", ".join(quote_identifier(c) for c in columns)})
+                SELECT {", ".join(expressions)}
+                FROM "video_cache"
+                """
+            )
+            sync_conn.exec_driver_sql('DROP TABLE "video_cache"')
+            sync_conn.exec_driver_sql(
+                'ALTER TABLE "video_cache_new" RENAME TO "video_cache"'
+            )
+
+        def create_video_cache_indexes() -> None:
+            if not table_columns("video_cache"):
+                return
+            sync_conn.exec_driver_sql(
+                'CREATE INDEX IF NOT EXISTS "ix_video_cache_bvid" '
+                'ON "video_cache" ("bvid")'
+            )
+            sync_conn.exec_driver_sql(
+                'CREATE INDEX IF NOT EXISTS "ix_video_cache_workspace_id" '
+                'ON "video_cache" ("workspace_id")'
+            )
+            sync_conn.exec_driver_sql(
+                'CREATE INDEX IF NOT EXISTS "ix_video_cache_knowledge_base_id" '
+                'ON "video_cache" ("knowledge_base_id")'
+            )
+            sync_conn.exec_driver_sql(
+                'CREATE INDEX IF NOT EXISTS "ix_video_cache_source_binding_id" '
+                'ON "video_cache" ("source_binding_id")'
+            )
+            sync_conn.exec_driver_sql(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS "ix_video_cache_scope_bvid"
+                ON "video_cache" (
+                    "workspace_id",
+                    "knowledge_base_id",
+                    COALESCE("source_binding_id", -1),
+                    "bvid"
+                )
+                WHERE "workspace_id" IS NOT NULL
+                  AND "knowledge_base_id" IS NOT NULL
+                """
+            )
+
+        def clone_scoped_video_cache_rows() -> None:
+            if not table_columns("video_cache") or not table_columns("favorite_videos"):
+                return
+            sync_conn.exec_driver_sql(
+                """
+                WITH desired AS (
+                    SELECT
+                        fv.bvid AS bvid,
+                        fv.workspace_id AS workspace_id,
+                        fv.knowledge_base_id AS knowledge_base_id,
+                        fv.source_binding_id AS source_binding_id
+                    FROM favorite_videos fv
+                    WHERE fv.workspace_id IS NOT NULL
+                      AND fv.knowledge_base_id IS NOT NULL
+                    GROUP BY
+                        fv.bvid,
+                        fv.workspace_id,
+                        fv.knowledge_base_id,
+                        COALESCE(fv.source_binding_id, -1)
+                ),
+                source AS (
+                    SELECT
+                        desired.bvid AS bvid,
+                        desired.workspace_id AS workspace_id,
+                        desired.knowledge_base_id AS knowledge_base_id,
+                        desired.source_binding_id AS source_binding_id,
+                        COALESCE(
+                            MIN(
+                                CASE
+                                    WHEN src.workspace_id = desired.workspace_id
+                                     AND src.knowledge_base_id = desired.knowledge_base_id
+                                     AND COALESCE(src.source_binding_id, -1) =
+                                         COALESCE(desired.source_binding_id, -1)
+                                    THEN src.id
+                                END
+                            ),
+                            MIN(src.id)
+                        ) AS source_cache_id
+                    FROM desired
+                    JOIN video_cache src
+                      ON src.bvid = desired.bvid
+                    GROUP BY
+                        desired.bvid,
+                        desired.workspace_id,
+                        desired.knowledge_base_id,
+                        COALESCE(desired.source_binding_id, -1)
+                )
+                INSERT INTO video_cache (
+                    bvid,
+                    cid,
+                    title,
+                    description,
+                    owner_name,
+                    owner_mid,
+                    content,
+                    content_source,
+                    outline_json,
+                    duration,
+                    pic_url,
+                    is_processed,
+                    process_error,
+                    workspace_id,
+                    knowledge_base_id,
+                    source_binding_id,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    src.bvid,
+                    src.cid,
+                    src.title,
+                    src.description,
+                    src.owner_name,
+                    src.owner_mid,
+                    src.content,
+                    src.content_source,
+                    src.outline_json,
+                    src.duration,
+                    src.pic_url,
+                    src.is_processed,
+                    src.process_error,
+                    source.workspace_id,
+                    source.knowledge_base_id,
+                    source.source_binding_id,
+                    src.created_at,
+                    src.updated_at
+                FROM source
+                JOIN video_cache src
+                  ON src.id = source.source_cache_id
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM video_cache vc
+                    WHERE vc.bvid = source.bvid
+                      AND vc.workspace_id = source.workspace_id
+                      AND vc.knowledge_base_id = source.knowledge_base_id
+                      AND COALESCE(vc.source_binding_id, -1) =
+                          COALESCE(source.source_binding_id, -1)
+                )
+                """
+            )
+
+        rebuild_video_cache_without_unique_bvid()
+        create_video_cache_indexes()
+        clone_scoped_video_cache_rows()
 
     await conn.run_sync(ensure_columns)
 

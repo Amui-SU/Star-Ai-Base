@@ -18,6 +18,19 @@ class InvalidKnowledgeScope(ValueError):
     """Raised when a requested chat scope is outside the knowledge base."""
 
 
+def _nullable_equal(left, right):
+    return or_(left == right, and_(left.is_(None), right.is_(None)))
+
+
+def _video_cache_matches_favorite():
+    return and_(
+        VideoCache.bvid == FavoriteVideo.bvid,
+        _nullable_equal(VideoCache.workspace_id, FavoriteVideo.workspace_id),
+        _nullable_equal(VideoCache.knowledge_base_id, FavoriteVideo.knowledge_base_id),
+        _nullable_equal(VideoCache.source_binding_id, FavoriteVideo.source_binding_id),
+    )
+
+
 async def _list_current_synced_folders(
     db: AsyncSession,
     *,
@@ -66,7 +79,7 @@ async def list_scope_options(
             VideoCache.title,
             VideoTitleOverride.custom_title,
         )
-        .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid)
+        .join(VideoCache, _video_cache_matches_favorite())
         .join(
             VideoTitleOverride,
             (VideoTitleOverride.workspace_id == FavoriteVideo.workspace_id)
@@ -166,7 +179,7 @@ async def resolve_scope_bvids(
         folder_video_result = await db.execute(
             select(VideoCache.bvid)
             .select_from(FavoriteVideo)
-            .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid)
+            .join(VideoCache, _video_cache_matches_favorite())
             .where(
                 FavoriteVideo.folder_id.in_(selected_folder_row_ids),
                 FavoriteVideo.knowledge_base_id == knowledge_base_id,
@@ -181,7 +194,7 @@ async def resolve_scope_bvids(
             video_result = await db.execute(
                 select(VideoCache.bvid)
                 .select_from(FavoriteVideo)
-                .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid)
+                .join(VideoCache, _video_cache_matches_favorite())
                 .where(
                     FavoriteVideo.folder_id.in_(current_folder_row_ids),
                     FavoriteVideo.knowledge_base_id == knowledge_base_id,
