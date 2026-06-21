@@ -935,6 +935,114 @@ async def test_partial_folder_sync_keeps_existing_unselected_videos(
 
 
 @pytest.mark.asyncio
+async def test_scoped_sync_rebuilds_missing_vectors_from_existing_cache(
+    db_session_factory,
+):
+    from app.routers.knowledge import _sync_folder
+
+    class FakeBilibili:
+        async def get_favorite_content(self, folder_id, pn=1, ps=1):
+            return {"info": {"title": "Scoped Folder", "media_count": 1}}
+
+        async def get_all_favorite_videos(self, folder_id):
+            return [
+                {
+                    "bvid": "BV1CACHED",
+                    "title": "Cached Video",
+                    "attr": 0,
+                    "cid": 123,
+                }
+            ]
+
+    class FakeContentFetcher:
+        async def fetch_content(self, *_args, **_kwargs):
+            raise AssertionError("existing processed cache should be reused")
+
+    class FakeRag:
+        def __init__(self):
+            self.deleted = []
+            self.added = []
+
+        def has_video_vectors_in_knowledge_base(
+            self, *, workspace_id, knowledge_base_id, bvid
+        ):
+            assert (workspace_id, knowledge_base_id, bvid) == (7, 11, "BV1CACHED")
+            return False
+
+        def delete_video_in_knowledge_base(
+            self, *, workspace_id, knowledge_base_id, bvid
+        ):
+            self.deleted.append((workspace_id, knowledge_base_id, bvid))
+
+        def add_video_content(self, video, **kwargs):
+            self.added.append((video, kwargs))
+            return 1
+
+    rag = FakeRag()
+
+    async with db_session_factory() as session:
+        folder = FavoriteFolder(
+            session_id="scoped-session",
+            workspace_id=7,
+            knowledge_base_id=11,
+            source_binding_id=13,
+            media_id=10,
+            title="Scoped Folder",
+            media_count=1,
+            last_sync_at=datetime(2026, 6, 14),
+        )
+        session.add(folder)
+        await session.flush()
+        session.add(
+            FavoriteVideo(
+                folder_id=folder.id,
+                bvid="BV1CACHED",
+                workspace_id=7,
+                knowledge_base_id=11,
+                source_binding_id=13,
+            )
+        )
+        session.add(
+            VideoCache(
+                bvid="BV1CACHED",
+                title="Cached Video",
+                content="cached transcript " * 8,
+                content_source=ContentSource.SUBTITLE.value,
+                is_processed=True,
+                workspace_id=7,
+                knowledge_base_id=11,
+                source_binding_id=13,
+            )
+        )
+        await session.commit()
+
+        result = await _sync_folder(
+            db=session,
+            bili=FakeBilibili(),
+            rag=rag,
+            content_fetcher=FakeContentFetcher(),
+            session_id="scoped-session",
+            folder_id=10,
+            workspace_id=7,
+            knowledge_base_id=11,
+            source_binding_id=13,
+        )
+
+    assert result["indexed"] == 1
+    assert rag.deleted == [(7, 11, "BV1CACHED")]
+    assert len(rag.added) == 1
+    video, metadata = rag.added[0]
+    assert video.bvid == "BV1CACHED"
+    assert video.content.startswith("cached transcript")
+    assert video.source == ContentSource.SUBTITLE
+    assert metadata == {
+        "workspace_id": 7,
+        "knowledge_base_id": 11,
+        "source_binding_id": 13,
+    }
+
+
+@pytest.mark.asyncio
 async def test_scoped_build_rejects_empty_folder_ids(client, db_session_factory):
     auth = await register_user(client, "alice@example.com", "Alice")
     knowledge_base = await create_knowledge_base(client, "Empty Folders KB")

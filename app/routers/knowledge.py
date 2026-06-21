@@ -450,6 +450,44 @@ async def _sync_folder(
         text = (cache.content or "").strip()
         return len(text) >= 50
 
+    def _video_content_from_cache(
+        cache: Optional[VideoCache], bvid: str, title: str
+    ) -> Optional[VideoContent]:
+        if not cache:
+            return None
+        text = (cache.content or "").strip()
+        if len(text) < 10:
+            return None
+        try:
+            source = ContentSource(cache.content_source)
+        except Exception:
+            source = ContentSource.BASIC_INFO
+        return VideoContent(
+            bvid=bvid,
+            title=title,
+            content=text,
+            source=source,
+            outline=cache.outline_json,
+        )
+
+    def _has_scoped_vectors(bvid: str) -> bool:
+        if not _has_cache_scope(workspace_id, knowledge_base_id):
+            return True
+        checker = getattr(rag, "has_video_vectors_in_knowledge_base", None)
+        if checker is None:
+            return False
+        try:
+            return bool(
+                checker(
+                    workspace_id=workspace_id,
+                    knowledge_base_id=knowledge_base_id,
+                    bvid=bvid,
+                )
+            )
+        except Exception as e:
+            logger.warning(f"检查 scoped 向量失败 [{knowledge_base_id}/{bvid}]: {e}")
+            return False
+
     # 需要更新的已存在视频（缓存过少或来源较弱）
     update_candidates: set[str] = set()
     for bvid in current_bvids & existing_bvids:
@@ -466,7 +504,13 @@ async def _sync_folder(
             update_candidates.add(bvid)
 
     # 新增/更新向量与关联
-    targets = list(added) + list(update_candidates)
+    missing_vector_candidates: set[str] = set()
+    if _has_cache_scope(workspace_id, knowledge_base_id):
+        for bvid in current_bvids:
+            if not _has_scoped_vectors(bvid):
+                missing_vector_candidates.add(bvid)
+
+    targets = list(added | update_candidates | missing_vector_candidates)
     total_targets = len(targets)
     processed_targets = 0
     if progress_callback:
@@ -476,24 +520,6 @@ async def _sync_folder(
 
         # 尝试添加到向量库（可能失败，但不影响记录入库）
         try:
-            vector_scope_count_stmt = (
-                select(func.count())
-                .select_from(FavoriteVideo)
-                .where(FavoriteVideo.bvid == bvid)
-            )
-            if _has_cache_scope(workspace_id, knowledge_base_id):
-                vector_scope_count_stmt = (
-                    vector_scope_count_stmt.where(
-                        FavoriteVideo.workspace_id == workspace_id
-                    )
-                    .where(FavoriteVideo.knowledge_base_id == knowledge_base_id)
-                    .where(
-                        FavoriteVideo.source_binding_id.is_(None)
-                        if source_binding_id is None
-                        else FavoriteVideo.source_binding_id == source_binding_id
-                    )
-                )
-            vector_scope_count = await db.scalar(vector_scope_count_stmt)
             # 检查缓存内容是否缺失
             cache = await _get_video_cache_for_scope(
                 db,
@@ -535,9 +561,16 @@ async def _sync_folder(
                     logger.info(f"[{bvid}] 已写入缓存: source={cache.content_source}")
 
             # 需要重建向量：新增/升级/内容变化 或 向量缺失
-            if (vector_scope_count == 0) or should_reindex:
+            if bvid in missing_vector_candidates or should_reindex:
                 if not content:
-                    if _is_asr_cache_usable(cache):
+                    cached_content = _video_content_from_cache(
+                        cache, bvid, meta["title"]
+                    )
+                    if cached_content:
+                        content = cached_content
+                        cache.is_processed = True
+                        logger.info(f"[{bvid}] 使用缓存内容重建 scoped 向量")
+                    elif _is_asr_cache_usable(cache):
                         content = VideoContent(
                             bvid=bvid,
                             title=meta["title"],

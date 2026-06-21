@@ -534,6 +534,30 @@ class RAGService:
             logger.error(f"鍒犻櫎 scoped 瑙嗛澶辫触 [{knowledge_base_id}/{bvid}]: {e}")
             raise
 
+    def has_video_vectors_in_knowledge_base(
+        self,
+        *,
+        workspace_id: int,
+        knowledge_base_id: int,
+        bvid: str,
+    ) -> bool:
+        """Return whether one video already has vectors in the scoped collection."""
+        where = {
+            "$and": [
+                {"workspace_id": workspace_id},
+                {"knowledge_base_id": knowledge_base_id},
+                {"bvid": bvid},
+            ]
+        }
+        try:
+            result = self.vectorstore._collection.get(where=where, limit=1)
+            return bool(result.get("ids"))
+        except Exception as e:
+            logger.warning(
+                f"检查 scoped 视频向量失败 [{knowledge_base_id}/{bvid}]: {e}"
+            )
+            return False
+
     def delete_by_knowledge_base(
         self,
         knowledge_base_id: int,
