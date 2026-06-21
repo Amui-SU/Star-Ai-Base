@@ -194,7 +194,7 @@ function Save-RuntimeState {
         backend = [ordered]@{
             pid = $BackendProcess.Id
             port = 8000
-            command = "python -m uvicorn app.main:app --app-dir $quotedProjectRoot --host 127.0.0.1 --port 8000"
+            command = "python -m uvicorn app.main:app --app-dir $quotedProjectRoot --host 0.0.0.0 --port 8000"
             started_at = $startedAt
         }
         frontend = [ordered]@{
@@ -459,7 +459,7 @@ function Invoke-Start {
     try {
         Write-Info "Starting backend..."
         $backendProcess = Start-Process -FilePath $pythonExe `
-            -ArgumentList @("-m", "uvicorn", "app.main:app", "--app-dir", $quotedProjectRoot, "--host", "127.0.0.1", "--port", "8000") `
+            -ArgumentList @("-m", "uvicorn", "app.main:app", "--app-dir", $quotedProjectRoot, "--host", "0.0.0.0", "--port", "8000") `
             -WorkingDirectory $ProjectRoot `
             -RedirectStandardOutput $backendLog `
             -RedirectStandardError $backendErrLog `
@@ -489,7 +489,7 @@ function Invoke-Start {
         }
 
         Save-RuntimeState -ProjectRoot $ProjectRoot -BackendProcess $backendProcess -FrontendProcess $frontendProcess -PythonExe $pythonExe
-        Write-Ok "Backend ready: http://127.0.0.1:8000"
+        Write-Ok "Backend ready: http://127.0.0.1:8000 (LAN: http://<电脑IP>:8000)"
         Write-Ok "Frontend ready: http://localhost:3000"
 
         if (-not $NoBrowser) {

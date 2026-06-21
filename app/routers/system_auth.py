@@ -1,4 +1,6 @@
 import hashlib
+import ipaddress
+import os
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -417,35 +419,120 @@ async def update_display_name(
 
 # ── Google OAuth ──────────────────────────────────────────────
 
+
+@router.get("/email/config")
+async def email_config_status() -> dict[str, bool]:
+    smtp_configured = bool(settings.smtp_user and settings.smtp_password)
+    return {
+        "debug": bool(settings.debug),
+        "smtp_configured": smtp_configured,
+        "email_login_available": bool(settings.debug or smtp_configured),
+    }
+
+
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 GOOGLE_SCOPES = "openid email profile"
+WECHAT_AUTH_URL = "https://open.weixin.qq.com/connect/qrconnect"
+WECHAT_TOKEN_URL = "https://api.weixin.qq.com/sns/oauth2/access_token"
+WECHAT_USERINFO_URL = "https://api.weixin.qq.com/sns/userinfo"
+QQ_AUTH_URL = "https://graph.qq.com/oauth2.0/authorize"
+QQ_TOKEN_URL = "https://graph.qq.com/oauth2.0/token"
+QQ_ME_URL = "https://graph.qq.com/oauth2.0/me"
+QQ_USERINFO_URL = "https://graph.qq.com/user/get_user_info"
 _OAUTH_STATE_TTL = 600  # 10 分钟
 
 
-def _make_oauth_state() -> str:
-    """生成 HMAC 签名的 OAuth state（URL-safe，不依赖 Fernet/APP_ENCRYPTION_KEY）。"""
+def _frontend_origin_is_allowed(url: str) -> bool:
+    parsed = urllib.parse.urlparse((url or "").strip())
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+    ):
+        return False
+
+    host = parsed.hostname.lower()
+    if host == "localhost":
+        return True
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+
+    return ip.is_loopback or ip.is_private
+
+
+def _normalize_frontend_origin(url: str | None) -> str | None:
+    if not url:
+        return None
+
+    parsed = urllib.parse.urlparse(url.strip())
+    origin = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
+    if not _frontend_origin_is_allowed(origin):
+        return None
+    return origin
+
+
+def _frontend_url_from_request(request: Request) -> str:
+    for header in ("origin", "referer"):
+        origin = _normalize_frontend_origin(request.headers.get(header))
+        if origin:
+            return origin
+    return "http://localhost:3000"
+
+
+def _frontend_url_from_state(frontend_url: str | None) -> str:
+    return _normalize_frontend_origin(frontend_url) or "http://localhost:3000"
+
+
+def _oauth_signing_key() -> bytes:
+    import hashlib
+
+    configured_key = os.getenv("APP_ENCRYPTION_KEY", "").strip()
+    if configured_key:
+        material = configured_key
+    else:
+        secrets_material = [
+            settings.google_client_secret,
+            settings.wechat_client_secret,
+            settings.qq_client_secret,
+        ]
+        material = "|".join(item.strip() for item in secrets_material if item.strip())
+    return hashlib.sha256((material or "dev").encode("utf-8")).digest()
+
+
+def _make_oauth_state(
+    frontend_url: str | None = None, redirect_uri: str | None = None
+) -> str:
+    """Create a signed OAuth state with the frontend and callback origins."""
     import base64
     import hashlib
     import hmac
     import json
 
-    payload = json.dumps(
-        {"exp": int(time.time()) + _OAUTH_STATE_TTL, "rnd": secrets.token_hex(8)}
-    )
-    payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-    key = hashlib.sha256(
-        settings.google_client_secret.encode()
-        if settings.google_client_secret
-        else b"dev"
-    ).digest()
-    sig = hmac.new(key, payload_b64.encode(), hashlib.sha256).hexdigest()[:16]
+    payload = {
+        "exp": int(time.time()) + _OAUTH_STATE_TTL,
+        "rnd": secrets.token_hex(8),
+    }
+    safe_frontend_url = _frontend_url_from_state(frontend_url)
+    if safe_frontend_url:
+        payload["frontend_url"] = safe_frontend_url
+    if redirect_uri:
+        payload["redirect_uri"] = redirect_uri
+
+    payload_json = json.dumps(payload, separators=(",", ":"))
+    payload_b64 = base64.urlsafe_b64encode(payload_json.encode()).decode().rstrip("=")
+    sig = hmac.new(
+        _oauth_signing_key(), payload_b64.encode(), hashlib.sha256
+    ).hexdigest()[:16]
     return f"{payload_b64}.{sig}"
 
 
-def _verify_oauth_state(state: str) -> bool:
-    """验证 OAuth state 签名和有效期。"""
+def _decode_oauth_state(state: str) -> dict | None:
+    """Validate and decode a signed OAuth state."""
     import base64
     import hashlib
     import hmac
@@ -454,44 +541,339 @@ def _verify_oauth_state(state: str) -> bool:
 
     try:
         payload_b64, sig = state.rsplit(".", 1)
-        key = hashlib.sha256(
-            settings.google_client_secret.encode()
-            if settings.google_client_secret
-            else b"dev"
-        ).digest()
-        expected = hmac.new(key, payload_b64.encode(), hashlib.sha256).hexdigest()[:16]
+        expected = hmac.new(
+            _oauth_signing_key(), payload_b64.encode(), hashlib.sha256
+        ).hexdigest()[:16]
         if not hmac.compare_digest(sig, expected):
-            logger.warning("OAuth state 签名不匹配")
-            return False
+            logger.warning("OAuth state signature mismatch")
+            return None
+
         padded = payload_b64 + "=" * (-len(payload_b64) % 4)
         data = json.loads(base64.urlsafe_b64decode(padded.encode()))
-        ok = time.time() <= data["exp"]
-        if not ok:
+        if time.time() > int(data["exp"]):
             logger.warning(
-                f"OAuth state 已过期: exp={data['exp']}, now={int(time.time())}"
+                f"OAuth state expired: exp={data['exp']}, now={int(time.time())}"
             )
-        return ok
+            return None
+        return data
     except Exception as e:
-        logger.warning(f"OAuth state 解析失败: {type(e).__name__}: {e}")
-        return False
+        logger.warning(f"OAuth state parse failed: {type(e).__name__}: {e}")
+        return None
+
+
+def _verify_oauth_state(state: str) -> bool:
+    """Validate OAuth state signature and expiry."""
+    return _decode_oauth_state(state) is not None
+
+
+def _oauth_user_email(provider: str, external_id: str, email: str | None = None) -> str:
+    normalized_email = (email or "").strip().lower()
+    if normalized_email:
+        return normalized_email
+    safe_id = "".join(ch if ch.isalnum() else "_" for ch in external_id.lower()).strip(
+        "_"
+    )
+    return f"{provider}_{safe_id or secrets.token_hex(8)}@oauth.local"
+
+
+async def _upsert_oauth_user(
+    db: AsyncSession,
+    provider: str,
+    external_id: str,
+    display_name: str,
+    avatar_url: str | None = None,
+    email: str | None = None,
+) -> SystemUser:
+    user_email = _oauth_user_email(provider, external_id, email)
+    result = await db.execute(select(SystemUser).where(SystemUser.email == user_email))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        name = (display_name or provider.title()).strip()[:100] or provider.title()
+        user = SystemUser(
+            email=user_email,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            display_name=name,
+            avatar_url=avatar_url or None,
+            status="active",
+        )
+        db.add(user)
+        await db.flush()
+        workspace = Workspace(name=f"{name} 的个人空间", owner_user_id=user.id)
+        db.add(workspace)
+        await db.flush()
+        db.add(
+            WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role="owner")
+        )
+    else:
+        if display_name and user.display_name.startswith(provider.title()):
+            user.display_name = display_name[:100]
+        if avatar_url and not user.avatar_url:
+            user.avatar_url = avatar_url
+
+    return user
+
+
+async def _redirect_with_oauth_session(
+    db: AsyncSession, user: SystemUser, frontend_url: str | None
+) -> RedirectResponse:
+    token = create_session_token()
+    db.add(
+        SystemSession(
+            user_id=user.id,
+            session_token_hash=hash_token(token),
+            expires_at=session_expires_at().replace(tzinfo=None),
+        )
+    )
+    await db.commit()
+    redirect = RedirectResponse(_frontend_url_from_state(frontend_url))
+    set_session_cookie(redirect, token)
+    return redirect
 
 
 def _google_redirect_uri() -> str:
-    if settings.google_redirect_uri:
-        return settings.google_redirect_uri
-    return f"http://localhost:{settings.app_port}/system-auth/google/callback"
+    configured = (settings.google_redirect_uri or "").strip()
+    return (
+        configured
+        or f"http://localhost:{settings.app_port}/system-auth/google/callback"
+    )
+
+
+def _wechat_redirect_uri() -> str:
+    return (settings.wechat_redirect_uri or "").strip()
+
+
+def _qq_redirect_uri() -> str:
+    return (settings.qq_redirect_uri or "").strip()
+
+
+@router.get("/wechat/login")
+async def wechat_login(request: Request, frontend_url: str = ""):
+    if (
+        not settings.wechat_client_id
+        or not settings.wechat_client_secret
+        or not _wechat_redirect_uri()
+    ):
+        raise HTTPException(status_code=501, detail="WeChat login is not configured")
+
+    redirect_uri = _wechat_redirect_uri()
+    state = _make_oauth_state(
+        _normalize_frontend_origin(frontend_url) or _frontend_url_from_request(request),
+        redirect_uri,
+    )
+    params = {
+        "appid": settings.wechat_client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "snsapi_login",
+        "state": state,
+    }
+    url = f"{WECHAT_AUTH_URL}?{urllib.parse.urlencode(params)}#wechat_redirect"
+    return RedirectResponse(url)
+
+
+@router.get("/qq/login")
+async def qq_login(request: Request, frontend_url: str = ""):
+    if (
+        not settings.qq_client_id
+        or not settings.qq_client_secret
+        or not _qq_redirect_uri()
+    ):
+        raise HTTPException(status_code=501, detail="QQ login is not configured")
+
+    redirect_uri = _qq_redirect_uri()
+    state = _make_oauth_state(
+        _normalize_frontend_origin(frontend_url) or _frontend_url_from_request(request),
+        redirect_uri,
+    )
+    params = {
+        "client_id": settings.qq_client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "get_user_info",
+        "state": state,
+    }
+    url = f"{QQ_AUTH_URL}?{urllib.parse.urlencode(params)}"
+    return RedirectResponse(url)
+
+
+async def _validate_oauth_callback_state(state: str) -> dict:
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state")
+    state_data = _decode_oauth_state(state)
+    if state_data is None:
+        raise HTTPException(
+            status_code=400, detail="Invalid OAuth state, please sign in again"
+        )
+    return state_data
+
+
+@router.get("/wechat/callback")
+async def wechat_callback(
+    code: str = "",
+    error: str = "",
+    state: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    if error:
+        raise HTTPException(
+            status_code=400, detail=f"WeChat authorization failed: {error}"
+        )
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+    if (
+        not settings.wechat_client_id
+        or not settings.wechat_client_secret
+        or not _wechat_redirect_uri()
+    ):
+        raise HTTPException(status_code=501, detail="WeChat login is not configured")
+    state_data = await _validate_oauth_callback_state(state)
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=15.0),
+            proxy=settings.http_proxy.strip() or None,
+        ) as client:
+            token_resp = await client.get(
+                WECHAT_TOKEN_URL,
+                params={
+                    "appid": settings.wechat_client_id,
+                    "secret": settings.wechat_client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                },
+            )
+            token_data = token_resp.json()
+            access_token = token_data.get("access_token")
+            openid = token_data.get("openid")
+            if token_resp.status_code != 200 or not access_token or not openid:
+                raise HTTPException(
+                    status_code=400, detail="WeChat token exchange failed"
+                )
+
+            user_resp = await client.get(
+                WECHAT_USERINFO_URL,
+                params={
+                    "access_token": access_token,
+                    "openid": openid,
+                    "lang": "zh_CN",
+                },
+            )
+            user_info = user_resp.json()
+            if user_resp.status_code != 200:
+                raise HTTPException(status_code=400, detail="WeChat user info failed")
+    except httpx.HTTPError as e:
+        logger.error(f"WeChat OAuth network request failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=502, detail=f"Cannot connect to WeChat service: {e}"
+        )
+    except HTTPException:
+        raise
+
+    external_id = user_info.get("openid") or openid
+    user = await _upsert_oauth_user(
+        db,
+        "wechat",
+        external_id,
+        user_info.get("nickname") or "WeChat User",
+        user_info.get("headimgurl") or None,
+    )
+    return await _redirect_with_oauth_session(db, user, state_data.get("frontend_url"))
+
+
+@router.get("/qq/callback")
+async def qq_callback(
+    code: str = "",
+    error: str = "",
+    state: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    if error:
+        raise HTTPException(status_code=400, detail=f"QQ authorization failed: {error}")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+    if (
+        not settings.qq_client_id
+        or not settings.qq_client_secret
+        or not _qq_redirect_uri()
+    ):
+        raise HTTPException(status_code=501, detail="QQ login is not configured")
+    state_data = await _validate_oauth_callback_state(state)
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=15.0),
+            proxy=settings.http_proxy.strip() or None,
+        ) as client:
+            token_resp = await client.get(
+                QQ_TOKEN_URL,
+                params={
+                    "grant_type": "authorization_code",
+                    "client_id": settings.qq_client_id,
+                    "client_secret": settings.qq_client_secret,
+                    "code": code,
+                    "redirect_uri": state_data.get("redirect_uri")
+                    or _qq_redirect_uri(),
+                    "fmt": "json",
+                },
+            )
+            token_data = token_resp.json()
+            access_token = token_data.get("access_token")
+            if token_resp.status_code != 200 or not access_token:
+                raise HTTPException(status_code=400, detail="QQ token exchange failed")
+
+            me_resp = await client.get(
+                QQ_ME_URL, params={"access_token": access_token, "fmt": "json"}
+            )
+            me_data = me_resp.json()
+            openid = me_data.get("openid")
+            if me_resp.status_code != 200 or not openid:
+                raise HTTPException(status_code=400, detail="QQ openid fetch failed")
+
+            user_resp = await client.get(
+                QQ_USERINFO_URL,
+                params={
+                    "access_token": access_token,
+                    "oauth_consumer_key": settings.qq_client_id,
+                    "openid": openid,
+                    "fmt": "json",
+                },
+            )
+            user_info = user_resp.json()
+            if user_resp.status_code != 200 or user_info.get("ret", 0) != 0:
+                raise HTTPException(status_code=400, detail="QQ user info failed")
+    except httpx.HTTPError as e:
+        logger.error(f"QQ OAuth network request failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=502, detail=f"Cannot connect to QQ service: {e}"
+        )
+    except HTTPException:
+        raise
+
+    user = await _upsert_oauth_user(
+        db,
+        "qq",
+        openid,
+        user_info.get("nickname") or "QQ User",
+        user_info.get("figureurl_qq_2") or user_info.get("figureurl_qq_1") or None,
+    )
+    return await _redirect_with_oauth_session(db, user, state_data.get("frontend_url"))
 
 
 @router.get("/google/login")
-async def google_login(request: Request):
+async def google_login(request: Request, frontend_url: str = ""):
     """重定向到 Google OAuth 授权页面。"""
     if not settings.google_client_id:
         raise HTTPException(status_code=501, detail="Google 登录未配置")
 
-    state = _make_oauth_state()
+    redirect_uri = _google_redirect_uri()
+    state = _make_oauth_state(
+        _normalize_frontend_origin(frontend_url) or _frontend_url_from_request(request),
+        redirect_uri,
+    )
     params = {
         "client_id": settings.google_client_id,
-        "redirect_uri": _google_redirect_uri(),
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": GOOGLE_SCOPES,
         "access_type": "offline",
@@ -519,10 +901,12 @@ async def google_callback(
 
     # 校验 state（自包含签名，无需服务端存储）
     if not state:
-        raise HTTPException(status_code=400, detail="缺少 OAuth state 参数")
-    if not _verify_oauth_state(state):
-        raise HTTPException(status_code=400, detail="无效的 OAuth state，请重新登录")
-
+        raise HTTPException(status_code=400, detail="Missing OAuth state")
+    state_data = _decode_oauth_state(state)
+    if state_data is None:
+        raise HTTPException(
+            status_code=400, detail="Invalid OAuth state, please sign in again"
+        )
     httpx_timeout = httpx.Timeout(30.0, connect=15.0)
     proxy = settings.http_proxy.strip() or None
 
@@ -547,7 +931,8 @@ async def google_callback(
                     "client_secret": settings.google_client_secret,
                     "code": code,
                     "grant_type": "authorization_code",
-                    "redirect_uri": _google_redirect_uri(),
+                    "redirect_uri": state_data.get("redirect_uri")
+                    or _google_redirect_uri(),
                 },
             )
             if token_resp.status_code != 200:
@@ -627,7 +1012,7 @@ async def google_callback(
         )
         await db.commit()
 
-        frontend_url = "http://localhost:3000"
+        frontend_url = _frontend_url_from_state(state_data.get("frontend_url"))
         redirect = RedirectResponse(frontend_url)
         set_session_cookie(redirect, token)
         return redirect

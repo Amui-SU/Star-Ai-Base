@@ -35,6 +35,8 @@ export default function ImportModal({
   const [qrStatus, setQrStatus] = useState<
     "idle" | "loading" | "ready" | "scanned" | "success" | "error"
   >("idle");
+  const [qrErrorMessage, setQrErrorMessage] =
+    useState("二维码获取失败，请检查网络或重试");
   const [polling, setPolling] = useState(false);
   const [url, setUrl] = useState("");
   const [urlMessage, setUrlMessage] = useState("");
@@ -47,6 +49,7 @@ export default function ImportModal({
         setPolling(false);
         setQr(null);
         setQrStatus("idle");
+        setQrErrorMessage("二维码获取失败，请检查网络或重试");
         setUrl("");
         setUrlMessage("");
       }, 0);
@@ -60,12 +63,16 @@ export default function ImportModal({
 
   const getQR = async () => {
     setQrStatus("loading");
+    setQrErrorMessage("二维码获取失败，请检查网络或重试");
     try {
       const data = await sourceBindingApi.getBilibiliQRCode();
       setQr(data);
       setQrStatus("ready");
       setPolling(true);
-    } catch {
+    } catch (err) {
+      setQrErrorMessage(
+        err instanceof Error ? err.message : "二维码获取失败，请检查网络或重试",
+      );
       setQrStatus("error");
     }
   };
@@ -92,10 +99,12 @@ export default function ImportModal({
         }
         if (res.status === "expired") {
           setPolling(false);
+          setQrErrorMessage("二维码已过期");
           setQrStatus("error");
         }
       } catch {
         setPolling(false);
+        setQrErrorMessage("二维码状态检查失败，请重新获取");
         setQrStatus("error");
       }
     }, 2000);
@@ -253,7 +262,7 @@ export default function ImportModal({
                   )}
                   {qrStatus === "error" && (
                     <div className="import-qr-placeholder">
-                      <p>二维码已过期</p>
+                      <p>{qrErrorMessage}</p>
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"

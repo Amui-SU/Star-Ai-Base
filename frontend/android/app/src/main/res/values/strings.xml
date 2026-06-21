@@ -1,0 +1,7 @@
+﻿<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Zhiku Cloud</string>
+    <string name="title_activity_main">Zhiku Cloud</string>
+    <string name="package_name">com.zhikuyun.app</string>
+    <string name="custom_url_scheme">com.zhikuyun.app</string>
+</resources>

@@ -1,5 +1,10 @@
+import urllib.parse
+
 import pytest
+from app.config import settings
 from app.routers.system_auth import _IP_RATE_MAX, _MAX_ATTEMPTS
+from app.routers.system_auth import _decode_oauth_state
+from app.routers.system_auth import _make_oauth_state
 
 
 async def _send_code(client, email: str) -> str | None:
@@ -212,3 +217,274 @@ async def test_code_attempts_limit(client):
     )
     assert resp.status_code == 400
     assert "次数过多" in resp.json()["detail"]
+
+
+def test_oauth_state_preserves_frontend_origin(monkeypatch):
+    monkeypatch.setattr(settings, "google_client_secret", "test-secret")
+
+    state = _make_oauth_state("http://192.168.1.199:3000")
+    data = _decode_oauth_state(state)
+
+    assert data is not None
+    assert data["frontend_url"] == "http://192.168.1.199:3000"
+
+
+def test_oauth_state_uses_non_google_provider_secret(monkeypatch):
+    monkeypatch.delenv("APP_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setattr(settings, "google_client_secret", "")
+    monkeypatch.setattr(settings, "wechat_client_secret", "wechat-secret")
+    monkeypatch.setattr(settings, "qq_client_secret", "")
+
+    state = _make_oauth_state("http://localhost:3000")
+
+    assert _decode_oauth_state(state) is not None
+
+    monkeypatch.setattr(settings, "wechat_client_secret", "rotated-secret")
+
+    assert _decode_oauth_state(state) is None
+
+
+@pytest.mark.asyncio
+async def test_google_callback_redirects_to_frontend_origin(client, monkeypatch):
+    monkeypatch.setattr(settings, "google_client_id", "client-id")
+    monkeypatch.setattr(settings, "google_client_secret", "test-secret")
+
+    state = _make_oauth_state("http://192.168.1.199:3000")
+
+    class _FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, data=None):
+            return _FakeResponse(200, {"access_token": "token"})
+
+        async def get(self, url, headers=None):
+            return _FakeResponse(
+                200,
+                {
+                    "verified_email": True,
+                    "email": "phone@example.com",
+                    "name": "Phone User",
+                    "picture": "https://example.com/avatar.png",
+                },
+            )
+
+    monkeypatch.setattr("app.routers.system_auth.httpx.AsyncClient", _FakeAsyncClient)
+
+    response = await client.get(
+        f"/system-auth/google/callback?code=test-code&state={state}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in {302, 307}
+    assert response.headers["location"] == "http://192.168.1.199:3000"
+
+
+@pytest.mark.asyncio
+async def test_google_login_state_uses_explicit_frontend_url(client, monkeypatch):
+    monkeypatch.setattr(settings, "google_client_id", "client-id")
+    monkeypatch.setattr(settings, "google_client_secret", "test-secret")
+
+    response = await client.get(
+        "/system-auth/google/login",
+        params={"frontend_url": "http://192.168.1.199:3000"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code in {302, 307}
+    redirect_url = urllib.parse.urlparse(response.headers["location"])
+    query = urllib.parse.parse_qs(redirect_url.query)
+    state = query["state"][0]
+
+    data = _decode_oauth_state(state)
+    assert data is not None
+    assert data["frontend_url"] == "http://192.168.1.199:3000"
+
+
+@pytest.mark.asyncio
+async def test_google_login_uses_configured_redirect_uri(client, monkeypatch):
+    monkeypatch.setattr(settings, "google_client_id", "client-id")
+    monkeypatch.setattr(settings, "google_client_secret", "test-secret")
+    monkeypatch.setattr(
+        settings,
+        "google_redirect_uri",
+        "http://localhost:8000/system-auth/google/callback",
+    )
+
+    response = await client.get(
+        "http://192.168.1.199:8000/system-auth/google/login",
+        params={"frontend_url": "http://192.168.1.199:3000"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code in {302, 307}
+    redirect_url = urllib.parse.urlparse(response.headers["location"])
+    query = urllib.parse.parse_qs(redirect_url.query)
+
+    assert (
+        query["redirect_uri"][0] == "http://localhost:8000/system-auth/google/callback"
+    )
+    state_data = _decode_oauth_state(query["state"][0])
+    assert state_data is not None
+    assert (
+        state_data["redirect_uri"]
+        == "http://localhost:8000/system-auth/google/callback"
+    )
+
+
+@pytest.mark.asyncio
+async def test_email_config_status_reports_debug_and_smtp(client, monkeypatch):
+    monkeypatch.setattr(settings, "debug", True)
+    monkeypatch.setattr(settings, "smtp_user", "")
+    monkeypatch.setattr(settings, "smtp_password", "")
+
+    response = await client.get("/system-auth/email/config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "debug": True,
+        "smtp_configured": False,
+        "email_login_available": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_wechat_login_requires_configuration(client, monkeypatch):
+    monkeypatch.setattr(settings, "wechat_client_id", "")
+    monkeypatch.setattr(settings, "wechat_client_secret", "")
+    monkeypatch.setattr(settings, "wechat_redirect_uri", "")
+
+    response = await client.get("/system-auth/wechat/login", follow_redirects=False)
+
+    assert response.status_code == 501
+
+
+@pytest.mark.asyncio
+async def test_wechat_login_redirects_to_provider(client, monkeypatch):
+    monkeypatch.setattr(settings, "wechat_client_id", "wechat-id")
+    monkeypatch.setattr(settings, "wechat_client_secret", "wechat-secret")
+    monkeypatch.setattr(
+        settings,
+        "wechat_redirect_uri",
+        "https://example.com/system-auth/wechat/callback",
+    )
+
+    response = await client.get(
+        "/system-auth/wechat/login",
+        params={"frontend_url": "http://localhost:3000"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code in {302, 307}
+    redirect_url = urllib.parse.urlparse(response.headers["location"])
+    query = urllib.parse.parse_qs(redirect_url.query)
+    assert redirect_url.netloc == "open.weixin.qq.com"
+    assert query["appid"][0] == "wechat-id"
+    assert query["redirect_uri"][0] == "https://example.com/system-auth/wechat/callback"
+    state_data = _decode_oauth_state(query["state"][0])
+    assert state_data is not None
+    assert state_data["frontend_url"] == "http://localhost:3000"
+    assert (
+        state_data["redirect_uri"] == "https://example.com/system-auth/wechat/callback"
+    )
+
+
+@pytest.mark.asyncio
+async def test_qq_login_redirects_to_provider(client, monkeypatch):
+    monkeypatch.setattr(settings, "qq_client_id", "qq-id")
+    monkeypatch.setattr(settings, "qq_client_secret", "qq-secret")
+    monkeypatch.setattr(
+        settings,
+        "qq_redirect_uri",
+        "https://example.com/system-auth/qq/callback",
+    )
+
+    response = await client.get(
+        "/system-auth/qq/login",
+        params={"frontend_url": "http://localhost:3000"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code in {302, 307}
+    redirect_url = urllib.parse.urlparse(response.headers["location"])
+    query = urllib.parse.parse_qs(redirect_url.query)
+    assert redirect_url.netloc == "graph.qq.com"
+    assert query["client_id"][0] == "qq-id"
+    assert query["redirect_uri"][0] == "https://example.com/system-auth/qq/callback"
+    state_data = _decode_oauth_state(query["state"][0])
+    assert state_data is not None
+    assert state_data["frontend_url"] == "http://localhost:3000"
+
+
+@pytest.mark.asyncio
+async def test_wechat_callback_creates_user_and_redirects(client, monkeypatch):
+    monkeypatch.setattr(settings, "wechat_client_id", "wechat-id")
+    monkeypatch.setattr(settings, "wechat_client_secret", "wechat-secret")
+    monkeypatch.setattr(
+        settings,
+        "wechat_redirect_uri",
+        "https://example.com/system-auth/wechat/callback",
+    )
+    state = _make_oauth_state(
+        "http://localhost:3000",
+        "https://example.com/system-auth/wechat/callback",
+    )
+
+    class _FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.text = str(payload)
+
+        def json(self):
+            return self._payload
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, params=None, headers=None):
+            if "access_token" in url:
+                return _FakeResponse(
+                    200,
+                    {"access_token": "wechat-token", "openid": "wx-openid"},
+                )
+            return _FakeResponse(
+                200,
+                {
+                    "openid": "wx-openid",
+                    "nickname": "Wechat User",
+                    "headimgurl": "https://example.com/wx.png",
+                },
+            )
+
+    monkeypatch.setattr("app.routers.system_auth.httpx.AsyncClient", _FakeAsyncClient)
+
+    response = await client.get(
+        f"/system-auth/wechat/callback?code=test-code&state={state}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in {302, 307}
+    assert response.headers["location"] == "http://localhost:3000"
+    assert "system_session" in response.cookies

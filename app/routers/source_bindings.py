@@ -148,6 +148,9 @@ async def generate_bilibili_binding_qrcode(
     bili = BilibiliService()
     try:
         result = await bili.generate_qrcode()
+    except Exception as e:
+        logger.warning(f"生成 B站绑定二维码失败: {e}")
+        raise HTTPException(status_code=502, detail=str(e)) from e
     finally:
         await bili.close()
 
@@ -185,6 +188,9 @@ async def poll_bilibili_binding_qrcode(
     bili = BilibiliService()
     try:
         result = await bili.poll_qrcode_status(qrcode_key)
+    except Exception as e:
+        logger.warning(f"轮询 B站绑定二维码失败: {e}")
+        raise HTTPException(status_code=502, detail=str(e)) from e
     finally:
         await bili.close()
 
