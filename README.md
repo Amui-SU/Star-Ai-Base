@@ -54,10 +54,10 @@
 
 ## 功能一览
 
-- **B 站扫码登录**：安全拉取会话，读取你的收藏夹列表与视频。
+- **系统账号 + 内容源绑定**：使用邮箱账号登录，登录后扫码绑定 B 站账号读取收藏夹列表与视频。
 - **收藏夹与视频**：列表、分页、全量预览；支持默认收藏夹整理预览与执行（后端接口 + 前端入口）。
-- **知识库构建**：同步收藏夹、构建/更新向量、进度查询、按文件夹状态统计、清空或按视频删除入库内容。
-- **对话与检索**：流式/非流式问答、纯检索片段；支持在多种 LLM 提供方之间切换（见下文）。
+- **知识库构建**：按工作区/知识库隔离同步收藏夹、构建/更新向量、查询进度与统计。
+- **对话与检索**：在当前知识库内流式/非流式问答、纯检索片段；支持收藏夹/视频提问范围和多种 LLM 提供方切换（见下文）。
 - **移动端体验**：手机端默认进入沉浸式聊天界面，需要管理资料、切换主题或账号时可展开侧栏。
 - **ASR**：对接 DashScope 语音转写；直链不可用时走本地下载 + ffmpeg + 上传识别兜底。
 - **OpenClaw**：内置 `skills/bilibili-rag-local`，可把本地 API 暴露给 OpenClaw 调用。
@@ -281,7 +281,7 @@ Embedding 与 ASR 仍以项目当前实现为准（默认与 DashScope 体系配
 │   └── dev.ps1               # Windows 开发启动器
 ├── skills/
 │   └── bilibili-rag-local/   # OpenClaw Skill
-├── test/                     # 诊断脚本（见下文运行方式）
+├── tests/                    # 自动化测试与诊断脚本（见下文运行方式）
 ├── requirements.txt
 ├── setup_dependencies.ps1
 ├── setup_dependencies.bat
@@ -307,7 +307,7 @@ Embedding 与 ASR 仍以项目当前实现为准（默认与 DashScope 体系配
 
 1. 将 `skills/bilibili-rag-local` 复制到 OpenClaw 的 Skills 目录（例如 `~/.openclaw/skills/`）。
 2. 重启或刷新 OpenClaw 的 Skills 列表。
-3. 通过 Skill 调用典型接口：`POST /chat/ask`、`POST /chat/search`、`GET /knowledge/folders/status` 等。
+3. 通过 Skill 调用 scoped 接口，例如 `POST /knowledge-bases/{id}/chat`、`POST /knowledge-bases/{id}/search`、`GET /knowledge-bases/{id}/stats`。旧全局 `/chat/ask|ask/stream|search` 与 `/knowledge/*` RAG/知识库入口已返回 `410 Gone`。
 
 **建议**：先完成收藏夹入库再高频问答；问题越具体，召回通常越稳定。
 
@@ -315,13 +315,13 @@ Embedding 与 ASR 仍以项目当前实现为准（默认与 DashScope 体系配
 
 ## 测试与诊断脚本
 
-`test/` 下脚本依赖项目根目录的模块与配置，请**在项目根目录**执行，例如：
+`tests/` 下脚本依赖项目根目录的模块与配置，请**在项目根目录**执行，例如：
 
 ```bash
 # 在仓库根目录
-python test/debug_asr_single.py
-python test/diagnose_rag.py
-python test/sync_cache_vectors.py
+python tests/debug_asr_single.py
+python tests/diagnose_rag.py
+python tests/sync_cache_vectors.py
 ```
 
 | 脚本                    | 用途                     |

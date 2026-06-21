@@ -1,5 +1,7 @@
 # Post-Login Knowledge Workspace Implementation Plan
 
+> **STATUS: COMPLETED** — Scoped chat/search, ingestion separation, responsive workspace, model status, thinking UI, and theme polish were implemented and verified in the main codebase.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a responsive Claude-inspired post-login workspace with clear knowledge-base and ingestion interactions, real folder/video chat scoping, compact model health, and remembered dark/light layout preferences.

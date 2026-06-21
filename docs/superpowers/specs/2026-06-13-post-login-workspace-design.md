@@ -1,5 +1,7 @@
 # 登录后知识工作台交互与视觉优化设计
 
+> **STATUS: COMPLETED** — Design implemented in the post-login workspace; retained as product/design reference.
+
 日期：2026-06-13
 
 ## 1. 目标
