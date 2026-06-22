@@ -305,6 +305,10 @@ type RequestOptions = RequestInit & {
   query?: Record<string, string | number | boolean | undefined | null>;
 };
 
+function isFormDataBody(body: BodyInit | null | undefined): body is FormData {
+  return typeof FormData !== "undefined" && body instanceof FormData;
+}
+
 function withQuery(path: string, query?: RequestOptions["query"]): string {
   if (!query) return path;
   const params = new URLSearchParams();
@@ -323,6 +327,7 @@ export async function request<T>(
 ): Promise<T> {
   let response: Response;
   const apiBaseUrl = getApiBaseUrl();
+  const isFormData = isFormDataBody(init.body);
   try {
     response = await requestWithNativeFallback(
       `${apiBaseUrl}${withQuery(path, query)}`,
@@ -330,7 +335,7 @@ export async function request<T>(
         credentials: "include",
         ...init,
         headers: {
-          "Content-Type": "application/json",
+          ...(isFormData ? {} : { "Content-Type": "application/json" }),
           ...getLocalAuthHeaders(),
           ...headers,
         },
@@ -608,6 +613,25 @@ export const importApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  importLocalVideo: (data: {
+    file: File;
+    knowledge_base_id?: number | null;
+    title?: string;
+  }) => {
+    const formData = new FormData();
+    formData.set("file", data.file);
+    if (data.knowledge_base_id) {
+      formData.set("knowledge_base_id", String(data.knowledge_base_id));
+    }
+    if (data.title?.trim()) {
+      formData.set("title", data.title.trim());
+    }
+    return request<ImportUrlResponse>("/imports/local-video", {
+      method: "POST",
+      body: formData,
+    });
+  },
 };
 
 export const authApi = {

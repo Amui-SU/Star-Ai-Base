@@ -78,4 +78,49 @@ describe("requestWithNativeFallback", () => {
       }),
     );
   });
+
+  it("passes FormData uploads to CapacitorHttp as native form data", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValue(new TypeError("Failed to fetch"));
+    request.mockResolvedValue({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      data: { ok: true },
+      url: "http://192.168.1.200:8000/imports/local-video",
+    });
+
+    const { requestWithNativeFallback } = await import("./nativeHttp");
+    const formData = new FormData();
+    formData.set(
+      "file",
+      new File(["video"], "demo.mp4", { type: "video/mp4" }),
+    );
+    formData.set("knowledge_base_id", "7");
+
+    const response = await requestWithNativeFallback(
+      "http://192.168.1.200:8000/imports/local-video",
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dataType: "formData",
+        data: [
+          expect.objectContaining({
+            key: "file",
+            type: "base64File",
+            contentType: "video/mp4",
+            fileName: "demo.mp4",
+            value: "dmlkZW8=",
+          }),
+          { key: "knowledge_base_id", value: "7", type: "string" },
+        ],
+      }),
+    );
+  });
 });

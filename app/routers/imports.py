@@ -1,9 +1,19 @@
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,23 +23,27 @@ from app.dependencies import (
     get_current_user,
     get_current_workspace,
 )
-from app.models import (
-    ContentSource,
-    FavoriteFolder,
-    FavoriteVideo,
-    IngestionTask,
-    KnowledgeBase,
-    SourceBinding,
-    SystemUser,
-    VideoCache,
-    Workspace,
-)
+from app.models import FavoriteFolder, FavoriteVideo, IngestionTask, KnowledgeBase
+from app.models import ContentSource, SystemUser, VideoCache, VideoContent, Workspace
 from app.routers.knowledge import get_rag_service
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
 
 router = APIRouter(prefix="/imports", tags=["imports"])
+_LOCAL_IMPORT_DIR = Path("data/local_imports")
+_LOCAL_VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".m4v",
+    ".mkv",
+    ".webm",
+    ".avi",
+    ".flv",
+    ".wmv",
+    ".mpeg",
+    ".mpg",
+}
 
 
 class ImportMethod(BaseModel):
@@ -78,6 +92,62 @@ def _extract_bvid(url: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _is_video_upload(file: UploadFile) -> bool:
+    content_type = (file.content_type or "").lower()
+    suffix = Path(file.filename or "").suffix.lower()
+    return content_type.startswith("video/") or suffix in _LOCAL_VIDEO_EXTENSIONS
+
+
+def _safe_upload_suffix(filename: str | None) -> str:
+    suffix = Path(filename or "").suffix.lower()
+    return suffix if suffix in _LOCAL_VIDEO_EXTENSIONS else ".mp4"
+
+
+def _local_video_id() -> str:
+    return "LV" + uuid.uuid4().hex[:18].upper()
+
+
+async def _get_owned_knowledge_base(
+    db: AsyncSession,
+    knowledge_base_id: int | None,
+    workspace_id: int,
+) -> KnowledgeBase:
+    if not knowledge_base_id:
+        raise HTTPException(status_code=400, detail="请先选择知识库")
+    knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+    if knowledge_base is None:
+        raise HTTPException(status_code=400, detail="请先选择知识库")
+    if knowledge_base.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    return knowledge_base
+
+
+async def _create_import_task(
+    db: AsyncSession,
+    *,
+    workspace_id: int,
+    knowledge_base_id: int,
+    user_id: int,
+    current_step: str,
+) -> str:
+    task_id = str(uuid.uuid4())
+    task = IngestionTask(
+        task_id=task_id,
+        workspace_id=workspace_id,
+        knowledge_base_id=knowledge_base_id,
+        source_binding_id=None,
+        created_by=user_id,
+        status="pending",
+        progress=0,
+        current_step=current_step,
+        total_items=1,
+        processed_items=0,
+    )
+    db.add(task)
+    await db.commit()
+    return task_id
+
+
 @router.get("/methods", response_model=ImportMethodsResponse)
 async def list_import_methods() -> ImportMethodsResponse:
     return ImportMethodsResponse(
@@ -90,9 +160,9 @@ async def list_import_methods() -> ImportMethodsResponse:
                 level=2,
             ),
             ImportMethod(
-                id="video_url",
-                label="视频 URL",
-                description="粘贴 B 站视频链接，直接导入到当前知识库",
+                id="video_import",
+                label="导入视频",
+                description="支持视频 URL 或本地视频文件，直接导入到当前知识库",
                 status="available",
             ),
             ImportMethod(
@@ -131,29 +201,18 @@ async def import_url(
     bvid = _extract_bvid(payload.url)
     if not bvid:
         raise HTTPException(status_code=400, detail="未识别到 B 站 BV 号")
-    if not payload.knowledge_base_id:
-        raise HTTPException(status_code=400, detail="请先选择知识库")
-    knowledge_base = await db.get(KnowledgeBase, payload.knowledge_base_id)
-    if knowledge_base is None:
-        raise HTTPException(status_code=400, detail="请先选择知识库")
-    if knowledge_base.workspace_id != current_workspace.id:
-        raise HTTPException(status_code=404, detail="知识库不存在")
-
-    task_id = str(uuid.uuid4())
-    task = IngestionTask(
-        task_id=task_id,
+    knowledge_base = await _get_owned_knowledge_base(
+        db,
+        payload.knowledge_base_id,
+        current_workspace.id,
+    )
+    task_id = await _create_import_task(
+        db,
         workspace_id=current_workspace.id,
         knowledge_base_id=knowledge_base.id,
-        source_binding_id=None,
-        created_by=current_user.id,
-        status="pending",
-        progress=0,
+        user_id=current_user.id,
         current_step=f"准备导入 {bvid}",
-        total_items=1,
-        processed_items=0,
     )
-    db.add(task)
-    await db.commit()
 
     background_tasks.add_task(
         _run_bilibili_video_import,
@@ -173,112 +232,199 @@ async def import_url(
     )
 
 
+@router.post("/local-video", response_model=ImportUrlResponse)
+async def import_local_video(
+    background_tasks: BackgroundTasks,
+    knowledge_base_id: int = Form(...),
+    title: str | None = Form(None),
+    file: UploadFile = File(...),
+    current_user: SystemUser = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+) -> ImportUrlResponse:
+    if not _is_video_upload(file):
+        raise HTTPException(status_code=400, detail="请上传视频文件")
+
+    knowledge_base = await _get_owned_knowledge_base(
+        db,
+        knowledge_base_id,
+        current_workspace.id,
+    )
+    local_id = _local_video_id()
+    video_title = (title or file.filename or local_id).strip() or local_id
+    upload_dir = Path(_LOCAL_IMPORT_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = upload_dir / f"{local_id}{_safe_upload_suffix(file.filename)}"
+    try:
+        with file_path.open("wb") as out_file:
+            shutil.copyfileobj(file.file, out_file)
+    finally:
+        await file.close()
+
+    task_id = await _create_import_task(
+        db,
+        workspace_id=current_workspace.id,
+        knowledge_base_id=knowledge_base.id,
+        user_id=current_user.id,
+        current_step=f"准备导入 {video_title}",
+    )
+
+    background_tasks.add_task(
+        _run_local_video_import,
+        task_id=task_id,
+        local_id=local_id,
+        title=video_title,
+        file_path=str(file_path),
+        workspace_id=current_workspace.id,
+        knowledge_base_id=knowledge_base.id,
+    )
+
+    return ImportUrlResponse(
+        ok=True,
+        status="pending",
+        source_type="local_video",
+        message="已创建本地视频导入任务",
+        task_id=task_id,
+        bvid=local_id,
+    )
+
+
+async def _update_import_task(task_id: str, **kwargs) -> None:
+    async with get_db_context() as session:
+        result = await session.execute(
+            select(IngestionTask).where(IngestionTask.task_id == task_id)
+        )
+        task = result.scalar_one_or_none()
+        if task:
+            for key, value in kwargs.items():
+                setattr(task, key, value)
+            await session.commit()
+
+
+async def _store_imported_video_content(
+    *,
+    content: VideoContent,
+    workspace_id: int,
+    knowledge_base_id: int,
+    description: str | None = None,
+    owner_name: str | None = None,
+    owner_mid: int | None = None,
+    duration: int | None = None,
+    pic_url: str | None = None,
+    folder_title: str = "单条视频导入",
+) -> None:
+    async with get_db_context() as db:
+        result = await db.execute(
+            select(VideoCache)
+            .where(VideoCache.bvid == content.bvid)
+            .where(VideoCache.workspace_id == workspace_id)
+            .where(VideoCache.knowledge_base_id == knowledge_base_id)
+            .where(VideoCache.source_binding_id.is_(None))
+        )
+        cache = result.scalar_one_or_none()
+        if cache is None:
+            cache = VideoCache(
+                bvid=content.bvid,
+                title=content.title,
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                source_binding_id=None,
+                is_processed=True,
+            )
+            db.add(cache)
+        cache.title = content.title
+        cache.description = description
+        cache.owner_name = owner_name
+        cache.owner_mid = owner_mid
+        cache.duration = duration
+        cache.pic_url = pic_url
+        cache.content = content.content
+        cache.content_source = content.source.value
+        cache.outline_json = content.outline
+        cache.is_processed = True
+        cache.workspace_id = workspace_id
+        cache.knowledge_base_id = knowledge_base_id
+        cache.source_binding_id = None
+
+        folder_result = await db.execute(
+            select(FavoriteFolder)
+            .where(FavoriteFolder.workspace_id == workspace_id)
+            .where(FavoriteFolder.knowledge_base_id == knowledge_base_id)
+            .where(FavoriteFolder.media_id == 0)
+            .where(FavoriteFolder.title == folder_title)
+        )
+        folder = folder_result.scalar_one_or_none()
+        if folder is None:
+            folder = FavoriteFolder(
+                session_id="",
+                media_id=0,
+                title=folder_title,
+                media_count=0,
+                is_selected=True,
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                source_binding_id=None,
+            )
+            db.add(folder)
+            await db.flush()
+
+        exists = await db.execute(
+            select(FavoriteVideo.id)
+            .where(FavoriteVideo.folder_id == folder.id)
+            .where(FavoriteVideo.bvid == content.bvid)
+        )
+        if exists.scalar_one_or_none() is None:
+            db.add(
+                FavoriteVideo(
+                    folder_id=folder.id,
+                    bvid=content.bvid,
+                    is_selected=True,
+                    workspace_id=workspace_id,
+                    knowledge_base_id=knowledge_base_id,
+                    source_binding_id=None,
+                )
+            )
+            folder.media_count = (folder.media_count or 0) + 1
+        folder.last_sync_at = datetime.now(timezone.utc)
+        await db.commit()
+
+
 async def _run_bilibili_video_import(
     task_id: str,
     bvid: str,
     workspace_id: int,
     knowledge_base_id: int,
 ) -> None:
-    async def update_task(**kwargs):
-        async with get_db_context() as session:
-            result = await session.execute(
-                select(IngestionTask).where(IngestionTask.task_id == task_id)
-            )
-            task = result.scalar_one_or_none()
-            if task:
-                for key, value in kwargs.items():
-                    setattr(task, key, value)
-                await session.commit()
-
     bili = BilibiliService()
     asr = ASRService()
     fetcher = ContentFetcher(bili, asr)
-    rag = get_rag_service()
     try:
-        await update_task(status="running", current_step="获取视频信息...", progress=12)
+        rag = get_rag_service()
+        await _update_import_task(
+            task_id,
+            status="running",
+            current_step="获取视频信息...",
+            progress=12,
+        )
         info = await bili.get_video_info(bvid)
         title = info.get("title") or bvid
         cid = info.get("cid")
 
-        await update_task(current_step="提取视频内容...", progress=36)
+        await _update_import_task(task_id, current_step="提取视频内容...", progress=36)
         content = await fetcher.fetch_content(bvid, cid=cid, title=title)
 
-        async with get_db_context() as db:
-            result = await db.execute(
-                select(VideoCache)
-                .where(VideoCache.bvid == bvid)
-                .where(VideoCache.workspace_id == workspace_id)
-                .where(VideoCache.knowledge_base_id == knowledge_base_id)
-                .where(VideoCache.source_binding_id.is_(None))
-            )
-            cache = result.scalar_one_or_none()
-            if cache is None:
-                cache = VideoCache(
-                    bvid=bvid,
-                    title=title,
-                    description=info.get("desc"),
-                    owner_name=(info.get("owner") or {}).get("name"),
-                    owner_mid=(info.get("owner") or {}).get("mid"),
-                    duration=info.get("duration"),
-                    pic_url=info.get("pic"),
-                    workspace_id=workspace_id,
-                    knowledge_base_id=knowledge_base_id,
-                    source_binding_id=None,
-                    is_processed=True,
-                )
-                db.add(cache)
-            cache.title = title
-            cache.content = content.content
-            cache.content_source = content.source.value
-            cache.outline_json = content.outline
-            cache.is_processed = True
-            cache.workspace_id = workspace_id
-            cache.knowledge_base_id = knowledge_base_id
-            cache.source_binding_id = None
+        await _store_imported_video_content(
+            content=content,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            description=info.get("desc"),
+            owner_name=(info.get("owner") or {}).get("name"),
+            owner_mid=(info.get("owner") or {}).get("mid"),
+            duration=info.get("duration"),
+            pic_url=info.get("pic"),
+        )
 
-            folder_result = await db.execute(
-                select(FavoriteFolder)
-                .where(FavoriteFolder.workspace_id == workspace_id)
-                .where(FavoriteFolder.knowledge_base_id == knowledge_base_id)
-                .where(FavoriteFolder.media_id == 0)
-                .where(FavoriteFolder.title == "单条视频导入")
-            )
-            folder = folder_result.scalar_one_or_none()
-            if folder is None:
-                folder = FavoriteFolder(
-                    session_id="",
-                    media_id=0,
-                    title="单条视频导入",
-                    media_count=0,
-                    is_selected=True,
-                    workspace_id=workspace_id,
-                    knowledge_base_id=knowledge_base_id,
-                    source_binding_id=None,
-                )
-                db.add(folder)
-                await db.flush()
-
-            exists = await db.execute(
-                select(FavoriteVideo.id)
-                .where(FavoriteVideo.folder_id == folder.id)
-                .where(FavoriteVideo.bvid == bvid)
-            )
-            if exists.scalar_one_or_none() is None:
-                db.add(
-                    FavoriteVideo(
-                        folder_id=folder.id,
-                        bvid=bvid,
-                        is_selected=True,
-                        workspace_id=workspace_id,
-                        knowledge_base_id=knowledge_base_id,
-                        source_binding_id=None,
-                    )
-                )
-                folder.media_count = (folder.media_count or 0) + 1
-            folder.last_sync_at = datetime.now(timezone.utc)
-            await db.commit()
-
-        await update_task(current_step="写入向量索引...", progress=76)
+        await _update_import_task(task_id, current_step="写入向量索引...", progress=76)
         try:
             rag.delete_video_in_knowledge_base(
                 workspace_id=workspace_id,
@@ -287,13 +433,14 @@ async def _run_bilibili_video_import(
             )
         except Exception:
             pass
-        chunks = rag.add_video_content(
+        rag.add_video_content(
             content,
             workspace_id=workspace_id,
             knowledge_base_id=knowledge_base_id,
             source_binding_id=None,
         )
-        await update_task(
+        await _update_import_task(
+            task_id,
             status="completed",
             progress=100,
             processed_items=1,
@@ -301,10 +448,85 @@ async def _run_bilibili_video_import(
             error_message=None,
         )
     except Exception as exc:
-        await update_task(
+        await _update_import_task(
+            task_id,
             status="failed",
             current_step="导入失败",
             error_message=str(exc),
         )
     finally:
         await bili.close()
+
+
+async def _run_local_video_import(
+    task_id: str,
+    local_id: str,
+    title: str,
+    file_path: str,
+    workspace_id: int,
+    knowledge_base_id: int,
+) -> None:
+    asr = ASRService()
+    try:
+        rag = get_rag_service()
+        await _update_import_task(
+            task_id,
+            status="running",
+            current_step="转写本地视频...",
+            progress=28,
+        )
+        transcript = await asr.transcribe_local_file(file_path)
+        if not transcript or len(transcript.strip()) < 10:
+            raise ValueError("未能从本地视频中识别到有效文本")
+
+        content = VideoContent(
+            bvid=local_id,
+            title=title,
+            content=transcript.strip(),
+            source=ContentSource.ASR,
+        )
+
+        await _store_imported_video_content(
+            content=content,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            description=f"本地视频文件：{Path(file_path).name}",
+        )
+
+        await _update_import_task(task_id, current_step="写入向量索引...", progress=76)
+        try:
+            rag.delete_video_in_knowledge_base(
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                bvid=local_id,
+            )
+        except Exception:
+            pass
+        rag.add_video_content(
+            content,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            source_binding_id=None,
+        )
+        await _update_import_task(
+            task_id,
+            status="completed",
+            progress=100,
+            processed_items=1,
+            current_step="导入完成",
+            error_message=None,
+        )
+    except Exception as exc:
+        await _update_import_task(
+            task_id,
+            status="failed",
+            current_step="导入失败",
+            error_message=str(exc),
+        )
+    finally:
+        try:
+            upload_path = Path(file_path)
+            if upload_path.exists():
+                upload_path.unlink()
+        except Exception:
+            pass

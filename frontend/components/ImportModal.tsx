@@ -19,7 +19,8 @@ interface Props {
   onImported?: () => void;
 }
 
-type Step = "methods" | "bilibili" | "url";
+type Step = "methods" | "bilibili" | "video";
+type VideoImportMode = "url" | "local";
 
 export default function ImportModal({
   open,
@@ -38,9 +39,13 @@ export default function ImportModal({
   const [qrErrorMessage, setQrErrorMessage] =
     useState("二维码获取失败，请检查网络或重试");
   const [polling, setPolling] = useState(false);
+  const [videoMode, setVideoMode] = useState<VideoImportMode>("url");
   const [url, setUrl] = useState("");
   const [urlMessage, setUrlMessage] = useState("");
   const [urlSubmitting, setUrlSubmitting] = useState(false);
+  const [localVideoFile, setLocalVideoFile] = useState<File | null>(null);
+  const [localVideoMessage, setLocalVideoMessage] = useState("");
+  const [localVideoSubmitting, setLocalVideoSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -50,8 +55,13 @@ export default function ImportModal({
         setQr(null);
         setQrStatus("idle");
         setQrErrorMessage("二维码获取失败，请检查网络或重试");
+        setVideoMode("url");
         setUrl("");
         setUrlMessage("");
+        setUrlSubmitting(false);
+        setLocalVideoFile(null);
+        setLocalVideoMessage("");
+        setLocalVideoSubmitting(false);
       }, 0);
       return () => window.clearTimeout(timer);
     }
@@ -133,6 +143,28 @@ export default function ImportModal({
     }
   };
 
+  const submitLocalVideo = async () => {
+    if (!localVideoFile || localVideoSubmitting) return;
+    setLocalVideoSubmitting(true);
+    setLocalVideoMessage("");
+    try {
+      const res = await importApi.importLocalVideo({
+        file: localVideoFile,
+        knowledge_base_id: knowledgeBaseId,
+        title: localVideoFile.name,
+      });
+      setLocalVideoMessage(res.message);
+      if (res.ok) {
+        onImported?.();
+        setLocalVideoFile(null);
+      }
+    } catch (err) {
+      setLocalVideoMessage(err instanceof Error ? err.message : "导入失败");
+    } finally {
+      setLocalVideoSubmitting(false);
+    }
+  };
+
   if (!open) return null;
 
   const methodList =
@@ -147,9 +179,9 @@ export default function ImportModal({
             level: 2,
           },
           {
-            id: "video_url",
-            label: "视频 URL",
-            description: "粘贴 B 站视频链接，直接导入到当前知识库",
+            id: "video_import",
+            label: "导入视频",
+            description: "支持视频 URL 或本地视频文件，直接导入到当前知识库",
             status: "available",
             level: 1,
           },
@@ -170,7 +202,7 @@ export default function ImportModal({
                 ? "导入资料"
                 : step === "bilibili"
                   ? "B 站收藏夹"
-                  : "视频 URL"}
+                  : "导入视频"}
             </div>
             <div className="modal-subtitle text-left">
               选择导入方式，资料会进入当前知识库
@@ -199,7 +231,12 @@ export default function ImportModal({
                 className={`import-method-card ${method.status !== "available" ? "disabled" : ""}`}
                 onClick={() => {
                   if (method.id === "bilibili_favorites") setStep("bilibili");
-                  if (method.id === "video_url") setStep("url");
+                  if (
+                    method.id === "video_url" ||
+                    method.id === "video_import"
+                  ) {
+                    setStep("video");
+                  }
                 }}
                 disabled={
                   method.status !== "available" &&
@@ -278,23 +315,87 @@ export default function ImportModal({
           </div>
         )}
 
-        {step === "url" && (
+        {step === "video" && (
           <div className="import-step-body">
-            <label className="import-url-label" htmlFor="import-url-input">
-              粘贴视频链接
-            </label>
-            <textarea
-              id="import-url-input"
-              className="input import-url-input"
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-              placeholder="https://www.bilibili.com/video/BV..."
-            />
-            <p className="import-step-copy">
-              当前已支持 B
-              站视频链接导入；抖音等平台入口已预留，后续接入解析器。
-            </p>
-            {urlMessage && <div className="import-message">{urlMessage}</div>}
+            <div className="import-video-mode-tabs" aria-label="视频导入方式">
+              <button
+                type="button"
+                className={videoMode === "url" ? "active" : ""}
+                onClick={() => {
+                  setVideoMode("url");
+                  setLocalVideoMessage("");
+                }}
+              >
+                视频 URL
+              </button>
+              <button
+                type="button"
+                className={videoMode === "local" ? "active" : ""}
+                onClick={() => {
+                  setVideoMode("local");
+                  setUrlMessage("");
+                }}
+              >
+                本地视频
+              </button>
+            </div>
+
+            {videoMode === "url" ? (
+              <>
+                <label className="import-url-label" htmlFor="import-url-input">
+                  粘贴视频链接
+                </label>
+                <textarea
+                  id="import-url-input"
+                  className="input import-url-input"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="https://www.bilibili.com/video/BV..."
+                />
+                <p className="import-step-copy">
+                  当前已支持 B
+                  站视频链接导入；抖音等平台入口已预留，后续接入解析器。
+                </p>
+                {urlMessage && (
+                  <div className="import-message">{urlMessage}</div>
+                )}
+              </>
+            ) : (
+              <>
+                <label
+                  className="import-url-label"
+                  htmlFor="import-local-video-input"
+                >
+                  选择本地视频文件
+                </label>
+                <input
+                  id="import-local-video-input"
+                  className="import-local-video-input"
+                  type="file"
+                  accept="video/*"
+                  onChange={(event) =>
+                    setLocalVideoFile(event.target.files?.[0] ?? null)
+                  }
+                />
+                <div className="import-local-video-card">
+                  <div className="import-local-video-title">
+                    {localVideoFile ? localVideoFile.name : "尚未选择视频"}
+                  </div>
+                  <div className="import-local-video-meta">
+                    {localVideoFile
+                      ? `${(localVideoFile.size / 1024 / 1024).toFixed(1)} MB`
+                      : "支持从手机相册或电脑文件中选择视频"}
+                  </div>
+                </div>
+                <p className="import-step-copy">
+                  本地视频会上传到后端并通过 ASR
+                  转写后入库，完成后可在当前知识库中提问。
+                </p>
+                {localVideoMessage && (
+                  <div className="import-message">{localVideoMessage}</div>
+                )}
+              </>
+            )}
             <div className="import-actions">
               <button
                 type="button"
@@ -306,10 +407,20 @@ export default function ImportModal({
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!url.trim() || !knowledgeBaseId || urlSubmitting}
-                onClick={() => void submitUrl()}
+                disabled={
+                  videoMode === "url"
+                    ? !url.trim() || !knowledgeBaseId || urlSubmitting
+                    : !localVideoFile ||
+                      !knowledgeBaseId ||
+                      localVideoSubmitting
+                }
+                onClick={() =>
+                  void (videoMode === "url" ? submitUrl() : submitLocalVideo())
+                }
               >
-                {urlSubmitting ? "导入中..." : "开始导入"}
+                {urlSubmitting || localVideoSubmitting
+                  ? "导入中..."
+                  : "开始导入"}
               </button>
             </div>
           </div>
