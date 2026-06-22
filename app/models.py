@@ -383,6 +383,7 @@ class WorkspaceResponse(BaseModel):
 class SystemAuthResponse(BaseModel):
     user: SystemUserResponse
     workspace: WorkspaceResponse
+    session_token: Optional[str] = None
 
 
 class KnowledgeBaseCreateRequest(BaseModel):

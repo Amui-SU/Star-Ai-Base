@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { DevIndicatorGuard } from "@/components/DevIndicatorGuard";
+import LocalConnectionBootstrap from "@/components/LocalConnectionBootstrap";
 import "./globals.css";
 
 const body = Inter({
@@ -26,6 +27,7 @@ export default function RootLayout({
     <html lang="zh-CN">
       <body className={`${body.variable} antialiased`}>
         <DevIndicatorGuard />
+        <LocalConnectionBootstrap />
         {children}
       </body>
     </html>

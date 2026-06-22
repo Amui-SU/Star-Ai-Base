@@ -6,6 +6,11 @@ const config: CapacitorConfig = {
   appId: "com.zhikuyun.app",
   appName: "Zhiku Cloud",
   webDir: "out",
+  plugins: {
+    CapacitorHttp: {
+      enabled: true,
+    },
+  },
   ...(serverUrl
     ? {
         server: {

@@ -5,7 +5,8 @@
 本项目使用 Capacitor 将现有 Next.js 前端封装成 Android APK。
 
 - Web 端继续使用同一套前端代码
-- APK 通过 `CAPACITOR_SERVER_URL` 加载线上 Web 页面
+- APK 默认内置静态前端资源，不再写死某个局域网 IP
+- 手机端通过“连接设置”保存电脑端后端地址，例如 `http://192.168.1.23:8000`
 - 后端继续使用同一套 FastAPI API，所以 Web / APK 数据互通
 
 ## 已添加文件
@@ -34,37 +35,21 @@ cd frontend
 npm run dev
 ```
 
-## 线上 Web 模式打包 APK
+## 默认本地静态 APK
 
-1. 先把前端部署到公网 HTTPS，例如：
-
-```text
-https://app.zhikuyun.com
-```
-
-2. 打包时指定线上地址：
+默认打包方式适合本地局域网使用。先导出前端静态资源并同步 Android 工程：
 
 ```powershell
 cd frontend
-$env:CAPACITOR_SERVER_URL='https://app.zhikuyun.com'
-```
-
-3. 同步 Android 工程：
-
-```powershell
+npm run build
 npx cap sync android
 ```
 
-4. 打开 Android Studio：
+然后构建 APK：
 
 ```powershell
-npx cap open android
-```
-
-5. 在 Android Studio 里选择：
-
-```text
-Build -> Build APK(s)
+cd android
+.\gradlew.bat assembleDebug
 ```
 
 APK 常见输出位置：
@@ -73,38 +58,63 @@ APK 常见输出位置：
 frontend/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+安装后，手机端点“连接设置”，填写电脑端后端地址：
+
+```text
+http://<电脑局域网 IP>:8000
+```
+
+例如：
+
+```text
+http://192.168.1.23:8000
+```
+
 ## 本地手机预览
 
-如果 Android 手机和电脑在同一局域网，先查电脑局域网 IP，例如 `192.168.1.23`，然后用：
+如果 Android 手机和电脑在同一局域网，启动脚本会打印手机端可填写的地址：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev.ps1 start
+```
+
+看到类似下面这一行后，在 APK 的“连接设置”里填写它：
+
+```text
+Mobile local connection address: http://192.168.1.23:8000
+```
+
+如果手机浏览器也要预览 Web 端，可以打开：
+
+```text
+http://192.168.1.23:3000
+```
+
+## 线上 Web 模式
+
+如果以后部署到公网 HTTPS，有两种做法：
+
+- 保持默认内置静态 APK，只在“连接设置”里填写公网 API 域名。
+- 或者显式使用 `CAPACITOR_SERVER_URL` 加载线上 Web 页面。
+
+使用线上 Web 页面时：
 
 ```powershell
 cd frontend
-$env:CAPACITOR_SERVER_URL='http://192.168.1.23:3000'
+$env:CAPACITOR_SERVER_URL='https://app.zhikuyun.com'
 npx cap sync android
+```
+
+完成后可以打开 Android Studio 构建：
+
+```powershell
 npx cap open android
-```
-
-同时前端接口也不要指向手机自己的 `localhost`，应改成电脑或服务器地址：
-
-```powershell
-$env:NEXT_PUBLIC_API_URL='http://192.168.1.23:8000'
-npm run dev
-```
-
-## 如果要做本地静态包
-
-当前 `capacitor.config.ts` 使用的是 `webDir = "out"`。
-如果你以后想改成离线静态包，需要先让 Next.js 导出 `out/`，然后再执行：
-
-```powershell
-cd frontend
-npm run build
-npx cap sync android
 ```
 
 ## 重要说明
 
-- APK 里不要再用 `http://localhost:8000`
-- 线上 Web / APK 必须指向同一个后端域名
+- 默认 APK 不再依赖 `CAPACITOR_SERVER_URL`
+- 本地局域网换了以后，只需要在手机端“连接设置”里更新后端地址
+- 线上 Web / APK 应指向同一个后端域名
 - 生产环境建议使用 HTTPS
-- 如果后端 Cookie 登录在 Android WebView 里有兼容问题，再改成 token 登录
+- 手机端本地静态 APK 使用 bearer token 登录态，Web 端继续兼容 Cookie 登录

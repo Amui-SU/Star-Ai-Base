@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { systemAuthApi, SystemUser } from "@/lib/api";
+import LocalConnectionSettings from "@/components/LocalConnectionSettings";
 
 interface Props {
   onAuthSuccess: (user: SystemUser) => void;
@@ -319,8 +320,9 @@ export default function AuthPage({ onAuthSuccess }: Props) {
     );
   };
 
-  const isOAuthAvailable = (provider: (typeof oauthButtons)[number]["provider"]) =>
-    provider === "google" && googleLoginSupported;
+  const isOAuthAvailable = (
+    provider: (typeof oauthButtons)[number]["provider"],
+  ) => provider === "google" && googleLoginSupported;
 
   const handleOAuthClick = (
     event: React.MouseEvent<HTMLAnchorElement>,
@@ -389,6 +391,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
               智库云
             </span>
           </div>
+          <LocalConnectionSettings />
         </div>
       </header>
 
@@ -463,7 +466,9 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                             key={button.provider}
                             href={
                               available
-                                ? systemAuthApi.getOAuthLoginUrl(button.provider)
+                                ? systemAuthApi.getOAuthLoginUrl(
+                                    button.provider,
+                                  )
                                 : "#"
                             }
                             aria-disabled={!available}

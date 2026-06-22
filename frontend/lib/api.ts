@@ -1,7 +1,18 @@
+import {
+  clearLocalSessionToken,
+  getLocalApiBaseUrl,
+  getLocalAuthHeaders,
+  saveLocalSessionToken,
+} from "@/lib/localConnection";
+import { requestWithNativeFallback } from "@/lib/nativeHttp";
+
 const resolveApiBaseUrl = () => {
   const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
   if (configuredApiUrl) return configuredApiUrl;
   if (typeof window === "undefined") return "http://localhost:8000";
+
+  const localApiBaseUrl = getLocalApiBaseUrl();
+  if (localApiBaseUrl) return localApiBaseUrl;
 
   const { protocol, hostname } = window.location;
   if (protocol !== "http:" && protocol !== "https:") {
@@ -11,6 +22,7 @@ const resolveApiBaseUrl = () => {
 };
 
 export const API_BASE_URL = resolveApiBaseUrl();
+export const getApiBaseUrl = resolveApiBaseUrl;
 
 export type OAuthProvider = "google" | "wechat" | "qq";
 
@@ -50,6 +62,7 @@ export interface Workspace {
 export interface SystemAuthResponse {
   user: SystemUser;
   workspace: Workspace;
+  session_token?: string;
 }
 
 export interface SourceBinding {
@@ -264,6 +277,16 @@ export interface LLMHealthResponse {
   provider: string;
 }
 
+export interface LocalLanAddressResponse {
+  host: string | null;
+  api_url: string | null;
+  frontend_url: string | null;
+  qr_url: string | null;
+  connect_page_url?: string | null;
+  qr_image_url?: string | null;
+  qr_data_url?: string | null;
+}
+
 type RequestOptions = RequestInit & {
   query?: Record<string, string | number | boolean | undefined | null>;
 };
@@ -285,18 +308,23 @@ export async function request<T>(
   { query, headers, ...init }: RequestOptions = {},
 ): Promise<T> {
   let response: Response;
+  const apiBaseUrl = getApiBaseUrl();
   try {
-    response = await fetch(`${API_BASE_URL}${withQuery(path, query)}`, {
-      credentials: "include",
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...headers,
+    response = await requestWithNativeFallback(
+      `${apiBaseUrl}${withQuery(path, query)}`,
+      {
+        credentials: "include",
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          ...getLocalAuthHeaders(),
+          ...headers,
+        },
       },
-    });
+    );
   } catch (error) {
     throw new Error(
-      `无法连接到后端服务（${API_BASE_URL}）。请确认后端已启动，且接口地址可访问。`,
+      `无法连接到后端服务（${apiBaseUrl}）。请确认后端已启动，且接口地址可访问。`,
       { cause: error },
     );
   }
@@ -326,7 +354,7 @@ export const systemAuthApi = {
     const params = new URLSearchParams();
     if (frontendUrl) params.set("frontend_url", frontendUrl);
     const query = params.toString();
-    return `${API_BASE_URL}/system-auth/${provider}/login${query ? `?${query}` : ""}`;
+    return `${getApiBaseUrl()}/system-auth/${provider}/login${query ? `?${query}` : ""}`;
   },
 
   getGoogleLoginUrl: () => systemAuthApi.getOAuthLoginUrl("google"),
@@ -337,27 +365,44 @@ export const systemAuthApi = {
       body: JSON.stringify({ email }),
     }),
 
-  register: (data: {
+  register: async (data: {
     email: string;
     password: string;
     display_name: string;
     code: string;
-  }) =>
-    request<SystemAuthResponse>("/system-auth/register", {
+  }) => {
+    const response = await request<SystemAuthResponse>(
+      "/system-auth/register",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
+    saveLocalSessionToken(response.session_token);
+    return response;
+  },
+
+  login: async (data: { email: string; password: string }) => {
+    const response = await request<SystemAuthResponse>("/system-auth/login", {
       method: "POST",
       body: JSON.stringify(data),
-    }),
+    });
+    saveLocalSessionToken(response.session_token);
+    return response;
+  },
 
-  login: (data: { email: string; password: string }) =>
-    request<SystemAuthResponse>("/system-auth/login", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  logout: () =>
-    request<{ ok?: boolean; message?: string }>("/system-auth/logout", {
-      method: "POST",
-    }),
+  logout: async () => {
+    try {
+      return await request<{ ok?: boolean; message?: string }>(
+        "/system-auth/logout",
+        {
+          method: "POST",
+        },
+      );
+    } finally {
+      clearLocalSessionToken();
+    }
+  },
 
   me: () => request<SystemUser>("/system-auth/me"),
 
@@ -366,6 +411,11 @@ export const systemAuthApi = {
       method: "PUT",
       body: JSON.stringify({ display_name }),
     }),
+};
+
+export const localConnectionApi = {
+  lanAddress: () =>
+    request<LocalLanAddressResponse>("/local-connection/lan-address"),
 };
 
 export const sourceBindingApi = {
@@ -488,7 +538,7 @@ export const knowledgeBaseApi = {
     }),
 
   chatStreamUrl: (knowledgeBaseId: number) =>
-    `${API_BASE_URL}/knowledge-bases/${knowledgeBaseId}/chat/stream`,
+    `${getApiBaseUrl()}/knowledge-bases/${knowledgeBaseId}/chat/stream`,
 
   build: (knowledgeBaseId: number, data: KnowledgeBaseBuildRequest) =>
     request<KnowledgeBaseBuildResponse>(

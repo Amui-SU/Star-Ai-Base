@@ -45,6 +45,15 @@ describe("mobile chat message layout", () => {
     );
   });
 
+  it("hides the provider config body scrollbar without disabling scrolling", () => {
+    expect(stylesheet).toMatch(
+      /\.provider-config-body\s*\{[^}]*overflow-y:\s*auto;[^}]*scrollbar-width:\s*none;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.provider-config-body::-webkit-scrollbar\s*\{[^}]*display:\s*none;/s,
+    );
+  });
+
   it("keeps the mobile import modal above the workspace with screen insets", () => {
     expect(stylesheet).toMatch(
       /\.modal-backdrop:has\(>\s*\.import-modal\)\s*\{[^}]*z-index:\s*100;[^}]*align-items:\s*center;[^}]*padding:\s*16px;/s,

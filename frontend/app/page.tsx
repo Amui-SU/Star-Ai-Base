@@ -13,6 +13,7 @@ import KnowledgeBasePanel from "@/components/KnowledgeBasePanel";
 import ImportModal from "@/components/ImportModal";
 import SourcesPanel from "@/components/SourcesPanel";
 import ChatPanel from "@/components/ChatPanel";
+import LocalConnectionSettings from "@/components/LocalConnectionSettings";
 import { systemAuthApi, sourceBindingApi } from "@/lib/api";
 import type { KnowledgeBase, SystemUser } from "@/lib/api";
 
@@ -220,7 +221,9 @@ export default function Home() {
       };
 
   return (
-    <div className={`app-shell ${isSidebarOpen ? "sidebar-open" : "sidebar-closed"}`}>
+    <div
+      className={`app-shell ${isSidebarOpen ? "sidebar-open" : "sidebar-closed"}`}
+    >
       <main className="app-main">
         <section className="workspace-card relative" ref={containerRef}>
           <header className="workspace-topbar">
@@ -229,6 +232,7 @@ export default function Home() {
               <span>智库云</span>
             </div>
             <div className="workspace-top-actions">
+              <LocalConnectionSettings />
               {themeReady && (
                 <button
                   onClick={() => setIsDarkMode((p) => !p)}
@@ -311,11 +315,7 @@ export default function Home() {
                 } as React.CSSProperties
               }
             >
-              <aside
-                className="panel panel-sources"
-                style={sidebarPanelStyle}
-
-              >
+              <aside className="panel panel-sources" style={sidebarPanelStyle}>
                 {/* 知识库选择 */}
                 <KnowledgeBasePanel
                   activeId={activeKbId}

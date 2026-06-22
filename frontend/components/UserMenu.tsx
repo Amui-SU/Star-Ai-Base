@@ -2,7 +2,12 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { systemAuthApi, SystemUser } from "@/lib/api";
+import {
+  localConnectionApi,
+  type LocalLanAddressResponse,
+  systemAuthApi,
+  type SystemUser,
+} from "@/lib/api";
 
 interface Props {
   user: SystemUser;
@@ -14,6 +19,12 @@ export default function UserMenu({ user, onUserChange, onLogout }: Props) {
   const initial = user.display_name?.charAt(0)?.toUpperCase() || "?";
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedLan, setCopiedLan] = useState(false);
+  const [showLanQr, setShowLanQr] = useState(false);
+  const [lanAddress, setLanAddress] = useState<LocalLanAddressResponse | null>(
+    null,
+  );
+  const [lanLoading, setLanLoading] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [displayName, setDisplayName] = useState(user.display_name);
   const [savingName, setSavingName] = useState(false);
@@ -31,6 +42,35 @@ export default function UserMenu({ user, onUserChange, onLogout }: Props) {
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [open]);
 
+  useEffect(() => {
+    if (!open || lanAddress) return;
+    let cancelled = false;
+    setLanLoading(true);
+    localConnectionApi
+      .lanAddress()
+      .then((response) => {
+        if (!cancelled) setLanAddress(response);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLanAddress({
+            host: null,
+            api_url: null,
+            frontend_url: null,
+            qr_url: null,
+            connect_page_url: null,
+            qr_image_url: null,
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLanLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lanAddress, open]);
+
   const copyEmail = async () => {
     try {
       await navigator.clipboard.writeText(user.email);
@@ -38,6 +78,18 @@ export default function UserMenu({ user, onUserChange, onLogout }: Props) {
       window.setTimeout(() => setCopied(false), 1200);
     } catch {
       setCopied(false);
+    }
+  };
+
+  const copyLanAddress = async () => {
+    if (!lanAddress?.api_url) return;
+    try {
+      await navigator.clipboard.writeText(lanAddress.api_url);
+      setCopiedLan(true);
+      setShowLanQr(true);
+      window.setTimeout(() => setCopiedLan(false), 1200);
+    } catch {
+      setCopiedLan(false);
     }
   };
 
@@ -160,6 +212,25 @@ export default function UserMenu({ user, onUserChange, onLogout }: Props) {
                 {copied ? "已复制" : "Copy"}
               </span>
             </button>
+            <button
+              type="button"
+              className="user-menu-action user-menu-lan-action"
+              onClick={() => void copyLanAddress()}
+              disabled={!lanAddress?.api_url}
+              aria-label="复制电脑局域网地址"
+            >
+              <span className="user-menu-action-main">
+                <span>电脑局域网地址</span>
+                <span className="user-menu-action-value">
+                  {lanLoading
+                    ? "检测中..."
+                    : lanAddress?.api_url || "未检测到局域网地址"}
+                </span>
+              </span>
+              <span className="user-menu-action-hint">
+                {copiedLan ? "已复制" : "Copy"}
+              </span>
+            </button>
             {editingName ? (
               <div className="user-menu-edit-actions">
                 <button
@@ -222,6 +293,53 @@ export default function UserMenu({ user, onUserChange, onLogout }: Props) {
           </button>
         </div>
       )}
+
+      {showLanQr &&
+        lanAddress?.api_url &&
+        (lanAddress.qr_data_url ||
+          lanAddress.qr_image_url ||
+          lanAddress.qr_url) && (
+          <div
+            className="modal-backdrop"
+            onMouseDown={() => setShowLanQr(false)}
+          >
+            <div
+              className="modal-card local-connection-qr-card"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="local-connection-qr-head">
+                <div>
+                  <div className="modal-title text-left">手机扫码连接</div>
+                  <div className="modal-subtitle text-left">
+                    打开手机端连接设置，点“扫码”识别这个二维码。
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="provider-config-close"
+                  onClick={() => setShowLanQr(false)}
+                  aria-label="关闭手机扫码连接"
+                >
+                  ×
+                </button>
+              </div>
+
+              <img
+                className="local-connection-qr-image"
+                src={
+                  lanAddress.qr_data_url ||
+                  lanAddress.qr_image_url ||
+                  lanAddress.qr_url ||
+                  ""
+                }
+                alt="手机连接二维码"
+              />
+              <div className="local-connection-qr-address">
+                {lanAddress.api_url}
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

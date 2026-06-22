@@ -124,6 +124,27 @@ function Test-PortListening {
     }
 }
 
+function Get-LanIPv4Address {
+    try {
+        $lines = ipconfig | Select-String "IPv4"
+        foreach ($line in $lines) {
+            $text = "" + $line
+            $match = [regex]::Match($text, "(\d{1,3}(?:\.\d{1,3}){3})")
+            if ($match.Success) {
+                $ip = $match.Groups[1].Value
+                if ($ip -like "192.168.*" -or $ip -like "10.*" -or $ip -match "^172\.(1[6-9]|2\d|3[0-1])\.") {
+                    return $ip
+                }
+            }
+        }
+    }
+    catch {
+        return $null
+    }
+
+    return $null
+}
+
 function Get-ProcessCommandLine {
     param([int]$ProcessId)
 
@@ -489,8 +510,14 @@ function Invoke-Start {
         }
 
         Save-RuntimeState -ProjectRoot $ProjectRoot -BackendProcess $backendProcess -FrontendProcess $frontendProcess -PythonExe $pythonExe
+        $lanIp = Get-LanIPv4Address
         Write-Ok "Backend ready: http://127.0.0.1:8000 (LAN: http://<电脑IP>:8000)"
         Write-Ok "Frontend ready: http://localhost:3000"
+        if ($lanIp) {
+            Write-Ok "Mobile local connection address: http://$lanIp:8000"
+            Write-Ok "Mobile browser preview: http://$lanIp:3000"
+            Write-Ok "Mobile QR connect page: http://$lanIp:8000/local-connection/mobile-connect?api=http%3A%2F%2F$lanIp%3A8000"
+        }
 
         if (-not $NoBrowser) {
             Start-Process "http://localhost:3000"

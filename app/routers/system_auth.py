@@ -119,6 +119,18 @@ def _invalid_credentials_exception() -> HTTPException:
     return HTTPException(status_code=401, detail="邮箱或密码错误")
 
 
+def _session_token_from_request(request: Request) -> str | None:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if token:
+        return token
+
+    authorization = request.headers.get("authorization", "")
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() == "bearer" and value.strip():
+        return value.strip()
+    return None
+
+
 def _user_response(user: SystemUser) -> SystemUserResponse:
     return SystemUserResponse(
         id=user.id,
@@ -140,7 +152,7 @@ def _workspace_response(
 
 async def _create_system_session(
     db: AsyncSession, user_id: int, response: Response
-) -> None:
+) -> str:
     token = create_session_token()
     db.add(
         SystemSession(
@@ -150,6 +162,7 @@ async def _create_system_session(
         )
     )
     set_session_cookie(response, token)
+    return token
 
 
 async def _get_primary_workspace(
@@ -168,7 +181,7 @@ async def _get_primary_workspace(
 
 
 async def _get_current_user(request: Request, db: AsyncSession) -> SystemUser:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
+    token = _session_token_from_request(request)
     if not token:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
@@ -325,7 +338,7 @@ async def register(
             role="owner",
         )
         db.add(member)
-        await _create_system_session(db, user.id, response)
+        token = await _create_system_session(db, user.id, response)
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -334,6 +347,7 @@ async def register(
     return SystemAuthResponse(
         user=_user_response(user),
         workspace=_workspace_response(workspace, member),
+        session_token=token,
     )
 
 
@@ -358,12 +372,13 @@ async def login(
         raise _invalid_credentials_exception()
 
     workspace, member = await _get_primary_workspace(db, user.id)
-    await _create_system_session(db, user.id, response)
+    token = await _create_system_session(db, user.id, response)
     await db.commit()
 
     return SystemAuthResponse(
         user=_user_response(user),
         workspace=_workspace_response(workspace, member),
+        session_token=token,
     )
 
 
@@ -373,7 +388,7 @@ async def logout(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
+    token = _session_token_from_request(request)
     if token:
         result = await db.execute(
             select(SystemSession).where(

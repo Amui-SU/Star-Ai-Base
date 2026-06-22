@@ -34,13 +34,25 @@ def _unauthorized() -> HTTPException:
     return HTTPException(status_code=401, detail="Not authenticated")
 
 
+def _session_token_from_request(request: Request) -> str | None:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if token:
+        return token
+
+    authorization = request.headers.get("authorization", "")
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() == "bearer" and value.strip():
+        return value.strip()
+    return None
+
+
 async def _resolve_current_user(
     request: Request,
     db: AsyncSession,
     *,
     touch_last_seen: bool,
 ) -> SystemUser:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
+    token = _session_token_from_request(request)
     if not token:
         raise _unauthorized()
 

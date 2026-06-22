@@ -30,6 +30,7 @@ import {
   parseThinkingConfig,
   type ThinkingMode,
 } from "@/lib/thinkingConfig";
+import { getLocalAuthHeaders } from "@/lib/localConnection";
 
 interface Message {
   id: string;
@@ -397,7 +398,10 @@ export default function ChatPanel({
       const response = await fetch(streamUrl, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...getLocalAuthHeaders(),
+        },
         signal: abortController.signal,
         body: JSON.stringify(scopedPayload),
       });
@@ -1326,25 +1330,25 @@ export default function ChatPanel({
 
       {configProvider && (
         <div
-          className="modal-backdrop z-80"
+          className="modal-backdrop"
           onMouseDown={() => closeProviderConfig()}
         >
           <div
-            className="modal-card thinking-provider-modal w-[min(640px,94vw)] p-8"
+            className="modal-card thinking-provider-modal"
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <h3 className="modal-title text-left">
+            <div className="provider-config-head">
+              <div className="provider-config-title-block">
+                <h3 className="provider-config-title">
                   配置 {configProvider.label}
                 </h3>
-                <p className="modal-subtitle text-left whitespace-nowrap">
+                <p className="provider-config-subtitle">
                   保存后会写入项目的 .env.local，并自动切换到该模型。
                 </p>
               </div>
               <button
                 type="button"
-                className="btn btn-ghost px-2 py-1 text-xs"
+                className="provider-config-close"
                 onClick={() => closeProviderConfig()}
                 disabled={configSaving}
                 aria-label="关闭配置弹窗"
@@ -1353,14 +1357,14 @@ export default function ChatPanel({
               </button>
             </div>
 
-            <div className="mt-6 flex flex-col gap-4">
+            <div className="provider-config-body">
               <label className="flex flex-col gap-2 text-xs font-medium text-(--ink-soft)">
                 API Key
                 <input
                   type="password"
                   value={configApiKey}
                   onChange={(e) => setConfigApiKey(e.target.value)}
-                  className="input w-full h-14 rounded-2xl border-2 px-5 text-center text-base"
+                  className="input provider-config-input text-center"
                   placeholder={
                     configProvider.enabled
                       ? "留空沿用已保存的 API Key"
@@ -1376,7 +1380,7 @@ export default function ChatPanel({
                   type="text"
                   value={configBaseUrl}
                   onChange={(e) => setConfigBaseUrl(e.target.value)}
-                  className="input w-full h-14 rounded-2xl border-2 px-5 text-base"
+                  className="input provider-config-input"
                   placeholder="留空使用默认地址"
                 />
               </label>
@@ -1387,7 +1391,7 @@ export default function ChatPanel({
                   type="text"
                   value={configModel}
                   onChange={(e) => setConfigModel(e.target.value)}
-                  className="input w-full h-14 rounded-2xl border-2 px-5 text-base"
+                  className="input provider-config-input"
                   placeholder={configProvider.model}
                 />
               </label>
@@ -1452,6 +1456,7 @@ export default function ChatPanel({
                       readOnly={configThinkingMode === "standard"}
                       spellCheck={false}
                       rows={7}
+                      wrap="soft"
                     />
                   </label>
                 )}
@@ -1466,25 +1471,25 @@ export default function ChatPanel({
                   {configError}
                 </div>
               )}
+            </div>
 
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => closeProviderConfig()}
-                  disabled={configSaving}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => void handleSaveProviderConfig()}
-                  disabled={configSaving}
-                >
-                  {configSaving ? "保存中..." : "保存配置"}
-                </button>
-              </div>
+            <div className="provider-config-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => closeProviderConfig()}
+                disabled={configSaving}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void handleSaveProviderConfig()}
+                disabled={configSaving}
+              >
+                {configSaving ? "保存中..." : "保存配置"}
+              </button>
             </div>
           </div>
         </div>
