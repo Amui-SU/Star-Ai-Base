@@ -19,6 +19,10 @@ from app.config import settings
 
 from app.database import get_db
 from app.models import (
+    AdminPasswordResetResponse,
+    AdminUserListResponse,
+    AdminUserResponse,
+    AdminUserStatusUpdateRequest,
     SystemAuthResponse,
     SystemDisplayNameUpdateRequest,
     SystemLoginRequest,
@@ -119,6 +123,24 @@ def _invalid_credentials_exception() -> HTTPException:
     return HTTPException(status_code=401, detail="邮箱或密码错误")
 
 
+def _configured_admin_emails() -> set[str]:
+    return {
+        email.strip().lower()
+        for email in settings.admin_emails.split(",")
+        if email.strip()
+    }
+
+
+async def _is_admin_user(db: AsyncSession, user: SystemUser) -> bool:
+    configured = _configured_admin_emails()
+    if configured:
+        return user.email.lower() in configured
+
+    result = await db.execute(select(SystemUser.id).order_by(SystemUser.id).limit(1))
+    first_user_id = result.scalar_one_or_none()
+    return first_user_id == user.id
+
+
 def _session_token_from_request(request: Request) -> str | None:
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token:
@@ -131,12 +153,27 @@ def _session_token_from_request(request: Request) -> str | None:
     return None
 
 
-def _user_response(user: SystemUser) -> SystemUserResponse:
+async def _user_response(db: AsyncSession, user: SystemUser) -> SystemUserResponse:
     return SystemUserResponse(
         id=user.id,
         email=user.email,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
+        status=user.status,
+        is_admin=await _is_admin_user(db, user),
+    )
+
+
+async def _admin_user_response(db: AsyncSession, user: SystemUser) -> AdminUserResponse:
+    return AdminUserResponse(
+        id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        avatar_url=user.avatar_url,
+        status=user.status,
+        is_admin=await _is_admin_user(db, user),
+        created_at=user.created_at,
+        updated_at=user.updated_at,
     )
 
 
@@ -206,6 +243,13 @@ async def _get_current_user(request: Request, db: AsyncSession) -> SystemUser:
 
     session.last_seen_at = _naive_utc_now()
     await db.commit()
+    return user
+
+
+async def _get_current_admin_user(request: Request, db: AsyncSession) -> SystemUser:
+    user = await _get_current_user(request, db)
+    if not await _is_admin_user(db, user):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     return user
 
 
@@ -345,7 +389,7 @@ async def register(
         raise _duplicate_email_exception() from None
 
     return SystemAuthResponse(
-        user=_user_response(user),
+        user=await _user_response(db, user),
         workspace=_workspace_response(workspace, member),
         session_token=token,
     )
@@ -376,7 +420,7 @@ async def login(
     await db.commit()
 
     return SystemAuthResponse(
-        user=_user_response(user),
+        user=await _user_response(db, user),
         workspace=_workspace_response(workspace, member),
         session_token=token,
     )
@@ -410,7 +454,7 @@ async def me(
     db: AsyncSession = Depends(get_db),
 ) -> SystemUserResponse:
     user = await _get_current_user(request, db)
-    return _user_response(user)
+    return await _user_response(db, user)
 
 
 @router.put("/me/display-name", response_model=SystemUserResponse)
@@ -429,7 +473,78 @@ async def update_display_name(
     user.display_name = display_name
     await db.commit()
     await db.refresh(user)
-    return _user_response(user)
+    return await _user_response(db, user)
+
+
+@router.get("/admin/users", response_model=AdminUserListResponse)
+async def admin_list_users(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> AdminUserListResponse:
+    await _get_current_admin_user(request, db)
+
+    result = await db.execute(select(SystemUser).order_by(SystemUser.id))
+    users = result.scalars().all()
+    return AdminUserListResponse(
+        users=[await _admin_user_response(db, user) for user in users]
+    )
+
+
+@router.put("/admin/users/{user_id}/status", response_model=AdminUserResponse)
+async def admin_update_user_status(
+    user_id: int,
+    payload: AdminUserStatusUpdateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> AdminUserResponse:
+    admin = await _get_current_admin_user(request, db)
+    next_status = payload.status.strip().lower()
+    if next_status not in {"active", "inactive"}:
+        raise HTTPException(status_code=400, detail="用户状态只能是 active 或 inactive")
+    if admin.id == user_id and next_status != "active":
+        raise HTTPException(status_code=400, detail="不能禁用当前管理员账号")
+
+    result = await db.execute(select(SystemUser).where(SystemUser.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    user.status = next_status
+    if next_status == "inactive":
+        await db.execute(delete(SystemSession).where(SystemSession.user_id == user_id))
+    await db.commit()
+    await db.refresh(user)
+    return await _admin_user_response(db, user)
+
+
+@router.post(
+    "/admin/users/{user_id}/reset-password",
+    response_model=AdminPasswordResetResponse,
+)
+async def admin_reset_user_password(
+    user_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> AdminPasswordResetResponse:
+    admin = await _get_current_admin_user(request, db)
+    if admin.id == user_id:
+        raise HTTPException(status_code=400, detail="不能重置当前管理员账号密码")
+
+    result = await db.execute(select(SystemUser).where(SystemUser.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    temporary_password = secrets.token_urlsafe(18)
+    user.password_hash = hash_password(temporary_password)
+    user.status = "active"
+    await db.execute(delete(SystemSession).where(SystemSession.user_id == user_id))
+    await db.commit()
+    await db.refresh(user)
+    return AdminPasswordResetResponse(
+        user=await _admin_user_response(db, user),
+        temporary_password=temporary_password,
+    )
 
 
 # ── Google OAuth ──────────────────────────────────────────────

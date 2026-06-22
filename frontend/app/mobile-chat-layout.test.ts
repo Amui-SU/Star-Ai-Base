@@ -62,4 +62,13 @@ describe("mobile chat message layout", () => {
       /\.import-modal,\s*\.import-modal-step\s*\{[^}]*width:\s*min\(100%, calc\(100vw - 32px\)\);/s,
     );
   });
+
+  it("prevents the LAN QR card from showing its own right-side scrollbar", () => {
+    expect(stylesheet).toMatch(
+      /\.local-connection-qr-card\s*\{[^}]*overflow:\s*hidden;[^}]*scrollbar-width:\s*none;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.local-connection-qr-card::-webkit-scrollbar\s*\{[^}]*display:\s*none;/s,
+    );
+  });
 });

@@ -119,6 +119,8 @@ SystemUser → Workspace (1:1 via WorkspaceMember) → KnowledgeBase (1:N)
 
 **账号资料**：`/system-auth/me/display-name` 支持登录后修改显示名，前端 `UserMenu` 负责编辑态、保存、恢复和登出。
 
+**管理员用户管理**：`ADMIN_EMAILS` 可用英文逗号配置管理员邮箱；为空时系统中首个注册用户自动拥有管理员权限。管理员接口集中在 `/system-auth/admin/users`：列表、启用/禁用、重置临时密码。禁用用户会删除该用户所有系统会话；重置密码也会删除旧会话并把用户状态恢复为 `active`。前端入口在 `UserMenu`，只有 `SystemUserResponse.is_admin=true` 且传入 `onOpenAdmin` 时显示“用户管理”，面板组件为 `AdminUsersPanel.tsx`。不要在前端绕过权限判断，后端仍必须以 `_get_current_admin_user()` 为准。
+
 **模型状态**：`/chat/llm/config`、`/chat/llm/provider-config`、`/chat/health/llm` 均需要系统登录态。配置接口返回当前与可用 provider，健康检查返回可用性、模型和延迟；前端模型选择展示头像和延迟，展开后可切换 provider 或进入配置。
 
 **手机端本地连接**：`routers/local_connection.py` 负责检测真实局域网 IPv4（只接受 `10.*`、`172.16-31.*`、`192.168.*`，忽略 `198.18.*` 代理网段和 `169.254.*` 链路本地地址），返回电脑端 API 地址、连接页、PNG 二维码地址和内联 `qr_data_url`。二维码内容为 `zhikuyun://connect?api=...`，`_qr_png_bytes()` 与 `_qr_data_url()` 使用 `lru_cache(maxsize=64)` 缓存，避免用户菜单 Copy 后重新生成导致弹窗慢。`/mobile-connect.png` 保留给旧客户端/浏览器图片访问，并带 `Cache-Control: public, max-age=86400`。
@@ -136,6 +138,7 @@ Next.js 16 App Router，单页应用。
 **组件：**
 - `AuthPage.tsx` — 系统登录/注册全屏页，右侧卡片内嵌检索流程动画演示（替代旧欢迎页）
 - `UserMenu.tsx` — 右上角用户头像下拉（头像、显示名、邮箱、电脑局域网地址/二维码、编辑用户名、登出）
+- `AdminUsersPanel.tsx` — 管理员用户管理弹层（查看账号、启用/禁用、重置临时密码；自账号操作禁用）
 - `LocalConnectionBootstrap.tsx` / `LocalConnectionSettings.tsx` — APK 本地连接入口。Bootstrap 处理 `zhikuyun://connect?api=...` deep link 和启动 query；Settings 负责手动填写、扫码、测试并保存后端地址。
 - `KnowledgeBasePanel.tsx` — 侧栏知识库下拉切换/创建/选择/删除（含确认提示）
 - `ChatPanel.tsx` — 对话区（已移除 legacy 回退，只走 scoped API；模型头像+延迟；支持知识库/收藏夹/视频提问范围）

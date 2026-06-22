@@ -664,7 +664,13 @@ html.light .workspace-card {
   width: min(360px, calc(100vw - 28px));
   display: grid;
   gap: 14px;
+  overflow: hidden;
   padding: 22px;
+  scrollbar-width: none;
+}
+
+.local-connection-qr-card::-webkit-scrollbar {
+  display: none;
 }
 
 .local-connection-qr-head {
@@ -712,6 +718,182 @@ html.light .workspace-card {
   font-size: 12px;
   line-height: 1.45;
   text-align: center;
+}
+
+.admin-users-panel {
+  width: min(760px, calc(100vw - 28px));
+  max-height: min(720px, calc(100vh - 28px));
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 22px;
+}
+
+.admin-users-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-users-count,
+.admin-users-password-email,
+.admin-users-email {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.admin-users-error {
+  border: 1px solid rgba(224, 96, 80, 0.3);
+  border-radius: 10px;
+  background: rgba(224, 96, 80, 0.1);
+  color: var(--danger);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.admin-users-password-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 260px) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 12px;
+}
+
+.admin-users-password-label {
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.admin-users-password-card code {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--input-bg);
+  color: var(--accent-strong);
+  padding: 8px 10px;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-users-list {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.admin-users-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
+}
+
+.admin-users-main {
+  min-width: 0;
+}
+
+.admin-users-name {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-users-email {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-users-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.admin-users-badges span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.admin-users-badges .active {
+  border-color: rgba(90, 176, 130, 0.34);
+  color: #79d49e;
+}
+
+.admin-users-badges .inactive {
+  border-color: rgba(224, 96, 80, 0.34);
+  color: var(--danger);
+}
+
+.admin-users-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.admin-users-primary,
+.admin-users-secondary {
+  min-height: 32px;
+  border-radius: 9px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    opacity 160ms ease;
+}
+
+.admin-users-primary {
+  border: 1px solid rgba(217, 119, 87, 0.38);
+  background: rgba(217, 119, 87, 0.12);
+  color: var(--accent-strong);
+}
+
+.admin-users-secondary {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-soft);
+}
+
+.admin-users-primary:hover,
+.admin-users-secondary:hover {
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.admin-users-primary:disabled,
+.admin-users-secondary:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 html.light .user-menu-popover {
@@ -4824,6 +5006,27 @@ html.light .status-pill.empty {
 
   .scope-picker-summary {
     max-width: 88px;
+  }
+
+  .admin-users-panel {
+    width: calc(100vw - 20px);
+    padding: 16px;
+  }
+
+  .admin-users-password-card,
+  .admin-users-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .admin-users-badges,
+  .admin-users-actions {
+    justify-content: flex-start;
+  }
+
+  .admin-users-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 }
 /* 鈹€鈹€ Mobile Workspace Polish 鈹€鈹€ */

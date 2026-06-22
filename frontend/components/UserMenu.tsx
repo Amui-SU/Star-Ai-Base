@@ -13,9 +13,15 @@ interface Props {
   user: SystemUser;
   onUserChange: (user: SystemUser) => void;
   onLogout: () => void;
+  onOpenAdmin?: () => void;
 }
 
-export default function UserMenu({ user, onUserChange, onLogout }: Props) {
+export default function UserMenu({
+  user,
+  onUserChange,
+  onLogout,
+  onOpenAdmin,
+}: Props) {
   const initial = user.display_name?.charAt(0)?.toUpperCase() || "?";
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -266,6 +272,19 @@ export default function UserMenu({ user, onUserChange, onLogout }: Props) {
               >
                 <span>更改用户名</span>
                 <span className="user-menu-action-hint">Edit</span>
+              </button>
+            )}
+            {user.is_admin && onOpenAdmin && (
+              <button
+                type="button"
+                className="user-menu-action"
+                onClick={() => {
+                  setOpen(false);
+                  onOpenAdmin();
+                }}
+              >
+                <span>用户管理</span>
+                <span className="user-menu-action-hint">Admin</span>
               </button>
             )}
           </div>

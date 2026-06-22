@@ -372,6 +372,26 @@ class SystemUserResponse(BaseModel):
     email: str
     display_name: str
     avatar_url: Optional[str] = None
+    status: str = "active"
+    is_admin: bool = False
+
+
+class AdminUserResponse(SystemUserResponse):
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class AdminUserListResponse(BaseModel):
+    users: list[AdminUserResponse]
+
+
+class AdminUserStatusUpdateRequest(BaseModel):
+    status: str
+
+
+class AdminPasswordResetResponse(BaseModel):
+    user: AdminUserResponse
+    temporary_password: str
 
 
 class WorkspaceResponse(BaseModel):

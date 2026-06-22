@@ -23,6 +23,13 @@ const user: SystemUser = {
   id: 1,
   email: "su1113416467@gmail.com",
   display_name: "苏yiwei",
+  status: "active",
+  is_admin: false,
+};
+
+const adminUser: SystemUser = {
+  ...user,
+  is_admin: true,
 };
 
 afterEach(() => {
@@ -90,5 +97,46 @@ describe("UserMenu", () => {
     await tester.click(screen.getByRole("button", { name: "苏" }));
 
     expect(await screen.findByText("未检测到局域网地址")).toBeInTheDocument();
+  });
+
+  it("only shows the user management entry for admins", async () => {
+    vi.mocked(localConnectionApi.lanAddress).mockResolvedValue({
+      host: null,
+      api_url: null,
+      frontend_url: null,
+      qr_url: null,
+      qr_image_url: null,
+      qr_data_url: null,
+      connect_page_url: null,
+    });
+    const openAdmin = vi.fn();
+    const tester = userEvent.setup();
+
+    const firstRender = render(
+      <UserMenu
+        user={user}
+        onUserChange={vi.fn()}
+        onLogout={vi.fn()}
+        onOpenAdmin={openAdmin}
+      />,
+    );
+
+    await tester.click(screen.getByRole("button", { name: "苏" }));
+    expect(screen.queryByText("用户管理")).not.toBeInTheDocument();
+    firstRender.unmount();
+
+    render(
+      <UserMenu
+        user={adminUser}
+        onUserChange={vi.fn()}
+        onLogout={vi.fn()}
+        onOpenAdmin={openAdmin}
+      />,
+    );
+
+    await tester.click(screen.getByRole("button", { name: "苏" }));
+    await tester.click(await screen.findByText("用户管理"));
+
+    expect(openAdmin).toHaveBeenCalledTimes(1);
   });
 });

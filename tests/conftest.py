@@ -61,6 +61,7 @@ async def client(monkeypatch, db_session_factory) -> AsyncIterator[AsyncClient]:
     from app.config import settings
 
     monkeypatch.setattr(settings, "debug", True)
+    monkeypatch.setattr(settings, "admin_emails", "")
 
     from app.main import app
 

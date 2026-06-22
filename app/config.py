@@ -126,6 +126,9 @@ class Settings(BaseSettings):
     smtp_from: str = Field(default="", env="SMTP_FROM")
     smtp_use_tls: bool = Field(default=True, env="SMTP_USE_TLS")
 
+    # 管理员账号。为空时首个注册用户自动成为管理员；多个邮箱用英文逗号分隔。
+    admin_emails: str = Field(default="", env="ADMIN_EMAILS")
+
     @field_validator("deepseek_model", mode="before")
     @classmethod
     def normalize_deepseek_model(cls, value: str) -> str:

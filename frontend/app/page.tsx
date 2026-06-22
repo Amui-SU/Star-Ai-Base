@@ -14,6 +14,7 @@ import ImportModal from "@/components/ImportModal";
 import SourcesPanel from "@/components/SourcesPanel";
 import ChatPanel from "@/components/ChatPanel";
 import LocalConnectionSettings from "@/components/LocalConnectionSettings";
+import AdminUsersPanel from "@/components/AdminUsersPanel";
 import { systemAuthApi, sourceBindingApi } from "@/lib/api";
 import type { KnowledgeBase, SystemUser } from "@/lib/api";
 
@@ -41,6 +42,7 @@ export default function Home() {
     useState<KnowledgeBase | null>(null);
   const [kbRefreshKey, setKbRefreshKey] = useState(0);
   const [showImport, setShowImport] = useState(false);
+  const [showAdminUsers, setShowAdminUsers] = useState(false);
   const [statsKey, setStatsKey] = useState(0);
   const [knowledgeBuilding, setKnowledgeBuilding] = useState(false);
 
@@ -274,6 +276,7 @@ export default function Home() {
                 user={systemUser}
                 onUserChange={setSystemUser}
                 onLogout={onLogout}
+                onOpenAdmin={() => setShowAdminUsers(true)}
               />
             </div>
           </header>
@@ -400,6 +403,11 @@ export default function Home() {
         onClose={() => setShowImport(false)}
         onBound={onBiliBound}
         onImported={() => setStatsKey((v) => v + 1)}
+      />
+      <AdminUsersPanel
+        open={showAdminUsers}
+        currentUserId={systemUser.id}
+        onClose={() => setShowAdminUsers(false)}
       />
     </div>
   );

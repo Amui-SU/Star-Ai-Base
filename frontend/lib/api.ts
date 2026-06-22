@@ -51,6 +51,20 @@ export interface SystemUser {
   email: string;
   display_name: string;
   avatar_url?: string;
+  status?: string;
+  is_admin?: boolean;
+}
+
+export interface AdminUser extends SystemUser {
+  status: "active" | "inactive" | string;
+  is_admin: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface AdminPasswordResetResponse {
+  user: AdminUser;
+  temporary_password: string;
 }
 
 export interface Workspace {
@@ -411,6 +425,27 @@ export const systemAuthApi = {
       method: "PUT",
       body: JSON.stringify({ display_name }),
     }),
+
+  adminListUsers: async () => {
+    const response = await request<{ users: AdminUser[] }>(
+      "/system-auth/admin/users",
+    );
+    return response.users;
+  },
+
+  adminUpdateUserStatus: (userId: number, status: "active" | "inactive") =>
+    request<AdminUser>(`/system-auth/admin/users/${userId}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    }),
+
+  adminResetUserPassword: (userId: number) =>
+    request<AdminPasswordResetResponse>(
+      `/system-auth/admin/users/${userId}/reset-password`,
+      {
+        method: "POST",
+      },
+    ),
 };
 
 export const localConnectionApi = {
