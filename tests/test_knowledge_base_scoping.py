@@ -353,6 +353,53 @@ async def test_scoped_chat_lets_llm_call_web_search_tool_when_enabled(
 
 
 @pytest.mark.asyncio
+async def test_scoped_chat_reports_socks_dependency_failure(client, monkeypatch):
+    await register_user(client, "web-socks-failure@example.com", "Web Socks Failure")
+    knowledge_base = await create_knowledge_base(client, "Web Socks Failure KB")
+
+    class FakeRAGService:
+        def search_in_knowledge_base(self, *args, **kwargs):
+            return [
+                type(
+                    "FakeDocument",
+                    (),
+                    {
+                        "page_content": "Knowledge context.",
+                        "metadata": {"bvid": "BV1KB", "title": "Knowledge Source"},
+                    },
+                )()
+            ]
+
+    async def failing_complete(*args, **kwargs):
+        raise RuntimeError(
+            "Using SOCKS proxy, but the 'socksio' package is not installed. "
+            "Make sure to install httpx using `pip install httpx[socks]`."
+        )
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._complete_knowledge_base_answer",
+        failing_complete,
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat",
+        json={"question": "查外部资料", "web_search": True},
+    )
+
+    assert response.status_code == 200
+    web_search = response.json()["web_search"]
+    assert web_search["status"] == "failed"
+    assert "联网搜索代理依赖缺失" in web_search["message"]
+    assert "当前模型不支持联网搜索工具调用" not in web_search["message"]
+    assert web_search["errors"][0]["source"] == "web_search"
+    assert "socksio" in web_search["errors"][0]["message"]
+
+
+@pytest.mark.asyncio
 async def test_scoped_chat_web_search_tool_chain_executes_model_requested_query(
     client, monkeypatch
 ):
@@ -1690,6 +1737,62 @@ async def test_scoped_chat_stream_reports_web_search_no_results(client, monkeypa
     assert '"queries": ["查外部资料", "模型搜索词"]' in response.text
     assert '"results": []' in response.text
     assert "联网搜索未找到可用结果，已仅参考知识库" in response.text
+
+
+@pytest.mark.asyncio
+async def test_scoped_chat_stream_reports_socks_dependency_failure(client, monkeypatch):
+    await register_user(
+        client, "web-stream-socks-failure@example.com", "Web Stream Socks Failure"
+    )
+    knowledge_base = await create_knowledge_base(client, "Web Stream Socks Failure KB")
+
+    class FakeRAGService:
+        def search_in_knowledge_base(self, *args, **kwargs):
+            return [
+                type(
+                    "FakeDocument",
+                    (),
+                    {
+                        "page_content": "Knowledge context.",
+                        "metadata": {"bvid": "BV1KB", "title": "Knowledge Source"},
+                    },
+                )()
+            ]
+
+    async def failing_prepare(*args, **kwargs):
+        raise RuntimeError(
+            "Using SOCKS proxy, but the 'socksio' package is not installed. "
+            "Make sure to install httpx using `pip install httpx[socks]`."
+        )
+
+    def fake_stream_llm_events(messages):
+        yield "answer", "模型答案"
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: FakeRAGService(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._prepare_knowledge_base_web_search",
+        failing_prepare,
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._stream_llm_events",
+        fake_stream_llm_events,
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat/stream",
+        json={"question": "查外部资料", "web_search": True},
+    )
+
+    assert response.status_code == 200
+    assert "[[WEB_SEARCH_JSON]]" in response.text
+    assert '"status": "failed"' in response.text
+    assert "联网搜索代理依赖缺失" in response.text
+    assert "当前模型不支持联网搜索工具调用" not in response.text
+    assert '"source": "web_search"' in response.text
+    assert "socksio" in response.text
 
 
 @pytest.mark.asyncio

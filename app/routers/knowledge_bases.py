@@ -311,6 +311,37 @@ def _web_search_status(
     return payload
 
 
+def _exception_summary(exc: Exception) -> str:
+    return str(exc).strip() or exc.__class__.__name__
+
+
+def _web_search_failed_status_from_exception(exc: Exception) -> dict:
+    detail = _exception_summary(exc)
+    lowered = detail.lower()
+    if "socksio" in lowered or "httpx[socks]" in lowered or "socks proxy" in lowered:
+        message = (
+            "联网搜索代理依赖缺失：当前配置了 SOCKS 代理，但后端未安装 socksio，"
+            "已仅参考知识库。请重新安装后端依赖或运行 pip install socksio。"
+        )
+    elif (
+        isinstance(exc, TimeoutError) or "timeout" in lowered or "timed out" in lowered
+    ):
+        message = "联网搜索工具链准备超时，已仅参考知识库。"
+    elif "tool" in lowered and (
+        "not support" in lowered
+        or "unsupported" in lowered
+        or "not supported" in lowered
+    ):
+        message = "当前模型接口可能不支持联网搜索工具调用，已仅参考知识库。"
+    else:
+        message = "联网搜索工具链准备失败，已仅参考知识库。"
+    return _web_search_status(
+        "failed",
+        message=message,
+        errors=[{"source": "web_search", "message": detail}],
+    )
+
+
 def _web_search_result_details(
     web_results: list[dict[str, str]],
 ) -> list[dict[str, str]]:
@@ -1247,10 +1278,7 @@ async def chat_with_knowledge_base(
         logger.warning(f"知识库模型回答失败，回退到检索内容: {exc}")
         response = _answer_from_documents(question, documents)
         if payload.web_search:
-            response.web_search = _web_search_status(
-                "failed",
-                message="当前模型不支持联网搜索工具调用，已仅参考知识库",
-            )
+            response.web_search = _web_search_failed_status_from_exception(exc)
         return response
     return ChatResponse(
         answer=answer,
@@ -1319,10 +1347,7 @@ async def stream_chat_with_knowledge_base(
                 prepared_thinking = tool_run.thinking
             except Exception as exc:
                 logger.warning(f"知识库联网工具链准备失败，将仅使用知识库回答: {exc}")
-                web_search_status = _web_search_status(
-                    "failed",
-                    message="当前模型不支持联网搜索工具调用，已仅参考知识库",
-                )
+                web_search_status = _web_search_failed_status_from_exception(exc)
         sources = [
             *[_source_from_document(document) for document in documents],
             *[_source_from_web_result(result) for result in web_results],
