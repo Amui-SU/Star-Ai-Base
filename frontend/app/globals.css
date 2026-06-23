@@ -1669,9 +1669,9 @@ html.light .sources-empty-card {
 }
 
 .folder-card .status-pill.ok {
-  background: rgba(72, 187, 120, 0.16);
-  border-color: rgba(110, 231, 143, 0.34);
-  color: #a7efb8;
+  background: rgba(95, 163, 255, 0.15);
+  border-color: rgba(95, 163, 255, 0.3);
+  color: #a8ceff;
 }
 
 .folder-card .status-pill.partial {
@@ -2394,6 +2394,24 @@ html.light .video-card:hover {
 .web-search-status.failed {
   border-color: rgba(255, 192, 120, 0.28);
   color: #ffd4a3;
+}
+
+html.light .web-search-status.success {
+  border-color: rgba(47, 124, 120, 0.3);
+  background: rgba(47, 124, 120, 0.1);
+  color: #1f7a75;
+}
+
+html.light .web-search-status.no_results {
+  border-color: rgba(47, 124, 120, 0.3);
+  background: rgba(47, 124, 120, 0.1);
+  color: #1f7a75;
+}
+
+html.light .web-search-status.failed {
+  border-color: rgba(47, 124, 120, 0.3);
+  background: rgba(47, 124, 120, 0.1);
+  color: #1f7a75;
 }
 
 .web-search-block {
@@ -3381,8 +3399,9 @@ html.light .composer-input {
 }
 
 html.light .mode-chip.mode-chip-send.active {
-  background: var(--btn-light);
-  color: var(--btn-dark);
+  background: #2f7c78;
+  color: #fffaf2;
+  box-shadow: 0 8px 18px rgba(47, 124, 120, 0.22);
 }
 
 .mode-chip.mode-chip-send.disabled,
@@ -3427,6 +3446,20 @@ html.light .mode-chip.mode-chip-send.active {
 
 .composer-send-button.active:hover {
   transform: translateY(-1px);
+}
+
+html.light .composer-send-button.active,
+html.light .composer-send-button.generating,
+html.light .mode-chip.mode-chip-send.active {
+  background: #2f7c78;
+  color: #fffaf2;
+  box-shadow: 0 8px 18px rgba(47, 124, 120, 0.22);
+}
+
+html.light .composer-send-button.active:hover,
+html.light .mode-chip.mode-chip-send.active:hover {
+  background: #266b68;
+  filter: none;
 }
 
 .composer-send-button.disabled,
@@ -3505,7 +3538,29 @@ html.light .scope-picker-trigger[aria-expanded="true"] {
 html.light
   .scope-picker-trigger.web-search-enabled:not([aria-expanded="true"]) {
   background: rgba(47, 124, 120, 0.15);
+  border-color: rgba(47, 124, 120, 0.35);
   color: #1f7a75;
+}
+
+html.light .scope-picker-trigger.web-search-enabled:not([aria-expanded="true"]),
+html.light .scope-picker-trigger.web-search-notice:not([aria-expanded="true"]) {
+  background: rgba(47, 124, 120, 0.15);
+  border-color: rgba(47, 124, 120, 0.35);
+  color: #1f7a75;
+}
+
+html.light .scope-picker-trigger.web-search-notice:not([aria-expanded="true"]) {
+  animation-name: webSearchPulseLight;
+}
+
+html.light
+  .scope-picker-trigger.web-search-enabled:not([aria-expanded="true"])
+  span:first-child,
+html.light
+  .scope-picker-trigger.web-search-notice:not([aria-expanded="true"])
+  span:first-child {
+  color: #2f7c78;
+  filter: drop-shadow(0 0 5px rgba(47, 124, 120, 0.34));
 }
 
 .scope-picker-summary {
@@ -3591,6 +3646,12 @@ html.light
   color: #b8d8ff;
 }
 
+html.light .scope-web-search-btn.active {
+  border-color: rgba(47, 124, 120, 0.35);
+  background: rgba(47, 124, 120, 0.15);
+  color: #1f7a75;
+}
+
 .scope-web-dot {
   width: 6px;
   height: 6px;
@@ -3602,6 +3663,10 @@ html.light
 .scope-web-search-btn.active .scope-web-dot {
   opacity: 1;
   box-shadow: 0 0 0 4px rgba(95, 163, 255, 0.14);
+}
+
+html.light .scope-web-search-btn.active .scope-web-dot {
+  box-shadow: 0 0 0 4px rgba(47, 124, 120, 0.14);
 }
 
 .scope-visually-hidden {
@@ -3808,6 +3873,21 @@ html.light
   100% {
     transform: translateY(0) scale(1);
     box-shadow: 0 0 0 rgba(95, 163, 255, 0);
+  }
+}
+
+@keyframes webSearchPulseLight {
+  0% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 0 0 rgba(47, 124, 120, 0);
+  }
+  45% {
+    transform: translateY(-1px) scale(1.03);
+    box-shadow: 0 0 0 5px rgba(47, 124, 120, 0.16);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 0 0 rgba(47, 124, 120, 0);
   }
 }
 
@@ -6003,9 +6083,24 @@ html.light .status-pill.empty {
     color: rgba(32, 32, 30, 0.72);
   }
 
+  html.light .mode-chip.mode-chip-send.active,
+  html.light .composer-send-button.active,
+  html.light .composer-send-button.generating {
+    background: #2f7c78;
+    color: #fffaf2;
+    box-shadow: 0 8px 18px rgba(47, 124, 120, 0.22);
+  }
+
   .mode-chip.mode-chip-send.active:hover,
   .composer-send-button.active:hover {
     background: #ffffff;
+    filter: none;
+    transform: translateY(-1px);
+  }
+
+  html.light .mode-chip.mode-chip-send.active:hover,
+  html.light .composer-send-button.active:hover {
+    background: #266b68;
     filter: none;
     transform: translateY(-1px);
   }

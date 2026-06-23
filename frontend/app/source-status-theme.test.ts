@@ -9,12 +9,12 @@ const stylesheet = readFileSync(
 );
 
 describe("source ingestion status theme", () => {
-  it("uses distinct semantic badges for dark-theme ingestion states", () => {
+  it("uses existing blue semantic badges for dark-theme ingested states", () => {
     expect(stylesheet).toMatch(
       /\.folder-card \.status-pill\s*\{[^}]*padding:\s*3px 7px;[^}]*border:\s*1px solid transparent;[^}]*border-radius:\s*999px;/s,
     );
     expect(stylesheet).toMatch(
-      /\.folder-card \.status-pill\.ok\s*\{[^}]*background:\s*rgba\(72,\s*187,\s*120,\s*0\.16\);[^}]*border-color:\s*rgba\(110,\s*231,\s*143,\s*0\.34\);[^}]*color:\s*#a7efb8;/s,
+      /\.folder-card \.status-pill\.ok\s*\{[^}]*background:\s*rgba\(95,\s*163,\s*255,\s*0\.15\);[^}]*border-color:\s*rgba\(95,\s*163,\s*255,\s*0\.3\);[^}]*color:\s*#a8ceff;/s,
     );
     expect(stylesheet).toMatch(
       /\.folder-card \.status-pill\.partial\s*\{[^}]*background:\s*rgba\(217,\s*119,\s*87,\s*0\.14\);[^}]*border-color:\s*rgba\(240,\s*161,\s*131,\s*0\.34\);[^}]*color:\s*#f0a183;/s,
@@ -27,6 +27,35 @@ describe("source ingestion status theme", () => {
   it("keeps light-theme status badges subtle", () => {
     expect(stylesheet).toMatch(
       /html\.light \.folder-card \.status-pill\s*\{[^}]*background:\s*transparent;[^}]*border-color:\s*transparent;/s,
+    );
+  });
+});
+
+describe("chat web search light theme", () => {
+  it("uses the existing green treatment for web search controls and notices", () => {
+    expect(stylesheet).toMatch(
+      /html\.light \.scope-picker-trigger\.web-search-enabled:not\(\[aria-expanded="true"\]\),\s*html\.light \.scope-picker-trigger\.web-search-notice:not\(\[aria-expanded="true"\]\)\s*\{[^}]*background:\s*rgba\(47,\s*124,\s*120,\s*0\.15\);[^}]*border-color:\s*rgba\(47,\s*124,\s*120,\s*0\.35\);[^}]*color:\s*#1f7a75;/s,
+    );
+    expect(stylesheet).toMatch(
+      /html\.light \.scope-picker-trigger\.web-search-notice:not\(\[aria-expanded="true"\]\)\s*\{[^}]*animation-name:\s*webSearchPulseLight;/s,
+    );
+    expect(stylesheet).toMatch(
+      /@keyframes webSearchPulseLight\s*\{[\s\S]*box-shadow:\s*0 0 0 5px rgba\(47,\s*124,\s*120,\s*0\.16\);[\s\S]*\}/s,
+    );
+    expect(stylesheet).toMatch(
+      /html\.light \.scope-web-search-btn\.active\s*\{[^}]*border-color:\s*rgba\(47,\s*124,\s*120,\s*0\.35\);[^}]*background:\s*rgba\(47,\s*124,\s*120,\s*0\.15\);[^}]*color:\s*#1f7a75;/s,
+    );
+    expect(stylesheet).toMatch(
+      /html\.light \.web-search-status\.no_results\s*\{[^}]*border-color:\s*rgba\(47,\s*124,\s*120,\s*0\.3\);[^}]*background:\s*rgba\(47,\s*124,\s*120,\s*0\.1\);[^}]*color:\s*#1f7a75;/s,
+    );
+  });
+
+  it("uses a green primary send button instead of the dark light-theme button", () => {
+    expect(stylesheet).toMatch(
+      /html\.light \.composer-send-button\.active,\s*html\.light \.composer-send-button\.generating,\s*html\.light \.mode-chip\.mode-chip-send\.active\s*\{[^}]*background:\s*#2f7c78;[^}]*color:\s*#fffaf2;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.composer-send-button:disabled\s*\{[^}]*background:\s*rgba\(248,\s*246,\s*241,\s*0\.74\);[^}]*color:\s*rgba\(32,\s*32,\s*30,\s*0\.72\);[^}]*\}\s*html\.light \.mode-chip\.mode-chip-send\.active,\s*html\.light \.composer-send-button\.active,\s*html\.light \.composer-send-button\.generating\s*\{[^}]*background:\s*#2f7c78;[^}]*color:\s*#fffaf2;/s,
     );
   });
 });
