@@ -1907,13 +1907,15 @@ async def test_scoped_chat_stream_emits_web_search_progress_before_tool_setup(
     )
 
     assert response.status_code == 200
-    first_progress = '[[THINKING_DELTA]]"正在联网搜索外部资料。'
+    first_progress = '[[WEB_SEARCH_PROGRESS]]"正在联网搜索外部资料"'
     first_model_thinking = '[[THINKING_DELTA]]"模型思考"'
     assert first_progress in response.text
     assert first_model_thinking in response.text
     assert response.text.index(first_progress) < response.text.index(
         first_model_thinking
     )
+    assert '[[THINKING_JSON]]"模型思考"' in response.text
+    assert "正在联网搜索外部资料。模型思考" not in response.text
 
 
 @pytest.mark.asyncio
@@ -1970,10 +1972,14 @@ async def test_scoped_chat_stream_emits_web_search_heartbeat_while_preparing(
     )
 
     assert response.status_code == 200
-    assert '[[THINKING_DELTA]]"正在联网搜索外部资料。' in response.text
-    heartbeat = '[[THINKING_DELTA]]"联网搜索仍在进行'
+    first_progress = '[[WEB_SEARCH_PROGRESS]]"正在联网搜索外部资料"'
+    assert first_progress in response.text
+    heartbeat = '[[WEB_SEARCH_PROGRESS]]"联网搜索仍在进行'
     assert heartbeat in response.text
     assert response.text.index(heartbeat) < response.text.index("模型答案")
+    assert '[[WEB_SEARCH_PROGRESS]]""' in response.text
+    assert '[[THINKING_DELTA]]"联网搜索仍在进行' not in response.text
+    assert '[[THINKING_JSON]]"联网搜索仍在进行' not in response.text
 
 
 @pytest.mark.asyncio
@@ -2388,7 +2394,7 @@ async def test_scoped_chat_adds_initial_web_sources_to_first_answer_context(
 
 
 @pytest.mark.asyncio
-async def test_scoped_chat_stream_reuses_tool_decision_answer_when_no_tool_called(
+async def test_scoped_chat_stream_uses_final_stream_after_tool_decision(
     client, monkeypatch
 ):
     await register_user(client, "web-stream-unused@example.com", "Web Stream Unused")
@@ -2427,9 +2433,12 @@ async def test_scoped_chat_stream_reuses_tool_decision_answer_when_no_tool_calle
         {"chat": type("Chat", (), {"completions": FakeCompletions()})()},
     )()
 
-    def fail_stream_llm_events(messages):
-        raise AssertionError("streaming should reuse the first model answer")
-        yield "answer", ""
+    captured = {"stream_messages": None}
+
+    def fake_stream_llm_events(messages):
+        captured["stream_messages"] = messages
+        yield "thinking", "实时思考"
+        yield "answer", "实时流式答案"
 
     async def empty_search_web(*args, **kwargs):
         return []
@@ -2455,7 +2464,7 @@ async def test_scoped_chat_stream_reuses_tool_decision_answer_when_no_tool_calle
     )
     monkeypatch.setattr(
         "app.routers.knowledge_bases._stream_llm_events",
-        fail_stream_llm_events,
+        fake_stream_llm_events,
     )
     monkeypatch.setattr("app.routers.knowledge_bases.search_web", empty_search_web)
 
@@ -2465,8 +2474,10 @@ async def test_scoped_chat_stream_reuses_tool_decision_answer_when_no_tool_calle
     )
 
     assert response.status_code == 200
-    assert "无需联网的流式答案" in response.text
-    assert "先判断无需搜索" in response.text
+    assert "实时流式答案" in response.text
+    assert '[[THINKING_DELTA]]"实时思考"' in response.text
+    assert "无需联网的流式答案" not in response.text
+    assert captured["stream_messages"] is not None
     assert "[[WEB_SEARCH_JSON]]" in response.text
     assert '"status": "no_results"' in response.text
 

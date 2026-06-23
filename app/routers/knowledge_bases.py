@@ -45,6 +45,7 @@ from app.routers.knowledge import _sync_folder, get_rag_service
 from app.routers.chat import (
     LLMToolRunResult,
     _apply_mode_instructions,
+    _append_no_more_tool_calls_instruction,
     _complete_llm_answer,
     _encode_thinking_delta,
     _enforce_markdown_output,
@@ -71,6 +72,7 @@ MAX_WEB_SEARCH_QUERY_CHARS = 180
 WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS = 2.5
 MAX_FETCH_WEB_PAGE_CALLS = 1
 FETCH_WEB_PAGE_CONTEXT_CHARS = 2000
+WEB_SEARCH_PROGRESS_MARKER = "[[WEB_SEARCH_PROGRESS]]"
 
 
 def _supports_keyword_argument(callable_obj, keyword: str) -> bool:
@@ -82,6 +84,10 @@ def _supports_keyword_argument(callable_obj, keyword: str) -> bool:
         parameter.kind == inspect.Parameter.VAR_KEYWORD
         for parameter in parameters.values()
     )
+
+
+def _encode_web_search_progress(content: str) -> str:
+    return f"{WEB_SEARCH_PROGRESS_MARKER}{json.dumps(content, ensure_ascii=False)}\n"
 
 
 def _response(knowledge_base: KnowledgeBase) -> KnowledgeBaseResponse:
@@ -1346,13 +1352,9 @@ async def stream_chat_with_knowledge_base(
         web_results: list[dict[str, str]] = []
         web_search_status = None
         prepared_messages = messages
-        prepared_answer: str | None = None
-        prepared_thinking = ""
         thinking_parts: list[str] = []
         if payload.web_search:
-            progress_thinking = "正在联网搜索外部资料。"
-            thinking_parts.append(progress_thinking)
-            yield _encode_thinking_delta(progress_thinking)
+            yield _encode_web_search_progress("正在联网搜索外部资料")
             try:
                 async for (
                     event_type,
@@ -1363,40 +1365,34 @@ async def stream_chat_with_knowledge_base(
                     provider=payload.web_search_provider,
                 ):
                     if event_type == "heartbeat":
-                        heartbeat_thinking = str(event_payload)
-                        thinking_parts.append(heartbeat_thinking)
-                        yield _encode_thinking_delta(heartbeat_thinking)
+                        yield _encode_web_search_progress(str(event_payload))
                         continue
                     tool_run, web_results, web_search_status = event_payload
-                prepared_messages = tool_run.messages
-                prepared_answer = tool_run.answer
-                prepared_thinking = tool_run.thinking
+                prepared_messages = _append_no_more_tool_calls_instruction(
+                    tool_run.messages
+                )
             except Exception as exc:
                 logger.warning(f"知识库联网工具链准备失败，将仅使用知识库回答: {exc}")
                 web_search_status = _web_search_failed_status_from_exception(exc)
+            finally:
+                yield _encode_web_search_progress("")
         sources = [
             *[_source_from_document(document) for document in documents],
             *[_source_from_web_result(result) for result in web_results],
         ]
         answer_started = False
-        if prepared_answer is not None:
-            answer_started = True
-            yield prepared_answer
-            if prepared_thinking:
-                thinking_parts.append(prepared_thinking)
-        else:
-            try:
-                for event_type, content in _stream_llm_events(prepared_messages):
-                    if event_type == "thinking":
-                        thinking_parts.append(content)
-                        yield _encode_thinking_delta(content)
-                    else:
-                        answer_started = True
-                        yield content
-            except Exception as exc:
-                logger.warning(f"知识库流式模型回答失败，回退到检索内容: {exc}")
-                if not answer_started:
-                    yield _answer_from_documents(question, documents).answer
+        try:
+            for event_type, content in _stream_llm_events(prepared_messages):
+                if event_type == "thinking":
+                    thinking_parts.append(content)
+                    yield _encode_thinking_delta(content)
+                else:
+                    answer_started = True
+                    yield content
+        except Exception as exc:
+            logger.warning(f"知识库流式模型回答失败，回退到检索内容: {exc}")
+            if not answer_started:
+                yield _answer_from_documents(question, documents).answer
         if thinking_parts:
             yield "\n[[THINKING_JSON]]"
             yield json.dumps("".join(thinking_parts), ensure_ascii=False)

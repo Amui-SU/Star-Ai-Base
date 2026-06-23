@@ -12,6 +12,26 @@ describe("parseChatStream", () => {
     expect(result.sources).toEqual([]);
   });
 
+  it("separates web search progress from answer and thinking text", () => {
+    const result = parseChatStream(
+      '[[WEB_SEARCH_PROGRESS]]"正在联网搜索外部资料"\n[[THINKING_DELTA]]"模型思考"\n回答',
+    );
+
+    expect(result.answer).toBe("回答");
+    expect(result.thinking).toBe("模型思考");
+    expect(result.webSearchProgress).toBe("正在联网搜索外部资料");
+  });
+
+  it("uses an empty web search progress marker to clear the active state", () => {
+    const result = parseChatStream(
+      '[[WEB_SEARCH_PROGRESS]]"正在联网搜索外部资料"\n回答\n[[WEB_SEARCH_PROGRESS]]""\n[[SOURCES_JSON]][]',
+    );
+
+    expect(result.answer).toBe("回答");
+    expect(result.webSearchProgress).toBe("");
+    expect(result.complete).toBe(true);
+  });
+
   it("does not leak a partial thinking marker into the answer", () => {
     const result = parseChatStream('回答[[THINKING_DELTA]]"未完成');
 

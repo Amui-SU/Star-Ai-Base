@@ -26,17 +26,21 @@ export interface ChatWebSearchStatus {
 export interface ParsedChatStream {
   answer: string;
   thinking: string;
+  webSearchProgress?: string;
   sources: ChatStreamSource[];
   webSearch?: ChatWebSearchStatus;
   complete: boolean;
 }
 
 const THINKING_DELTA_MARKER = "[[THINKING_DELTA]]";
+const WEB_SEARCH_PROGRESS_MARKER = "[[WEB_SEARCH_PROGRESS]]";
 const THINKING_MARKER = "[[THINKING_JSON]]";
 const WEB_SEARCH_MARKER = "[[WEB_SEARCH_JSON]]";
 const SOURCES_MARKER = "[[SOURCES_JSON]]";
 const COMPLETE_THINKING_DELTA =
   /\[\[THINKING_DELTA\]\]("(?:\\.|[^"\\])*")\r?\n/g;
+const COMPLETE_WEB_SEARCH_PROGRESS =
+  /\[\[WEB_SEARCH_PROGRESS\]\]("(?:\\.|[^"\\])*")\r?\n/g;
 
 function parseJson<T>(value: string, fallback: T): T {
   try {
@@ -78,10 +82,22 @@ export function parseChatStream(buffer: string): ParsedChatStream {
       return "";
     },
   );
+  let webSearchProgress: string | undefined;
+  visible = visible.replace(
+    COMPLETE_WEB_SEARCH_PROGRESS,
+    (_, encoded: string) => {
+      webSearchProgress = parseJson(encoded, "");
+      return "";
+    },
+  );
 
   const partialDeltaIndex = visible.lastIndexOf(THINKING_DELTA_MARKER);
   if (partialDeltaIndex >= 0) {
     visible = visible.slice(0, partialDeltaIndex);
+  }
+  const partialProgressIndex = visible.lastIndexOf(WEB_SEARCH_PROGRESS_MARKER);
+  if (partialProgressIndex >= 0) {
+    visible = visible.slice(0, partialProgressIndex);
   }
 
   let sourcesIndex = findLastMetadataMarker(visible, SOURCES_MARKER);
@@ -134,6 +150,7 @@ export function parseChatStream(buffer: string): ParsedChatStream {
   return {
     answer,
     thinking: finalThinking || thinkingFromDeltas,
+    webSearchProgress,
     sources,
     webSearch,
     complete: sourcesIndex >= 0,

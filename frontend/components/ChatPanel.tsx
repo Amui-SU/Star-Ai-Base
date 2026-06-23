@@ -43,6 +43,8 @@ interface Message {
   thinkingActive?: boolean;
   thinkingStartedAt?: number;
   thinkingDurationMs?: number;
+  webSearchActive?: boolean;
+  webSearchProgress?: string;
   sources?: Array<{
     bvid?: string;
     title: string;
@@ -449,6 +451,8 @@ export default function ChatPanel({
               thinkingActive: true,
               thinkingStartedAt,
               thinkingDurationMs: undefined,
+              webSearchActive: false,
+              webSearchProgress: undefined,
             }
           : message,
       ),
@@ -511,6 +515,14 @@ export default function ChatPanel({
                       ...m,
                       content: parsed.answer,
                       thinking: parsed.thinking || m.thinking,
+                      webSearchActive:
+                        parsed.webSearchProgress !== undefined
+                          ? Boolean(parsed.webSearchProgress)
+                          : m.webSearchActive,
+                      webSearchProgress:
+                        parsed.webSearchProgress !== undefined
+                          ? parsed.webSearchProgress || undefined
+                          : m.webSearchProgress,
                       sources: parsed.complete ? parsed.sources : m.sources,
                       webSearch: parsed.webSearch || m.webSearch,
                     }
@@ -537,6 +549,8 @@ export default function ChatPanel({
                 ...m,
                 content: finalAnswer,
                 thinking: finalThinking || undefined,
+                webSearchActive: false,
+                webSearchProgress: undefined,
                 sources: parsed.sources,
                 webSearch: parsed.webSearch,
               }
@@ -564,6 +578,14 @@ export default function ChatPanel({
                     ...m,
                     content: finalAnswer,
                     thinking: finalThinking || m.thinking,
+                    webSearchActive:
+                      parsed.webSearchProgress !== undefined
+                        ? Boolean(parsed.webSearchProgress)
+                        : m.webSearchActive,
+                    webSearchProgress:
+                      parsed.webSearchProgress !== undefined
+                        ? parsed.webSearchProgress || undefined
+                        : m.webSearchProgress,
                     sources: parsed.complete ? parsed.sources : m.sources,
                     webSearch: parsed.webSearch || m.webSearch,
                   }
@@ -589,6 +611,8 @@ export default function ChatPanel({
                   ...m,
                   content: finalAnswer,
                   thinking: finalThinking || undefined,
+                  webSearchActive: false,
+                  webSearchProgress: undefined,
                   sources: res.sources,
                   webSearch: res.web_search,
                 }
@@ -602,6 +626,8 @@ export default function ChatPanel({
               ? {
                   ...m,
                   content: `错误: ${fallbackError instanceof Error ? fallbackError.message : "请求失败"}`,
+                  webSearchActive: false,
+                  webSearchProgress: undefined,
                 }
               : m,
           ),
@@ -619,6 +645,8 @@ export default function ChatPanel({
                 ...message,
                 thinkingActive: false,
                 thinkingDurationMs,
+                webSearchActive: false,
+                webSearchProgress: undefined,
               }
             : message,
         ),
@@ -833,7 +861,20 @@ export default function ChatPanel({
     setRegeneratingMessageId(assistantId);
     setMessages((prev) =>
       prev.map((m) =>
-        m.id === assistantId ? { ...m, content: "", sources: [] } : m,
+        m.id === assistantId
+          ? {
+              ...m,
+              content: "",
+              thinking: undefined,
+              thinkingActive: false,
+              thinkingStartedAt: undefined,
+              thinkingDurationMs: undefined,
+              webSearchActive: false,
+              webSearchProgress: undefined,
+              sources: [],
+              webSearch: undefined,
+            }
+          : m,
       ),
     );
     try {
@@ -1079,6 +1120,18 @@ export default function ChatPanel({
                           durationMs={m.thinkingDurationMs}
                           thinking={m.thinking}
                         />
+                      )}
+                      {m.role === "assistant" && m.webSearchActive && (
+                        <div
+                          className="web-search-live-status"
+                          role="status"
+                          aria-live="polite"
+                        >
+                          <span className="web-search-live-dot" />
+                          <span>
+                            {m.webSearchProgress || "正在联网搜索外部资料"}
+                          </span>
+                        </div>
                       )}
                       {m.role === "user" && editingMessageId === m.id ? (
                         <div className="inline-edit-wrap">

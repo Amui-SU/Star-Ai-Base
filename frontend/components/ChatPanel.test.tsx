@@ -564,6 +564,132 @@ describe("ChatPanel", () => {
     expect(screen.getByText("已使用联网搜索")).toBeVisible();
   });
 
+  it("renders web search progress as a live status outside thinking text", async () => {
+    mockChatPanelDependencies();
+    const encoder = new TextEncoder();
+    const pendingReads: Array<
+      ReturnType<typeof createDeferred<ReadableStreamReadResult<Uint8Array>>>
+    > = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              const pending =
+                createDeferred<ReadableStreamReadResult<Uint8Array>>();
+              pendingReads.push(pending);
+              return pending.promise;
+            }),
+          }),
+        },
+      }),
+    );
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "search progress");
+    await user.click(container.querySelector(".composer-send-button")!);
+
+    await waitFor(() => {
+      expect(pendingReads).toHaveLength(1);
+    });
+
+    await act(async () => {
+      pendingReads[0].resolve({
+        done: false,
+        value: encoder.encode(
+          '[[WEB_SEARCH_PROGRESS]]"正在联网搜索外部资料"\n',
+        ),
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "正在联网搜索外部资料",
+    );
+    expect(
+      container.querySelector(".thinking-process-content")?.textContent ?? "",
+    ).not.toContain("正在联网搜索外部资料");
+
+    await act(async () => {
+      pendingReads[1].resolve({
+        done: false,
+        value: encoder.encode(
+          '[[WEB_SEARCH_PROGRESS]]""\nstream answer\n[[SOURCES_JSON]][]',
+        ),
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("stream answer")).toBeVisible();
+  });
+
+  it("clears previous references immediately when regenerating an answer", async () => {
+    mockChatPanelDependencies();
+    const encoder = new TextEncoder();
+    const secondRead = createDeferred<ReadableStreamReadResult<Uint8Array>>();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        body: {
+          getReader: () => {
+            let read = false;
+            return {
+              read: vi.fn().mockImplementation(() => {
+                if (read)
+                  return Promise.resolve({ done: true, value: undefined });
+                read = true;
+                return Promise.resolve({
+                  done: false,
+                  value: encoder.encode(
+                    'first answer\n[[WEB_SEARCH_JSON]]{"status":"success","message":"已使用联网搜索","result_count":1}\n[[SOURCES_JSON]][{"type":"web","title":"Old Web","url":"https://example.com/old"}]',
+                  ),
+                });
+              }),
+            };
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => secondRead.promise),
+          }),
+        },
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "original question");
+    await user.click(container.querySelector(".composer-send-button")!);
+
+    expect(await screen.findByText("参考链接（1）")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "重新生成" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByText(/参考链接/)).not.toBeInTheDocument();
+
+    secondRead.resolve({ done: true, value: undefined });
+  });
+
   it("shows web search fallback status returned by the chat response", async () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     vi.mocked(chatApi.getModelConfig).mockResolvedValue({
