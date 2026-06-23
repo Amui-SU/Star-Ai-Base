@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ChatScopePicker from "@/components/ChatScopePicker";
+import type { WebSearchProvider } from "@/lib/api";
 import type { ChatScopeSelection } from "@/lib/chatScope";
 
 afterEach(() => {
@@ -35,6 +36,10 @@ function ControlledPicker({
   onChange,
   webSearchEnabled = false,
   onWebSearchChange,
+  webSearchProvider = "auto",
+  onWebSearchProviderChange,
+  tavilyConfigured = false,
+  onConfigureTavily,
   webSearchNotice = "",
   disabled = false,
 }: {
@@ -42,16 +47,24 @@ function ControlledPicker({
   onChange?: (next: ChatScopeSelection) => void;
   webSearchEnabled?: boolean;
   onWebSearchChange?: (enabled: boolean) => void;
+  webSearchProvider?: WebSearchProvider;
+  onWebSearchProviderChange?: (provider: WebSearchProvider) => void;
+  tavilyConfigured?: boolean;
+  onConfigureTavily?: () => void;
   webSearchNotice?: string;
   disabled?: boolean;
 }) {
   const [value, setValue] = useState(initialValue);
   const [webSearch, setWebSearch] = useState(webSearchEnabled);
+  const [provider, setProvider] =
+    useState<WebSearchProvider>(webSearchProvider);
   return (
     <ChatScopePicker
       options={options}
       value={value}
       webSearchEnabled={webSearch}
+      webSearchProvider={provider}
+      tavilyConfigured={tavilyConfigured}
       webSearchNotice={webSearchNotice}
       disabled={disabled}
       onChange={(next) => {
@@ -62,6 +75,11 @@ function ControlledPicker({
         setWebSearch(enabled);
         onWebSearchChange?.(enabled);
       }}
+      onWebSearchProviderChange={(nextProvider) => {
+        setProvider(nextProvider);
+        onWebSearchProviderChange?.(nextProvider);
+      }}
+      onConfigureTavily={onConfigureTavily ?? vi.fn()}
     />
   );
 }
@@ -129,6 +147,27 @@ describe("ChatScopePicker", () => {
       "title",
       "开启后，模型可能向外部搜索服务发送查询并读取公开网页",
     );
+  });
+
+  it("lets enabled web search choose Tavily and open configuration inline", async () => {
+    const user = userEvent.setup();
+    const onWebSearchProviderChange = vi.fn();
+    const onConfigureTavily = vi.fn();
+    render(
+      <ControlledPicker
+        webSearchEnabled
+        tavilyConfigured={false}
+        onWebSearchProviderChange={onWebSearchProviderChange}
+        onConfigureTavily={onConfigureTavily}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^提问范围/ }));
+    await user.click(screen.getByRole("button", { name: "Tavily" }));
+
+    expect(onWebSearchProviderChange).toHaveBeenLastCalledWith("tavily");
+    await user.click(screen.getByRole("button", { name: "配置 Tavily" }));
+    expect(onConfigureTavily).toHaveBeenCalled();
   });
 
   it("uses the temporary web search notice before restoring the scope summary", () => {

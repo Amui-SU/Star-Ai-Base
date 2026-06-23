@@ -19,7 +19,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
     chatApi: {
       ...actual.chatApi,
       getModelConfig: vi.fn(),
+      getWebSearchConfig: vi.fn(),
       health: vi.fn(),
+      saveWebSearchConfig: vi.fn(),
       setModelProvider: vi.fn(),
     },
     knowledgeBaseApi: {
@@ -63,6 +65,18 @@ function mockChatPanelDependencies() {
     latency_ms: 10,
     model: "deepseek-v4-pro",
     provider: "deepseek",
+  });
+  vi.mocked(chatApi.getWebSearchConfig).mockResolvedValue({
+    provider: "auto",
+    tavily_configured: false,
+    fallback_html: true,
+    tavily_search_depth: "basic",
+  });
+  vi.mocked(chatApi.saveWebSearchConfig).mockResolvedValue({
+    provider: "tavily",
+    tavily_configured: true,
+    fallback_html: true,
+    tavily_search_depth: "basic",
   });
   vi.mocked(knowledgeBaseApi.stats).mockResolvedValue({
     knowledge_base_id: 1,
@@ -242,6 +256,12 @@ describe("ChatPanel", () => {
       model: "qwen-plus",
       provider: "dashscope",
     });
+    vi.mocked(chatApi.getWebSearchConfig).mockResolvedValue({
+      provider: "auto",
+      tavily_configured: false,
+      fallback_html: true,
+      tavily_search_depth: "basic",
+    });
     vi.mocked(knowledgeBaseApi.stats).mockResolvedValue({
       knowledge_base_id: 1,
       workspace_id: 1,
@@ -284,6 +304,59 @@ describe("ChatPanel", () => {
     expect(JSON.parse(String(requestInit.body))).toMatchObject({
       question: "latest news",
       web_search: true,
+      web_search_provider: "auto",
+    });
+  });
+
+  it("opens Tavily config from web search provider choice and sends Tavily after saving", async () => {
+    mockChatPanelDependencies();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: vi.fn().mockResolvedValue({ done: true, value: undefined }),
+        }),
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^提问范围/ }));
+    await user.click(screen.getByRole("button", { name: "联网搜索" }));
+    await user.click(screen.getByRole("button", { name: /^提问范围/ }));
+    await user.click(screen.getByRole("button", { name: "Tavily" }));
+    expect(screen.getByText("配置联网搜索")).toBeVisible();
+
+    await user.type(screen.getByLabelText("Tavily API Key"), "tvly-test");
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(chatApi.saveWebSearchConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "tavily",
+          tavily_api_key: "tvly-test",
+        }),
+      );
+    });
+
+    await user.type(
+      screen.getByPlaceholderText("输入问题..."),
+      "search with tavily",
+    );
+    await user.click(container.querySelector(".composer-send-button")!);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(requestInit.body))).toMatchObject({
+      question: "search with tavily",
+      web_search: true,
+      web_search_provider: "tavily",
     });
   });
 

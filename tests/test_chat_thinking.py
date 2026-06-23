@@ -7,6 +7,7 @@ from app.models import ChatRequest, KnowledgeBaseChatRequest
 from app.routers.chat import (
     LLMProviderConfigRequest,
     THINKING_DELTA_MARKER,
+    WebSearchConfigRequest,
     _build_thinking_completion_options,
     _complete_llm_answer_with_tools,
     _complete_llm_answer,
@@ -17,7 +18,9 @@ from app.routers.chat import (
     _parse_tool_arguments,
     _parse_thinking_config,
     _stream_llm_events,
+    get_web_search_config,
     save_llm_provider_config,
+    save_web_search_config,
 )
 
 
@@ -33,6 +36,79 @@ def test_knowledge_base_chat_request_supports_web_search_toggle():
     assert (
         KnowledgeBaseChatRequest(question="hello", web_search=True).web_search is True
     )
+
+
+def test_knowledge_base_chat_request_supports_web_search_provider():
+    assert KnowledgeBaseChatRequest(question="hello").web_search_provider == "auto"
+    assert (
+        KnowledgeBaseChatRequest(
+            question="hello",
+            web_search=True,
+            web_search_provider="Tavily",
+        ).web_search_provider
+        == "tavily"
+    )
+
+
+@pytest.mark.asyncio
+async def test_web_search_config_hides_tavily_key(monkeypatch):
+    monkeypatch.setattr("app.routers.chat.settings.web_search_provider", "tavily")
+    monkeypatch.setattr("app.routers.chat.settings.tavily_api_key", "tvly-secret")
+    monkeypatch.setattr("app.routers.chat.settings.web_search_fallback_html", True)
+    monkeypatch.setattr("app.routers.chat.settings.tavily_search_depth", "advanced")
+
+    result = await get_web_search_config()
+
+    assert result == {
+        "provider": "tavily",
+        "tavily_configured": True,
+        "fallback_html": True,
+        "tavily_search_depth": "advanced",
+    }
+    assert "tavily_api_key" not in result
+    assert "api_key" not in result
+
+
+@pytest.mark.asyncio
+async def test_save_web_search_config_persists_tavily_key_without_echoing_it(
+    monkeypatch,
+):
+    captured = {}
+    monkeypatch.setattr("app.routers.chat.settings.tavily_api_key", "")
+    monkeypatch.setattr(
+        "app.routers.chat._write_env_values",
+        lambda updates: captured.setdefault("updates", updates),
+    )
+
+    result = await save_web_search_config(
+        WebSearchConfigRequest(
+            provider="tavily",
+            tavily_api_key="tvly-test",
+            fallback_html=False,
+            tavily_search_depth="advanced",
+        )
+    )
+
+    assert captured["updates"] == {
+        "WEB_SEARCH_PROVIDER": "tavily",
+        "WEB_SEARCH_FALLBACK_HTML": "false",
+        "TAVILY_SEARCH_DEPTH": "advanced",
+        "TAVILY_API_KEY": "tvly-test",
+    }
+    assert result["provider"] == "tavily"
+    assert result["tavily_configured"] is True
+    assert "tavily_api_key" not in result
+    assert "api_key" not in result
+
+
+@pytest.mark.asyncio
+async def test_save_web_search_config_requires_key_for_tavily(monkeypatch):
+    monkeypatch.setattr("app.routers.chat.settings.tavily_api_key", "")
+
+    with pytest.raises(HTTPException) as exc:
+        await save_web_search_config(WebSearchConfigRequest(provider="tavily"))
+
+    assert exc.value.status_code == 400
 
 
 def test_message_to_openai_dict_keeps_only_request_safe_assistant_fields():

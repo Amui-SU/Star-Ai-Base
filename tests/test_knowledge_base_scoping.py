@@ -1348,6 +1348,37 @@ async def test_initial_web_search_no_results_is_visible_to_model(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_web_search_tool_run_uses_request_provider(monkeypatch):
+    from app.routers.knowledge_bases import _prepare_web_search_tool_run
+
+    captured = {"providers": []}
+
+    async def fake_search_web(query, *, max_results=3, diagnostics=None, provider=None):
+        captured["providers"].append(provider)
+        return []
+
+    async def fake_prepare_llm_messages_with_tools(messages, **kwargs):
+        await kwargs["tool_handlers"]["web_search"]({"query": "tool query"})
+        from app.routers.chat import LLMToolRunResult
+
+        return LLMToolRunResult(messages=messages, answer="answer", thinking="")
+
+    monkeypatch.setattr("app.routers.knowledge_bases.search_web", fake_search_web)
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._prepare_llm_messages_with_tools",
+        fake_prepare_llm_messages_with_tools,
+    )
+
+    await _prepare_web_search_tool_run(
+        [{"role": "user", "content": "question"}],
+        question="initial query",
+        provider="tavily",
+    )
+
+    assert captured["providers"] == ["tavily", "tavily"]
+
+
+@pytest.mark.asyncio
 async def test_initial_web_search_diagnostics_are_reported_when_search_fails(
     monkeypatch,
 ):

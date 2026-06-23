@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { KnowledgeScopeOptions, KnowledgeScopeVideo } from "@/lib/api";
+import type {
+  KnowledgeScopeOptions,
+  KnowledgeScopeVideo,
+  WebSearchProvider,
+} from "@/lib/api";
 import {
   EMPTY_CHAT_SCOPE,
   type ChatScopeSelection,
@@ -16,6 +20,10 @@ interface Props {
   onChange: (next: ChatScopeSelection) => void;
   webSearchEnabled: boolean;
   onWebSearchChange: (enabled: boolean) => void;
+  webSearchProvider: WebSearchProvider;
+  onWebSearchProviderChange: (provider: WebSearchProvider) => void;
+  tavilyConfigured: boolean;
+  onConfigureTavily: () => void;
   webSearchNotice?: string;
   disabled?: boolean;
 }
@@ -38,6 +46,10 @@ export default function ChatScopePicker({
   onChange,
   webSearchEnabled,
   onWebSearchChange,
+  webSearchProvider,
+  onWebSearchProviderChange,
+  tavilyConfigured,
+  onConfigureTavily,
   webSearchNotice = "",
   disabled = false,
 }: Props) {
@@ -131,6 +143,13 @@ export default function ChatScopePicker({
     setOpen(false);
   };
 
+  const chooseWebSearchProvider = (provider: WebSearchProvider) => {
+    onWebSearchProviderChange(provider);
+    if (provider === "tavily" && !tavilyConfigured) {
+      onConfigureTavily();
+    }
+  };
+
   const renderVideoOption = (
     video: KnowledgeScopeVideo & { folderTitle?: string },
   ) => (
@@ -201,6 +220,45 @@ export default function ChatScopePicker({
               开启后，模型可能向外部搜索服务发送查询并读取公开网页
             </span>
           </div>
+
+          {webSearchEnabled && (
+            <div className="scope-web-provider-panel">
+              <div
+                className="scope-web-provider-options"
+                role="group"
+                aria-label="联网搜索方式"
+              >
+                {(
+                  [
+                    ["auto", "自动"],
+                    ["tavily", "Tavily"],
+                    ["html", "内置"],
+                  ] as const
+                ).map(([provider, label]) => (
+                  <button
+                    key={provider}
+                    type="button"
+                    className={`scope-web-provider-option ${
+                      webSearchProvider === provider ? "active" : ""
+                    }`}
+                    aria-pressed={webSearchProvider === provider}
+                    onClick={() => chooseWebSearchProvider(provider)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {webSearchProvider === "tavily" && !tavilyConfigured && (
+                <button
+                  type="button"
+                  className="scope-web-config-btn"
+                  onClick={onConfigureTavily}
+                >
+                  配置 Tavily
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="scope-mode-grid" aria-label="范围类型">
             <button

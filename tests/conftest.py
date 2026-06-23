@@ -19,6 +19,22 @@ from app.routers.system_auth import _ip_rate_limit
 
 
 @pytest.fixture(autouse=True)
+def isolate_web_search_settings() -> Iterator[None]:
+    from app.config import settings
+
+    tracked_settings = {
+        "web_search_provider": settings.web_search_provider,
+        "tavily_api_key": settings.tavily_api_key,
+        "web_search_fallback_html": settings.web_search_fallback_html,
+        "tavily_search_depth": settings.tavily_search_depth,
+        "http_proxy": settings.http_proxy,
+    }
+    yield
+    for name, value in tracked_settings.items():
+        setattr(settings, name, value)
+
+
+@pytest.fixture(autouse=True)
 def isolate_auth_ip_rate_limit() -> Iterator[None]:
     _ip_rate_limit.clear()
     yield

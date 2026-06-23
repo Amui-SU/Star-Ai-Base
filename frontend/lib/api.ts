@@ -139,6 +139,7 @@ export interface KnowledgeBaseChatRequest extends KnowledgeScopeRequest {
   question: string;
   k?: number;
   web_search?: boolean;
+  web_search_provider?: WebSearchProvider;
 }
 
 export interface KnowledgeBaseBuildRequest {
@@ -277,6 +278,15 @@ export interface ChatResponse {
   sources: ChatSource[];
   thinking?: string;
   web_search?: ChatWebSearchStatus | null;
+}
+
+export type WebSearchProvider = "auto" | "tavily" | "html";
+
+export interface WebSearchConfigResponse {
+  provider: WebSearchProvider;
+  tavily_configured: boolean;
+  fallback_html: boolean;
+  tavily_search_depth: "basic" | "advanced" | string;
 }
 
 export type LLMProvider =
@@ -755,6 +765,20 @@ export const chatApi = {
     }),
 
   getModelConfig: () => request<LLMConfigResponse>("/chat/llm/config"),
+
+  getWebSearchConfig: () =>
+    request<WebSearchConfigResponse>("/chat/web-search/config"),
+
+  saveWebSearchConfig: (data: {
+    provider: WebSearchProvider;
+    tavily_api_key?: string;
+    fallback_html?: boolean;
+    tavily_search_depth?: "basic" | "advanced" | string;
+  }) =>
+    request<WebSearchConfigResponse>("/chat/web-search/config", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   setModelProvider: (provider: LLMProvider) =>
     request<{ ok: boolean; current_provider: string; model: string }>(

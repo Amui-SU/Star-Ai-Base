@@ -73,6 +73,17 @@ MAX_FETCH_WEB_PAGE_CALLS = 1
 FETCH_WEB_PAGE_CONTEXT_CHARS = 2000
 
 
+def _supports_keyword_argument(callable_obj, keyword: str) -> bool:
+    try:
+        parameters = inspect.signature(callable_obj).parameters
+    except (TypeError, ValueError):
+        return True
+    return keyword in parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+
+
 def _response(knowledge_base: KnowledgeBase) -> KnowledgeBaseResponse:
     return KnowledgeBaseResponse(
         id=knowledge_base.id,
@@ -491,15 +502,14 @@ async def _execute_web_search_tool(
     state.setdefault("query_log", []).append(query)
     try:
         diagnostics: list[dict] = []
-        parameters = inspect.signature(search_web).parameters
-        supports_diagnostics = "diagnostics" in parameters or any(
-            parameter.kind == inspect.Parameter.VAR_KEYWORD
-            for parameter in parameters.values()
-        )
+        supports_diagnostics = _supports_keyword_argument(search_web, "diagnostics")
+        supports_provider = _supports_keyword_argument(search_web, "provider")
+        search_kwargs = {}
         if supports_diagnostics:
-            results = await search_web(query, diagnostics=diagnostics)
-        else:
-            results = await search_web(query)
+            search_kwargs["diagnostics"] = diagnostics
+        if supports_provider:
+            search_kwargs["provider"] = state.get("provider")
+        results = await search_web(query, **search_kwargs)
     except Exception as exc:
         state["failed"] = True
         state.setdefault("errors", []).append(
@@ -592,9 +602,10 @@ async def _prepare_web_search_tool_run(
     messages: list[dict],
     *,
     question: str,
+    provider: str = "auto",
 ) -> tuple[LLMToolRunResult, list[dict[str, str]], dict]:
     web_results: list[dict[str, str]] = []
-    web_search_state = {"attempted": False, "failed": False}
+    web_search_state = {"attempted": False, "failed": False, "provider": provider}
 
     await _run_initial_web_search(question, web_results, web_search_state)
     initial_result_count = len(web_results)
@@ -638,6 +649,7 @@ async def _complete_knowledge_base_answer(
     *,
     question: str,
     enable_web_search: bool,
+    web_search_provider: str = "auto",
 ) -> tuple[str, str, list[dict[str, str]], dict | None]:
     if not enable_web_search:
         answer, thinking = _complete_llm_answer(messages)
@@ -646,6 +658,7 @@ async def _complete_knowledge_base_answer(
     tool_run, web_results, web_search_state = await _prepare_web_search_tool_run(
         messages,
         question=question,
+        provider=web_search_provider,
     )
     if tool_run.answer is not None:
         answer = tool_run.answer
@@ -668,10 +681,12 @@ async def _prepare_knowledge_base_web_search(
     messages: list[dict],
     *,
     question: str,
+    provider: str = "auto",
 ) -> tuple[LLMToolRunResult, list[dict[str, str]], dict | None]:
     tool_run, web_results, web_search_state = await _prepare_web_search_tool_run(
         messages,
         question=question,
+        provider=provider,
     )
 
     return (
@@ -688,9 +703,16 @@ async def _prepare_knowledge_base_web_search_with_heartbeats(
     messages: list[dict],
     *,
     question: str,
+    provider: str = "auto",
 ):
+    prepare_kwargs = {"question": question}
+    if _supports_keyword_argument(_prepare_knowledge_base_web_search, "provider"):
+        prepare_kwargs["provider"] = provider
     task = asyncio.create_task(
-        _prepare_knowledge_base_web_search(messages, question=question)
+        _prepare_knowledge_base_web_search(
+            messages,
+            **prepare_kwargs,
+        )
     )
     heartbeat_count = 0
     try:
@@ -1184,11 +1206,19 @@ async def chat_with_knowledge_base(
         documents,
     )
     try:
+        complete_kwargs = {
+            "question": question,
+            "enable_web_search": payload.web_search,
+        }
+        if _supports_keyword_argument(
+            _complete_knowledge_base_answer,
+            "web_search_provider",
+        ):
+            complete_kwargs["web_search_provider"] = payload.web_search_provider
         answer, thinking, web_results, web_search_status = (
             await _complete_knowledge_base_answer(
                 messages,
-                question=question,
-                enable_web_search=payload.web_search,
+                **complete_kwargs,
             )
         )
     except Exception as exc:
@@ -1254,6 +1284,7 @@ async def stream_chat_with_knowledge_base(
                 ) in _prepare_knowledge_base_web_search_with_heartbeats(
                     messages,
                     question=question,
+                    provider=payload.web_search_provider,
                 ):
                     if event_type == "heartbeat":
                         heartbeat_thinking = str(event_payload)

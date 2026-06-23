@@ -105,6 +105,13 @@ class LLMProviderConfigRequest(BaseModel):
     thinking_config: Optional[dict] = None
 
 
+class WebSearchConfigRequest(BaseModel):
+    provider: str = "auto"
+    tavily_api_key: Optional[str] = None
+    fallback_html: bool = True
+    tavily_search_depth: str = "basic"
+
+
 PROVIDER_ENV_FIELDS = {
     "dashscope": {
         "api_key": "DASHSCOPE_API_KEY",
@@ -171,6 +178,10 @@ SETTINGS_FIELD_BY_ENV = {
     "ZHIPU_BASE_URL": "zhipu_base_url",
     "ZHIPU_MODEL": "zhipu_model",
     "ZHIPU_THINKING_CONFIG": "zhipu_thinking_config",
+    "WEB_SEARCH_PROVIDER": "web_search_provider",
+    "TAVILY_API_KEY": "tavily_api_key",
+    "WEB_SEARCH_FALLBACK_HTML": "web_search_fallback_html",
+    "TAVILY_SEARCH_DEPTH": "tavily_search_depth",
 }
 
 PROVIDER_THINKING_SETTINGS_FIELDS = {
@@ -293,6 +304,73 @@ def _write_env_values(updates: Dict[str, str]) -> None:
         field = SETTINGS_FIELD_BY_ENV.get(key)
         if field:
             setattr(settings, field, value)
+
+
+SUPPORTED_WEB_SEARCH_PROVIDERS = {"auto", "tavily", "html"}
+SUPPORTED_TAVILY_SEARCH_DEPTHS = {"basic", "advanced"}
+
+
+def _normalize_web_search_provider(provider: Optional[str]) -> str:
+    normalized = (provider or "auto").strip().lower()
+    if normalized not in SUPPORTED_WEB_SEARCH_PROVIDERS:
+        raise HTTPException(status_code=400, detail="Unsupported web search provider")
+    return normalized
+
+
+def _normalize_tavily_search_depth(depth: Optional[str]) -> str:
+    normalized = (depth or "basic").strip().lower()
+    if normalized not in SUPPORTED_TAVILY_SEARCH_DEPTHS:
+        raise HTTPException(status_code=400, detail="Unsupported Tavily search depth")
+    return normalized
+
+
+def _web_search_config_response(provider: str) -> dict:
+    return {
+        "provider": provider,
+        "tavily_configured": bool(settings.tavily_api_key.strip()),
+        "fallback_html": bool(settings.web_search_fallback_html),
+        "tavily_search_depth": _normalize_tavily_search_depth(
+            settings.tavily_search_depth
+        ),
+    }
+
+
+@router.get("/web-search/config")
+async def get_web_search_config(_current_user=Depends(get_current_user)):
+    """Return web search settings without exposing saved API keys."""
+    provider = _normalize_web_search_provider(settings.web_search_provider)
+    return _web_search_config_response(provider)
+
+
+@router.post("/web-search/config")
+async def save_web_search_config(
+    body: WebSearchConfigRequest,
+    _current_user=Depends(get_current_user),
+):
+    """Persist web search configuration to .env.local without echoing secrets."""
+    provider = _normalize_web_search_provider(body.provider)
+    search_depth = _normalize_tavily_search_depth(body.tavily_search_depth)
+    tavily_api_key = (body.tavily_api_key or "").strip()
+    existing_tavily_key = settings.tavily_api_key.strip()
+    if provider == "tavily" and not (tavily_api_key or existing_tavily_key):
+        raise HTTPException(status_code=400, detail="Tavily API Key cannot be empty")
+
+    updates = {
+        "WEB_SEARCH_PROVIDER": provider,
+        "WEB_SEARCH_FALLBACK_HTML": "true" if body.fallback_html else "false",
+        "TAVILY_SEARCH_DEPTH": search_depth,
+    }
+    if tavily_api_key:
+        updates["TAVILY_API_KEY"] = tavily_api_key
+
+    _write_env_values(updates)
+    settings.web_search_provider = provider
+    settings.web_search_fallback_html = body.fallback_html
+    settings.tavily_search_depth = search_depth
+    if tavily_api_key:
+        settings.tavily_api_key = tavily_api_key
+
+    return _web_search_config_response(provider)
 
 
 @router.get("/llm/config")

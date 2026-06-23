@@ -452,13 +452,17 @@ async def search_web(
     *,
     max_results: int = 3,
     diagnostics: list[dict] | None = None,
+    provider: str | None = None,
 ) -> list[dict[str, str]]:
     """Return lightweight web search snippets for LLM grounding."""
     term = _truncate_text(query.strip(), MAX_SEARCH_QUERY_CHARS)
     if not term:
         return []
 
-    provider = settings.web_search_provider.strip().lower()
+    provider_override = provider is not None
+    selected_provider = (provider or settings.web_search_provider).strip().lower()
+    if selected_provider not in {"auto", "tavily", "html"}:
+        selected_provider = settings.web_search_provider.strip().lower() or "html"
     timeout = httpx.Timeout(8.0, connect=4.0)
     proxy = settings.http_proxy or None
     headers = {
@@ -474,10 +478,12 @@ async def search_web(
         headers=headers,
         trust_env=False,
     ) as client:
-        if provider == "tavily":
+        if selected_provider in {"auto", "tavily"}:
             if not settings.tavily_api_key.strip():
                 _append_missing_tavily_key_diagnostic(diagnostics)
-                if not settings.web_search_fallback_html:
+                if (
+                    provider_override and selected_provider == "tavily"
+                ) or not settings.web_search_fallback_html:
                     _sort_provider_diagnostics(diagnostics)
                     return []
             else:
@@ -489,7 +495,11 @@ async def search_web(
                     max_results=max_results,
                     diagnostics=diagnostics,
                 )
-                if tavily_results or not settings.web_search_fallback_html:
+                if (
+                    tavily_results
+                    or (provider_override and selected_provider == "tavily")
+                    or not settings.web_search_fallback_html
+                ):
                     _sort_provider_diagnostics(diagnostics)
                     return tavily_results
 

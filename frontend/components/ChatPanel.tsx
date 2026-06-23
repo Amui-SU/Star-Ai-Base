@@ -16,6 +16,8 @@ import {
   KnowledgeBaseChatRequest,
   KnowledgeScopeOptions,
   ChatWebSearchStatus,
+  WebSearchConfigResponse,
+  WebSearchProvider,
 } from "@/lib/api";
 import {
   EMPTY_CHAT_SCOPE,
@@ -149,6 +151,14 @@ export default function ChatPanel({
   const [chatScope, setChatScope] =
     useState<ChatScopeSelection>(EMPTY_CHAT_SCOPE);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [webSearchProvider, setWebSearchProvider] =
+    useState<WebSearchProvider>("auto");
+  const [webSearchConfig, setWebSearchConfig] =
+    useState<WebSearchConfigResponse | null>(null);
+  const [webSearchConfigOpen, setWebSearchConfigOpen] = useState(false);
+  const [webSearchApiKey, setWebSearchApiKey] = useState("");
+  const [webSearchConfigSaving, setWebSearchConfigSaving] = useState(false);
+  const [webSearchConfigError, setWebSearchConfigError] = useState("");
   const [scopeNotice, setScopeNotice] = useState("");
   const [webSearchNotice, setWebSearchNotice] = useState("");
   const [llmHealth, setLlmHealth] = useState<LLMHealthResponse | null>(null);
@@ -288,6 +298,49 @@ export default function ChatPanel({
     }
   };
 
+  const openWebSearchConfig = () => {
+    setWebSearchApiKey("");
+    setWebSearchConfigError("");
+    setWebSearchConfigOpen(true);
+  };
+
+  const closeWebSearchConfig = (force = false) => {
+    if (webSearchConfigSaving && !force) return;
+    setWebSearchConfigOpen(false);
+    setWebSearchApiKey("");
+    setWebSearchConfigError("");
+  };
+
+  const handleSaveWebSearchConfig = async () => {
+    if (webSearchConfigSaving) return;
+    const apiKey = webSearchApiKey.trim();
+    if (!webSearchConfig?.tavily_configured && !apiKey) {
+      setWebSearchConfigError("请填写 Tavily API Key");
+      return;
+    }
+    setWebSearchConfigSaving(true);
+    setWebSearchConfigError("");
+    try {
+      const cfg = await chatApi.saveWebSearchConfig({
+        provider: "tavily",
+        tavily_api_key: apiKey || undefined,
+        fallback_html: webSearchConfig?.fallback_html ?? true,
+        tavily_search_depth: webSearchConfig?.tavily_search_depth || "basic",
+      });
+      setWebSearchConfig(cfg);
+      setWebSearchProvider("tavily");
+      setWebSearchEnabled(true);
+      setWebSearchNotice("联网搜索已开启");
+      closeWebSearchConfig(true);
+    } catch (err) {
+      setWebSearchConfigError(
+        err instanceof Error ? err.message : "保存联网搜索配置失败",
+      );
+    } finally {
+      setWebSearchConfigSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (knowledgeBaseId) {
       knowledgeBaseApi
@@ -303,8 +356,15 @@ export default function ChatPanel({
     let cancelled = false;
     const loadConfig = async () => {
       try {
-        const cfg = await chatApi.getModelConfig();
-        if (!cancelled) setLlmConfig(cfg);
+        const [cfg, webCfg] = await Promise.all([
+          chatApi.getModelConfig(),
+          chatApi.getWebSearchConfig(),
+        ]);
+        if (!cancelled) {
+          setLlmConfig(cfg);
+          setWebSearchConfig(webCfg);
+          setWebSearchProvider(webCfg.provider || "auto");
+        }
       } catch {
         // 忽略配置加载失败，不影响聊天主流程
       }
@@ -397,6 +457,7 @@ export default function ChatPanel({
       question: q,
       k: 5,
       web_search: webSearchEnabled,
+      web_search_provider: webSearchProvider,
       ...toScopePayload(chatScope),
     };
     let streamTimedOut = false;
@@ -648,6 +709,14 @@ export default function ChatPanel({
       setWebSearchNotice("");
       scopeNoticeTimerRef.current = null;
     }, 2200);
+  };
+
+  const handleWebSearchProviderChange = (provider: WebSearchProvider) => {
+    setWebSearchProvider(provider);
+    setWebSearchEnabled(true);
+    if (provider === "tavily" && !webSearchConfig?.tavily_configured) {
+      openWebSearchConfig();
+    }
   };
 
   const extractThinkingFromContent = (
@@ -1401,9 +1470,13 @@ export default function ChatPanel({
                 options={scopeOptions}
                 value={chatScope}
                 webSearchEnabled={webSearchEnabled}
+                webSearchProvider={webSearchProvider}
+                tavilyConfigured={Boolean(webSearchConfig?.tavily_configured)}
                 webSearchNotice={webSearchNotice}
                 onChange={handleScopeChange}
                 onWebSearchChange={handleWebSearchChange}
+                onWebSearchProviderChange={handleWebSearchProviderChange}
+                onConfigureTavily={openWebSearchConfig}
                 disabled={!knowledgeBaseId}
               />
               <button
@@ -1450,6 +1523,79 @@ export default function ChatPanel({
           内容由 AI 生成，请注意甄别。
         </div>
       </div>
+
+      {webSearchConfigOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={() => closeWebSearchConfig()}
+        >
+          <div
+            className="modal-card thinking-provider-modal"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="provider-config-head">
+              <div className="provider-config-title-block">
+                <h3 className="provider-config-title">配置联网搜索</h3>
+                <p className="provider-config-subtitle">
+                  Tavily API Key 会写入后端 .env.local，前端只保存是否已配置。
+                </p>
+              </div>
+              <button
+                type="button"
+                className="provider-config-close"
+                onClick={() => closeWebSearchConfig()}
+                disabled={webSearchConfigSaving}
+                aria-label="关闭联网搜索配置"
+              >
+                x
+              </button>
+            </div>
+
+            <div className="provider-config-body">
+              <label className="flex flex-col gap-2 text-xs font-medium text-(--ink-soft)">
+                Tavily API Key
+                <input
+                  type="password"
+                  value={webSearchApiKey}
+                  onChange={(e) => setWebSearchApiKey(e.target.value)}
+                  className="input provider-config-input text-center"
+                  placeholder={
+                    webSearchConfig?.tavily_configured
+                      ? "留空沿用已保存的 Tavily API Key"
+                      : "粘贴 Tavily API Key"
+                  }
+                  autoFocus
+                />
+              </label>
+
+              {webSearchConfigError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {webSearchConfigError}
+                </div>
+              )}
+            </div>
+
+            <div className="provider-config-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => closeWebSearchConfig()}
+                disabled={webSearchConfigSaving}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void handleSaveWebSearchConfig()}
+                disabled={webSearchConfigSaving}
+              >
+                {webSearchConfigSaving ? "保存中..." : "保存配置"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {configProvider && (
         <div

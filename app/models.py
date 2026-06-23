@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
 
@@ -442,6 +442,15 @@ class KnowledgeBaseChatRequest(BaseModel):
     folder_ids: Optional[list[int]] = None
     bvids: Optional[list[str]] = None
     web_search: bool = False
+    web_search_provider: str = "auto"
+
+    @field_validator("web_search_provider")
+    @classmethod
+    def normalize_web_search_provider(cls, value: str) -> str:
+        provider = (value or "auto").strip().lower()
+        if provider not in {"auto", "tavily", "html"}:
+            raise ValueError("unsupported web search provider")
+        return provider
 
 
 class KnowledgeScopeVideo(BaseModel):
