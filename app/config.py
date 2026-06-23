@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     # HTTP 代理（访问 Google 等境外服务时需要）
     http_proxy: str = Field(default="", env="HTTP_PROXY")
 
+    # Web search provider configuration.
+    web_search_provider: str = Field(default="html", env="WEB_SEARCH_PROVIDER")
+    tavily_api_key: str = Field(default="", env="TAVILY_API_KEY")
+    web_search_fallback_html: bool = Field(default=True, env="WEB_SEARCH_FALLBACK_HTML")
+    tavily_search_depth: str = Field(default="basic", env="TAVILY_SEARCH_DEPTH")
+
     # SMTP 邮件配置（用于发送邮箱验证码）
     smtp_host: str = Field(default="smtp.qq.com", env="SMTP_HOST")
     smtp_port: int = Field(default=587, env="SMTP_PORT")

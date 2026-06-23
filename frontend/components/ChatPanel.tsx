@@ -15,6 +15,7 @@ import {
   LLMProvider,
   KnowledgeBaseChatRequest,
   KnowledgeScopeOptions,
+  ChatWebSearchStatus,
 } from "@/lib/api";
 import {
   EMPTY_CHAT_SCOPE,
@@ -40,9 +41,17 @@ interface Message {
   thinkingActive?: boolean;
   thinkingStartedAt?: number;
   thinkingDurationMs?: number;
-  sources?: Array<{ bvid: string; title: string; url: string }>;
+  sources?: Array<{
+    bvid?: string;
+    title: string;
+    url: string;
+    type?: "knowledge" | "web" | string;
+  }>;
+  webSearch?: ChatWebSearchStatus | null;
 }
 type Reaction = "like" | "dislike" | null;
+
+const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 interface Props {
   statsKey?: number;
@@ -139,7 +148,9 @@ export default function ChatPanel({
   });
   const [chatScope, setChatScope] =
     useState<ChatScopeSelection>(EMPTY_CHAT_SCOPE);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [scopeNotice, setScopeNotice] = useState("");
+  const [webSearchNotice, setWebSearchNotice] = useState("");
   const [llmHealth, setLlmHealth] = useState<LLMHealthResponse | null>(null);
   const [llmChecking, setLlmChecking] = useState(false);
   const [llmConfig, setLlmConfig] = useState<LLMConfigResponse | null>(null);
@@ -385,13 +396,22 @@ export default function ChatPanel({
     const scopedPayload: KnowledgeBaseChatRequest = {
       question: q,
       k: 5,
+      web_search: webSearchEnabled,
       ...toScopePayload(chatScope),
     };
     let streamTimedOut = false;
-    const streamTimeout = window.setTimeout(() => {
-      streamTimedOut = true;
-      abortController.abort();
-    }, 45000);
+    let streamBuffer = "";
+    let streamIdleTimer: number | null = null;
+    const resetStreamIdleTimer = () => {
+      if (streamIdleTimer !== null) {
+        window.clearTimeout(streamIdleTimer);
+      }
+      streamIdleTimer = window.setTimeout(() => {
+        streamTimedOut = true;
+        abortController.abort();
+      }, CHAT_STREAM_IDLE_TIMEOUT_MS);
+    };
+    resetStreamIdleTimer();
     try {
       if (!knowledgeBaseId) return;
       const streamUrl = knowledgeBaseApi.chatStreamUrl(knowledgeBaseId);
@@ -413,16 +433,16 @@ export default function ChatPanel({
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let done = false;
-      let buffer = "";
 
       while (!done) {
         const { value, done: doneReading } = await reader.read();
         done = doneReading;
         if (value) {
+          resetStreamIdleTimer();
           const chunk = decoder.decode(value, { stream: !done });
           if (chunk) {
-            buffer += chunk;
-            const parsed = parseChatStream(buffer);
+            streamBuffer += chunk;
+            const parsed = parseChatStream(streamBuffer);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
@@ -431,6 +451,7 @@ export default function ChatPanel({
                       content: parsed.answer,
                       thinking: parsed.thinking || m.thinking,
                       sources: parsed.complete ? parsed.sources : m.sources,
+                      webSearch: parsed.webSearch || m.webSearch,
                     }
                   : m,
               ),
@@ -439,7 +460,7 @@ export default function ChatPanel({
         }
       }
 
-      const parsed = parseChatStream(buffer);
+      const parsed = parseChatStream(streamBuffer);
       const extracted = extractThinkingFromContent(parsed.answer);
       const finalThinking = (
         parsed.thinking ||
@@ -456,6 +477,7 @@ export default function ChatPanel({
                 content: finalAnswer,
                 thinking: finalThinking || undefined,
                 sources: parsed.sources,
+                webSearch: parsed.webSearch,
               }
             : m,
         ),
@@ -463,6 +485,30 @@ export default function ChatPanel({
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         if (!streamTimedOut) {
+          return;
+        }
+        const parsed = parseChatStream(streamBuffer);
+        const extracted = extractThinkingFromContent(parsed.answer);
+        const finalThinking = (
+          parsed.thinking ||
+          extracted.thinking ||
+          ""
+        ).trim();
+        const finalAnswer = extracted.answer;
+        if (finalAnswer.trim() || finalThinking) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? {
+                    ...m,
+                    content: finalAnswer,
+                    thinking: finalThinking || m.thinking,
+                    sources: parsed.complete ? parsed.sources : m.sources,
+                    webSearch: parsed.webSearch || m.webSearch,
+                  }
+                : m,
+            ),
+          );
           return;
         }
       }
@@ -483,6 +529,7 @@ export default function ChatPanel({
                   content: finalAnswer,
                   thinking: finalThinking || undefined,
                   sources: res.sources,
+                  webSearch: res.web_search,
                 }
               : m,
           ),
@@ -500,7 +547,9 @@ export default function ChatPanel({
         );
       }
     } finally {
-      window.clearTimeout(streamTimeout);
+      if (streamIdleTimer !== null) {
+        window.clearTimeout(streamIdleTimer);
+      }
       const thinkingDurationMs = Date.now() - thinkingStartedAt;
       setMessages((prev) =>
         prev.map((message) =>
@@ -534,6 +583,8 @@ export default function ChatPanel({
     setRegeneratingMessageId(null);
     setMessages([]);
     setChatScope(EMPTY_CHAT_SCOPE);
+    setWebSearchEnabled(false);
+    setWebSearchNotice("");
     setScopeNotice("");
     if (scopeNoticeTimerRef.current) {
       window.clearTimeout(scopeNoticeTimerRef.current);
@@ -574,12 +625,27 @@ export default function ChatPanel({
     stopGenerating();
     setMessages([]);
     setChatScope(next);
+    setWebSearchNotice("");
     setScopeNotice(`提问范围已更新：${scopeSummary(next)}`);
     if (scopeNoticeTimerRef.current) {
       window.clearTimeout(scopeNoticeTimerRef.current);
     }
     scopeNoticeTimerRef.current = window.setTimeout(() => {
       setScopeNotice("");
+      scopeNoticeTimerRef.current = null;
+    }, 2200);
+  };
+
+  const handleWebSearchChange = (enabled: boolean) => {
+    const notice = enabled ? "联网搜索已开启" : "联网搜索已关闭";
+    setWebSearchEnabled(enabled);
+    setWebSearchNotice(notice);
+    setScopeNotice("");
+    if (scopeNoticeTimerRef.current) {
+      window.clearTimeout(scopeNoticeTimerRef.current);
+    }
+    scopeNoticeTimerRef.current = window.setTimeout(() => {
+      setWebSearchNotice("");
       scopeNoticeTimerRef.current = null;
     }, 2200);
   };
@@ -1001,13 +1067,13 @@ export default function ChatPanel({
                           {m.content}
                         </ReactMarkdown>
                       )}
-                      {m.sources && m.sources.length > 0 && (
+                      {((m.sources && m.sources.length > 0) || m.webSearch) && (
                         <details className="source-details">
                           <summary className="source-summary">
-                            参考链接（{m.sources.length}）
+                            参考链接（{m.sources?.length ?? 0}）
                           </summary>
                           <div className="source-list">
-                            {m.sources.map((s, i) => (
+                            {m.sources?.map((s, i) => (
                               <a
                                 key={i}
                                 href={s.url}
@@ -1015,9 +1081,63 @@ export default function ChatPanel({
                                 rel="noopener noreferrer"
                                 className="source-link"
                               >
-                                {s.title}
+                                <span className="source-type-badge">
+                                  {s.type === "web" ? "网页" : "知识库"}
+                                </span>
+                                <span className="source-link-title">
+                                  {s.title}
+                                </span>
                               </a>
                             ))}
+                            {m.webSearch?.message && (
+                              <div className="web-search-block">
+                                <div
+                                  className={`web-search-status ${m.webSearch.status}`}
+                                >
+                                  {m.webSearch.message}
+                                </div>
+                                {(!m.webSearch.results ||
+                                  m.webSearch.results.length === 0) &&
+                                  m.webSearch.queries &&
+                                  m.webSearch.queries.length > 0 && (
+                                    <div className="web-search-details">
+                                      <div className="web-search-detail-label">
+                                        尝试查询
+                                      </div>
+                                      <div className="web-search-query-list">
+                                        {m.webSearch.queries.map((query) => (
+                                          <span
+                                            key={query}
+                                            className="web-search-query"
+                                          >
+                                            {query}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                {m.webSearch.errors &&
+                                  m.webSearch.errors.length > 0 && (
+                                    <div className="web-search-details">
+                                      <div className="web-search-detail-label">
+                                        诊断信息
+                                      </div>
+                                      <div className="web-search-error-list">
+                                        {m.webSearch.errors.map(
+                                          (error, index) => (
+                                            <span
+                                              key={`${error.source || "web"}-${error.query || error.url || index}-${index}`}
+                                              className="web-search-error"
+                                            >
+                                              {error.message}
+                                            </span>
+                                          ),
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                              </div>
+                            )}
                           </div>
                         </details>
                       )}
@@ -1280,7 +1400,10 @@ export default function ChatPanel({
               <ChatScopePicker
                 options={scopeOptions}
                 value={chatScope}
+                webSearchEnabled={webSearchEnabled}
+                webSearchNotice={webSearchNotice}
                 onChange={handleScopeChange}
+                onWebSearchChange={handleWebSearchChange}
                 disabled={!knowledgeBaseId}
               />
               <button

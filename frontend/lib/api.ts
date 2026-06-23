@@ -138,6 +138,7 @@ export interface KnowledgeBaseSearchResponse {
 export interface KnowledgeBaseChatRequest extends KnowledgeScopeRequest {
   question: string;
   k?: number;
+  web_search?: boolean;
 }
 
 export interface KnowledgeBaseBuildRequest {
@@ -230,9 +231,28 @@ export interface OrganizePreviewResponse {
 }
 
 export interface ChatSource {
-  bvid: string;
+  bvid?: string;
   title: string;
   url: string;
+  type?: "knowledge" | "web" | string;
+}
+
+export interface ChatWebSearchStatus {
+  status: "success" | "no_results" | "failed" | string;
+  message: string;
+  result_count?: number;
+  queries?: string[];
+  results?: Array<{
+    title: string;
+    url: string;
+    snippet?: string;
+  }>;
+  errors?: Array<{
+    source?: string;
+    query?: string;
+    url?: string;
+    message: string;
+  }>;
 }
 
 export interface ImportMethod {
@@ -256,6 +276,7 @@ export interface ChatResponse {
   answer: string;
   sources: ChatSource[];
   thinking?: string;
+  web_search?: ChatWebSearchStatus | null;
 }
 
 export type LLMProvider =

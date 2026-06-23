@@ -33,21 +33,34 @@ const options = {
 function ControlledPicker({
   initialValue = { folderIds: [], bvids: [] },
   onChange,
+  webSearchEnabled = false,
+  onWebSearchChange,
+  webSearchNotice = "",
   disabled = false,
 }: {
   initialValue?: ChatScopeSelection;
   onChange?: (next: ChatScopeSelection) => void;
+  webSearchEnabled?: boolean;
+  onWebSearchChange?: (enabled: boolean) => void;
+  webSearchNotice?: string;
   disabled?: boolean;
 }) {
   const [value, setValue] = useState(initialValue);
+  const [webSearch, setWebSearch] = useState(webSearchEnabled);
   return (
     <ChatScopePicker
       options={options}
       value={value}
+      webSearchEnabled={webSearch}
+      webSearchNotice={webSearchNotice}
       disabled={disabled}
       onChange={(next) => {
         setValue(next);
         onChange?.(next);
+      }}
+      onWebSearchChange={(enabled) => {
+        setWebSearch(enabled);
+        onWebSearchChange?.(enabled);
       }}
     />
   );
@@ -84,12 +97,58 @@ describe("ChatScopePicker", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /^提问范围/ }));
-    await user.click(screen.getByRole("button", { name: "恢复整个知识库" }));
+    await user.click(screen.getByRole("button", { name: "整个知识库" }));
 
     expect(onChange).toHaveBeenLastCalledWith({ folderIds: [], bvids: [] });
     expect(
       screen.getByRole("button", { name: /^提问范围/ }),
     ).toHaveAccessibleName("提问范围：整个知识库");
+  });
+
+  it("toggles web search from the picker menu", async () => {
+    const user = userEvent.setup();
+    const onWebSearchChange = vi.fn();
+    render(<ControlledPicker onWebSearchChange={onWebSearchChange} />);
+
+    await user.click(screen.getByRole("button", { name: /^提问范围/ }));
+    await user.click(screen.getByRole("button", { name: "联网搜索" }));
+
+    expect(onWebSearchChange).toHaveBeenLastCalledWith(true);
+    expect(
+      screen.getByRole("button", { name: /^提问范围/ }),
+    ).toHaveAccessibleName("提问范围：整个知识库，联网搜索已开启");
+  });
+
+  it("shows a privacy hint on the web search control without splitting the UI", async () => {
+    const user = userEvent.setup();
+    render(<ControlledPicker />);
+
+    await user.click(screen.getByRole("button", { name: /^提问范围/ }));
+
+    expect(screen.getByRole("button", { name: "联网搜索" })).toHaveAttribute(
+      "title",
+      "开启后，模型可能向外部搜索服务发送查询并读取公开网页",
+    );
+  });
+
+  it("uses the temporary web search notice before restoring the scope summary", () => {
+    const { rerender } = render(
+      <ControlledPicker webSearchEnabled webSearchNotice="联网搜索已开启" />,
+    );
+
+    const trigger = screen.getByRole("button", { name: /^提问范围/ });
+    expect(trigger).toHaveTextContent("联网搜索已开启");
+    expect(trigger).toHaveAccessibleName(
+      "提问范围：整个知识库，联网搜索已开启",
+    );
+
+    rerender(<ControlledPicker webSearchEnabled webSearchNotice="" />);
+
+    expect(trigger).toHaveTextContent("整个知识库");
+    expect(trigger).not.toHaveTextContent("联网搜索已开启");
+    expect(trigger).toHaveAccessibleName(
+      "提问范围：整个知识库，联网搜索已开启",
+    );
   });
 
   it("filters standalone videos by title and bvid", async () => {
@@ -127,7 +186,9 @@ describe("ChatScopePicker", () => {
       <ChatScopePicker
         options={duplicatedOptions}
         value={{ folderIds: [], bvids: [] }}
+        webSearchEnabled={false}
         onChange={vi.fn()}
+        onWebSearchChange={vi.fn()}
       />,
     );
 

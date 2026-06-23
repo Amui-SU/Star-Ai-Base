@@ -197,6 +197,17 @@ npm install
 - **SiliconFlow**：`SILICONFLOW_API_KEY`、`SILICONFLOW_BASE_URL`、`SILICONFLOW_MODEL`
 - **智谱 GLM**：`ZHIPU_API_KEY`、`ZHIPU_BASE_URL`、`ZHIPU_MODEL`
 
+### 联网搜索
+
+开启聊天页的“联网搜索”后，后端会通过搜索工具链检索外部资料，再把搜索结果作为参考资料交给 LLM；关闭时仅使用知识库内容。
+
+| 变量                       | 默认值  | 说明                                                        |
+| -------------------------- | ------- | ----------------------------------------------------------- |
+| `WEB_SEARCH_PROVIDER`      | `html`  | 搜索源：`html` 使用内置搜索页解析；`tavily` 使用 Tavily API |
+| `TAVILY_API_KEY`           | 空      | 使用 `WEB_SEARCH_PROVIDER=tavily` 时需要配置                |
+| `WEB_SEARCH_FALLBACK_HTML` | `true`  | Tavily 失败或未配置 Key 时是否回退到内置 HTML 搜索          |
+| `TAVILY_SEARCH_DEPTH`      | `basic` | Tavily 搜索深度，常用 `basic` 或 `advanced`                 |
+
 ---
 
 ## 启动与访问地址

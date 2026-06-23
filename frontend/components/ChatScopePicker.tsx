@@ -14,6 +14,9 @@ interface Props {
   options: KnowledgeScopeOptions;
   value: ChatScopeSelection;
   onChange: (next: ChatScopeSelection) => void;
+  webSearchEnabled: boolean;
+  onWebSearchChange: (enabled: boolean) => void;
+  webSearchNotice?: string;
   disabled?: boolean;
 }
 
@@ -33,6 +36,9 @@ export default function ChatScopePicker({
   options,
   value,
   onChange,
+  webSearchEnabled,
+  onWebSearchChange,
+  webSearchNotice = "",
   disabled = false,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -41,6 +47,12 @@ export default function ChatScopePicker({
   const rootRef = useRef<HTMLDivElement>(null);
   const normalized = normalizeScope(value);
   const summary = scopeSummary(value);
+  const triggerSummary = webSearchNotice && !open ? webSearchNotice : summary;
+  const accessibleSummary = webSearchNotice
+    ? `${summary}，${webSearchNotice}`
+    : webSearchEnabled
+      ? `${summary}，联网搜索已开启`
+      : summary;
 
   const allVideos = useMemo(() => {
     const seen = new Set<string>();
@@ -114,6 +126,11 @@ export default function ChatScopePicker({
     });
   };
 
+  const toggleWebSearch = () => {
+    onWebSearchChange(!webSearchEnabled);
+    setOpen(false);
+  };
+
   const renderVideoOption = (
     video: KnowledgeScopeVideo & { folderTitle?: string },
   ) => (
@@ -138,16 +155,18 @@ export default function ChatScopePicker({
     <div className="scope-picker" ref={rootRef}>
       <button
         type="button"
-        className="mode-chip scope-picker-trigger"
+        className={`mode-chip scope-picker-trigger ${
+          webSearchEnabled ? "web-search-enabled" : ""
+        } ${webSearchNotice ? "web-search-notice" : ""}`}
         disabled={disabled}
         onClick={() => setOpen((next) => !next)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`提问范围：${summary}`}
-        title={`提问范围：${summary}`}
+        aria-label={`提问范围：${accessibleSummary}`}
+        title={`提问范围：${accessibleSummary}`}
       >
         <span aria-hidden="true">◎</span>
-        <span className="scope-picker-summary">{summary}</span>
+        <span className="scope-picker-summary">{triggerSummary}</span>
       </button>
 
       {open && (
@@ -163,16 +182,30 @@ export default function ChatScopePicker({
             </div>
             <button
               type="button"
-              className="scope-reset-btn"
-              onClick={() => emit(EMPTY_CHAT_SCOPE)}
+              className={`scope-web-search-btn ${
+                webSearchEnabled ? "active" : ""
+              }`}
+              aria-label="联网搜索"
+              aria-describedby="scope-web-search-privacy"
+              aria-pressed={webSearchEnabled}
+              title="开启后，模型可能向外部搜索服务发送查询并读取公开网页"
+              onClick={toggleWebSearch}
             >
-              恢复整个知识库
+              <span className="scope-web-dot" aria-hidden="true" />
+              联网搜索
             </button>
+            <span
+              id="scope-web-search-privacy"
+              className="scope-visually-hidden"
+            >
+              开启后，模型可能向外部搜索服务发送查询并读取公开网页
+            </span>
           </div>
 
           <div className="scope-mode-grid" aria-label="范围类型">
             <button
               type="button"
+              aria-label="整个知识库"
               className={`scope-mode-card ${
                 normalized.folderIds.length === 0 &&
                 normalized.bvids.length === 0

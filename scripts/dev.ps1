@@ -124,6 +124,58 @@ function Test-PortListening {
     }
 }
 
+function Resolve-WindowsHttpProxy {
+    try {
+        $settings = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -ErrorAction SilentlyContinue
+        if (-not $settings -or [int]$settings.ProxyEnable -ne 1 -or -not $settings.ProxyServer) {
+            return $null
+        }
+
+        $rawProxy = "" + $settings.ProxyServer
+        $candidate = $rawProxy
+        foreach ($part in ($rawProxy -split ";")) {
+            $trimmed = $part.Trim()
+            if ($trimmed -match "^(?:https?|socks)=([^;]+)$") {
+                $candidate = $Matches[1]
+                break
+            }
+        }
+        if ($candidate -notmatch "^[a-zA-Z][a-zA-Z0-9+.-]*://") {
+            $candidate = "http://$candidate"
+        }
+        return $candidate
+    }
+    catch {
+        return $null
+    }
+}
+
+function Ensure-HttpProxyEnvironment {
+    $proxy = Resolve-WindowsHttpProxy
+    if (-not $proxy) {
+        return
+    }
+
+    foreach ($name in @("HTTP_PROXY", "HTTPS_PROXY")) {
+        if (-not [Environment]::GetEnvironmentVariable($name, "Process")) {
+            [Environment]::SetEnvironmentVariable($name, $proxy, "Process")
+        }
+    }
+    foreach ($name in @("NO_PROXY", "no_proxy")) {
+        $current = [Environment]::GetEnvironmentVariable($name, "Process")
+        if (-not $current) {
+            [Environment]::SetEnvironmentVariable($name, "localhost,127.0.0.1,::1", "Process")
+        }
+        elseif ($current -notmatch "(^|,)127\.0\.0\.1(,|$)") {
+            [Environment]::SetEnvironmentVariable(
+                $name,
+                "$current,localhost,127.0.0.1,::1",
+                "Process"
+            )
+        }
+    }
+}
+
 function Get-LanIPv4Address {
     try {
         $lines = ipconfig | Select-String "IPv4"
@@ -476,6 +528,7 @@ function Invoke-Start {
 
     [Environment]::SetEnvironmentVariable("PYTHONIOENCODING", "utf-8", "Process")
     [Environment]::SetEnvironmentVariable("PYTHONUTF8", "1", "Process")
+    Ensure-HttpProxyEnvironment
 
     try {
         Write-Info "Starting backend..."

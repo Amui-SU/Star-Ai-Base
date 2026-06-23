@@ -441,6 +441,7 @@ class KnowledgeBaseChatRequest(BaseModel):
     k: int = 5
     folder_ids: Optional[list[int]] = None
     bvids: Optional[list[str]] = None
+    web_search: bool = False
 
 
 class KnowledgeScopeVideo(BaseModel):
@@ -551,3 +552,4 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[dict]  # 来源视频列表
     thinking: Optional[str] = None  # 思考过程（模型支持时返回）
+    web_search: Optional[dict] = None  # 联网搜索状态

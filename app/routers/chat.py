@@ -6,8 +6,9 @@ Bilibili RAG 知识库系统
 import re
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -82,6 +83,13 @@ _current_llm_provider = (
     else "dashscope"
 )
 THINKING_DELTA_MARKER = "[[THINKING_DELTA]]"
+
+
+@dataclass
+class LLMToolRunResult:
+    messages: list[dict]
+    answer: str | None = None
+    thinking: str = ""
 
 
 class LLMProviderUpdateRequest(BaseModel):
@@ -696,6 +704,316 @@ def _complete_llm_answer(
         getattr(message, "reasoning_content", None),
     )
     return answer, thinking
+
+
+def _message_to_openai_dict(message: Any) -> dict:
+    if isinstance(message, dict):
+        raw = message
+    elif hasattr(message, "model_dump"):
+        raw = message.model_dump(exclude_none=True)
+    elif hasattr(message, "dict"):
+        raw = message.dict(exclude_none=True)
+    else:
+        raw = {"role": "assistant", "content": getattr(message, "content", "") or ""}
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            raw["tool_calls"] = [
+                _tool_call_to_dict(tool_call) for tool_call in tool_calls
+            ]
+
+    result = {
+        "role": raw.get("role") or "assistant",
+        "content": raw.get("content") or "",
+    }
+    if raw.get("tool_calls"):
+        result["tool_calls"] = raw["tool_calls"]
+    return result
+
+
+def _tool_call_to_dict(tool_call: Any) -> dict:
+    if isinstance(tool_call, dict):
+        return tool_call
+    function = getattr(tool_call, "function", None)
+    return {
+        "id": getattr(tool_call, "id", ""),
+        "type": getattr(tool_call, "type", "function"),
+        "function": {
+            "name": getattr(function, "name", ""),
+            "arguments": getattr(function, "arguments", "{}"),
+        },
+    }
+
+
+def _tool_call_id(tool_call: Any) -> str:
+    if isinstance(tool_call, dict):
+        return str(tool_call.get("id") or "")
+    return str(getattr(tool_call, "id", "") or "")
+
+
+def _tool_call_function(tool_call: Any) -> tuple[str, Any]:
+    if isinstance(tool_call, dict):
+        function = tool_call.get("function") or {}
+        return str(function.get("name") or ""), function.get("arguments") or "{}"
+    function = getattr(tool_call, "function", None)
+    return str(getattr(function, "name", "") or ""), (
+        getattr(function, "arguments", "{}") or "{}"
+    )
+
+
+def _extract_dsml_text_tool_calls(content: str) -> tuple[str, list[dict]]:
+    if "<｜｜DSML｜｜tool_calls>" not in content:
+        return content, []
+
+    tool_calls: list[dict] = []
+
+    def collect_tool_calls(match: re.Match) -> str:
+        block = match.group(1)
+        for invoke_index, invoke_match in enumerate(
+            re.finditer(
+                r'<｜｜DSML｜｜invoke\s+name="([^"]+)">(.*?)</｜｜DSML｜｜invoke>',
+                block,
+                flags=re.DOTALL,
+            ),
+            start=len(tool_calls) + 1,
+        ):
+            arguments = {
+                param_match.group(1): param_match.group(2).strip()
+                for param_match in re.finditer(
+                    r'<｜｜DSML｜｜parameter\s+name="([^"]+)"(?:\s+string="true")?>(.*?)</｜｜DSML｜｜parameter>',
+                    invoke_match.group(2),
+                    flags=re.DOTALL,
+                )
+            }
+            tool_calls.append(
+                {
+                    "id": f"dsml_call_{invoke_index}",
+                    "type": "function",
+                    "function": {
+                        "name": invoke_match.group(1).strip(),
+                        "arguments": json.dumps(arguments, ensure_ascii=False),
+                    },
+                }
+            )
+        return ""
+
+    visible_content = re.sub(
+        r"<｜｜DSML｜｜tool_calls>(.*?)</｜｜DSML｜｜tool_calls>",
+        collect_tool_calls,
+        content,
+        flags=re.DOTALL,
+    ).strip()
+    return visible_content, tool_calls
+
+
+def _contains_dsml_tool_call_text(content: str) -> bool:
+    return "<｜｜DSML｜｜tool_calls>" in (content or "")
+
+
+def _append_no_more_tool_calls_instruction(messages: list[dict]) -> list[dict]:
+    return [
+        *messages,
+        {
+            "role": "system",
+            "content": (
+                "工具调用阶段已经结束。不要再输出工具调用、DSML、XML 或 JSON 工具请求；"
+                "请直接基于已有知识库资料和工具返回结果，用 Markdown 回答用户问题。"
+            ),
+        },
+    ]
+
+
+def _normalize_tool_arguments(parsed: dict) -> dict:
+    normalized = dict(parsed)
+    if normalized.get("query"):
+        return normalized
+
+    for key in ("search_query", "keyword", "keywords", "q"):
+        value = normalized.get(key)
+        if isinstance(value, str) and value.strip():
+            normalized["query"] = value.strip()
+            normalized.pop(key, None)
+            return normalized
+
+    queries = normalized.get("queries")
+    if isinstance(queries, list):
+        query = " ".join(str(item).strip() for item in queries if str(item).strip())
+        if query:
+            normalized["query"] = query
+            normalized.pop("queries", None)
+    elif isinstance(queries, str) and queries.strip():
+        normalized["query"] = queries.strip()
+        normalized.pop("queries", None)
+    return normalized
+
+
+def _parse_tool_arguments(raw_arguments: Any) -> dict:
+    if isinstance(raw_arguments, dict):
+        return _normalize_tool_arguments(raw_arguments)
+    try:
+        parsed = json.loads(raw_arguments or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return _normalize_tool_arguments(parsed) if isinstance(parsed, dict) else {}
+
+
+async def _complete_llm_answer_with_tools(
+    messages: list[dict],
+    *,
+    tools: list[dict],
+    tool_handlers: dict[str, Callable[[dict], Awaitable[dict]]],
+    max_tool_calls: int = 2,
+) -> tuple[str, str, list[dict]]:
+    tool_run = await _prepare_llm_messages_with_tools(
+        messages,
+        tools=tools,
+        tool_handlers=tool_handlers,
+        max_tool_calls=max_tool_calls,
+    )
+    if tool_run.answer is not None:
+        return tool_run.answer, tool_run.thinking, tool_run.messages
+
+    llm_config = _resolve_llm_config()
+    client = _get_llm_client(llm_config)
+    response = client.chat.completions.create(
+        model=llm_config["model"],
+        messages=_append_no_more_tool_calls_instruction(tool_run.messages),
+        temperature=0.5,
+        **_build_thinking_completion_options(llm_config),
+    )
+    message = response.choices[0].message
+    thinking, answer = _extract_thinking_and_answer(
+        message.content or "",
+        getattr(message, "reasoning_content", None),
+    )
+    if _contains_dsml_tool_call_text(answer):
+        response = client.chat.completions.create(
+            model=llm_config["model"],
+            messages=_append_no_more_tool_calls_instruction(
+                [
+                    *tool_run.messages,
+                    {
+                        "role": "assistant",
+                        "content": ("我刚刚仍输出了工具调用文本，这不是最终答案。"),
+                    },
+                ]
+            ),
+            temperature=0.5,
+            **_build_thinking_completion_options(llm_config),
+        )
+        message = response.choices[0].message
+        thinking, answer = _extract_thinking_and_answer(
+            message.content or "",
+            getattr(message, "reasoning_content", None),
+        )
+    return answer, thinking, tool_run.messages
+
+
+async def _prepare_llm_messages_with_tools(
+    messages: list[dict],
+    *,
+    tools: list[dict],
+    tool_handlers: dict[str, Callable[[dict], Awaitable[dict]]],
+    max_tool_calls: int = 2,
+) -> LLMToolRunResult:
+    llm_config = _resolve_llm_config()
+    client = _get_llm_client(llm_config)
+    working_messages = [*messages]
+    executed_tool_calls = 0
+
+    while executed_tool_calls < max_tool_calls:
+        response = client.chat.completions.create(
+            model=llm_config["model"],
+            messages=working_messages,
+            temperature=0.5,
+            tools=tools,
+            tool_choice="auto",
+            **_build_thinking_completion_options(llm_config),
+        )
+        message = response.choices[0].message
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if not tool_calls:
+            content, text_tool_calls = _extract_dsml_text_tool_calls(
+                message.content or ""
+            )
+            if text_tool_calls:
+                message = {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": text_tool_calls,
+                }
+                tool_calls = text_tool_calls
+            else:
+                thinking, answer = _extract_thinking_and_answer(
+                    message.content or "",
+                    getattr(message, "reasoning_content", None),
+                )
+                return LLMToolRunResult(
+                    messages=working_messages,
+                    answer=answer,
+                    thinking=thinking,
+                )
+
+        if not tool_calls:
+            thinking, answer = _extract_thinking_and_answer(
+                message.content or "",
+                getattr(message, "reasoning_content", None),
+            )
+            return LLMToolRunResult(
+                messages=working_messages,
+                answer=answer,
+                thinking=thinking,
+            )
+
+        working_messages, executed_this_round = await _append_tool_call_results(
+            working_messages,
+            message,
+            tool_calls,
+            tool_handlers=tool_handlers,
+            remaining_tool_calls=max_tool_calls - executed_tool_calls,
+        )
+        executed_tool_calls += executed_this_round
+
+    return LLMToolRunResult(messages=working_messages)
+
+
+async def _append_tool_call_results(
+    working_messages: list[dict],
+    message: Any,
+    tool_calls: list[Any],
+    *,
+    tool_handlers: dict[str, Callable[[dict], Awaitable[dict]]],
+    remaining_tool_calls: int,
+) -> tuple[list[dict], int]:
+    executed_tool_calls = 0
+    working_messages.append(_message_to_openai_dict(message))
+    for tool_call in tool_calls:
+        call_id = _tool_call_id(tool_call)
+        name, raw_arguments = _tool_call_function(tool_call)
+        handler = tool_handlers.get(name)
+        if executed_tool_calls >= remaining_tool_calls:
+            executed_tool_calls += 1
+            content = {
+                "error": "tool_call_limit_exceeded",
+                "message": "联网搜索次数已达到上限",
+            }
+        elif handler is None:
+            executed_tool_calls += 1
+            content = {
+                "error": "unknown_tool",
+                "message": f"工具 {name or 'unknown'} 不可用",
+            }
+        else:
+            executed_tool_calls += 1
+            content = await handler(_parse_tool_arguments(raw_arguments))
+        working_messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "name": name,
+                "content": json.dumps(content, ensure_ascii=False),
+            }
+        )
+    return working_messages, executed_tool_calls
 
 
 def _extract_thinking_and_answer(
