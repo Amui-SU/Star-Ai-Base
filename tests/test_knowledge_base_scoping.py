@@ -1473,6 +1473,118 @@ async def test_only_new_tool_results_are_appended_after_initial_web_context(
 
 
 @pytest.mark.asyncio
+async def test_tool_web_results_remove_initial_no_results_instruction(monkeypatch):
+    from app.routers.knowledge_bases import _prepare_web_search_tool_run
+
+    captured = {"calls": [], "second_call_messages": []}
+
+    class FakeToolFunction:
+        name = "web_search"
+        arguments = json.dumps({"query": "tool query"}, ensure_ascii=False)
+
+    class FakeToolCall:
+        id = "call_search"
+        function = FakeToolFunction()
+
+    class FakeMessage:
+        reasoning_content = ""
+
+        def __init__(self, *, content="", tool_calls=None):
+            self.content = content
+            self.tool_calls = tool_calls
+
+        def model_dump(self, exclude_none=True):
+            data = {"role": "assistant", "content": self.content}
+            if self.tool_calls is not None:
+                data["tool_calls"] = [
+                    {
+                        "id": "call_search",
+                        "type": "function",
+                        "function": {
+                            "name": "web_search",
+                            "arguments": FakeToolFunction.arguments,
+                        },
+                    }
+                ]
+            return data
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured["calls"].append(kwargs)
+            if len(captured["calls"]) == 1:
+                captured["first_call_messages"] = kwargs["messages"]
+                return type(
+                    "Response",
+                    (),
+                    {
+                        "choices": [
+                            type(
+                                "Choice",
+                                (),
+                                {"message": FakeMessage(tool_calls=[FakeToolCall()])},
+                            )()
+                        ]
+                    },
+                )()
+            captured["second_call_messages"] = kwargs["messages"]
+            return type(
+                "Response",
+                (),
+                {
+                    "choices": [
+                        type("Choice", (), {"message": FakeMessage(content="answer")})()
+                    ]
+                },
+            )()
+
+    fake_client = type(
+        "Client",
+        (),
+        {"chat": type("Chat", (), {"completions": FakeCompletions()})()},
+    )()
+
+    async def fake_search_web(query, *, max_results=3):
+        if query == "question":
+            return []
+        return [
+            {
+                "title": "Tool Web Result",
+                "url": "https://example.com/tool",
+                "snippet": "Tool snippet",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "app.routers.chat._resolve_llm_config",
+        lambda: {
+            "provider": "test",
+            "model": "tool-model",
+            "api_key": "test",
+            "base_url": "https://example.com",
+            "thinking_config": {},
+        },
+    )
+    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
+    monkeypatch.setattr("app.routers.knowledge_bases.search_web", fake_search_web)
+
+    tool_run, web_results, _state = await _prepare_web_search_tool_run(
+        [{"role": "user", "content": "知识库资料\n\n问题：question"}],
+        question="question",
+        provider="tavily",
+    )
+    serialized_second_call = json.dumps(
+        captured["second_call_messages"],
+        ensure_ascii=False,
+    )
+    serialized_final_messages = json.dumps(tool_run.messages, ensure_ascii=False)
+
+    assert len(web_results) == 1
+    assert "Tool Web Result" in serialized_second_call
+    assert "不要声称已获得外部网页资料" not in serialized_second_call
+    assert "不要声称已获得外部网页资料" not in serialized_final_messages
+
+
+@pytest.mark.asyncio
 async def test_scoped_chat_stream_reports_web_search_no_results(client, monkeypatch):
     await register_user(client, "web-stream-empty@example.com", "Web Stream Empty")
     knowledge_base = await create_knowledge_base(client, "Web Stream Empty KB")

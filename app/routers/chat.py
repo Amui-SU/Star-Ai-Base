@@ -992,6 +992,7 @@ async def _prepare_llm_messages_with_tools(
     tools: list[dict],
     tool_handlers: dict[str, Callable[[dict], Awaitable[dict]]],
     max_tool_calls: int = 2,
+    after_tool_messages: Optional[Callable[[list[dict]], list[dict]]] = None,
 ) -> LLMToolRunResult:
     llm_config = _resolve_llm_config()
     client = _get_llm_client(llm_config)
@@ -1049,6 +1050,8 @@ async def _prepare_llm_messages_with_tools(
             tool_handlers=tool_handlers,
             remaining_tool_calls=max_tool_calls - executed_tool_calls,
         )
+        if after_tool_messages is not None:
+            working_messages = after_tool_messages(working_messages)
         executed_tool_calls += executed_this_round
 
     return LLMToolRunResult(messages=working_messages)

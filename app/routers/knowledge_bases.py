@@ -434,6 +434,23 @@ def _append_web_search_no_results_message(
     ]
 
 
+def _is_web_search_no_results_message(message: dict) -> bool:
+    content = str(message.get("content") or "")
+    return (
+        message.get("role") == "system"
+        and "初始联网搜索未返回可用结果" in content
+        and "不要声称已获得外部网页资料" in content
+    )
+
+
+def _remove_web_search_no_results_messages(messages: list[dict]) -> list[dict]:
+    return [
+        message
+        for message in messages
+        if not _is_web_search_no_results_message(message)
+    ]
+
+
 WEB_SEARCH_TOOL = {
     "type": "function",
     "function": {
@@ -633,6 +650,11 @@ async def _prepare_web_search_tool_run(
             ),
         },
         max_tool_calls=3,
+        after_tool_messages=lambda next_messages: (
+            _remove_web_search_no_results_messages(next_messages)
+            if len(web_results) > initial_result_count
+            else next_messages
+        ),
     )
 
     if len(web_results) > initial_result_count:

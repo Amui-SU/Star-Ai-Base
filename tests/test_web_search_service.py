@@ -10,6 +10,13 @@ class FakeResolverResult:
         self.host = host
 
 
+@pytest.fixture(autouse=True)
+def use_html_search_provider(monkeypatch):
+    monkeypatch.setattr(web_search.settings, "web_search_provider", "html")
+    monkeypatch.setattr(web_search.settings, "tavily_api_key", "")
+    monkeypatch.setattr(web_search.settings, "web_search_fallback_html", True)
+
+
 @pytest.mark.asyncio
 async def test_fetch_web_page_rejects_private_network_urls():
     blocked_urls = [
