@@ -1626,8 +1626,10 @@ async def test_tool_web_results_remove_initial_no_results_instruction(monkeypatc
     serialized_final_messages = json.dumps(tool_run.messages, ensure_ascii=False)
 
     assert len(web_results) == 1
+    assert "联网搜索资料" in serialized_second_call
     assert "Tool Web Result" in serialized_second_call
     assert "不要声称已获得外部网页资料" not in serialized_second_call
+    assert "联网搜索资料" in serialized_final_messages
     assert "不要声称已获得外部网页资料" not in serialized_final_messages
 
 

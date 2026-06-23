@@ -447,6 +447,28 @@ async def _is_blocked_url(url: str) -> bool:
     return False
 
 
+def _is_blocked_search_result_url(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        return True
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        return True
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        return True
+    if _is_blocked_address(hostname):
+        return True
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    try:
+        parsed.port
+    except ValueError:
+        return True
+    return False
+
+
 async def search_web(
     query: str,
     *,
@@ -718,7 +740,12 @@ async def _normalize_search_results(
     for result in results:
         title = (result.get("title") or "").strip()
         url = (result.get("url") or "").strip()
-        if not title or not url or url in seen_urls or await _is_blocked_url(url):
+        if (
+            not title
+            or not url
+            or url in seen_urls
+            or _is_blocked_search_result_url(url)
+        ):
             continue
         seen_urls.add(url)
         normalized.append(

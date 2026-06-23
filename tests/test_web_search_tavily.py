@@ -91,6 +91,56 @@ async def test_search_web_uses_tavily_provider_when_configured(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_web_keeps_tavily_snippets_when_dns_lookup_fails(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "results": [
+                    {
+                        "title": "Tavily DNS Result",
+                        "url": "https://example.com/tavily-dns",
+                        "content": "Tavily snippet should still ground the model",
+                    }
+                ]
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, data=None, json=None, headers=None):
+            return FakeResponse()
+
+    async def unresolved_hostname(hostname, port=80):
+        return []
+
+    monkeypatch.setattr(web_search.settings, "web_search_provider", "tavily")
+    monkeypatch.setattr(web_search.settings, "tavily_api_key", "test-key")
+    monkeypatch.setattr(web_search.settings, "web_search_fallback_html", False)
+    monkeypatch.setattr(web_search.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(web_search, "_resolve_hostname", unresolved_hostname)
+
+    results = await web_search.search_web("tavily dns query")
+
+    assert results == [
+        {
+            "title": "Tavily DNS Result",
+            "url": "https://example.com/tavily-dns",
+            "snippet": "Tavily snippet should still ground the model",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_search_web_falls_back_to_html_when_tavily_fails(monkeypatch):
     captured = {"requests": []}
 
