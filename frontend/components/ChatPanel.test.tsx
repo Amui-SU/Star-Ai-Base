@@ -969,6 +969,58 @@ describe("ChatPanel", () => {
     expect(knowledgeBaseApi.chat).not.toHaveBeenCalled();
   });
 
+  it("uses instant autoscroll during streaming updates to avoid repeated smooth-scroll jank", async () => {
+    mockChatPanelDependencies();
+    const scrollMock = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollMock;
+    const encoder = new TextEncoder();
+    const pendingReads: Array<
+      ReturnType<typeof createDeferred<ReadableStreamReadResult<Uint8Array>>>
+    > = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              const pending =
+                createDeferred<ReadableStreamReadResult<Uint8Array>>();
+              pendingReads.push(pending);
+              return pending.promise;
+            }),
+          }),
+        },
+      }),
+    );
+
+    const { container } = render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+    );
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "smooth stream" },
+    });
+    fireEvent.click(container.querySelector(".composer-send-button")!);
+
+    await waitFor(() => {
+      expect(pendingReads).toHaveLength(1);
+    });
+
+    await act(async () => {
+      pendingReads[0].resolve({
+        done: false,
+        value: encoder.encode("stream chunk"),
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("stream chunk")).toBeVisible();
+    expect(scrollMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: "smooth" }),
+    );
+  });
+
   it("does not call the non-stream fallback after idle timeout when partial content exists", async () => {
     vi.useFakeTimers();
     mockChatPanelDependencies();

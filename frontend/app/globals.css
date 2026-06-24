@@ -2369,11 +2369,12 @@ html.light .video-card:hover {
     rgba(255, 255, 255, 0.98),
     rgba(255, 255, 255, 0.58)
   );
-  background-size: 220% 100%;
-  background-position: 180% 50%;
+  background-size: 260% 100%;
+  background-position: 220% 50%;
   -webkit-background-clip: text;
   background-clip: text;
-  animation: webSearchTextShimmer 1.55s ease-in-out infinite;
+  animation: webSearchTextShimmer 4.8s linear infinite;
+  will-change: background-position;
 }
 
 @supports ((-webkit-background-clip: text) or (background-clip: text)) {
@@ -2404,12 +2405,11 @@ html.light .web-search-live-dot {
 
 @keyframes webSearchTextShimmer {
   0% {
-    background-position: 180% 50%;
+    background-position: 220% 50%;
   }
 
-  56%,
   100% {
-    background-position: -80% 50%;
+    background-position: -120% 50%;
   }
 }
 

@@ -189,6 +189,7 @@ export default function ChatPanel({
   const endRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   const scopeNoticeTimerRef = useRef<number | null>(null);
   const providerLogoMap: Record<string, string> = {
     deepseek: "/logos/deepseek-icon.png",
@@ -423,7 +424,19 @@ export default function ChatPanel({
   };
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    });
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
   }, [messages]);
 
   useEffect(() => {

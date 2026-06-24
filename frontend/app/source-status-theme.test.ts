@@ -38,8 +38,16 @@ describe("chat web search light theme", () => {
     );
     expect(stylesheet).not.toMatch(/\.web-search-live-status::before\s*\{/);
     expect(stylesheet).toMatch(
-      /\.web-search-live-text\s*\{[^}]*background:\s*linear-gradient\(\s*90deg,\s*rgba\(255,\s*255,\s*255,\s*0\.58\),\s*rgba\(255,\s*255,\s*255,\s*0\.98\),\s*rgba\(255,\s*255,\s*255,\s*0\.58\)\s*\);[^}]*background-size:\s*220% 100%;[^}]*animation:\s*webSearchTextShimmer 1\.55s ease-in-out infinite;/s,
+      /\.web-search-live-text\s*\{[^}]*background:\s*linear-gradient\(\s*90deg,\s*rgba\(255,\s*255,\s*255,\s*0\.58\),\s*rgba\(255,\s*255,\s*255,\s*0\.98\),\s*rgba\(255,\s*255,\s*255,\s*0\.58\)\s*\);[^}]*background-size:\s*260% 100%;[^}]*animation:\s*webSearchTextShimmer 4\.8s linear infinite;[^}]*will-change:\s*background-position;/s,
     );
+    expect(stylesheet).toMatch(
+      /@keyframes webSearchTextShimmer\s*\{\s*0%\s*\{[^}]*background-position:\s*220% 50%;[^}]*\}\s*100%\s*\{[^}]*background-position:\s*-120% 50%;[^}]*\}\s*\}/s,
+    );
+    const shimmerKeyframes =
+      stylesheet.match(
+        /@keyframes webSearchTextShimmer\s*\{[\s\S]*?\n\}/,
+      )?.[0] ?? "";
+    expect(shimmerKeyframes).not.toContain("56%");
     expect(stylesheet).toMatch(
       /\.web-search-live-dot\s*\{[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.78\);[^}]*box-shadow:\s*0 0 10px rgba\(255,\s*255,\s*255,\s*0\.2\);/s,
     );
