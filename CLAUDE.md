@@ -63,7 +63,7 @@ app/
 │   ├── knowledge.py      # 知识库构建/同步/统计/清空（旧 B 站 session_id 驱动）
 │   ├── knowledge_bases.py# 多用户知识库 CRUD + scoped search/chat/chat-stream/build/delete/scope-options
 │   ├── favorites.py      # 收藏夹列表/视频/整理/清理
-│   ├── imports.py        # 多来源导入入口：B 站视频 URL 已接入，抖音/通用 URL 预留
+│   ├── imports.py        # 多来源导入入口：B 站视频 URL 与本地视频已接入，抖音/通用 URL 预留
 │   └── source_bindings.py# B 站账号绑定到 workspace（QR 绑定流程 + 凭据加密存储 + 自定义视频名）
 └── services/
     ├── bilibili.py       # B 站 API（登录/收藏夹/视频/音频/WBI 签名）
@@ -93,7 +93,7 @@ SystemUser → Workspace (1:1 via WorkspaceMember) → KnowledgeBase (1:N)
 | 知识库/RAG | `/knowledge/*`、`/chat/ask|ask/stream|search` 已返回 `410 Gone` | `/knowledge-bases/{id}/search|chat|chat/stream|build|build/status|stats|scope-options` |
 | 绑定 | — | `/source-bindings` + `/source-bindings/bilibili/qrcode` |
 | 收藏夹 | `/favorites/*` | `/source-bindings/{id}/favorites` + `/source-bindings/{id}/favorites/{media_id}/videos` |
-| 导入 | — | `/imports/methods` + `/imports/url` |
+| 导入 | — | `/imports/methods` + `/imports/url` + `/imports/local-video` |
 | 视频名 | — | `/source-bindings/{id}/videos/title` |
 | 本地连接 | — | `/local-connection/lan-address`、`/local-connection/mobile-connect`、`/local-connection/mobile-connect.png` |
 
@@ -113,7 +113,7 @@ SystemUser → Workspace (1:1 via WorkspaceMember) → KnowledgeBase (1:N)
 
 **提问范围**：`KnowledgeBaseChatRequest` 支持 `folder_ids` 与 `bvids`。`/knowledge-bases/{id}/scope-options` 返回当前知识库可提问的收藏夹和视频；前端 `ChatScopePicker` 可在整个知识库、收藏夹、单个视频之间切换，最终仍走 scoped chat/chat-stream。
 
-**导入体系**：`imports.py` 提供一级导入入口。`/imports/methods` 返回 B 站收藏夹、视频 URL、抖音、通用 URL 等方式；当前已实现 B 站视频 URL 导入，写入 `VideoCache`、`FavoriteFolder("单条视频导入")`、`FavoriteVideo`、`IngestionTask` 并同步向量。B 站收藏夹扫码绑定仍作为第二层级入口复用 `source_bindings.py`。
+**导入体系**：`imports.py` 提供一级导入入口。`/imports/methods` 返回 B 站收藏夹、导入视频、抖音、通用 URL 等方式；`导入视频` 使用方法 id `video_import`，前端兼容旧 `video_url` id。当前已实现 B 站视频 URL 导入与本地视频文件导入：URL 路径走 `/imports/url`，本地文件走 `/imports/local-video` multipart 表单（`knowledge_base_id`、可选 `title`、`file`），依赖 `python-multipart`。两条路径都写入 `VideoCache`、`FavoriteFolder("单条视频导入")`、`FavoriteVideo`、`IngestionTask` 并同步向量。本地视频会保存到 `data/local_imports`，交给 `ASRService.transcribe_local_file()` 转写，任务结束时兜底清理上传源文件；扩展本地导入时必须保留工作区/知识库隔离与失败清理。B 站收藏夹扫码绑定仍作为第二层级入口复用 `source_bindings.py`。
 
 **自定义视频名**：`VideoTitleOverride` 以 workspace + knowledge_base + source_binding + bvid 为唯一作用域保存自定义标题。`source_bindings.py` 在返回收藏夹视频时合并 `custom_title/display_title/original_title`，`/source-bindings/{id}/videos/title` 负责创建、更新和清除覆盖名。
 
@@ -127,7 +127,7 @@ SystemUser → Workspace (1:1 via WorkspaceMember) → KnowledgeBase (1:N)
 
 **局域网 CORS / PNA**：`main.py` 的 CORS 允许 localhost、私有 IPv4、`capacitor://localhost`、`ionic://localhost`。另有 `allow_private_network_preflight` 中间件，当请求带 `Access-Control-Request-Private-Network: true` 时返回 `Access-Control-Allow-Private-Network: true`，用于兼容手机 WebView/Chrome 的 Private Network Access 预检。
 
-**APK 原生 HTTP 兜底**：`frontend/lib/nativeHttp.ts` 封装 `requestWithNativeFallback()`。普通 Web 优先使用 `fetch`；Capacitor 原生壳中如果 `fetch` 抛错，会退到 `CapacitorHttp.request()`。`frontend/capacitor.config.ts` 必须保持 `plugins.CapacitorHttp.enabled = true`，Android Manifest 必须保留 `INTERNET`、`CAMERA`、cleartext HTTP 和 `zhikuyun://connect` deep link。公网 HTTPS 部署并移除本地连接时，主要删除 `LocalConnectionBootstrap`、`LocalConnectionSettings`、`localConnection*`、`nativeHttp`、`local_connection.py` 以及 UserMenu 的局域网地址区块。
+**APK 原生 HTTP 兜底**：`frontend/lib/nativeHttp.ts` 封装 `requestWithNativeFallback()`。普通 Web 优先使用 `fetch`；Capacitor 原生壳中如果 `fetch` 抛错，会退到 `CapacitorHttp.request()`。本地视频上传依赖 FormData，native fallback 需要把字符串字段序列化为 `{ type: "string" }`，把 `File` 通过 FileReader 转 base64 并标记 `{ type: "base64File" }`，同时传 `dataType: "formData"`；不要恢复默认 JSON `Content-Type`，浏览器/原生层需要自行生成 multipart boundary。`frontend/capacitor.config.ts` 必须保持 `plugins.CapacitorHttp.enabled = true`，Android Manifest 必须保留 `INTERNET`、`CAMERA`、cleartext HTTP 和 `zhikuyun://connect` deep link。公网 HTTPS 部署并移除本地连接时，主要删除 `LocalConnectionBootstrap`、`LocalConnectionSettings`、`localConnection*`、`nativeHttp`、`local_connection.py` 以及 UserMenu 的局域网地址区块。
 
 **进程管理**（`scripts/dev.ps1`）：`Test-ProjectProcess` 按命令行完整路径+分隔符精准匹配，避免 substring 误杀。失败清理直接停 `Start-Process` 返回的子进程 PID。`stop` 优先读 `runtime.json` 的 PID，再用 `Get-CimInstance` 扫描并按 `Test-ProjectProcess` 过滤。
 
@@ -144,7 +144,7 @@ Next.js 16 App Router，单页应用。
 - `ChatPanel.tsx` — 对话区（已移除 legacy 回退，只走 scoped API；模型头像+延迟；支持知识库/收藏夹/视频提问范围）
 - `ChatScopePicker.tsx` — 聊天输入区的提问范围选择器，消费 `scope-options`
 - `SourcesPanel.tsx` — 收藏夹资料管理（已迁移到 source_binding_id + knowledgeBaseId；支持入库、整理、清理、自定义视频名）
-- `ImportModal.tsx` — 多来源导入弹窗，B 站视频 URL 已接入，收藏夹扫码绑定作为二级入口
+- `ImportModal.tsx` — 多来源导入弹窗，`导入视频` 内含视频 URL 与本地视频两个页签，收藏夹扫码绑定作为二级入口
 - `ThinkingProcess.tsx` — 模型原生 thinking/reasoning 流式展示与折叠
 - `DevIndicatorGuard.tsx` — 本地隐藏 Next dev indicator
 
@@ -160,14 +160,14 @@ Next.js 16 App Router，单页应用。
                 → 已登录 → 工作台
                    ├─ 侧栏 KnowledgeBasePanel(下拉切换/创建/删除)
                    ├─ SourcesPanel(收藏夹资料/导入/入库/整理/视频名)
-                   ├─ ImportModal(多来源导入；B站收藏夹绑定为二级入口)
+                   ├─ ImportModal(多来源导入；视频 URL/本地视频；B站收藏夹绑定为二级入口)
                    ├─ ChatPanel(选KB→scoped API + ChatScopePicker / 不选→禁用输入提示选择知识库)
                    └─ UserMenu(头像+改名+登出)
 ```
 
 `lib/api.ts` 仍保留历史 API 客户端定义，但登录后页面以 `systemAuthApi.me()` 判断登录态，并通过 `sourceBindingApi/knowledgeBaseApi/importApi` 访问内容源、知识库、导入与聊天能力；不再依赖旧 `bili_session`。
 
-**手机端连接测试重点**：后端覆盖 `tests/test_local_connection.py`；前端覆盖 `frontend/lib/localConnection.test.ts`、`frontend/lib/localConnectionScanner.test.ts`、`frontend/lib/nativeHttp.test.ts`、`frontend/components/LocalConnectionSettings.test.tsx`、`frontend/components/UserMenu.test.tsx`、`frontend/lib/api.test.ts`。改动 APK 连接能力时至少运行这些测试，并检查 `frontend/android/app/src/main/assets/capacitor.config.json` 内仍有 `webDir: out` 和 `CapacitorHttp.enabled: true`，且没有 `server.url`。
+**手机端连接测试重点**：后端覆盖 `tests/test_local_connection.py`；前端覆盖 `frontend/lib/localConnection.test.ts`、`frontend/lib/localConnectionScanner.test.ts`、`frontend/lib/nativeHttp.test.ts`、`frontend/components/LocalConnectionSettings.test.tsx`、`frontend/components/UserMenu.test.tsx`、`frontend/lib/api.test.ts`。改动 APK 连接能力时至少运行这些测试，并检查 `frontend/android/app/src/main/assets/capacitor.config.json` 内仍有 `webDir: out` 和 `CapacitorHttp.enabled: true`，且没有 `server.url`。改动本地视频导入时还要运行 `pytest tests/test_imports.py tests/test_knowledge_base_scoping.py -q` 与 `cd frontend && npm test -- api.test.ts nativeHttp.test.ts ImportModal.test.tsx`，覆盖 multipart、FormData、URL 兼容和任务入库。
 
 ## 多用户演进进度
 
