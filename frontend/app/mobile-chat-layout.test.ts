@@ -91,6 +91,36 @@ describe("mobile chat message layout", () => {
     );
   });
 
+  it("keeps mobile connection settings readable and above admin overlays", () => {
+    expect(stylesheet).toMatch(
+      /\.modal-backdrop\.local-connection-modal-backdrop\s*\{[^}]*z-index:\s*140;/s,
+    );
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 1024px\)\s*\{[\s\S]*\.local-connection-modal-backdrop\s*\{[^}]*align-items:\s*flex-start;[^}]*overflow-y:\s*auto;[^}]*padding:\s*max\(16px, calc\(env\(safe-area-inset-top\) \+ 12px\)\)\s+14px\s+max\(22px, calc\(env\(safe-area-inset-bottom\) \+ 16px\)\);/s,
+    );
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 1024px\)\s*\{[\s\S]*\.local-connection-modal\s*\{[^}]*width:\s*min\(100%, 420px\);[^}]*max-height:\s*none;[^}]*margin:\s*0 auto;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.local-connection-trigger\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.local-connection-trigger-label\s*\{[^}]*display:\s*inline;[^}]*white-space:\s*nowrap;/s,
+    );
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 640px\)\s*\{[\s\S]*\.auth-page \.local-connection-trigger\s*\{[^}]*min-width:\s*74px;[^}]*padding-inline:\s*10px;[^}]*color:\s*#faf9f5;/s,
+    );
+  });
+
+  it("uses an opaque knowledge selector menu on mobile", () => {
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 1024px\)\s*\{[\s\S]*\.knowledge-select-popover\s*\{[^}]*background:\s*#262624;[^}]*backdrop-filter:\s*none;/s,
+    );
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 1024px\)\s*\{[\s\S]*html\.light \.knowledge-select-popover\s*\{[^}]*background:\s*#f8efe2;/s,
+    );
+  });
+
   it("rebalances the mobile empty state with the title higher and composer lower", () => {
     expect(stylesheet).toMatch(
       /\.panel-chat-embedded \.panel-body:has\(\.empty-state\)\s*\{[^}]*padding-top:\s*clamp\(30px, 8dvh, 88px\);/s,

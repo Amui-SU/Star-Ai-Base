@@ -113,4 +113,13 @@ describe("AuthPage third-party login notice", () => {
     );
     expect(accountHint.parentElement).toBe(section);
   });
+
+  it("forces the login screen back to dark theme even after leaving light mode", () => {
+    document.documentElement.classList.add("light");
+
+    render(<AuthPage onAuthSuccess={vi.fn()} />);
+
+    expect(document.documentElement).toHaveClass("auth-page-active");
+    expect(document.documentElement).not.toHaveClass("light");
+  });
 });

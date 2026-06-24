@@ -379,6 +379,14 @@ body.auth-page-active {
     gap: 6px;
   }
 
+  .auth-page .local-connection-trigger {
+    min-width: 74px;
+    min-height: 28px;
+    padding-inline: 10px;
+    color: #faf9f5;
+    font-size: 11px;
+  }
+
   .auth-page .auth-form-section {
     position: relative;
     min-height: calc(100svh - var(--auth-header-height));
@@ -4647,6 +4655,9 @@ html.light .model-provider-menu .status-pill.empty {
 
 /* Local connection settings are isolated so public deployments can remove them. */
 .local-connection-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 30px;
   border: 1px solid rgba(250, 249, 245, 0.1);
   border-radius: 999px;
@@ -4662,9 +4673,18 @@ html.light .model-provider-menu .status-pill.empty {
     border-color 160ms ease;
 }
 
+.local-connection-trigger-label {
+  display: inline;
+  white-space: nowrap;
+}
+
 .local-connection-trigger:hover {
   background: rgba(255, 255, 255, 0.12);
   border-color: var(--border-strong);
+}
+
+.modal-backdrop.local-connection-modal-backdrop {
+  z-index: 140;
 }
 
 .local-connection-modal {
@@ -4706,6 +4726,24 @@ html.light .model-provider-menu .status-pill.empty {
   border-color: rgba(224, 96, 80, 0.45);
   background: rgba(224, 96, 80, 0.1);
   color: var(--danger);
+}
+
+.local-connection-saved-notice {
+  position: fixed;
+  left: 50%;
+  bottom: max(24px, calc(env(safe-area-inset-bottom) + 18px));
+  z-index: 150;
+  transform: translateX(-50%);
+  border: 1px solid rgba(95, 163, 255, 0.3);
+  border-radius: 999px;
+  background: #262624;
+  color: #f5f3ee;
+  padding: 11px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
+  white-space: nowrap;
 }
 
 .local-connection-actions {
@@ -6319,6 +6357,28 @@ html.light .status-pill.empty {
 
   .chat-kb-meta {
     display: none;
+  }
+
+  .knowledge-select-popover {
+    background: #262624;
+    backdrop-filter: none;
+  }
+
+  html.light .knowledge-select-popover {
+    background: #f8efe2;
+  }
+
+  .local-connection-modal-backdrop {
+    align-items: flex-start;
+    overflow-y: auto;
+    padding: max(16px, calc(env(safe-area-inset-top) + 12px)) 14px
+      max(22px, calc(env(safe-area-inset-bottom) + 16px));
+  }
+
+  .local-connection-modal {
+    width: min(100%, 420px);
+    max-height: none;
+    margin: 0 auto;
   }
 
   .app-shell.sidebar-open .knowledge-panel-head {

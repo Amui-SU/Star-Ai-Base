@@ -63,12 +63,17 @@ export default function AuthPage({ onAuthSuccess }: Props) {
   }, []);
 
   useEffect(() => {
+    const wasLightMode = document.documentElement.classList.contains("light");
+    document.documentElement.classList.remove("light");
     document.documentElement.classList.add("auth-page-active");
     document.body.classList.add("auth-page-active");
 
     return () => {
       document.documentElement.classList.remove("auth-page-active");
       document.body.classList.remove("auth-page-active");
+      if (wasLightMode) {
+        document.documentElement.classList.add("light");
+      }
     };
   }, []);
 
