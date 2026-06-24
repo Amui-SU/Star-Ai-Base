@@ -1007,6 +1007,7 @@ async def _prepare_llm_messages_with_tools(
     executed_tool_calls = 0
 
     while executed_tool_calls < max_tool_calls:
+        # Keep tool planning fast; final answer generation still uses thinking config.
         response = await _create_chat_completion_async(
             client,
             model=llm_config["model"],
@@ -1014,7 +1015,6 @@ async def _prepare_llm_messages_with_tools(
             temperature=0.5,
             tools=tools,
             tool_choice="auto",
-            **_build_thinking_completion_options(llm_config),
         )
         message = response.choices[0].message
         tool_calls = getattr(message, "tool_calls", None) or []

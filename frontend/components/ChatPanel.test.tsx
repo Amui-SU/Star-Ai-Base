@@ -335,6 +335,48 @@ describe("ChatPanel", () => {
     });
   });
 
+  it("resets the web search provider to auto when enabling search from the picker", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatApi.getWebSearchConfig).mockResolvedValue({
+      provider: "tavily",
+      tavily_configured: true,
+      fallback_html: true,
+      tavily_search_depth: "basic",
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: vi.fn().mockResolvedValue({ done: true, value: undefined }),
+        }),
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+    );
+
+    await waitFor(() => {
+      expect(chatApi.getWebSearchConfig).toHaveBeenCalled();
+    });
+    await user.click(screen.getByRole("button", { name: /^提问范围/ }));
+    await user.click(screen.getByRole("button", { name: "联网搜索" }));
+    await user.type(screen.getByRole("textbox"), "latest news");
+    await user.click(container.querySelector(".composer-send-button")!);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(requestInit.body))).toMatchObject({
+      question: "latest news",
+      web_search: true,
+      web_search_provider: "auto",
+    });
+  });
+
   it("opens Tavily config from web search provider choice and sends Tavily after saving", async () => {
     mockChatPanelDependencies();
     const fetchMock = vi.fn().mockResolvedValue({

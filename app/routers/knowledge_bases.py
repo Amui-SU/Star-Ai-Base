@@ -70,7 +70,7 @@ MAX_WEB_CONTEXT_RESULTS = 5
 MAX_INITIAL_WEB_SEARCH_QUERIES = 3
 MAX_WEB_SEARCH_QUERY_CHARS = 180
 WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS = 2.5
-WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS = 12.0
+WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS = 60.0
 MAX_FETCH_WEB_PAGE_CALLS = 1
 FETCH_WEB_PAGE_CONTEXT_CHARS = 2000
 WEB_SEARCH_PROGRESS_MARKER = "[[WEB_SEARCH_PROGRESS]]"
@@ -805,7 +805,10 @@ async def _prepare_knowledge_base_web_search_with_heartbeats(
         while not task.done():
             remaining = deadline - loop.time()
             if remaining <= 0:
-                raise TimeoutError("web search tool chain timed out")
+                raise TimeoutError(
+                    f"web search tool chain timed out after "
+                    f"{WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS:g}s"
+                )
             try:
                 result = await asyncio.wait_for(
                     asyncio.shield(task),
@@ -818,7 +821,10 @@ async def _prepare_knowledge_base_web_search_with_heartbeats(
                     yield ("result", task.result())
                     return
                 if deadline - loop.time() <= 0:
-                    raise TimeoutError("web search tool chain timed out")
+                    raise TimeoutError(
+                        f"web search tool chain timed out after "
+                        f"{WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS:g}s"
+                    )
                 heartbeat_count += 1
                 yield (
                     "heartbeat",
@@ -1384,7 +1390,7 @@ async def stream_chat_with_knowledge_base(
                     tool_run.messages
                 )
             except Exception as exc:
-                logger.warning(f"知识库联网工具链准备失败，将仅使用知识库回答: {exc}")
+                logger.warning(f"知识库联网工具链准备失败，将仅使用知识库回答: {exc!r}")
                 web_search_status = _web_search_failed_status_from_exception(exc)
             finally:
                 yield _encode_web_search_progress("")

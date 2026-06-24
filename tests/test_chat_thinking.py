@@ -553,6 +553,60 @@ async def test_complete_llm_answer_with_tools_executes_requested_tool(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_tool_planning_skips_thinking_request_body(monkeypatch):
+    captured = {"calls": []}
+
+    class FakeMessage:
+        content = "answer"
+        reasoning_content = ""
+        tool_calls = None
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured["calls"].append(kwargs)
+            return type(
+                "Response",
+                (),
+                {"choices": [type("Choice", (), {"message": FakeMessage()})()]},
+            )()
+
+    fake_client = type(
+        "Client",
+        (),
+        {"chat": type("Chat", (), {"completions": FakeCompletions()})()},
+    )()
+
+    monkeypatch.setattr(
+        "app.routers.chat._resolve_llm_config",
+        lambda: {
+            "provider": "deepseek",
+            "model": "deepseek-v4-pro",
+            "api_key": "test",
+            "base_url": "https://example.com",
+            "thinking_config": {
+                "thinking": {"type": "enabled"},
+                "reasoning_effort": "high",
+            },
+        },
+    )
+    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
+
+    await _prepare_llm_messages_with_tools(
+        [{"role": "user", "content": "question"}],
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "web_search", "parameters": {"type": "object"}},
+            }
+        ],
+        tool_handlers={},
+    )
+
+    assert captured["calls"][0]["tools"][0]["function"]["name"] == "web_search"
+    assert "extra_body" not in captured["calls"][0]
+
+
+@pytest.mark.asyncio
 async def test_complete_llm_answer_with_tools_executes_dsml_text_tool_call(
     monkeypatch,
 ):

@@ -741,6 +741,9 @@ export default function ChatPanel({
   const handleWebSearchChange = (enabled: boolean) => {
     const notice = enabled ? "联网搜索已开启" : "联网搜索已关闭";
     setWebSearchEnabled(enabled);
+    if (enabled) {
+      setWebSearchProvider("auto");
+    }
     setWebSearchNotice(notice);
     setScopeNotice("");
     if (scopeNoticeTimerRef.current) {

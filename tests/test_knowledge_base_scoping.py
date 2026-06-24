@@ -2054,6 +2054,12 @@ async def test_web_search_heartbeat_generator_times_out_tool_setup(monkeypatch):
     assert events[0][0] == "heartbeat"
 
 
+def test_web_search_tool_prep_timeout_allows_slow_model_tool_planning():
+    from app.routers import knowledge_bases
+
+    assert knowledge_bases.WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS >= 60.0
+
+
 async def _collect_web_search_heartbeat_events(generator, events):
     async for event in generator:
         events.append(event)
