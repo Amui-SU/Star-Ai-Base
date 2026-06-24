@@ -2241,15 +2241,16 @@ html.light .video-card:hover {
   max-width: min(100%, 360px);
   min-height: 28px;
   overflow: hidden;
-  border: 1px solid rgba(95, 163, 255, 0.26);
-  border-radius: 8px;
-  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 8px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  color: #c7e0ff;
-  background: rgba(95, 163, 255, 0.08);
+  gap: 7px;
+  color: rgba(255, 255, 255, 0.68);
+  background: transparent;
   font-size: 12px;
+  font-weight: 500;
   line-height: 1.35;
 }
 
@@ -2263,30 +2264,29 @@ html.light .video-card:hover {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255, 255, 255, 0.22),
+    rgba(255, 255, 255, 0.72),
     transparent
   );
-  animation: webSearchSweep 1.35s ease-in-out infinite;
+  animation: webSearchSweep 1.45s ease-in-out infinite;
 }
 
 .web-search-live-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 999px;
   flex: 0 0 auto;
-  background: #7ab7ff;
-  box-shadow: 0 0 0 4px rgba(122, 183, 255, 0.14);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
 }
 
 html.light .web-search-live-status {
-  border-color: rgba(31, 122, 117, 0.26);
-  color: #176964;
-  background: rgba(31, 122, 117, 0.08);
+  color: rgba(255, 255, 255, 0.68);
+  background: transparent;
 }
 
 html.light .web-search-live-dot {
-  background: #1f7a75;
-  box-shadow: 0 0 0 4px rgba(31, 122, 117, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
 }
 
 @keyframes webSearchSweep {

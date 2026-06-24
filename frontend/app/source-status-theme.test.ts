@@ -32,6 +32,24 @@ describe("source ingestion status theme", () => {
 });
 
 describe("chat web search light theme", () => {
+  it("renders live web search progress as pale text with a white sweep", () => {
+    expect(stylesheet).toMatch(
+      /\.web-search-live-status\s*\{[^}]*border:\s*0;[^}]*color:\s*rgba\(255,\s*255,\s*255,\s*0\.68\);[^}]*background:\s*transparent;[^}]*font-weight:\s*500;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.web-search-live-status::before\s*\{[^}]*background:\s*linear-gradient\(\s*90deg,\s*transparent,\s*rgba\(255,\s*255,\s*255,\s*0\.72\),\s*transparent\s*\);[^}]*animation:\s*webSearchSweep 1\.45s ease-in-out infinite;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.web-search-live-dot\s*\{[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.78\);[^}]*box-shadow:\s*0 0 10px rgba\(255,\s*255,\s*255,\s*0\.2\);/s,
+    );
+    expect(stylesheet).toMatch(
+      /html\.light \.web-search-live-status\s*\{[^}]*color:\s*rgba\(255,\s*255,\s*255,\s*0\.68\);[^}]*background:\s*transparent;/s,
+    );
+    expect(stylesheet).toMatch(
+      /html\.light \.web-search-live-dot\s*\{[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.78\);[^}]*box-shadow:\s*0 0 10px rgba\(255,\s*255,\s*255,\s*0\.2\);/s,
+    );
+  });
+
   it("uses the existing green treatment for web search controls and notices", () => {
     expect(stylesheet).toMatch(
       /html\.light \.scope-picker-trigger\.web-search-enabled:not\(\[aria-expanded="true"\]\),\s*html\.light \.scope-picker-trigger\.web-search-notice:not\(\[aria-expanded="true"\]\)\s*\{[^}]*background:\s*rgba\(47,\s*124,\s*120,\s*0\.15\);[^}]*border-color:\s*rgba\(47,\s*124,\s*120,\s*0\.35\);[^}]*color:\s*#1f7a75;/s,
