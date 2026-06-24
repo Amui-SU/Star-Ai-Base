@@ -3,6 +3,7 @@ Bilibili RAG 知识库系统
 对话路由 - 智能问答
 """
 
+import asyncio
 import re
 import json
 import time
@@ -560,6 +561,10 @@ def _get_llm_client(llm_config: Optional[Dict[str, str]] = None) -> OpenAI:
     )
 
 
+async def _create_chat_completion_async(client: OpenAI, **kwargs):
+    return await asyncio.to_thread(lambda: client.chat.completions.create(**kwargs))
+
+
 def _is_llm_connection_error(err: Exception) -> bool:
     """判断是否为上游模型连接/超时问题"""
     if isinstance(err, (APIConnectionError, APITimeoutError)):
@@ -952,7 +957,8 @@ async def _complete_llm_answer_with_tools(
 
     llm_config = _resolve_llm_config()
     client = _get_llm_client(llm_config)
-    response = client.chat.completions.create(
+    response = await _create_chat_completion_async(
+        client,
         model=llm_config["model"],
         messages=_append_no_more_tool_calls_instruction(tool_run.messages),
         temperature=0.5,
@@ -964,7 +970,8 @@ async def _complete_llm_answer_with_tools(
         getattr(message, "reasoning_content", None),
     )
     if _contains_dsml_tool_call_text(answer):
-        response = client.chat.completions.create(
+        response = await _create_chat_completion_async(
+            client,
             model=llm_config["model"],
             messages=_append_no_more_tool_calls_instruction(
                 [
@@ -1000,7 +1007,8 @@ async def _prepare_llm_messages_with_tools(
     executed_tool_calls = 0
 
     while executed_tool_calls < max_tool_calls:
-        response = client.chat.completions.create(
+        response = await _create_chat_completion_async(
+            client,
             model=llm_config["model"],
             messages=working_messages,
             temperature=0.5,

@@ -342,18 +342,20 @@ export default function AuthPage({ onAuthSuccess }: Props) {
 
   const oauthButtonStyle: React.CSSProperties = {
     width: "100%",
-    height: "clamp(34px, 3.8vw, 42px)",
-    borderRadius: 12,
+    minWidth: 0,
+    height: "var(--auth-oauth-height)",
+    borderRadius: "var(--auth-oauth-radius)",
     border: "1px solid rgba(250, 249, 245, 0.14)",
     background:
       "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025))",
     color: "#faf9f5",
-    fontSize: "clamp(11px, 1.15vw, 13px)",
+    fontSize: "var(--auth-oauth-font)",
     fontWeight: 640,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: "var(--auth-oauth-icon-gap)",
+    padding: "0 var(--auth-oauth-x)",
     cursor: "pointer",
     transition: "all .2s",
     textDecoration: "none",
@@ -373,7 +375,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
         }}
       >
         <div
-          className="h-full flex items-center"
+          className="auth-header-inner h-full flex items-center"
           style={{
             margin: "0 auto",
             width: "var(--auth-container-width)",
@@ -394,7 +396,9 @@ export default function AuthPage({ onAuthSuccess }: Props) {
               智库云
             </span>
           </div>
-          <LocalConnectionSettings />
+          <div className="auth-header-actions">
+            <LocalConnectionSettings />
+          </div>
         </div>
       </header>
 
@@ -411,11 +415,11 @@ export default function AuthPage({ onAuthSuccess }: Props) {
       >
         {/* 左侧登录区 */}
         <section
-          className="auth-form-section flex items-center justify-center py-6"
+          className="auth-form-section auth-form-section-lowered flex items-center justify-center py-6"
           style={{ minHeight: "calc(100svh - var(--auth-header-height))" }}
         >
           <div
-            className={`flex flex-col items-center text-center transition-all duration-800 ease-out ${
+            className={`auth-form-content flex flex-col items-center text-center transition-all duration-800 ease-out ${
               visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
             }`}
             style={{ width: "min(604px, 100%)", maxWidth: "100%" }}
@@ -454,13 +458,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                     </div>
                   )}
                   <div className="auth-form-inner">
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                        gap: "clamp(7px, 1.2vw, 10px)",
-                      }}
-                    >
+                    <div className="auth-oauth-grid">
                       {oauthButtons.map((button) => {
                         const available = isOAuthAvailable(button.provider);
 
@@ -543,25 +541,27 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                         }}
                       />
                     </div>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      style={inputStyle}
-                      placeholder="输入邮箱地址"
-                      autoComplete="email"
-                      autoFocus
-                    />
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      style={{
-                        ...btnStyle,
-                        marginTop: "var(--auth-field-gap)",
-                      }}
-                    >
-                      继续
-                    </button>
+                    <div className="auth-primary-controls">
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        style={inputStyle}
+                        placeholder="输入邮箱地址"
+                        autoComplete="email"
+                        autoFocus
+                      />
+                      <button
+                        type="submit"
+                        disabled={submitting}
+                        style={{
+                          ...btnStyle,
+                          marginTop: "var(--auth-field-gap)",
+                        }}
+                      >
+                        继续
+                      </button>
+                    </div>
                     <p
                       style={{
                         margin: "var(--auth-help-gap) auto 0",
@@ -751,13 +751,12 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                 </form>
               )}
             </div>
-
-            {step === "email" && (
-              <p className="mt-4 mb-0 text-[17px] text-[#77746e]">
-                没有账号？继续后即可创建
-              </p>
-            )}
           </div>
+          {step === "email" && (
+            <p className="auth-account-hint mt-4 mb-0 text-[17px] text-[#77746e]">
+              没有账号？继续后即可创建
+            </p>
+          )}
         </section>
 
         {/* 右侧视觉面板 */}

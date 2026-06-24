@@ -82,7 +82,25 @@ describe("Home mobile shell", () => {
     });
 
     expect(container.querySelector(".sidebar-shell")).toHaveClass("closed");
-    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Expand sidebar" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the sidebar arrow icon while adding the mobile two-line handle", async () => {
+    const { container } = render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat Panel")).toBeInTheDocument();
+    });
+
+    const toggle = screen.getByRole("button", { name: "Expand sidebar" });
+    expect(toggle.querySelector(".sidebar-toggle-icon")).toBeInTheDocument();
+    expect(toggle.querySelector(".sidebar-toggle-lines")).toBeInTheDocument();
+    expect(toggle.querySelectorAll(".sidebar-toggle-line")).toHaveLength(2);
+    expect(
+      container.querySelector(".workspace-sidebar-toggle svg"),
+    ).toBeInTheDocument();
   });
 
   it("toggles the mobile sidebar from the visible handle", async () => {
@@ -110,6 +128,8 @@ describe("Home mobile shell", () => {
     });
 
     expect(container.querySelector(".app-shell")).toHaveClass("sidebar-closed");
-    expect(container.querySelector(".app-shell")).not.toHaveClass("sidebar-open");
+    expect(container.querySelector(".app-shell")).not.toHaveClass(
+      "sidebar-open",
+    );
   });
 });

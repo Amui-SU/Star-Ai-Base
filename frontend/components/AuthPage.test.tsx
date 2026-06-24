@@ -4,6 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AuthPage from "@/components/AuthPage";
 
+vi.mock("@/components/LocalConnectionSettings", () => ({
+  default: () => (
+    <button type="button" className="local-connection-trigger">
+      连接设置
+    </button>
+  ),
+}));
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -42,5 +50,67 @@ describe("AuthPage third-party login notice", () => {
     await user.click(screen.getByRole("link", { name: /WeChat/i }));
 
     expect(screen.getByText(thirdPartyNotice)).toBeInTheDocument();
+  });
+
+  it("renders compact social login buttons in a dedicated centered group", () => {
+    const { container } = render(<AuthPage onAuthSuccess={vi.fn()} />);
+
+    const oauthGroup = container.querySelector(".auth-oauth-grid");
+
+    expect(oauthGroup).toBeInTheDocument();
+    expect(oauthGroup).toContainElement(
+      screen.getByRole("link", { name: /Google/i }),
+    );
+    expect(oauthGroup).toContainElement(
+      screen.getByRole("link", { name: /WeChat/i }),
+    );
+    expect(oauthGroup).toContainElement(
+      screen.getByRole("link", { name: /QQ/i }),
+    );
+  });
+
+  it("keeps connection settings in a separate header action area", () => {
+    const { container } = render(<AuthPage onAuthSuccess={vi.fn()} />);
+
+    const actionArea = container.querySelector(".auth-header-actions");
+
+    expect(actionArea).toBeInTheDocument();
+    expect(actionArea).toContainElement(
+      screen.getByRole("button", { name: "连接设置" }),
+    );
+  });
+
+  it("marks the login module as movable for mobile vertical tuning", () => {
+    const { container } = render(<AuthPage onAuthSuccess={vi.fn()} />);
+
+    expect(container.querySelector(".auth-form-section")).toHaveClass(
+      "auth-form-section-lowered",
+    );
+  });
+
+  it("groups the primary email input and continue button for narrower mobile sizing", () => {
+    const { container } = render(<AuthPage onAuthSuccess={vi.fn()} />);
+
+    const primaryControls = container.querySelector(".auth-primary-controls");
+
+    expect(primaryControls).toBeInTheDocument();
+    expect(primaryControls).toContainElement(
+      screen.getByPlaceholderText("输入邮箱地址"),
+    );
+    expect(primaryControls).toContainElement(
+      screen.getByRole("button", { name: "继续" }),
+    );
+  });
+
+  it("keeps the no-account hint outside the auth card for lower mobile placement", () => {
+    const { container } = render(<AuthPage onAuthSuccess={vi.fn()} />);
+    const section = container.querySelector(".auth-form-section");
+    const accountHint = screen.getByText("没有账号？继续后即可创建");
+
+    expect(accountHint).toHaveClass("auth-account-hint");
+    expect(container.querySelector(".auth-card")).not.toContainElement(
+      accountHint,
+    );
+    expect(accountHint.parentElement).toBe(section);
   });
 });

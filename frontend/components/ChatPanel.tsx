@@ -956,7 +956,7 @@ export default function ChatPanel({
         <div className="chat-kb-context">
           {knowledgeBaseName || "选择知识库"}
           {stats && (stats.total_videos ?? 0) > 0 && (
-            <span> · {stats.total_videos} 个视频</span>
+            <span className="chat-kb-meta"> · {stats.total_videos} 个视频</span>
           )}
         </div>
         <div className="flex flex-col items-end gap-1.5">
@@ -1128,7 +1128,7 @@ export default function ChatPanel({
                           aria-live="polite"
                         >
                           <span className="web-search-live-dot" />
-                          <span>
+                          <span className="web-search-live-text">
                             {m.webSearchProgress || "正在联网搜索外部资料"}
                           </span>
                         </div>
@@ -1574,7 +1574,7 @@ export default function ChatPanel({
             </div>
           </div>
         </div>
-        <div className="text-[10px] text-(--muted) text-center">
+        <div className="composer-disclaimer text-[10px] text-(--muted) text-center">
           内容由 AI 生成，请注意甄别。
         </div>
       </div>

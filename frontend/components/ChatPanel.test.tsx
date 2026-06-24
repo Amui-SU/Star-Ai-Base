@@ -101,6 +101,33 @@ afterEach(() => {
 });
 
 describe("ChatPanel", () => {
+  it("marks the AI disclaimer so mobile layout can hide it without changing desktop", async () => {
+    mockChatPanelDependencies();
+
+    const { container } = render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+    );
+
+    expect(await screen.findByText("探索你的收藏")).toBeVisible();
+    expect(screen.getByText("内容由 AI 生成，请注意甄别。")).toHaveClass(
+      "composer-disclaimer",
+    );
+    expect(container.querySelector(".composer-disclaimer")).toBeInTheDocument();
+  });
+
+  it("marks the knowledge-base meta so the mobile header can hide it", async () => {
+    mockChatPanelDependencies();
+
+    const { container } = render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+    );
+
+    expect(await screen.findByText("Test KB")).toBeVisible();
+    expect(container.querySelector(".chat-kb-meta")).toHaveTextContent(
+      "1 个视频",
+    );
+  });
+
   it("includes credentials on the streaming chat request", async () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     vi.mocked(chatApi.getModelConfig).mockResolvedValue({
@@ -613,6 +640,9 @@ describe("ChatPanel", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "正在联网搜索外部资料",
     );
+    expect(
+      screen.getByRole("status").querySelector(".web-search-live-text"),
+    ).not.toBeNull();
     expect(
       container.querySelector(".thinking-process-content")?.textContent ?? "",
     ).not.toContain("正在联网搜索外部资料");

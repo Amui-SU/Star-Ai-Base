@@ -1,4 +1,6 @@
+import asyncio
 import json
+import time
 
 import pytest
 from fastapi import HTTPException
@@ -17,6 +19,7 @@ from app.routers.chat import (
     _message_to_openai_dict,
     _parse_tool_arguments,
     _parse_thinking_config,
+    _prepare_llm_messages_with_tools,
     _stream_llm_events,
     get_web_search_config,
     save_llm_provider_config,
@@ -370,6 +373,62 @@ def test_complete_llm_answer_returns_native_reasoning(monkeypatch):
     assert captured["extra_body"]["thinking"] == {"type": "enabled"}
     assert answer == "最终答案"
     assert thinking == "先分析"
+
+
+@pytest.mark.asyncio
+async def test_prepare_llm_messages_with_tools_does_not_block_event_loop(monkeypatch):
+    class FakeMessage:
+        content = "answer"
+        reasoning_content = ""
+        tool_calls = None
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            time.sleep(0.2)
+            return type(
+                "Response",
+                (),
+                {"choices": [type("Choice", (), {"message": FakeMessage()})()]},
+            )()
+
+    fake_client = type(
+        "Client",
+        (),
+        {"chat": type("Chat", (), {"completions": FakeCompletions()})()},
+    )()
+
+    monkeypatch.setattr(
+        "app.routers.chat._resolve_llm_config",
+        lambda: {
+            "provider": "test",
+            "model": "tool-model",
+            "api_key": "test",
+            "base_url": "https://example.com",
+            "thinking_config": {},
+        },
+    )
+    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
+
+    task = asyncio.create_task(
+        _prepare_llm_messages_with_tools(
+            [{"role": "user", "content": "question"}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "parameters": {"type": "object"},
+                    },
+                }
+            ],
+            tool_handlers={},
+        )
+    )
+    await asyncio.sleep(0.03)
+
+    assert not task.done()
+    result = await task
+    assert result.answer == "answer"
 
 
 @pytest.mark.asyncio

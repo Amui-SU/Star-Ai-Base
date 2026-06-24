@@ -32,12 +32,13 @@ describe("source ingestion status theme", () => {
 });
 
 describe("chat web search light theme", () => {
-  it("renders live web search progress as pale text with a white sweep", () => {
+  it("renders live web search progress as shimmering text without animating the container", () => {
     expect(stylesheet).toMatch(
       /\.web-search-live-status\s*\{[^}]*border:\s*0;[^}]*color:\s*rgba\(255,\s*255,\s*255,\s*0\.68\);[^}]*background:\s*transparent;[^}]*font-weight:\s*500;/s,
     );
+    expect(stylesheet).not.toMatch(/\.web-search-live-status::before\s*\{/);
     expect(stylesheet).toMatch(
-      /\.web-search-live-status::before\s*\{[^}]*background:\s*linear-gradient\(\s*90deg,\s*transparent,\s*rgba\(255,\s*255,\s*255,\s*0\.72\),\s*transparent\s*\);[^}]*animation:\s*webSearchSweep 1\.45s ease-in-out infinite;/s,
+      /\.web-search-live-text\s*\{[^}]*background:\s*linear-gradient\(\s*90deg,\s*rgba\(255,\s*255,\s*255,\s*0\.58\),\s*rgba\(255,\s*255,\s*255,\s*0\.98\),\s*rgba\(255,\s*255,\s*255,\s*0\.58\)\s*\);[^}]*background-size:\s*220% 100%;[^}]*animation:\s*webSearchTextShimmer 1\.55s ease-in-out infinite;/s,
     );
     expect(stylesheet).toMatch(
       /\.web-search-live-dot\s*\{[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.78\);[^}]*box-shadow:\s*0 0 10px rgba\(255,\s*255,\s*255,\s*0\.2\);/s,

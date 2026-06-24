@@ -2019,6 +2019,47 @@ async def test_web_search_heartbeat_generator_cancels_prepare_task_on_close(
 
 
 @pytest.mark.asyncio
+async def test_web_search_heartbeat_generator_times_out_tool_setup(monkeypatch):
+    from app.routers import knowledge_bases
+
+    async def never_finishing_prepare(messages, *, question):
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS",
+        0.025,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._prepare_knowledge_base_web_search",
+        never_finishing_prepare,
+    )
+
+    generator = knowledge_bases._prepare_knowledge_base_web_search_with_heartbeats(
+        [{"role": "user", "content": "question"}],
+        question="question",
+    )
+    events = []
+    with pytest.raises(TimeoutError, match="web search tool chain timed out"):
+        await asyncio.wait_for(
+            _collect_web_search_heartbeat_events(generator, events),
+            timeout=0.2,
+        )
+
+    assert events
+    assert events[0][0] == "heartbeat"
+
+
+async def _collect_web_search_heartbeat_events(generator, events):
+    async for event in generator:
+        events.append(event)
+
+
+@pytest.mark.asyncio
 async def test_scoped_chat_web_search_does_not_attach_db_fallback_sources(
     client, monkeypatch
 ):

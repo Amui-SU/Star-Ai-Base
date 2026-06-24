@@ -42,7 +42,12 @@ class BilibiliService:
         self.sessdata = sessdata
         self.bili_jct = bili_jct
         self.dedeuserid = dedeuserid
-        self.client = httpx.AsyncClient(timeout=30.0, headers=self.HEADERS)
+        timeout = httpx.Timeout(12.0, connect=4.0)
+        self.client = httpx.AsyncClient(
+            timeout=timeout,
+            headers=self.HEADERS,
+            trust_env=False,
+        )
 
     def _get_cookies(self) -> Dict[str, str]:
         """获取 Cookie"""
@@ -85,11 +90,25 @@ class BilibiliService:
             }
         """
         url = f"{self.PASSPORT_URL}/x/passport-login/web/qrcode/generate"
-        try:
-            response = await self.client.get(url)
-            data = self._parse_json_response(response, "生成二维码")
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as e:
-            raise Exception("连接 B站二维码接口超时或网络异常，请稍后重试") from e
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = await self.client.get(url)
+                data = self._parse_json_response(response, "生成二维码")
+                break
+            except (
+                httpx.TimeoutException,
+                httpx.NetworkError,
+                httpx.TransportError,
+            ) as e:
+                last_error = e
+                if attempt == 2:
+                    raise Exception(
+                        "连接 B站二维码接口超时或网络异常，请稍后重试"
+                    ) from e
+                await asyncio.sleep(0.6 * (attempt + 1))
+        else:
+            raise last_error or Exception("连接 B站二维码接口失败")
 
         if data["code"] != 0:
             raise Exception(f"生成二维码失败: {data['message']}")

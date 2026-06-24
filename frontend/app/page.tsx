@@ -295,10 +295,13 @@ export default function Home() {
               aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
             >
               <svg
-                className={`w-4 h-4 transition-transform ${isSidebarOpen ? "" : "rotate-180"}`}
+                className={`sidebar-toggle-icon w-4 h-4 transition-transform ${
+                  isSidebarOpen ? "" : "rotate-180"
+                }`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
+                aria-hidden="true"
               >
                 <path
                   strokeLinecap="round"
@@ -307,6 +310,13 @@ export default function Home() {
                   d="M15 19l-7-7 7-7"
                 />
               </svg>
+              <span
+                className={`sidebar-toggle-lines ${isSidebarOpen ? "open" : "closed"}`}
+                aria-hidden="true"
+              >
+                <span className="sidebar-toggle-line long" />
+                <span className="sidebar-toggle-line short" />
+              </span>
             </button>
 
             {/* 收藏夹侧栏 */}

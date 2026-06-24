@@ -70,6 +70,7 @@ MAX_WEB_CONTEXT_RESULTS = 5
 MAX_INITIAL_WEB_SEARCH_QUERIES = 3
 MAX_WEB_SEARCH_QUERY_CHARS = 180
 WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS = 2.5
+WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS = 12.0
 MAX_FETCH_WEB_PAGE_CALLS = 1
 FETCH_WEB_PAGE_CONTEXT_CHARS = 2000
 WEB_SEARCH_PROGRESS_MARKER = "[[WEB_SEARCH_PROGRESS]]"
@@ -798,16 +799,26 @@ async def _prepare_knowledge_base_web_search_with_heartbeats(
         )
     )
     heartbeat_count = 0
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS
     try:
         while not task.done():
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError("web search tool chain timed out")
             try:
                 result = await asyncio.wait_for(
                     asyncio.shield(task),
-                    timeout=WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS,
+                    timeout=min(WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS, remaining),
                 )
                 yield ("result", result)
                 return
             except TimeoutError:
+                if task.done():
+                    yield ("result", task.result())
+                    return
+                if deadline - loop.time() <= 0:
+                    raise TimeoutError("web search tool chain timed out")
                 heartbeat_count += 1
                 yield (
                     "heartbeat",
