@@ -22,7 +22,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# 虚拟环境
+# Virtual environments
 venv/
 ENV/
 env/
@@ -36,22 +36,22 @@ env/
 *.swo
 *~
 
-# 环境变量（.env 是配置模板，可提交；.env.local 包含密钥，不可提交）
+# Environment variables (.env is a shareable template; .env.local contains secrets)
 .env.local
 .env.*.local
 
-# 数据目录
+# Data directories
 data/
 *.db
 
 # ChromaDB
 chroma_db/
 
-# 日志
+# Logs
 logs/
 *.log
 
-# 缓存
+# Caches
 .cache/
 .pytest_cache/
 *.cache
@@ -64,9 +64,8 @@ logs/
 
 # Node
 node_modules/
-package-lock.json
-frontend/package-lock.json
+# Keep lockfiles tracked for reproducible installs.
 
-# 项目文档/配置（本地维护，不入库）
+# Local collaboration notes, not project source.
 CLAUDE.md
 docs/
