@@ -1063,6 +1063,74 @@ describe("ChatPanel", () => {
     );
   });
 
+  it("does not force autoscroll while the user reads earlier content during streaming", async () => {
+    mockChatPanelDependencies();
+    const scrollMock = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollMock;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const encoder = new TextEncoder();
+    const pendingReads: Array<
+      ReturnType<typeof createDeferred<ReadableStreamReadResult<Uint8Array>>>
+    > = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              const pending =
+                createDeferred<ReadableStreamReadResult<Uint8Array>>();
+              pendingReads.push(pending);
+              return pending.promise;
+            }),
+          }),
+        },
+      }),
+    );
+
+    const { container } = render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+    );
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "let me read while streaming" },
+    });
+    fireEvent.click(container.querySelector(".composer-send-button")!);
+
+    await waitFor(() => {
+      expect(pendingReads).toHaveLength(1);
+    });
+
+    const scrollContainer = container.querySelector(
+      ".chat-scroll",
+    ) as HTMLDivElement;
+    Object.defineProperties(scrollContainer, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 1200 },
+      scrollTop: { configurable: true, value: 240 },
+    });
+    fireEvent.scroll(scrollContainer);
+    scrollMock.mockClear();
+
+    await act(async () => {
+      pendingReads[0].resolve({
+        done: false,
+        value: encoder.encode("stream chunk after user scrolled up"),
+      });
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.getByText("stream chunk after user scrolled up"),
+    ).toBeVisible();
+    expect(scrollMock).not.toHaveBeenCalled();
+  });
+
   it("does not call the non-stream fallback after idle timeout when partial content exists", async () => {
     vi.useFakeTimers();
     mockChatPanelDependencies();

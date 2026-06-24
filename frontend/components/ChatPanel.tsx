@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type UIEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Image from "next/image";
@@ -56,6 +56,14 @@ interface Message {
 type Reaction = "like" | "dislike" | null;
 
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
+const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 96;
+
+function isNearScrollBottom(element: HTMLElement) {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight <=
+    CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD_PX
+  );
+}
 
 interface Props {
   statsKey?: number;
@@ -186,10 +194,12 @@ export default function ChatPanel({
   const [configSaving, setConfigSaving] = useState(false);
   const [configError, setConfigError] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
+  const shouldFollowChatScrollRef = useRef(true);
   const scopeNoticeTimerRef = useRef<number | null>(null);
   const providerLogoMap: Record<string, string> = {
     deepseek: "/logos/deepseek-icon.png",
@@ -423,9 +433,22 @@ export default function ChatPanel({
     }
   };
 
+  const handleChatScroll = (event: UIEvent<HTMLDivElement>) => {
+    const shouldFollow = isNearScrollBottom(event.currentTarget);
+    shouldFollowChatScrollRef.current = shouldFollow;
+    if (!shouldFollow && scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+  };
+
   useEffect(() => {
     if (scrollFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+    if (!shouldFollowChatScrollRef.current) {
+      return;
     }
     scrollFrameRef.current = window.requestAnimationFrame(() => {
       scrollFrameRef.current = null;
@@ -906,6 +929,7 @@ export default function ChatPanel({
     setInput("");
     const userId = Date.now().toString();
     const assistantId = (Date.now() + 1).toString();
+    shouldFollowChatScrollRef.current = true;
     setMessages((prev) => [
       ...prev,
       { id: userId, role: "user", content: q },
@@ -1092,7 +1116,11 @@ export default function ChatPanel({
       </div>
 
       <div className="panel-body">
-        <div className="chat-scroll">
+        <div
+          className="chat-scroll"
+          ref={chatScrollRef}
+          onScroll={handleChatScroll}
+        >
           {messages.length === 0 ? (
             <div className="empty-state">
               <div className="empty-hero">
