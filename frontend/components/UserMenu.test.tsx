@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import UserMenu from "@/components/UserMenu";
-import { localConnectionApi, systemAuthApi, type SystemUser } from "@/lib/api";
+import { localConnectionApi, type SystemUser } from "@/lib/api";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();

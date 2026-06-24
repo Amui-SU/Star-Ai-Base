@@ -106,7 +106,8 @@ export function saveLocalSessionToken(token: string | undefined | null): void {
     );
     return;
   }
-  const { sessionToken: _sessionToken, ...withoutToken } = existing;
+  const withoutToken = { ...existing };
+  delete withoutToken.sessionToken;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutToken));
 }
 

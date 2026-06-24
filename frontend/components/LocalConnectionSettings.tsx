@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   getSavedLocalConnection,
   isNativeShell,
@@ -10,23 +10,25 @@ import {
 import { scanLocalConnectionQrCode } from "@/lib/localConnectionScanner";
 import { requestWithNativeFallback } from "@/lib/nativeHttp";
 
+const getInitialLocalConnectionState = () => {
+  const native = isNativeShell();
+  const saved = native ? getSavedLocalConnection() : null;
+  return {
+    enabled: native,
+    address: saved?.apiBaseUrl || "",
+    open: native && !saved,
+  };
+};
+
 export default function LocalConnectionSettings() {
-  const [enabled, setEnabled] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [address, setAddress] = useState("");
+  const [initialState] = useState(getInitialLocalConnectionState);
+  const [enabled] = useState(initialState.enabled);
+  const [open, setOpen] = useState(initialState.open);
+  const [address, setAddress] = useState(initialState.address);
   const [message, setMessage] = useState("");
   const [messageKind, setMessageKind] = useState<"info" | "error">("info");
   const [testing, setTesting] = useState(false);
   const [scanning, setScanning] = useState(false);
-
-  useEffect(() => {
-    const native = isNativeShell();
-    setEnabled(native);
-    if (!native) return;
-    const saved = getSavedLocalConnection();
-    setAddress(saved?.apiBaseUrl || "");
-    setOpen(!saved);
-  }, []);
 
   if (!enabled) return null;
 

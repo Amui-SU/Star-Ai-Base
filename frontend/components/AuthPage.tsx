@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { systemAuthApi, SystemUser } from "@/lib/api";
 import LocalConnectionSettings from "@/components/LocalConnectionSettings";
@@ -305,10 +306,12 @@ export default function AuthPage({ onAuthSuccess }: Props) {
     }
 
     return (
-      <img
+      <Image
         src="/icons/qq-app-icon.jpg"
         alt=""
         aria-hidden="true"
+        width={24}
+        height={24}
         style={{
           width: "100%",
           height: "100%",

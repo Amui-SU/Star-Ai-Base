@@ -37,7 +37,14 @@ export default function AdminUsersPanel({
   };
 
   useEffect(() => {
-    if (open) void loadUsers();
+    if (!open) return;
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) void loadUsers();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   if (!open) return null;

@@ -51,11 +51,14 @@ export default function UserMenu({
   useEffect(() => {
     if (!open || lanAddress) return;
     let cancelled = false;
-    setLanLoading(true);
-    localConnectionApi
-      .lanAddress()
+    void Promise.resolve()
+      .then(() => {
+        if (cancelled) return null;
+        setLanLoading(true);
+        return localConnectionApi.lanAddress();
+      })
       .then((response) => {
-        if (!cancelled) setLanAddress(response);
+        if (!cancelled && response) setLanAddress(response);
       })
       .catch(() => {
         if (!cancelled) {
@@ -343,7 +346,7 @@ export default function UserMenu({
                 </button>
               </div>
 
-              <img
+              <Image
                 className="local-connection-qr-image"
                 src={
                   lanAddress.qr_data_url ||
@@ -352,6 +355,8 @@ export default function UserMenu({
                   ""
                 }
                 alt="手机连接二维码"
+                width={220}
+                height={220}
               />
               <div className="local-connection-qr-address">
                 {lanAddress.api_url}
