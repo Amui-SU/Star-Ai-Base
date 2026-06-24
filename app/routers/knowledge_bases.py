@@ -901,6 +901,7 @@ async def _load_scoped_chat_documents(
         )
         if documents:
             return documents
+        return []
     except Exception as exc:
         logger.warning(
             f"知识库向量检索不可用 [{knowledge_base.id}]，回退到数据库内容: {exc}"

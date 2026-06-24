@@ -848,7 +848,8 @@ describe("ChatPanel", () => {
     await user.type(screen.getByRole("textbox"), "sources");
     await user.click(container.querySelector(".composer-send-button")!);
 
-    expect(await screen.findByText("参考链接（0）")).toBeVisible();
+    expect(await screen.findByText("搜索状态")).toBeVisible();
+    expect(screen.queryByText("参考链接（0）")).not.toBeInTheDocument();
     const foldedNoResultsStatus = screen.queryByText(
       "联网搜索未找到可用结果，已仅参考知识库",
     );
@@ -860,7 +861,7 @@ describe("ChatPanel", () => {
       expect(foldedQueries).not.toBeVisible();
     }
 
-    await user.click(screen.getByText("参考链接（0）"));
+    await user.click(screen.getByText("搜索状态"));
 
     expect(
       screen.getByText("联网搜索未找到可用结果，已仅参考知识库"),

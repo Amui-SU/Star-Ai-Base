@@ -1192,7 +1192,9 @@ export default function ChatPanel({
                       {((m.sources && m.sources.length > 0) || m.webSearch) && (
                         <details className="source-details">
                           <summary className="source-summary">
-                            参考链接（{m.sources?.length ?? 0}）
+                            {(m.sources?.length ?? 0) > 0
+                              ? `参考链接（${m.sources?.length ?? 0}）`
+                              : "搜索状态"}
                           </summary>
                           <div className="source-list">
                             {m.sources?.map((s, i) => (

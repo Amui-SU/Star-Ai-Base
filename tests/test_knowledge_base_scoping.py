@@ -2105,6 +2105,59 @@ async def test_scoped_chat_web_search_does_not_attach_db_fallback_sources(
 
 
 @pytest.mark.asyncio
+async def test_scoped_chat_does_not_use_db_fallback_when_vector_search_is_empty(
+    client, monkeypatch
+):
+    await register_user(client, "empty-vector@example.com", "Empty Vector")
+    knowledge_base = await create_knowledge_base(client, "Empty Vector KB")
+    captured = {"fallback_called": False}
+
+    class EmptyRAGService:
+        def search_in_knowledge_base(self, *args, **kwargs):
+            return []
+
+    async def fake_load_db_fallback_documents(*args, **kwargs):
+        captured["fallback_called"] = True
+        return [
+            type(
+                "FakeDocument",
+                (),
+                {
+                    "page_content": "Unrelated database fallback content",
+                    "metadata": {
+                        "bvid": "BVunrelated",
+                        "title": "Unrelated DB Source",
+                        "url": "https://www.bilibili.com/video/BVunrelated",
+                    },
+                },
+            )()
+        ]
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service",
+        lambda: EmptyRAGService(),
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._load_db_fallback_documents",
+        fake_load_db_fallback_documents,
+    )
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._complete_llm_answer",
+        lambda messages: ("不应使用无关兜底资料回答", ""),
+    )
+
+    response = await client.post(
+        f"/knowledge-bases/{knowledge_base['id']}/chat",
+        json={"question": "一个与资料无关的问题"},
+    )
+
+    assert response.status_code == 200
+    assert captured["fallback_called"] is False
+    assert response.json()["sources"] == []
+    assert "没有找到相关内容" in response.json()["answer"]
+
+
+@pytest.mark.asyncio
 async def test_scoped_chat_stream_adds_web_sources_from_initial_search(
     client, monkeypatch
 ):
