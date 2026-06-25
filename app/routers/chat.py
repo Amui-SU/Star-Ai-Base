@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy import select, func, or_
@@ -26,10 +26,19 @@ from app.models import (
     ChatResponse,
     FavoriteFolder,
     FavoriteVideo,
+    UserApiAccount,
     VideoCache,
 )
 from app.config import settings
 from app.routers.knowledge import get_rag_service
+from app.routers.system_auth import _get_current_admin_user
+from app.services.api_credentials import (
+    LLM_API_SOURCE_OFFICIAL,
+    LLM_API_SOURCE_PERSONAL,
+    normalize_llm_api_source,
+    provider_defaults,
+    resolve_user_llm_credentials,
+)
 
 router = APIRouter(prefix="/chat", tags=["对话"])
 LEGACY_SCOPED_API_DETAIL = "旧全局接口已禁用，请使用 /knowledge-bases/* 范围化 API。"
@@ -37,6 +46,13 @@ LEGACY_SCOPED_API_DETAIL = "旧全局接口已禁用，请使用 /knowledge-base
 
 def _raise_legacy_scoped_api_required() -> None:
     raise HTTPException(status_code=410, detail=LEGACY_SCOPED_API_DETAIL)
+
+
+async def _require_current_admin_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_current_admin_user(request, db)
 
 
 PROVIDER_META = {
@@ -95,6 +111,10 @@ class LLMToolRunResult:
 
 class LLMProviderUpdateRequest(BaseModel):
     provider: str
+
+
+class LLMSourceUpdateRequest(BaseModel):
+    api_source: str
 
 
 class LLMProviderConfigRequest(BaseModel):
@@ -325,10 +345,31 @@ def _normalize_tavily_search_depth(depth: Optional[str]) -> str:
     return normalized
 
 
-def _web_search_config_response(provider: str) -> dict:
+async def _user_has_tavily_account(db: AsyncSession, user) -> bool:
+    result = await db.execute(
+        select(UserApiAccount.id)
+        .where(
+            UserApiAccount.user_id == user.id,
+            UserApiAccount.provider == "tavily",
+            UserApiAccount.enabled.is_(True),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+def _web_search_config_response(
+    provider: str,
+    *,
+    tavily_configured: bool | None = None,
+) -> dict:
     return {
         "provider": provider,
-        "tavily_configured": bool(settings.tavily_api_key.strip()),
+        "tavily_configured": (
+            bool(settings.tavily_api_key.strip())
+            if tavily_configured is None
+            else tavily_configured
+        ),
         "fallback_html": bool(settings.web_search_fallback_html),
         "tavily_search_depth": _normalize_tavily_search_depth(
             settings.tavily_search_depth
@@ -337,16 +378,23 @@ def _web_search_config_response(provider: str) -> dict:
 
 
 @router.get("/web-search/config")
-async def get_web_search_config(_current_user=Depends(get_current_user)):
+async def get_web_search_config(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Return web search settings without exposing saved API keys."""
     provider = _normalize_web_search_provider(settings.web_search_provider)
-    return _web_search_config_response(provider)
+    return _web_search_config_response(
+        provider,
+        tavily_configured=bool(settings.tavily_api_key.strip())
+        or await _user_has_tavily_account(db, current_user),
+    )
 
 
 @router.post("/web-search/config")
 async def save_web_search_config(
     body: WebSearchConfigRequest,
-    _current_user=Depends(get_current_user),
+    _current_admin=Depends(_require_current_admin_user),
 ):
     """Persist web search configuration to .env.local without echoing secrets."""
     provider = _normalize_web_search_provider(body.provider)
@@ -374,33 +422,146 @@ async def save_web_search_config(
     return _web_search_config_response(provider)
 
 
-@router.get("/llm/config")
-async def get_llm_config(_current_user=Depends(get_current_user)):
-    """获取当前模型配置（不返回密钥）"""
-    current = _resolve_llm_config()
+def _current_user_llm_source(
+    user,
+    *,
+    has_personal: bool,
+    has_official: bool,
+) -> str:
+    preferred = normalize_llm_api_source(
+        getattr(user, "llm_api_source", None),
+        default=None,
+    )
+    if preferred:
+        return preferred
+    if has_personal:
+        return LLM_API_SOURCE_PERSONAL
+    if has_official:
+        return LLM_API_SOURCE_OFFICIAL
+    return LLM_API_SOURCE_PERSONAL
+
+
+async def _llm_config_response(current_user, db: AsyncSession) -> dict:
+    result = await db.execute(
+        select(UserApiAccount)
+        .where(
+            UserApiAccount.user_id == current_user.id,
+            UserApiAccount.provider.in_(SUPPORTED_LLM_PROVIDERS),
+        )
+        .order_by(UserApiAccount.is_default.desc(), UserApiAccount.created_at.asc())
+    )
+    user_accounts = result.scalars().all()
+    account_by_provider: dict[str, UserApiAccount] = {}
+    enabled_account_by_provider: dict[str, UserApiAccount] = {}
+    for account in user_accounts:
+        account_by_provider.setdefault(account.provider, account)
+        if account.enabled:
+            enabled_account_by_provider.setdefault(account.provider, account)
+
+    default_account = next(
+        (
+            account
+            for account in user_accounts
+            if account.enabled and account.is_default
+        ),
+        None,
+    )
+    if default_account is None:
+        default_account = next(
+            (account for account in user_accounts if account.enabled), None
+        )
+    official_config_by_provider = {
+        provider: _resolve_llm_config(provider) for provider in PROVIDER_META
+    }
+    has_personal = default_account is not None
+    has_official = any(
+        bool((config.get("api_key") or "").strip())
+        for config in official_config_by_provider.values()
+    )
+    current_api_source = _current_user_llm_source(
+        current_user,
+        has_personal=has_personal,
+        has_official=has_official,
+    )
+    current_provider = (
+        default_account.provider
+        if current_api_source == LLM_API_SOURCE_PERSONAL and default_account
+        else _current_llm_provider
+    )
+
     providers = []
     for provider, meta in PROVIDER_META.items():
+        account = account_by_provider.get(provider)
+        enabled_account = enabled_account_by_provider.get(provider)
+        defaults = provider_defaults(provider)
+        official_config = official_config_by_provider[provider]
+        official_enabled = bool((official_config.get("api_key") or "").strip())
+        personal_enabled = bool(enabled_account)
+        selected_account = (
+            enabled_account
+            if current_api_source == LLM_API_SOURCE_PERSONAL
+            else account
+        )
+        if current_api_source == LLM_API_SOURCE_OFFICIAL:
+            model = official_config["model"]
+            base_url = official_config["base_url"]
+            thinking_config = official_config["thinking_config"]
+            enabled = official_enabled
+        else:
+            model = selected_account.model if selected_account else defaults.model
+            base_url = (
+                selected_account.base_url if selected_account else defaults.base_url
+            )
+            thinking_config = (
+                selected_account.thinking_config if selected_account else {}
+            )
+            enabled = personal_enabled
         providers.append(
             {
                 "provider": provider,
                 "label": meta["label"],
-                "enabled": bool(meta["api_key"]()),
-                "model": meta["model"](),
-                "base_url": meta["base_url"](),
-                "thinking_config": _get_provider_thinking_config(provider),
+                "enabled": enabled,
+                "official_enabled": official_enabled,
+                "personal_enabled": personal_enabled,
+                "model": model,
+                "base_url": base_url,
+                "thinking_config": thinking_config,
                 "thinking_template": _get_provider_thinking_template(provider),
             }
         )
     return {
-        "current_provider": current["provider"],
+        "current_provider": current_provider,
+        "current_api_source": current_api_source,
         "providers": providers,
     }
+
+
+@router.get("/llm/config")
+async def get_llm_config(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取当前模型配置（不返回密钥）"""
+    return await _llm_config_response(current_user, db)
+
+
+@router.post("/llm/source")
+async def set_llm_source(
+    body: LLMSourceUpdateRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """切换当前用户聊天使用官方通道或个人密钥。"""
+    current_user.llm_api_source = normalize_llm_api_source(body.api_source)
+    await db.commit()
+    await db.refresh(current_user)
+    return await _llm_config_response(current_user, db)
 
 
 @router.post("/llm/provider-config")
 async def save_llm_provider_config(
     body: LLMProviderConfigRequest,
-    _current_user=Depends(get_current_user),
+    _current_admin=Depends(_require_current_admin_user),
 ):
     """验证并保存模型提供方配置到 .env.local。"""
     global _current_llm_provider
@@ -483,7 +644,7 @@ async def save_llm_provider_config(
 @router.post("/llm/config")
 async def set_llm_config(
     body: LLMProviderUpdateRequest,
-    _current_user=Depends(get_current_user),
+    _current_admin=Depends(_require_current_admin_user),
 ):
     """切换当前问答模型提供方"""
     global _current_llm_provider
@@ -491,7 +652,7 @@ async def set_llm_config(
     if not llm_config["api_key"]:
         raise HTTPException(
             status_code=400,
-            detail=f"{llm_config['provider_label']} API Key 未配置，请先在 .env 中配置后重启后端。",
+            detail=f"{llm_config['provider_label']} API Key 未配置，请先在 .env.local 中配置后重启后端。",
         )
     _current_llm_provider = llm_config["provider"]
     logger.info(
@@ -506,16 +667,28 @@ async def set_llm_config(
 
 
 @router.get("/health/llm")
-async def llm_health_check(_current_user=Depends(get_current_user)):
+async def llm_health_check(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """LLM 连通性检查"""
-    llm_config = _resolve_llm_config()
-    if not llm_config["api_key"]:
+    try:
+        credential = await resolve_user_llm_credentials(
+            db,
+            current_user,
+            global_config_resolver=_resolve_llm_config,
+        )
+        llm_config = credential.to_llm_config()
+    except HTTPException as exc:
+        fallback_config = _resolve_llm_config()
+        detail = exc.detail
+        message = detail.get("message") if isinstance(detail, dict) else str(detail)
         return {
             "status": "down",
-            "message": "未配置 LLM API Key",
+            "message": message or "未配置 LLM API Key",
             "latency_ms": None,
-            "model": llm_config["model"],
-            "provider": llm_config["provider"],
+            "model": fallback_config["model"],
+            "provider": fallback_config["provider"],
         }
 
     start = time.perf_counter()
@@ -748,16 +921,18 @@ def _encode_thinking_delta(content: str) -> str:
     return f"{THINKING_DELTA_MARKER}{json.dumps(content, ensure_ascii=False)}\n"
 
 
-def _stream_llm_events(messages: list[dict]):
+def _stream_llm_events(
+    messages: list[dict], llm_config: Optional[Dict[str, str]] = None
+):
     """Yield native thinking and answer deltas from the configured model."""
-    llm_config = _resolve_llm_config()
-    client = _get_llm_client(llm_config)
+    cfg = llm_config or _resolve_llm_config()
+    client = _get_llm_client(cfg)
     stream = client.chat.completions.create(
-        model=llm_config["model"],
+        model=cfg["model"],
         messages=messages,
         temperature=0.5,
         stream=True,
-        **_build_thinking_completion_options(llm_config),
+        **_build_thinking_completion_options(cfg),
     )
     for chunk in stream:
         if not chunk.choices:
@@ -772,14 +947,15 @@ def _stream_llm_events(messages: list[dict]):
 
 def _complete_llm_answer(
     messages: list[dict],
+    llm_config: Optional[Dict[str, str]] = None,
 ) -> tuple[str, str]:
-    llm_config = _resolve_llm_config()
-    client = _get_llm_client(llm_config)
+    cfg = llm_config or _resolve_llm_config()
+    client = _get_llm_client(cfg)
     response = client.chat.completions.create(
-        model=llm_config["model"],
+        model=cfg["model"],
         messages=messages,
         temperature=0.5,
-        **_build_thinking_completion_options(llm_config),
+        **_build_thinking_completion_options(cfg),
     )
     message = response.choices[0].message
     thinking, answer = _extract_thinking_and_answer(
@@ -1000,9 +1176,10 @@ async def _prepare_llm_messages_with_tools(
     tool_handlers: dict[str, Callable[[dict], Awaitable[dict]]],
     max_tool_calls: int = 2,
     after_tool_messages: Optional[Callable[[list[dict]], list[dict]]] = None,
+    llm_config: Optional[Dict[str, str]] = None,
 ) -> LLMToolRunResult:
-    llm_config = _resolve_llm_config()
-    client = _get_llm_client(llm_config)
+    cfg = llm_config or _resolve_llm_config()
+    client = _get_llm_client(cfg)
     working_messages = [*messages]
     executed_tool_calls = 0
 
@@ -1010,7 +1187,7 @@ async def _prepare_llm_messages_with_tools(
         # Keep tool planning fast; final answer generation still uses thinking config.
         response = await _create_chat_completion_async(
             client,
-            model=llm_config["model"],
+            model=cfg["model"],
             messages=working_messages,
             temperature=0.5,
             tools=tools,

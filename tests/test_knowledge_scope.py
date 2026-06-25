@@ -202,6 +202,17 @@ async def test_chat_falls_back_to_database_content_when_vector_retrieval_fails(
         },
     )
     assert register_response.status_code == 200
+    account_response = await client.post(
+        "/api-accounts",
+        json={
+            "provider": "deepseek",
+            "api_key": "sk-test-user",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "is_default": True,
+        },
+    )
+    assert account_response.status_code == 200
 
     create_response = await client.post(
         "/knowledge-bases",

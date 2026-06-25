@@ -36,7 +36,8 @@ env/
 *.swo
 *~
 
-# Environment variables (.env is a shareable template; .env.local contains secrets)
+# Environment variables (.env.example is the shareable template)
+.env
 .env.local
 .env.*.local
 

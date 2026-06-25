@@ -510,6 +510,8 @@ html.light .workspace-card {
 }
 
 .workspace-topbar {
+  position: relative;
+  z-index: 140;
   height: 54px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
@@ -983,6 +985,204 @@ html.light .workspace-card {
 .admin-users-secondary:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.admin-users-secondary.danger {
+  color: #ffb2a0;
+}
+
+.modal-card.api-accounts-panel {
+  display: grid;
+  width: min(1120px, calc(100vw - 24px));
+  max-height: min(92dvh, 860px);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 18px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(32, 32, 30, 0.98);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.58);
+  overflow: hidden;
+}
+
+html.light .modal-card.api-accounts-panel {
+  border-color: rgba(196, 176, 144, 0.78);
+  background: rgba(250, 246, 239, 0.98);
+  box-shadow: 0 24px 60px rgba(55, 38, 22, 0.18);
+}
+
+.api-accounts-layout {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 16px;
+  overflow: hidden;
+}
+
+.api-accounts-list,
+.api-account-form {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.api-accounts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.api-accounts-toolbar,
+.api-account-form-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.api-accounts-empty {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.api-account-row {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.api-account-row.active {
+  border-color: rgba(217, 119, 87, 0.45);
+  background: rgba(217, 119, 87, 0.09);
+}
+
+.api-account-main {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.api-account-name {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-account-meta {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.api-account-badges,
+.api-account-actions,
+.api-account-switches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-account-badges span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.api-account-badges .active {
+  border-color: rgba(47, 124, 120, 0.42);
+  color: #8bded1;
+}
+
+.api-account-badges .inactive {
+  color: var(--muted);
+}
+
+.api-account-error,
+.api-account-message.error {
+  color: #ffb2a0;
+}
+
+.api-account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 16px;
+  scrollbar-gutter: stable;
+}
+
+.api-account-form-title {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.api-account-form-subtitle {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.api-account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.api-account-field .input {
+  width: 100%;
+}
+
+.api-account-switches label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.api-account-message {
+  border: 1px solid rgba(47, 124, 120, 0.28);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(47, 124, 120, 0.12);
+  color: #8bded1;
+  font-size: 12px;
+}
+
+.api-account-message.error {
+  border-color: rgba(255, 178, 160, 0.3);
+  background: rgba(255, 112, 80, 0.1);
 }
 
 html.light .user-menu-popover {
@@ -3399,9 +3599,63 @@ html.light .sources-ingest-button.active:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.api-account-empty-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(440px, 100%);
+  margin-top: -4px;
+  border: 1px solid rgba(217, 119, 87, 0.22);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background:
+    linear-gradient(180deg, rgba(217, 119, 87, 0.09), rgba(217, 119, 87, 0.04)),
+    rgba(255, 255, 255, 0.025);
+  color: var(--ink-soft);
+  text-align: left;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.1);
+}
+
+.api-account-empty-hint strong,
+.api-account-empty-hint span {
+  display: block;
+}
+
+.api-account-empty-hint strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.api-account-empty-hint span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.api-account-empty-hint button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  border: 1px solid rgba(217, 119, 87, 0.42);
+  border-radius: 9px;
+  padding: 0 12px;
+  background: rgba(217, 119, 87, 0.16);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
 @media (max-width: 720px) {
   .prompt-grid {
     grid-template-columns: 1fr;
+  }
+
+  .api-account-empty-hint {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
@@ -4209,7 +4463,7 @@ html.light .model-status-card {
   right: 0;
   z-index: 110;
   display: flex;
-  width: 198px;
+  width: 232px;
   max-width: calc(100vw - 32px);
   flex-direction: column;
   gap: 10px;
@@ -4219,6 +4473,50 @@ html.light .model-status-card {
   background: var(--paper-2);
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
   backdrop-filter: blur(8px);
+}
+
+.model-source-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.model-source-option {
+  display: grid;
+  min-width: 0;
+  min-height: 38px;
+  place-items: center;
+  gap: 1px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.model-source-option small {
+  color: currentColor;
+  font-size: 8px;
+  font-weight: 600;
+  opacity: 0.68;
+}
+
+.model-source-option.active {
+  border-color: rgba(47, 124, 120, 0.28);
+  background: rgba(47, 124, 120, 0.14);
+  color: #9bd0ca;
+}
+
+.model-source-option:disabled {
+  cursor: default;
+  opacity: 0.42;
 }
 
 .model-provider-option {
@@ -4276,7 +4574,7 @@ html.light .model-status-card {
 }
 
 .modal-backdrop:has(> .thinking-provider-modal) {
-  z-index: 130;
+  z-index: 230;
   overflow: hidden;
   padding: 16px;
 }
@@ -4684,7 +4982,7 @@ html.light .model-provider-menu .status-pill.empty {
 }
 
 .modal-backdrop.local-connection-modal-backdrop {
-  z-index: 140;
+  z-index: 230;
 }
 
 .local-connection-modal {
@@ -5246,7 +5544,7 @@ html.light .import-actions .btn-primary:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  z-index: 220;
 }
 
 .modal-card {
@@ -5558,6 +5856,26 @@ html.light .status-pill.empty {
   }
 }
 
+@media (max-width: 860px) {
+  .modal-card.api-accounts-panel {
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+    padding: 16px;
+  }
+
+  .api-accounts-layout {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .api-accounts-list,
+  .api-account-form {
+    min-height: min-content;
+    overflow: visible;
+  }
+}
+
 @media (max-width: 640px) {
   .prompt-grid {
     display: none;
@@ -5598,7 +5916,7 @@ html.light .status-pill.empty {
 
   .model-provider-menu {
     right: -2px;
-    width: min(198px, calc(100vw - 24px));
+    width: min(232px, calc(100vw - 24px));
     gap: 7px;
     padding: 7px;
   }
@@ -5651,6 +5969,26 @@ html.light .status-pill.empty {
   .admin-users-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+
+  .api-accounts-panel {
+    width: calc(100vw - 20px);
+    padding: 16px;
+  }
+
+  .api-accounts-layout {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .api-accounts-list,
+  .api-account-form {
+    max-height: none;
+  }
+
+  .api-account-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 /* 鈹€鈹€ Mobile Workspace Polish 鈹€鈹€ */
@@ -5835,7 +6173,7 @@ html.light .status-pill.empty {
 
   .model-provider-menu {
     right: -4px;
-    width: min(208px, calc(100vw - 22px));
+    width: min(232px, calc(100vw - 22px));
     max-height: 54dvh;
     overflow: auto;
   }
@@ -5919,7 +6257,7 @@ html.light .status-pill.empty {
   }
 
   .modal-backdrop:has(> .import-modal) {
-    z-index: 100;
+    z-index: 230;
     align-items: center;
     padding: 16px;
   }
@@ -6208,7 +6546,7 @@ html.light .status-pill.empty {
     opacity: 1;
     overflow: visible;
     position: relative;
-    z-index: 80;
+    z-index: 140;
     pointer-events: auto;
     transform: translateY(0);
   }

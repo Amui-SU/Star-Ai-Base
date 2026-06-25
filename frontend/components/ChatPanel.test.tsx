@@ -23,6 +23,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       health: vi.fn(),
       saveWebSearchConfig: vi.fn(),
       setModelProvider: vi.fn(),
+      setModelSource: vi.fn(),
     },
     knowledgeBaseApi: {
       ...actual.knowledgeBaseApi,
@@ -78,6 +79,22 @@ function mockChatPanelDependencies() {
     fallback_html: true,
     tavily_search_depth: "basic",
   });
+  vi.mocked(chatApi.setModelSource).mockResolvedValue({
+    current_provider: "deepseek",
+    current_api_source: "personal",
+    providers: [
+      {
+        provider: "deepseek",
+        label: "DeepSeek",
+        enabled: true,
+        official_enabled: true,
+        personal_enabled: true,
+        model: "deepseek-v4-pro",
+        thinking_config: { thinking: { type: "enabled" } },
+        thinking_template: { thinking: { type: "enabled" } },
+      },
+    ],
+  });
   vi.mocked(knowledgeBaseApi.stats).mockResolvedValue({
     knowledge_base_id: 1,
     workspace_id: 1,
@@ -115,6 +132,114 @@ describe("ChatPanel", () => {
     expect(container.querySelector(".composer-disclaimer")).toBeInTheDocument();
   });
 
+  it("does not show the AI key prompt when a model is available", async () => {
+    mockChatPanelDependencies();
+
+    render(<ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />);
+
+    expect(await screen.findByText("探索你的收藏")).toBeVisible();
+    expect(screen.queryByText("先添加 AI 服务密钥")).toBeNull();
+  });
+
+  it("lets users switch between official and personal model sources above the provider list", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatApi.getModelConfig).mockResolvedValue({
+      current_provider: "deepseek",
+      current_api_source: "official",
+      providers: [
+        {
+          provider: "deepseek",
+          label: "DeepSeek",
+          enabled: true,
+          official_enabled: true,
+          personal_enabled: true,
+          model: "deepseek-chat",
+          thinking_config: {},
+          thinking_template: {},
+        },
+      ],
+    });
+    const user = userEvent.setup();
+
+    render(<ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />);
+
+    await user.click(await screen.findByLabelText("模型选择"));
+    expect(screen.getByRole("button", { name: "官方" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(screen.getByRole("button", { name: "个人" }));
+
+    await waitFor(() =>
+      expect(chatApi.setModelSource).toHaveBeenCalledWith("personal"),
+    );
+    expect(screen.getByRole("button", { name: "个人" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("treats legacy model config without an explicit source as official", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatApi.getModelConfig).mockResolvedValue({
+      current_provider: "deepseek",
+      providers: [
+        {
+          provider: "deepseek",
+          label: "DeepSeek",
+          enabled: true,
+          model: "deepseek-chat",
+          thinking_config: {},
+          thinking_template: {},
+        },
+      ],
+    });
+    const user = userEvent.setup();
+
+    render(<ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />);
+
+    await user.click(await screen.findByLabelText("模型选择"));
+
+    expect(screen.getByRole("button", { name: "官方" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "个人" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("shows the AI key prompt only after config loads with no usable model", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatApi.getModelConfig).mockResolvedValue({
+      current_provider: "deepseek",
+      current_api_source: "personal",
+      providers: [
+        {
+          provider: "deepseek",
+          label: "DeepSeek",
+          enabled: false,
+          model: "deepseek-chat",
+          thinking_config: {},
+          thinking_template: {},
+        },
+      ],
+    });
+    const onOpenApiAccounts = vi.fn();
+
+    render(
+      <ChatPanel
+        knowledgeBaseId={1}
+        knowledgeBaseName="Test KB"
+        onOpenApiAccounts={onOpenApiAccounts}
+      />,
+    );
+
+    expect(await screen.findByText("先添加 AI 服务密钥")).toBeVisible();
+    expect(screen.getByRole("button", { name: "配置密钥" })).toBeVisible();
+  });
+
   it("marks the knowledge-base meta so the mobile header can hide it", async () => {
     mockChatPanelDependencies();
 
@@ -126,6 +251,81 @@ describe("ChatPanel", () => {
     expect(container.querySelector(".chat-kb-meta")).toHaveTextContent(
       "1 个视频",
     );
+  });
+
+  it("hides global provider and Tavily configuration controls from regular users", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatApi.getModelConfig).mockResolvedValue({
+      current_provider: "deepseek",
+      providers: [
+        {
+          provider: "deepseek",
+          label: "DeepSeek",
+          enabled: true,
+          model: "deepseek-v4-pro",
+          thinking_config: {},
+          thinking_template: {},
+        },
+        {
+          provider: "kimi",
+          label: "Moonshot Kimi",
+          enabled: false,
+          model: "moonshot-v1-8k",
+          thinking_config: {},
+          thinking_template: {},
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    render(<ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />);
+
+    await user.click(await screen.findByRole("button", { name: "模型选择" }));
+    expect(screen.queryByRole("button", { name: "配置 DeepSeek" })).toBeNull();
+    expect(screen.getByText("Moonshot Kimi")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /^提问范围/ }));
+    await user.click(screen.getByRole("button", { name: "联网搜索" }));
+    await user.click(screen.getByRole("button", { name: /^提问范围/ }));
+    const tavilyButton = await screen.findByRole("button", { name: "Tavily" });
+
+    expect(tavilyButton).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "配置 Tavily" })).toBeNull();
+    expect(screen.getByText("Tavily 需要管理员配置")).toBeVisible();
+  });
+
+  it("lets regular users open their own AI service key settings for Tavily", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatApi.getWebSearchConfig).mockResolvedValue({
+      provider: "auto",
+      tavily_configured: false,
+      fallback_html: true,
+      tavily_search_depth: "basic",
+    });
+    const onOpenApiAccounts = vi.fn();
+    const user = userEvent.setup();
+
+    const { container } = render(
+      <ChatPanel
+        knowledgeBaseId={1}
+        knowledgeBaseName="Test KB"
+        onOpenApiAccounts={onOpenApiAccounts}
+      />,
+    );
+
+    await screen.findByText("Test KB");
+    const scopeTrigger = container.querySelector(".scope-picker-trigger");
+    expect(scopeTrigger).not.toBeNull();
+    await user.click(scopeTrigger as HTMLElement);
+    const webSearchButton = container.querySelector(".scope-web-search-btn");
+    expect(webSearchButton).not.toBeNull();
+    await user.click(webSearchButton as HTMLElement);
+    await user.click(scopeTrigger as HTMLElement);
+    const tavilyButton = await screen.findByRole("button", { name: "Tavily" });
+
+    expect(tavilyButton).not.toBeDisabled();
+    await user.click(tavilyButton);
+    expect(onOpenApiAccounts).toHaveBeenCalled();
   });
 
   it("includes credentials on the streaming chat request", async () => {
@@ -176,7 +376,7 @@ describe("ChatPanel", () => {
 
     const user = userEvent.setup();
     const { container } = render(
-      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" isAdmin />,
     );
 
     await user.type(screen.getByRole("textbox"), "hello");
@@ -244,7 +444,7 @@ describe("ChatPanel", () => {
 
     const user = userEvent.setup();
     const { container } = render(
-      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" isAdmin />,
     );
 
     await waitFor(() => {
@@ -315,7 +515,7 @@ describe("ChatPanel", () => {
 
     const user = userEvent.setup();
     const { container } = render(
-      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" isAdmin />,
     );
 
     await user.click(screen.getByRole("button", { name: /^提问范围/ }));
@@ -391,7 +591,7 @@ describe("ChatPanel", () => {
 
     const user = userEvent.setup();
     const { container } = render(
-      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" isAdmin />,
     );
 
     await user.click(screen.getByRole("button", { name: /^提问范围/ }));

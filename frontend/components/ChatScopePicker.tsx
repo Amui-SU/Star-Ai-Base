@@ -23,6 +23,7 @@ interface Props {
   webSearchProvider: WebSearchProvider;
   onWebSearchProviderChange: (provider: WebSearchProvider) => void;
   tavilyConfigured: boolean;
+  canConfigureWebSearch?: boolean;
   onConfigureTavily: () => void;
   webSearchNotice?: string;
   disabled?: boolean;
@@ -49,6 +50,7 @@ export default function ChatScopePicker({
   webSearchProvider,
   onWebSearchProviderChange,
   tavilyConfigured,
+  canConfigureWebSearch = false,
   onConfigureTavily,
   webSearchNotice = "",
   disabled = false,
@@ -145,9 +147,6 @@ export default function ChatScopePicker({
 
   const chooseWebSearchProvider = (provider: WebSearchProvider) => {
     onWebSearchProviderChange(provider);
-    if (provider === "tavily" && !tavilyConfigured) {
-      onConfigureTavily();
-    }
   };
 
   const renderVideoOption = (
@@ -242,21 +241,40 @@ export default function ChatScopePicker({
                       webSearchProvider === provider ? "active" : ""
                     }`}
                     aria-pressed={webSearchProvider === provider}
+                    disabled={
+                      provider === "tavily" &&
+                      !tavilyConfigured &&
+                      !canConfigureWebSearch
+                    }
+                    title={
+                      provider === "tavily" &&
+                      !tavilyConfigured &&
+                      !canConfigureWebSearch
+                        ? "Tavily 需要管理员配置"
+                        : undefined
+                    }
                     onClick={() => chooseWebSearchProvider(provider)}
                   >
                     {label}
                   </button>
                 ))}
               </div>
-              {webSearchProvider === "tavily" && !tavilyConfigured && (
-                <button
-                  type="button"
-                  className="scope-web-config-btn"
-                  onClick={onConfigureTavily}
-                >
-                  配置 Tavily
-                </button>
+              {!tavilyConfigured && !canConfigureWebSearch && (
+                <div className="scope-web-config-note">
+                  Tavily 需要管理员配置
+                </div>
               )}
+              {webSearchProvider === "tavily" &&
+                !tavilyConfigured &&
+                canConfigureWebSearch && (
+                  <button
+                    type="button"
+                    className="scope-web-config-btn"
+                    onClick={onConfigureTavily}
+                  >
+                    配置 Tavily
+                  </button>
+                )}
             </div>
           )}
 

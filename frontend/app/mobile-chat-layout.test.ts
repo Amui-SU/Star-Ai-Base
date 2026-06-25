@@ -20,7 +20,7 @@ describe("mobile chat message layout", () => {
       /\.app-shell\.sidebar-open \.workspace-topbar\s*\{[^}]*overflow:\s*visible;/s,
     );
     expect(stylesheet).toMatch(
-      /\.app-shell\.sidebar-open \.workspace-topbar\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*80;/s,
+      /\.app-shell\.sidebar-open \.workspace-topbar\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*140;/s,
     );
   });
 
@@ -56,7 +56,7 @@ describe("mobile chat message layout", () => {
 
   it("keeps the mobile import modal above the workspace with screen insets", () => {
     expect(stylesheet).toMatch(
-      /\.modal-backdrop:has\(>\s*\.import-modal\)\s*\{[^}]*z-index:\s*100;[^}]*align-items:\s*center;[^}]*padding:\s*16px;/s,
+      /\.modal-backdrop:has\(>\s*\.import-modal\)\s*\{[^}]*z-index:\s*230;[^}]*align-items:\s*center;[^}]*padding:\s*16px;/s,
     );
     expect(stylesheet).toMatch(
       /\.import-modal,\s*\.import-modal-step\s*\{[^}]*width:\s*min\(100%, calc\(100vw - 32px\)\);/s,
@@ -93,7 +93,7 @@ describe("mobile chat message layout", () => {
 
   it("keeps mobile connection settings readable and above admin overlays", () => {
     expect(stylesheet).toMatch(
-      /\.modal-backdrop\.local-connection-modal-backdrop\s*\{[^}]*z-index:\s*140;/s,
+      /\.modal-backdrop\.local-connection-modal-backdrop\s*\{[^}]*z-index:\s*230;/s,
     );
     expect(stylesheet).toMatch(
       /@media \(max-width: 1024px\)\s*\{[\s\S]*\.local-connection-modal-backdrop\s*\{[^}]*align-items:\s*flex-start;[^}]*overflow-y:\s*auto;[^}]*padding:\s*max\(16px, calc\(env\(safe-area-inset-top\) \+ 12px\)\)\s+14px\s+max\(22px, calc\(env\(safe-area-inset-bottom\) \+ 16px\)\);/s,

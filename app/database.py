@@ -81,6 +81,28 @@ async def _ensure_sqlite_legacy_columns(conn: AsyncConnection) -> None:
             "knowledge_base_id": "INTEGER",
             "source_binding_id": "INTEGER",
         },
+        "user_api_accounts": {
+            "thinking_config": "JSON",
+            "enabled": "BOOLEAN",
+            "is_default": "BOOLEAN",
+            "last_validated_at": "DATETIME",
+            "last_error": "TEXT",
+            "created_at": "DATETIME",
+            "updated_at": "DATETIME",
+        },
+        "usage_events": {
+            "api_account_id": "INTEGER",
+            "api_source": "VARCHAR(20)",
+            "prompt_tokens": "INTEGER",
+            "completion_tokens": "INTEGER",
+            "total_tokens": "INTEGER",
+            "estimated_cost": "FLOAT",
+            "error_code": "VARCHAR(120)",
+            "created_at": "DATETIME",
+        },
+        "system_users": {
+            "llm_api_source": "VARCHAR(20)",
+        },
     }
 
     def ensure_columns(sync_conn):
@@ -353,9 +375,26 @@ async def _ensure_sqlite_legacy_columns(conn: AsyncConnection) -> None:
                 """
             )
 
+        def create_api_account_indexes() -> None:
+            if table_columns("user_api_accounts"):
+                sync_conn.exec_driver_sql(
+                    'CREATE INDEX IF NOT EXISTS "ix_user_api_accounts_user_provider" '
+                    'ON "user_api_accounts" ("user_id", "provider")'
+                )
+                sync_conn.exec_driver_sql(
+                    'CREATE INDEX IF NOT EXISTS "ix_user_api_accounts_user_default" '
+                    'ON "user_api_accounts" ("user_id", "is_default")'
+                )
+            if table_columns("usage_events"):
+                sync_conn.exec_driver_sql(
+                    'CREATE INDEX IF NOT EXISTS "ix_usage_events_user_feature" '
+                    'ON "usage_events" ("user_id", "feature")'
+                )
+
         rebuild_video_cache_without_unique_bvid()
         create_video_cache_indexes()
         clone_scoped_video_cache_rows()
+        create_api_account_indexes()
 
     await conn.run_sync(ensure_columns)
 

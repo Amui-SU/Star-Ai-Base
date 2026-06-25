@@ -39,6 +39,7 @@ function ControlledPicker({
   webSearchProvider = "auto",
   onWebSearchProviderChange,
   tavilyConfigured = false,
+  canConfigureWebSearch = false,
   onConfigureTavily,
   webSearchNotice = "",
   disabled = false,
@@ -50,6 +51,7 @@ function ControlledPicker({
   webSearchProvider?: WebSearchProvider;
   onWebSearchProviderChange?: (provider: WebSearchProvider) => void;
   tavilyConfigured?: boolean;
+  canConfigureWebSearch?: boolean;
   onConfigureTavily?: () => void;
   webSearchNotice?: string;
   disabled?: boolean;
@@ -65,6 +67,7 @@ function ControlledPicker({
       webSearchEnabled={webSearch}
       webSearchProvider={provider}
       tavilyConfigured={tavilyConfigured}
+      canConfigureWebSearch={canConfigureWebSearch}
       webSearchNotice={webSearchNotice}
       disabled={disabled}
       onChange={(next) => {
@@ -157,6 +160,7 @@ describe("ChatScopePicker", () => {
       <ControlledPicker
         webSearchEnabled
         tavilyConfigured={false}
+        canConfigureWebSearch
         onWebSearchProviderChange={onWebSearchProviderChange}
         onConfigureTavily={onConfigureTavily}
       />,

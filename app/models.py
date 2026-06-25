@@ -4,7 +4,7 @@ Bilibili RAG 知识库系统
 数据模型定义
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, Float
 from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -104,6 +104,7 @@ class SystemUser(Base):
     display_name = Column(String(100), nullable=False)
     avatar_url = Column(String(500), nullable=True)
     status = Column(String(20), default="active", nullable=False)
+    llm_api_source = Column(String(20), nullable=True)
     created_at = Column(DateTime, default=_utc_now)
     updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
@@ -207,6 +208,48 @@ class SourceCredential(Base):
     revoked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utc_now)
     updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
+
+
+class UserApiAccount(Base):
+    """Encrypted third-party API credentials owned by a system user."""
+
+    __tablename__ = "user_api_accounts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    provider = Column(String(50), index=True, nullable=False)
+    display_name = Column(String(120), nullable=False)
+    api_key_encrypted = Column(Text, nullable=False)
+    base_url = Column(String(500), nullable=False)
+    model = Column(String(200), nullable=False)
+    thinking_config = Column(JSON, nullable=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    last_validated_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
+
+
+class UsageEvent(Base):
+    """Lightweight AI usage audit log, ready for future billing."""
+
+    __tablename__ = "usage_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    api_account_id = Column(Integer, ForeignKey("user_api_accounts.id"), nullable=True)
+    api_source = Column(String(20), default="official", nullable=False)
+    feature = Column(String(50), index=True, nullable=False)
+    provider = Column(String(50), index=True, nullable=False)
+    model = Column(String(200), nullable=False)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    estimated_cost = Column(Float, nullable=True)
+    status = Column(String(20), default="success", nullable=False)
+    error_code = Column(String(120), nullable=True)
+    created_at = Column(DateTime, default=_utc_now)
 
 
 class VerificationCode(Base):
@@ -392,6 +435,41 @@ class AdminUserStatusUpdateRequest(BaseModel):
 class AdminPasswordResetResponse(BaseModel):
     user: AdminUserResponse
     temporary_password: str
+
+
+class ApiAccountCreateRequest(BaseModel):
+    provider: str
+    display_name: Optional[str] = None
+    api_key: str
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    thinking_config: Optional[dict] = None
+    is_default: bool = False
+
+
+class ApiAccountUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    thinking_config: Optional[dict] = None
+    enabled: Optional[bool] = None
+    is_default: Optional[bool] = None
+
+
+class ApiAccountResponse(BaseModel):
+    id: int
+    provider: str
+    provider_label: str
+    display_name: str
+    base_url: str
+    model: str
+    thinking_config: dict = {}
+    enabled: bool
+    is_default: bool
+    configured: bool = True
+    last_validated_at: Optional[datetime] = None
+    last_error: Optional[str] = None
 
 
 class WorkspaceResponse(BaseModel):

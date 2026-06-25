@@ -475,6 +475,7 @@ async def search_web(
     max_results: int = 3,
     diagnostics: list[dict] | None = None,
     provider: str | None = None,
+    tavily_api_key: str | None = None,
 ) -> list[dict[str, str]]:
     """Return lightweight web search snippets for LLM grounding."""
     term = _truncate_text(query.strip(), MAX_SEARCH_QUERY_CHARS)
@@ -485,6 +486,7 @@ async def search_web(
     selected_provider = (provider or settings.web_search_provider).strip().lower()
     if selected_provider not in {"auto", "tavily", "html"}:
         selected_provider = settings.web_search_provider.strip().lower() or "html"
+    selected_tavily_key = (tavily_api_key or settings.tavily_api_key).strip()
     timeout = httpx.Timeout(8.0, connect=4.0)
     proxy = settings.http_proxy or None
     headers = {
@@ -501,7 +503,7 @@ async def search_web(
         trust_env=False,
     ) as client:
         if selected_provider in {"auto", "tavily"}:
-            if not settings.tavily_api_key.strip():
+            if not selected_tavily_key:
                 _append_missing_tavily_key_diagnostic(diagnostics)
                 if (
                     provider_override and selected_provider == "tavily"
@@ -516,6 +518,7 @@ async def search_web(
                     term,
                     max_results=max_results,
                     diagnostics=diagnostics,
+                    api_key=selected_tavily_key,
                 )
                 if (
                     tavily_results
@@ -600,9 +603,15 @@ async def _try_search_provider(
     *,
     max_results: int,
     diagnostics: list[dict] | None = None,
+    **search_kwargs,
 ) -> list[dict[str, str]]:
     try:
-        results = await searcher(client, query, max_results=max_results)
+        results = await searcher(
+            client,
+            query,
+            max_results=max_results,
+            **search_kwargs,
+        )
     except Exception as exc:
         logger.debug(f"联网搜索源 {provider} 查询失败，继续尝试备用源: {exc}")
         if diagnostics is not None:
@@ -654,7 +663,9 @@ async def _search_tavily(
     query: str,
     *,
     max_results: int,
+    api_key: str | None = None,
 ) -> list[dict[str, str]]:
+    selected_api_key = (api_key or settings.tavily_api_key).strip()
     response = await client.post(
         "https://api.tavily.com/search",
         json={
@@ -663,7 +674,7 @@ async def _search_tavily(
             "max_results": max_results,
             "include_answer": False,
         },
-        headers={"Authorization": f"Bearer {settings.tavily_api_key.strip()}"},
+        headers={"Authorization": f"Bearer {selected_api_key}"},
     )
     response.raise_for_status()
     payload = response.json()

@@ -15,6 +15,7 @@ import SourcesPanel from "@/components/SourcesPanel";
 import ChatPanel from "@/components/ChatPanel";
 import LocalConnectionSettings from "@/components/LocalConnectionSettings";
 import AdminUsersPanel from "@/components/AdminUsersPanel";
+import ApiAccountsPanel from "@/components/ApiAccountsPanel";
 import { systemAuthApi, sourceBindingApi } from "@/lib/api";
 import type { KnowledgeBase, SystemUser } from "@/lib/api";
 
@@ -43,6 +44,8 @@ export default function Home() {
   const [kbRefreshKey, setKbRefreshKey] = useState(0);
   const [showImport, setShowImport] = useState(false);
   const [showAdminUsers, setShowAdminUsers] = useState(false);
+  const [showApiAccounts, setShowApiAccounts] = useState(false);
+  const [apiAccountsKey, setApiAccountsKey] = useState(0);
   const [statsKey, setStatsKey] = useState(0);
   const [knowledgeBuilding, setKnowledgeBuilding] = useState(false);
 
@@ -276,6 +279,7 @@ export default function Home() {
                 user={systemUser}
                 onUserChange={setSystemUser}
                 onLogout={onLogout}
+                onOpenApiAccounts={() => setShowApiAccounts(true)}
                 onOpenAdmin={() => setShowAdminUsers(true)}
               />
             </div>
@@ -400,6 +404,9 @@ export default function Home() {
                 sidebarWidth={sidebarWidth}
                 knowledgeBaseId={activeKbId}
                 knowledgeBaseName={activeKnowledgeBase?.name}
+                isAdmin={Boolean(systemUser?.is_admin)}
+                apiAccountsKey={apiAccountsKey}
+                onOpenApiAccounts={() => setShowApiAccounts(true)}
               />
             </section>
           </div>
@@ -418,6 +425,11 @@ export default function Home() {
         open={showAdminUsers}
         currentUserId={systemUser.id}
         onClose={() => setShowAdminUsers(false)}
+      />
+      <ApiAccountsPanel
+        open={showApiAccounts}
+        onClose={() => setShowApiAccounts(false)}
+        onChanged={() => setApiAccountsKey((value) => value + 1)}
       />
     </div>
   );

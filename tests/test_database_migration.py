@@ -110,3 +110,41 @@ async def test_init_db_migrates_video_cache_unique_bvid_to_scoped_rows(test_db_u
         ("BV1shared", "Original title", "cached content", 2, 20),
         ("BV1shared", "Second title", "second content", 3, 30),
     ]
+
+
+@pytest.mark.asyncio
+async def test_init_db_adds_usage_event_source_columns_to_legacy_table(test_db_url):
+    from app.database import _ensure_sqlite_legacy_columns
+
+    engine = create_async_engine(test_db_url, echo=False, future=True)
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE usage_events (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                feature VARCHAR(50) NOT NULL,
+                provider VARCHAR(50) NOT NULL,
+                model VARCHAR(200) NOT NULL,
+                status VARCHAR(20) NOT NULL
+            )
+            """
+        )
+
+        await _ensure_sqlite_legacy_columns(conn)
+
+        result = await conn.exec_driver_sql("PRAGMA table_info(usage_events)")
+        columns = {row[1] for row in result.fetchall()}
+
+    await engine.dispose()
+
+    assert {
+        "api_account_id",
+        "api_source",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "estimated_cost",
+        "error_code",
+        "created_at",
+    } <= columns

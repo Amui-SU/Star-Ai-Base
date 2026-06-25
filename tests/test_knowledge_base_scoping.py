@@ -37,7 +37,20 @@ async def register_user(client, email: str, display_name: str) -> dict:
         },
     )
     assert response.status_code == 200
-    return response.json()
+    auth = response.json()
+    account_response = await client.post(
+        "/api-accounts",
+        json={
+            "provider": "deepseek",
+            "api_key": "test-user-api-key",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "is_default": True,
+        },
+        headers={"Authorization": f"Bearer {auth['session_token']}"},
+    )
+    assert account_response.status_code == 200
+    return auth
 
 
 async def create_knowledge_base(client, name: str = "Scoped KB") -> dict:
@@ -1476,6 +1489,45 @@ async def test_web_search_tool_run_uses_request_provider(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_web_search_tool_run_uses_tavily_api_key(monkeypatch):
+    from app.routers.knowledge_bases import _prepare_web_search_tool_run
+
+    captured = {"keys": []}
+
+    async def fake_search_web(
+        query,
+        *,
+        max_results=3,
+        diagnostics=None,
+        provider=None,
+        tavily_api_key=None,
+    ):
+        captured["keys"].append(tavily_api_key)
+        return []
+
+    async def fake_prepare_llm_messages_with_tools(messages, **kwargs):
+        await kwargs["tool_handlers"]["web_search"]({"query": "tool query"})
+        from app.routers.chat import LLMToolRunResult
+
+        return LLMToolRunResult(messages=messages, answer="answer", thinking="")
+
+    monkeypatch.setattr("app.routers.knowledge_bases.search_web", fake_search_web)
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._prepare_llm_messages_with_tools",
+        fake_prepare_llm_messages_with_tools,
+    )
+
+    await _prepare_web_search_tool_run(
+        [{"role": "user", "content": "question"}],
+        question="initial query",
+        provider="tavily",
+        tavily_api_key="user-tavily-key",
+    )
+
+    assert captured["keys"] == ["user-tavily-key", "user-tavily-key"]
+
+
+@pytest.mark.asyncio
 async def test_initial_web_search_diagnostics_are_reported_when_search_fails(
     monkeypatch,
 ):
@@ -2840,6 +2892,14 @@ async def test_scoped_chat_stream_json_encodes_thinking(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_scoped_chat_stream_uses_configured_thinking(client, monkeypatch):
     await register_user(client, "alice@example.com", "Alice")
+    accounts_response = await client.get("/api-accounts")
+    assert accounts_response.status_code == 200
+    account_id = accounts_response.json()[0]["id"]
+    update_response = await client.patch(
+        f"/api-accounts/{account_id}",
+        json={"thinking_config": {"thinking": {"type": "enabled"}}},
+    )
+    assert update_response.status_code == 200
     knowledge_base = await create_knowledge_base(client, "Native Thinking KB")
     captured = {}
 
@@ -2873,13 +2933,6 @@ async def test_scoped_chat_stream_uses_configured_thinking(client, monkeypatch):
         "app.routers.knowledge_bases._stream_llm_events",
         fake_stream_llm_events,
     )
-    monkeypatch.setattr(
-        "app.routers.knowledge_bases._resolve_llm_config",
-        lambda: {
-            "thinking_config": {"thinking": {"type": "enabled"}},
-        },
-    )
-
     response = await client.post(
         f"/knowledge-bases/{knowledge_base['id']}/chat/stream",
         json={"question": "请回答"},

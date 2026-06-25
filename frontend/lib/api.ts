@@ -289,6 +289,41 @@ export interface WebSearchConfigResponse {
   tavily_search_depth: "basic" | "advanced" | string;
 }
 
+export interface ApiAccount {
+  id: number;
+  provider: string;
+  provider_label: string;
+  display_name: string;
+  base_url: string;
+  model: string;
+  thinking_config: Record<string, unknown>;
+  enabled: boolean;
+  is_default: boolean;
+  configured: boolean;
+  last_validated_at?: string | null;
+  last_error?: string | null;
+}
+
+export interface ApiAccountCreateRequest {
+  provider: string;
+  display_name?: string;
+  api_key: string;
+  base_url?: string;
+  model?: string;
+  thinking_config?: Record<string, unknown>;
+  is_default?: boolean;
+}
+
+export interface ApiAccountUpdateRequest {
+  display_name?: string;
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+  thinking_config?: Record<string, unknown>;
+  enabled?: boolean;
+  is_default?: boolean;
+}
+
 export type LLMProvider =
   | "dashscope"
   | "deepseek"
@@ -299,10 +334,14 @@ export type LLMProvider =
   | "siliconflow"
   | string;
 
+export type LLMApiSource = "official" | "personal";
+
 export interface LLMProviderInfo {
   provider: string;
   label: string;
   enabled: boolean;
+  official_enabled?: boolean;
+  personal_enabled?: boolean;
   model: string;
   base_url?: string;
   thinking_config: Record<string, unknown>;
@@ -311,6 +350,7 @@ export interface LLMProviderInfo {
 
 export interface LLMConfigResponse {
   current_provider: string;
+  current_api_source?: LLMApiSource;
   providers: LLMProviderInfo[];
 }
 
@@ -383,7 +423,17 @@ export async function request<T>(
     let message = response.statusText || "Request failed";
     try {
       const body = await response.json();
-      message = body.detail || body.message || message;
+      if (typeof body.detail === "string") {
+        message = body.detail;
+      } else if (
+        body.detail &&
+        typeof body.detail === "object" &&
+        typeof body.detail.message === "string"
+      ) {
+        message = body.detail.message;
+      } else if (typeof body.message === "string") {
+        message = body.message;
+      }
     } catch {
       // Keep the HTTP status text when the response body is not JSON.
     }
@@ -487,6 +537,37 @@ export const systemAuthApi = {
 export const localConnectionApi = {
   lanAddress: () =>
     request<LocalLanAddressResponse>("/local-connection/lan-address"),
+};
+
+export const apiAccountApi = {
+  list: () => request<ApiAccount[]>("/api-accounts"),
+
+  create: (data: ApiAccountCreateRequest) =>
+    request<ApiAccount>("/api-accounts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  update: (accountId: number, data: ApiAccountUpdateRequest) =>
+    request<ApiAccount>(`/api-accounts/${accountId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  setDefault: (accountId: number) =>
+    request<ApiAccount>(`/api-accounts/${accountId}/set-default`, {
+      method: "POST",
+    }),
+
+  validate: (accountId: number) =>
+    request<ApiAccount>(`/api-accounts/${accountId}/validate`, {
+      method: "POST",
+    }),
+
+  remove: (accountId: number) =>
+    request<void>(`/api-accounts/${accountId}`, {
+      method: "DELETE",
+    }),
 };
 
 export const sourceBindingApi = {
@@ -788,6 +869,12 @@ export const chatApi = {
         body: JSON.stringify({ provider }),
       },
     ),
+
+  setModelSource: (apiSource: LLMApiSource) =>
+    request<LLMConfigResponse>("/chat/llm/source", {
+      method: "POST",
+      body: JSON.stringify({ api_source: apiSource }),
+    }),
 
   saveModelProviderConfig: (data: {
     provider: string;

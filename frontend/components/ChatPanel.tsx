@@ -13,6 +13,7 @@ import {
   LLMHealthResponse,
   LLMConfigResponse,
   LLMProvider,
+  LLMApiSource,
   KnowledgeBaseChatRequest,
   KnowledgeScopeOptions,
   ChatWebSearchStatus,
@@ -71,6 +72,9 @@ interface Props {
   sidebarWidth?: number;
   knowledgeBaseId?: number | null;
   knowledgeBaseName?: string;
+  isAdmin?: boolean;
+  apiAccountsKey?: number;
+  onOpenApiAccounts?: () => void;
 }
 
 function MarkdownCode({
@@ -143,6 +147,9 @@ export default function ChatPanel({
   statsKey,
   knowledgeBaseId,
   knowledgeBaseName,
+  isAdmin = false,
+  apiAccountsKey = 0,
+  onOpenApiAccounts,
 }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -235,6 +242,10 @@ export default function ChatPanel({
     thinking_config?: Record<string, unknown>;
     thinking_template?: Record<string, unknown>;
   }) => {
+    if (!isAdmin) {
+      setScopeNotice("需要管理员配置模型");
+      return;
+    }
     setConfigProvider(provider);
     setConfigApiKey("");
     setConfigBaseUrl(provider.base_url || "");
@@ -312,6 +323,17 @@ export default function ChatPanel({
   };
 
   const openWebSearchConfig = () => {
+    if (onOpenApiAccounts) {
+      setWebSearchConfigError("");
+      setWebSearchNotice("请在 AI 服务密钥中添加 Tavily");
+      onOpenApiAccounts();
+      return;
+    }
+    if (!isAdmin) {
+      setWebSearchConfigError("");
+      setWebSearchNotice("Tavily 需要管理员配置");
+      return;
+    }
     setWebSearchApiKey("");
     setWebSearchConfigError("");
     setWebSearchConfigOpen(true);
@@ -408,7 +430,7 @@ export default function ChatPanel({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [apiAccountsKey]);
 
   const handleSwitchProvider = async (provider: LLMProvider) => {
     if (llmSwitching) return;
@@ -428,6 +450,21 @@ export default function ChatPanel({
         model: "unknown",
         provider: "unknown",
       });
+    } finally {
+      setLlmSwitching(false);
+    }
+  };
+
+  const handleSwitchModelSource = async (apiSource: LLMApiSource) => {
+    if (llmSwitching || llmConfig?.current_api_source === apiSource) return;
+    setLlmSwitching(true);
+    try {
+      const cfg = await chatApi.setModelSource(apiSource);
+      const health = await chatApi.health();
+      setLlmConfig(cfg);
+      setLlmHealth(health);
+    } catch (err) {
+      setScopeNotice(err instanceof Error ? err.message : "模型来源切换失败");
     } finally {
       setLlmSwitching(false);
     }
@@ -779,9 +816,19 @@ export default function ChatPanel({
   };
 
   const handleWebSearchProviderChange = (provider: WebSearchProvider) => {
+    if (
+      provider === "tavily" &&
+      !webSearchConfig?.tavily_configured &&
+      !isAdmin &&
+      !onOpenApiAccounts
+    ) {
+      setWebSearchNotice("Tavily 需要管理员配置");
+      return;
+    }
     setWebSearchProvider(provider);
     setWebSearchEnabled(true);
     if (provider === "tavily" && !webSearchConfig?.tavily_configured) {
+      setWebSearchNotice("请先添加 Tavily 服务密钥");
       openWebSearchConfig();
     }
   };
@@ -947,9 +994,45 @@ export default function ChatPanel({
   const isGenerating = loading || !!regeneratingMessageId;
   const canSend = !!input.trim() && !isGenerating;
   const remoteProviders = llmConfig?.providers ?? [];
+  const currentApiSource: LLMApiSource =
+    llmConfig?.current_api_source === "personal" ? "personal" : "official";
+  const sourceAvailability = {
+    official: remoteProviders.some(
+      (provider) => provider.official_enabled ?? provider.enabled,
+    ),
+    personal: remoteProviders.some(
+      (provider) => provider.personal_enabled ?? provider.enabled,
+    ),
+  };
+  const hasEnabledCurrentSource = remoteProviders.some(
+    (provider) => provider.enabled,
+  );
+  const shouldShowAiKeyHint =
+    Boolean(llmConfig) &&
+    currentApiSource === "personal" &&
+    !hasEnabledCurrentSource;
   const remoteProviderMap = new Map(
     remoteProviders.map((p) => [p.provider, p]),
   );
+  const sourceOptions: Array<{
+    value: LLMApiSource;
+    label: string;
+    hint: string;
+    enabled: boolean;
+  }> = [
+    {
+      value: "official",
+      label: "官方",
+      hint: "付费通道",
+      enabled: sourceAvailability.official,
+    },
+    {
+      value: "personal",
+      label: "个人",
+      hint: "自带 Key",
+      enabled: true,
+    },
+  ];
   const providersForMenu = [
     ...builtInProviders.map((base) => {
       const remote = remoteProviderMap.get(base.provider);
@@ -957,6 +1040,8 @@ export default function ChatPanel({
         provider: base.provider,
         label: remote?.label ?? base.label,
         enabled: remote?.enabled ?? false,
+        official_enabled: remote?.official_enabled ?? false,
+        personal_enabled: remote?.personal_enabled ?? false,
         model: remote?.model ?? base.model,
         base_url: remote?.base_url,
         thinking_config: remote?.thinking_config ?? {},
@@ -1034,12 +1119,52 @@ export default function ChatPanel({
 
               {modelMenuOpen && (
                 <div className="model-provider-menu">
+                  <div className="model-source-switch" aria-label="模型来源">
+                    {sourceOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-label={option.label}
+                        aria-pressed={currentApiSource === option.value}
+                        disabled={
+                          llmSwitching ||
+                          !llmConfig ||
+                          (option.value === "official" && !option.enabled)
+                        }
+                        className={`model-source-option ${
+                          currentApiSource === option.value ? "active" : ""
+                        }`}
+                        onClick={() =>
+                          void handleSwitchModelSource(option.value)
+                        }
+                        title={
+                          option.value === "official" && !option.enabled
+                            ? "官方通道暂未开通"
+                            : `${option.label} · ${option.hint}`
+                        }
+                      >
+                        <span>{option.label}</span>
+                        <small>{option.hint}</small>
+                      </button>
+                    ))}
+                  </div>
                   {providersForMenu.map((p) => (
                     <div key={p.provider} className="model-provider-row">
                       <button
                         type="button"
-                        disabled={llmSwitching || !llmConfig}
+                        disabled={
+                          llmSwitching || !llmConfig || (!isAdmin && !p.enabled)
+                        }
                         onClick={() => {
+                          if (!isAdmin) {
+                            setScopeNotice(
+                              p.enabled
+                                ? "需要管理员切换模型"
+                                : "需要管理员配置模型",
+                            );
+                            setModelMenuOpen(false);
+                            return;
+                          }
                           if (p.enabled) {
                             void handleSwitchProvider(p.provider);
                           } else {
@@ -1053,7 +1178,11 @@ export default function ChatPanel({
                         title={
                           p.enabled
                             ? `${p.label} · ${p.model}`
-                            : `${p.label}（未配置）`
+                            : `${p.label}（${
+                                currentApiSource === "official"
+                                  ? "未开通"
+                                  : "未配置"
+                              }）`
                         }
                       >
                         <span className="inline-flex min-w-0 flex-1 items-center gap-1.5">
@@ -1091,11 +1220,13 @@ export default function ChatPanel({
                           {p.enabled
                             ? p.provider === currentProvider
                               ? "当前"
-                              : "就绪"
-                            : "未配置"}
+                              : "可用"
+                            : currentApiSource === "official"
+                              ? "未开通"
+                              : "未配置"}
                         </span>
                       </button>
-                      {p.enabled && (
+                      {p.enabled && isAdmin && (
                         <button
                           type="button"
                           className="model-provider-config-btn"
@@ -1129,6 +1260,19 @@ export default function ChatPanel({
                   基于当前提问范围回答，可切换整个知识库、收藏夹或单个视频。
                 </p>
               </div>
+              {shouldShowAiKeyHint && (
+                <div className="api-account-empty-hint">
+                  <div>
+                    <strong>先添加 AI 服务密钥</strong>
+                    <span>聊天和联网搜索会使用你自己保存的第三方 Key。</span>
+                  </div>
+                  {onOpenApiAccounts && (
+                    <button type="button" onClick={onOpenApiAccounts}>
+                      配置密钥
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="prompt-grid">
                 {[
                   "总结收藏夹里最有价值的内容",
@@ -1571,6 +1715,7 @@ export default function ChatPanel({
                 webSearchEnabled={webSearchEnabled}
                 webSearchProvider={webSearchProvider}
                 tavilyConfigured={Boolean(webSearchConfig?.tavily_configured)}
+                canConfigureWebSearch={Boolean(onOpenApiAccounts) || isAdmin}
                 webSearchNotice={webSearchNotice}
                 onChange={handleScopeChange}
                 onWebSearchChange={handleWebSearchChange}

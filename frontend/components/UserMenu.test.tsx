@@ -139,4 +139,34 @@ describe("UserMenu", () => {
 
     expect(openAdmin).toHaveBeenCalledTimes(1);
   });
+
+  it("opens AI service key settings from the user menu", async () => {
+    vi.mocked(localConnectionApi.lanAddress).mockResolvedValue({
+      host: null,
+      api_url: null,
+      frontend_url: null,
+      qr_url: null,
+      qr_image_url: null,
+      qr_data_url: null,
+      connect_page_url: null,
+    });
+    const openApiAccounts = vi.fn();
+    const tester = userEvent.setup();
+
+    const { container } = render(
+      <UserMenu
+        user={user}
+        onUserChange={vi.fn()}
+        onLogout={vi.fn()}
+        onOpenApiAccounts={openApiAccounts}
+      />,
+    );
+
+    const trigger = container.querySelector(".user-menu-trigger");
+    expect(trigger).not.toBeNull();
+    await tester.click(trigger as HTMLElement);
+    await tester.click(await screen.findByText("AI 服务密钥"));
+
+    expect(openApiAccounts).toHaveBeenCalledTimes(1);
+  });
 });

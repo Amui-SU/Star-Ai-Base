@@ -13,6 +13,7 @@ interface Props {
   user: SystemUser;
   onUserChange: (user: SystemUser) => void;
   onLogout: () => void;
+  onOpenApiAccounts?: () => void;
   onOpenAdmin?: () => void;
 }
 
@@ -20,6 +21,7 @@ export default function UserMenu({
   user,
   onUserChange,
   onLogout,
+  onOpenApiAccounts,
   onOpenAdmin,
 }: Props) {
   const initial = user.display_name?.charAt(0)?.toUpperCase() || "?";
@@ -275,6 +277,19 @@ export default function UserMenu({
               >
                 <span>更改用户名</span>
                 <span className="user-menu-action-hint">Edit</span>
+              </button>
+            )}
+            {onOpenApiAccounts && (
+              <button
+                type="button"
+                className="user-menu-action"
+                onClick={() => {
+                  setOpen(false);
+                  onOpenApiAccounts();
+                }}
+              >
+                <span>AI 服务密钥</span>
+                <span className="user-menu-action-hint">Keys</span>
               </button>
             )}
             {user.is_admin && onOpenAdmin && (

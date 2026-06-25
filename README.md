@@ -151,13 +151,19 @@ npm install
 
 **3）环境变量**
 
-在项目根目录新建 `.env`（或 `.env.local`），至少配置你实际使用的模型与 ASR 所需密钥，见下一节。
+复制 `.env.example` 为 `.env.local`，至少配置你实际使用的模型与 ASR 所需密钥，见下一节。`.env.example` 只作为可提交的模板；真实 API Key、OAuth Secret、SMTP 密码等请只写入 `.env.local` 或系统环境变量。
+
+```powershell
+Copy-Item .env.example .env.local
+```
+
+正式使用时，普通用户不需要修改全局 `.env.local` 模型 Key；登录后从右上角用户菜单进入 **AI 服务密钥**，添加自己的 DeepSeek、OpenAI、DashScope、Kimi、SiliconFlow、智谱或 Tavily Key。
 
 ---
 
 ## 环境变量
 
-配置从 **环境变量** 或项目根目录的 **`.env` / `.env.local`** 读取（`extra="ignore"`，未列出的键可安全忽略）。
+配置从 **环境变量** 或项目根目录的 **`.env` / `.env.local`** 读取（`extra="ignore"`，未列出的键可安全忽略）。仓库提供 `.env.example` 作为模板，真实本机配置建议放在 `.env.local`。
 
 ### 应用与存储
 
@@ -198,6 +204,16 @@ npm install
 - **Kimi（Moonshot）**：`KIMI_API_KEY`、`KIMI_BASE_URL`、`KIMI_MODEL`
 - **SiliconFlow**：`SILICONFLOW_API_KEY`、`SILICONFLOW_BASE_URL`、`SILICONFLOW_MODEL`
 - **智谱 GLM**：`ZHIPU_API_KEY`、`ZHIPU_BASE_URL`、`ZHIPU_MODEL`
+
+### AI 服务密钥策略
+
+正式产品路径采用“用户自带 AI 服务密钥”：管理员全局 Key 只保留为开发、兼容和排障能力，普通用户的聊天与联网搜索使用自己在用户菜单中保存的第三方 Key。
+
+| 变量                   | 默认值          | 说明                                       |
+| ---------------------- | --------------- | ------------------------------------------ |
+| `API_ACCOUNT_MODE`     | `user_required` | 普通用户必须配置自己的 AI 服务密钥         |
+| `PLATFORM_API_ENABLED` | `false`         | 现阶段不开放平台全局 API 给普通用户消费    |
+| `BILLING_ENABLED`      | `false`         | 预留付费方案，现阶段不启用余额、套餐和扣费 |
 
 ### 联网搜索
 
@@ -316,7 +332,7 @@ APK 构建说明见 [frontend/APK-打包说明.md](frontend/APK-打包说明.md)
 
 ## 多模型提供方
 
-后端支持的 `LLM_PROVIDER` 取值与界面展示名称如下（可在前端切换，部分配置也可通过 API 持久化到 `.env`）：
+后端支持的 `LLM_PROVIDER` 取值与界面展示名称如下（可在前端切换，部分配置也可通过 API 持久化到 `.env.local`）：
 
 | `LLM_PROVIDER` | 说明             |
 | -------------- | ---------------- |
@@ -482,8 +498,8 @@ A：先在手机浏览器打开 `http://<电脑局域网 IP>:8000/health`。如�
 **Q：二维码弹出慢或生成失败？**
 A：新版后端会缓存二维码 PNG，并在 `电脑局域网地址` 接口内联返回二维码 data URL；电脑端点击 `Copy` 后弹窗优先使用内联二维码，不再等待额外图片请求。若仍失败，刷新电脑端页面后重新打开用户菜单。
 
-**Q：没有 `.env.example`？**  
-A：请直接参考本文 [环境变量](#环境变量) 在根目录创建 `.env` 或 `.env.local`。
+**Q：没有 `.env.local`？**
+A：复制仓库根目录的 `.env.example` 为 `.env.local`，再按需填写模型、ASR、联网搜索、OAuth 或邮件配置。
 
 **Q：启动器提示缺依赖，或用的不是我想用的 Python？**
 A：先运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 doctor` 查看诊断，再运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 install` 或双击 **`setup_dependencies.bat`** 安装依赖。若系统里有多个 Python，可在用户环境变量中设置 **`BILIBILI_RAG_PYTHON`** 为目标解释器完整路径。

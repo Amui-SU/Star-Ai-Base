@@ -62,6 +62,11 @@ from app.services.knowledge_scope import (
     list_scope_options,
     resolve_scope_bvids,
 )
+from app.services.api_credentials import (
+    record_usage_event,
+    resolve_optional_user_api_credentials,
+    resolve_user_llm_credentials,
+)
 from app.services.web_search import fetch_web_page, search_web
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
@@ -185,6 +190,7 @@ def _build_knowledge_base_messages(
     web_results: list[dict[str, str]] | None = None,
     *,
     enable_web_search: bool = False,
+    thinking_config: dict | None = None,
 ) -> list[dict]:
     context = "\n\n---\n\n".join(
         f"【{document.metadata.get('title') or '未命名资料'}】\n{document.page_content}"
@@ -226,7 +232,11 @@ def _build_knowledge_base_messages(
     ]
     return _apply_mode_instructions(
         _enforce_markdown_output(messages),
-        bool(_resolve_llm_config()["thinking_config"]),
+        bool(
+            thinking_config
+            if thinking_config is not None
+            else _resolve_llm_config()["thinking_config"]
+        ),
     )
 
 
@@ -576,11 +586,17 @@ async def _execute_web_search_tool(
         diagnostics: list[dict] = []
         supports_diagnostics = _supports_keyword_argument(search_web, "diagnostics")
         supports_provider = _supports_keyword_argument(search_web, "provider")
+        supports_tavily_api_key = _supports_keyword_argument(
+            search_web,
+            "tavily_api_key",
+        )
         search_kwargs = {}
         if supports_diagnostics:
             search_kwargs["diagnostics"] = diagnostics
         if supports_provider:
             search_kwargs["provider"] = state.get("provider")
+        if supports_tavily_api_key:
+            search_kwargs["tavily_api_key"] = state.get("tavily_api_key")
         results = await search_web(query, **search_kwargs)
     except Exception as exc:
         state["failed"] = True
@@ -675,9 +691,16 @@ async def _prepare_web_search_tool_run(
     *,
     question: str,
     provider: str = "auto",
+    tavily_api_key: str | None = None,
+    llm_config: dict | None = None,
 ) -> tuple[LLMToolRunResult, list[dict[str, str]], dict]:
     web_results: list[dict[str, str]] = []
-    web_search_state = {"attempted": False, "failed": False, "provider": provider}
+    web_search_state = {
+        "attempted": False,
+        "failed": False,
+        "provider": provider,
+        "tavily_api_key": tavily_api_key,
+    }
 
     await _run_initial_web_search(question, web_results, web_search_state)
     initial_result_count = len(web_results)
@@ -717,6 +740,7 @@ async def _prepare_web_search_tool_run(
         },
         max_tool_calls=3,
         after_tool_messages=after_tool_messages,
+        llm_config=llm_config,
     )
 
     if len(web_results) > context_appended_result_count:
@@ -734,21 +758,31 @@ async def _complete_knowledge_base_answer(
     question: str,
     enable_web_search: bool,
     web_search_provider: str = "auto",
+    tavily_api_key: str | None = None,
+    llm_config: dict | None = None,
 ) -> tuple[str, str, list[dict[str, str]], dict | None]:
+    def complete_llm_with_config(next_messages: list[dict]) -> tuple[str, str]:
+        kwargs = {}
+        if _supports_keyword_argument(_complete_llm_answer, "llm_config"):
+            kwargs["llm_config"] = llm_config
+        return _complete_llm_answer(next_messages, **kwargs)
+
     if not enable_web_search:
-        answer, thinking = _complete_llm_answer(messages)
+        answer, thinking = complete_llm_with_config(messages)
         return answer, thinking, [], None
 
     tool_run, web_results, web_search_state = await _prepare_web_search_tool_run(
         messages,
         question=question,
         provider=web_search_provider,
+        tavily_api_key=tavily_api_key,
+        llm_config=llm_config,
     )
     if tool_run.answer is not None:
         answer = tool_run.answer
         thinking = tool_run.thinking
     else:
-        answer, thinking = _complete_llm_answer(tool_run.messages)
+        answer, thinking = complete_llm_with_config(tool_run.messages)
 
     return (
         answer,
@@ -766,11 +800,15 @@ async def _prepare_knowledge_base_web_search(
     *,
     question: str,
     provider: str = "auto",
+    tavily_api_key: str | None = None,
+    llm_config: dict | None = None,
 ) -> tuple[LLMToolRunResult, list[dict[str, str]], dict | None]:
     tool_run, web_results, web_search_state = await _prepare_web_search_tool_run(
         messages,
         question=question,
         provider=provider,
+        tavily_api_key=tavily_api_key,
+        llm_config=llm_config,
     )
 
     return (
@@ -788,10 +826,16 @@ async def _prepare_knowledge_base_web_search_with_heartbeats(
     *,
     question: str,
     provider: str = "auto",
+    tavily_api_key: str | None = None,
+    llm_config: dict | None = None,
 ):
     prepare_kwargs = {"question": question}
     if _supports_keyword_argument(_prepare_knowledge_base_web_search, "provider"):
         prepare_kwargs["provider"] = provider
+    if _supports_keyword_argument(_prepare_knowledge_base_web_search, "tavily_api_key"):
+        prepare_kwargs["tavily_api_key"] = tavily_api_key
+    if _supports_keyword_argument(_prepare_knowledge_base_web_search, "llm_config"):
+        prepare_kwargs["llm_config"] = llm_config
     task = asyncio.create_task(
         _prepare_knowledge_base_web_search(
             messages,
@@ -840,6 +884,19 @@ async def _prepare_knowledge_base_web_search_with_heartbeats(
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def _resolve_web_search_api_key(
+    db: AsyncSession,
+    user: SystemUser,
+    *,
+    enabled: bool,
+    provider: str,
+) -> str | None:
+    if not enabled or provider == "html":
+        return None
+    credential = await resolve_optional_user_api_credentials(db, user, "tavily")
+    return credential.api_key if credential else None
 
 
 async def _load_db_fallback_documents(
@@ -1287,6 +1344,7 @@ async def search_knowledge_base(
 async def chat_with_knowledge_base(
     payload: KnowledgeBaseChatRequest,
     knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
+    current_user: SystemUser = Depends(get_current_user),
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
@@ -1302,10 +1360,24 @@ async def chat_with_knowledge_base(
         response = _answer_from_documents(question, documents)
         return response
 
+    credential = await resolve_user_llm_credentials(
+        db,
+        current_user,
+        global_config_resolver=_resolve_llm_config,
+    )
+    llm_config = credential.to_llm_config()
+    tavily_api_key = await _resolve_web_search_api_key(
+        db,
+        current_user,
+        enabled=payload.web_search,
+        provider=payload.web_search_provider,
+    )
+
     messages = _build_knowledge_base_messages(
         question,
         documents,
         enable_web_search=payload.web_search,
+        thinking_config=llm_config["thinking_config"],
     )
     try:
         complete_kwargs = {
@@ -1317,6 +1389,12 @@ async def chat_with_knowledge_base(
             "web_search_provider",
         ):
             complete_kwargs["web_search_provider"] = payload.web_search_provider
+        if _supports_keyword_argument(
+            _complete_knowledge_base_answer, "tavily_api_key"
+        ):
+            complete_kwargs["tavily_api_key"] = tavily_api_key
+        if _supports_keyword_argument(_complete_knowledge_base_answer, "llm_config"):
+            complete_kwargs["llm_config"] = llm_config
         answer, thinking, web_results, web_search_status = (
             await _complete_knowledge_base_answer(
                 messages,
@@ -1324,11 +1402,28 @@ async def chat_with_knowledge_base(
             )
         )
     except Exception as exc:
+        await record_usage_event(
+            db,
+            user=current_user,
+            credential=credential,
+            feature="chat",
+            status="failed",
+            error_code=exc.__class__.__name__,
+        )
+        await db.commit()
         logger.warning(f"知识库模型回答失败，回退到检索内容: {exc}")
         response = _answer_from_documents(question, documents)
         if payload.web_search:
             response.web_search = _web_search_failed_status_from_exception(exc)
         return response
+    await record_usage_event(
+        db,
+        user=current_user,
+        credential=credential,
+        feature="chat",
+        status="success",
+    )
+    await db.commit()
     return ChatResponse(
         answer=answer,
         thinking=thinking or None,
@@ -1344,6 +1439,7 @@ async def chat_with_knowledge_base(
 async def stream_chat_with_knowledge_base(
     payload: KnowledgeBaseChatRequest,
     knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
+    current_user: SystemUser = Depends(get_current_user),
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1354,6 +1450,21 @@ async def stream_chat_with_knowledge_base(
         current_workspace,
         db,
         allow_db_fallback=not payload.web_search,
+    )
+    credential = None
+    llm_config = None
+    if documents or payload.web_search:
+        credential = await resolve_user_llm_credentials(
+            db,
+            current_user,
+            global_config_resolver=_resolve_llm_config,
+        )
+        llm_config = credential.to_llm_config()
+    tavily_api_key = await _resolve_web_search_api_key(
+        db,
+        current_user,
+        enabled=payload.web_search,
+        provider=payload.web_search_provider,
     )
 
     async def generate():
@@ -1366,6 +1477,7 @@ async def stream_chat_with_knowledge_base(
             question,
             documents,
             enable_web_search=payload.web_search,
+            thinking_config=llm_config["thinking_config"] if llm_config else None,
         )
         web_results: list[dict[str, str]] = []
         web_search_status = None
@@ -1381,6 +1493,8 @@ async def stream_chat_with_knowledge_base(
                     messages,
                     question=question,
                     provider=payload.web_search_provider,
+                    tavily_api_key=tavily_api_key,
+                    llm_config=llm_config,
                 ):
                     if event_type == "heartbeat":
                         yield _encode_web_search_progress(str(event_payload))
@@ -1400,7 +1514,13 @@ async def stream_chat_with_knowledge_base(
         ]
         answer_started = False
         try:
-            for event_type, content in _stream_llm_events(prepared_messages):
+            stream_kwargs = {}
+            if _supports_keyword_argument(_stream_llm_events, "llm_config"):
+                stream_kwargs["llm_config"] = llm_config
+            for event_type, content in _stream_llm_events(
+                prepared_messages,
+                **stream_kwargs,
+            ):
                 if event_type == "thinking":
                     thinking_parts.append(content)
                     yield _encode_thinking_delta(content)
@@ -1419,6 +1539,15 @@ async def stream_chat_with_knowledge_base(
             yield json.dumps(web_search_status, ensure_ascii=False)
         yield "\n[[SOURCES_JSON]]"
         yield json.dumps(sources, ensure_ascii=False)
+        if credential is not None:
+            await record_usage_event(
+                db,
+                user=current_user,
+                credential=credential,
+                feature="chat",
+                status="success",
+            )
+            await db.commit()
 
     return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
 

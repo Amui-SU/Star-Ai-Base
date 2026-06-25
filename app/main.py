@@ -14,6 +14,7 @@ from app.config import settings, ensure_directories
 from app.database import init_db
 from app.routers import (
     auth,
+    api_accounts,
     chat,
     favorites,
     imports,
@@ -96,6 +97,7 @@ async def allow_private_network_preflight(request, call_next):
 
 # 注册路由
 app.include_router(system_auth.router)
+app.include_router(api_accounts.router)
 app.include_router(knowledge_bases.router)
 app.include_router(local_connection.router)
 app.include_router(source_bindings.router)
