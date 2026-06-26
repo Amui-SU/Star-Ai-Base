@@ -215,5 +215,5 @@ login_sessions → Redis                                 # 当前内存字典，
 - **前端完全迁移**：SourcesPanel + ChatPanel 均走 scoped API，`bili_session` 已从 page.tsx 移除
 - **`login_sessions` 内存字典**（已加 TTL 清理）：生产需换 Redis
 - **OAuth state**：HMAC 签名自包含 token，并通过 HttpOnly/SameSite=Lax 临时 nonce cookie 绑定同一浏览器回调；成功登录后清理临时 cookie。
-- **`_ip_rate_limit` 内存字典**：验证码 IP 限流，多 worker 不共享，生产需换 Redis 或网关层限流
+- **验证码 IP 限流**：邮箱验证码发送窗口已持久化到数据库，避免多 worker 绕过；生产仍建议叠加网关层限流。
 - **bcrypt 4.0.1 固定**：bcrypt 5.x 与 passlib 1.7.4 不兼容，不要升级

@@ -418,6 +418,29 @@ async def test_send_code_rate_limit(client):
 
 
 @pytest.mark.asyncio
+async def test_send_code_rate_limit_survives_empty_memory_cache(client):
+    """IP 限流应持久化，避免多 worker 或进程重启后绕过。"""
+    import app.routers.system_auth as system_auth_router
+
+    for i in range(_IP_RATE_MAX):
+        resp = await client.post(
+            "/system-auth/send-code",
+            json={"email": f"persistent-ratelimit{i}@example.com"},
+        )
+        assert resp.status_code == 200
+
+    system_auth_router._ip_rate_limit.clear()
+
+    resp = await client.post(
+        "/system-auth/send-code",
+        json={"email": "persistent-ratelimit-blocked@example.com"},
+    )
+
+    assert resp.status_code == 429
+    assert "频繁" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_code_attempts_limit(client):
     """错误尝试达到上限后验证码失效"""
     code = await _send_code(client, "eve@example.com")

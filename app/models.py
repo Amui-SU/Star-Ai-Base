@@ -266,6 +266,18 @@ class VerificationCode(Base):
     created_at = Column(DateTime, default=_utc_now)
 
 
+class VerificationIpRateLimit(Base):
+    """邮箱验证码 IP 级发送频率窗口。"""
+
+    __tablename__ = "verification_ip_rate_limits"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ip_address = Column(String(128), unique=True, index=True, nullable=False)
+    count = Column(Integer, default=0, nullable=False)
+    window_start = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
+
+
 class FavoriteFolder(Base):
     """收藏夹记录表"""
 

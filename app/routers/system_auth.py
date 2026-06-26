@@ -31,6 +31,7 @@ from app.models import (
     SystemUser,
     SystemUserResponse,
     VerificationCode,
+    VerificationIpRateLimit,
     Workspace,
     WorkspaceMember,
     WorkspaceResponse,
@@ -57,7 +58,7 @@ _EMAIL_RE = __import__("re").compile(
 _CODE_TTL_SECONDS = 300  # 5 分钟有效
 _MAX_ATTEMPTS = 5  # 验证码最多错误尝试次数
 
-# IP 级别频率限制（内存）
+# IP 级别频率限制（数据库为事实源；内存字典保留给旧测试/诊断兼容）
 _ip_rate_limit: dict[str, tuple[int, float]] = {}  # ip -> (count, window_start)
 _IP_RATE_MAX = 3  # 每窗口最多 3 次
 _IP_RATE_WINDOW = 60  # 窗口 60 秒
@@ -87,6 +88,51 @@ def _check_rate_limit(client_ip: str) -> bool:
     if count >= _IP_RATE_MAX:
         return False
     _ip_rate_limit[client_ip] = (count + 1, start)
+    return True
+
+
+async def _check_ip_rate_limit(db: AsyncSession, client_ip: str) -> bool:
+    """检查并持久化验证码 IP 限流窗口，避免多 worker 绕过。"""
+    now_naive = utc_now_naive()
+    window_expires_before = now_naive - timedelta(seconds=_IP_RATE_WINDOW)
+    await db.execute(
+        delete(VerificationIpRateLimit).where(
+            VerificationIpRateLimit.window_start < window_expires_before
+        )
+    )
+
+    result = await db.execute(
+        select(VerificationIpRateLimit).where(
+            VerificationIpRateLimit.ip_address == client_ip
+        )
+    )
+    entry = result.scalar_one_or_none()
+    if entry is None:
+        db.add(
+            VerificationIpRateLimit(
+                ip_address=client_ip,
+                count=1,
+                window_start=now_naive,
+                updated_at=now_naive,
+            )
+        )
+        await db.commit()
+        return True
+
+    if entry.window_start < window_expires_before:
+        entry.count = 1
+        entry.window_start = now_naive
+        entry.updated_at = now_naive
+        await db.commit()
+        return True
+
+    if entry.count >= _IP_RATE_MAX:
+        await db.commit()
+        return False
+
+    entry.count += 1
+    entry.updated_at = now_naive
+    await db.commit()
     return True
 
 
@@ -253,7 +299,7 @@ async def send_verification_code(
 
     # IP 频率限制
     client_ip = request.client.host if request.client else "unknown"
-    if not _check_rate_limit(client_ip):
+    if not await _check_ip_rate_limit(db, client_ip):
         raise HTTPException(status_code=429, detail="发送过于频繁，请稍后再试")
 
     # 清理过期验证码
