@@ -1559,7 +1559,6 @@ async def delete_knowledge_base(
     kb_id = knowledge_base.id
 
     deleted_vectors = 0
-    warning: str | None = None
     try:
         rag = get_rag_service()
         if _supports_keyword_argument(rag.delete_by_knowledge_base, "workspace_id"):
@@ -1573,8 +1572,14 @@ async def delete_knowledge_base(
             f"已删除知识库 {kb_id}（{knowledge_base.name}）的 {deleted_vectors} 个向量"
         )
     except Exception as exc:
-        warning = f"向量清理失败，知识库记录已删除：{exc}"
         logger.warning(f"删除知识库向量失败 [{kb_id}]: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "vector_cleanup_failed",
+                "message": f"向量清理失败，知识库未删除，请稍后重试或检查向量服务：{exc}",
+            },
+        ) from exc
 
     await db.execute(
         IngestionTask.__table__.delete().where(IngestionTask.knowledge_base_id == kb_id)
@@ -1599,6 +1604,4 @@ async def delete_knowledge_base(
     await db.commit()
 
     result: dict[str, object] = {"ok": True, "deleted_vectors": deleted_vectors}
-    if warning:
-        result["warning"] = warning
     return result

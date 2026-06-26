@@ -758,7 +758,7 @@ export const knowledgeBaseApi = {
     ),
 
   delete: (knowledgeBaseId: number) =>
-    request<{ ok: boolean; deleted_vectors: number; warning?: string }>(
+    request<{ ok: boolean; deleted_vectors: number }>(
       `/knowledge-bases/${knowledgeBaseId}`,
       { method: "DELETE" },
     ),

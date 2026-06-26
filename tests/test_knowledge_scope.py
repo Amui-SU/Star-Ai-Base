@@ -135,7 +135,7 @@ def test_scoped_rag_search_keeps_legacy_filter_for_empty_scope(bvids):
 
 
 @pytest.mark.asyncio
-async def test_delete_knowledge_base_continues_when_vector_cleanup_fails(
+async def test_delete_knowledge_base_keeps_record_when_vector_cleanup_fails(
     client, monkeypatch
 ):
     code_resp = await client.post(
@@ -171,15 +171,14 @@ async def test_delete_knowledge_base_continues_when_vector_cleanup_fails(
     )
 
     delete_response = await client.delete(f"/knowledge-bases/{knowledge_base['id']}")
-    assert delete_response.status_code == 200
+    assert delete_response.status_code == 503
     payload = delete_response.json()
-    assert payload["ok"] is True
-    assert payload["deleted_vectors"] == 0
-    assert "missing api key" in payload["warning"]
+    assert payload["detail"]["code"] == "vector_cleanup_failed"
+    assert "missing api key" in payload["detail"]["message"]
 
     list_response = await client.get("/knowledge-bases")
     assert list_response.status_code == 200
-    assert all(item["id"] != knowledge_base["id"] for item in list_response.json())
+    assert any(item["id"] == knowledge_base["id"] for item in list_response.json())
 
 
 @pytest.mark.asyncio
@@ -229,17 +228,19 @@ async def test_delete_knowledge_base_does_not_retry_without_workspace_on_runtime
 
     delete_response = await client.delete(f"/knowledge-bases/{knowledge_base['id']}")
 
-    assert delete_response.status_code == 200
+    assert delete_response.status_code == 503
     payload = delete_response.json()
-    assert payload["ok"] is True
-    assert payload["deleted_vectors"] == 0
-    assert "internal vector store type mismatch" in payload["warning"]
+    assert payload["detail"]["code"] == "vector_cleanup_failed"
+    assert "internal vector store type mismatch" in payload["detail"]["message"]
     assert calls == [
         {
             "knowledge_base_id": knowledge_base["id"],
             "workspace_id": knowledge_base["workspace_id"],
         }
     ]
+    list_response = await client.get("/knowledge-bases")
+    assert list_response.status_code == 200
+    assert any(item["id"] == knowledge_base["id"] for item in list_response.json())
 
 
 @pytest.mark.asyncio
