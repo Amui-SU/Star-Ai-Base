@@ -1,11 +1,12 @@
 import json
 from collections import defaultdict
+from datetime import timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -15,6 +16,7 @@ from app.models import (
     FavoriteFolderInfo,
     FavoriteVideo,
     LoginStatusResponse,
+    OAuthPendingState,
     QRCodeResponse,
     SourceBinding,
     SourceBindingResponse,
@@ -32,7 +34,7 @@ from app.routers.auth import (
 from app.security import decrypt_text, encrypt_text
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.services.favorite_folders import is_default_favorite_folder
-from app.time_utils import utc_now
+from app.time_utils import utc_now, utc_now_naive
 
 router = APIRouter(prefix="/source-bindings", tags=["source-bindings"])
 
@@ -107,6 +109,72 @@ def _response(binding: SourceBinding) -> SourceBindingResponse:
     )
 
 
+async def _create_pending_state(
+    db: AsyncSession,
+    *,
+    state_key: str,
+    purpose: str,
+    user_id: int,
+    ttl_seconds: int,
+) -> None:
+    now = utc_now_naive()
+    await db.execute(
+        delete(OAuthPendingState).where(OAuthPendingState.expires_at < now)
+    )
+    existing = await db.execute(
+        select(OAuthPendingState).where(OAuthPendingState.state_key == state_key)
+    )
+    pending = existing.scalar_one_or_none()
+    expires_at = now + timedelta(seconds=ttl_seconds)
+    if pending is None:
+        db.add(
+            OAuthPendingState(
+                state_key=state_key,
+                purpose=purpose,
+                user_id=user_id,
+                expires_at=expires_at,
+            )
+        )
+    else:
+        pending.purpose = purpose
+        pending.user_id = user_id
+        pending.expires_at = expires_at
+    await db.commit()
+
+
+async def _get_pending_state(
+    db: AsyncSession,
+    *,
+    state_key: str,
+    purpose: str,
+    user_id: int,
+) -> OAuthPendingState | None:
+    now = utc_now_naive()
+    await db.execute(
+        delete(OAuthPendingState).where(OAuthPendingState.expires_at < now)
+    )
+    result = await db.execute(
+        select(OAuthPendingState).where(OAuthPendingState.state_key == state_key)
+    )
+    pending = result.scalar_one_or_none()
+    await db.commit()
+    if (
+        pending is None
+        or pending.purpose != purpose
+        or pending.user_id != user_id
+        or pending.expires_at <= now
+    ):
+        return None
+    return pending
+
+
+async def _delete_pending_state(db: AsyncSession, state_key: str) -> None:
+    await db.execute(
+        delete(OAuthPendingState).where(OAuthPendingState.state_key == state_key)
+    )
+    await db.commit()
+
+
 @router.get("", response_model=list[SourceBindingResponse])
 async def list_bindings(
     current_user: SystemUser = Depends(get_current_user),
@@ -145,6 +213,7 @@ async def revoke_binding(
 @router.get("/bilibili/qrcode", response_model=QRCodeResponse)
 async def generate_bilibili_binding_qrcode(
     current_user: SystemUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> QRCodeResponse:
     bili = BilibiliService()
     try:
@@ -164,6 +233,13 @@ async def generate_bilibili_binding_qrcode(
         },
         QRCODE_SESSION_TTL,
     )
+    await _create_pending_state(
+        db,
+        state_key=result["qrcode_key"],
+        purpose="source_binding",
+        user_id=current_user.id,
+        ttl_seconds=QRCODE_SESSION_TTL,
+    )
     return QRCodeResponse(
         qrcode_key=result["qrcode_key"],
         qrcode_url=result["qrcode_url"],
@@ -179,11 +255,20 @@ async def poll_bilibili_binding_qrcode(
     db: AsyncSession = Depends(get_db),
 ) -> LoginStatusResponse:
     pending = _get_session(qrcode_key)
-    if (
-        not pending
-        or pending.get("purpose") != "source_binding"
-        or pending.get("user_id") != current_user.id
-    ):
+    pending_is_valid = bool(
+        pending
+        and pending.get("purpose") == "source_binding"
+        and pending.get("user_id") == current_user.id
+    )
+    if not pending_is_valid:
+        pending_record = await _get_pending_state(
+            db,
+            state_key=qrcode_key,
+            purpose="source_binding",
+            user_id=current_user.id,
+        )
+        pending_is_valid = pending_record is not None
+    if not pending_is_valid:
         raise HTTPException(status_code=404, detail="二维码不存在或已过期")
 
     bili = BilibiliService()
@@ -243,6 +328,7 @@ async def poll_bilibili_binding_qrcode(
     await db.commit()
 
     login_sessions.pop(qrcode_key, None)
+    await _delete_pending_state(db, qrcode_key)
     response_mid = int(external_id) if external_id.isdigit() else external_id
     response.user_info = {
         "mid": response_mid,

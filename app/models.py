@@ -278,6 +278,22 @@ class VerificationIpRateLimit(Base):
     updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
 
+class OAuthPendingState(Base):
+    """Short-lived OAuth/QR pending state shared across workers."""
+
+    __tablename__ = "oauth_pending_states"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    state_key = Column(String(255), unique=True, index=True, nullable=False)
+    purpose = Column(String(50), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=True)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id"), index=True, nullable=True
+    )
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_utc_now)
+
+
 class FavoriteFolder(Base):
     """收藏夹记录表"""
 
