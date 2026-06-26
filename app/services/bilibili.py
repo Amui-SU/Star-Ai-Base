@@ -28,6 +28,15 @@ def _service_kwargs_from_cookies(cookies: Mapping[str, Any] | None) -> Dict[str,
     }
 
 
+def normalize_bilibili_cookies(cookies: Mapping[str, Any] | None) -> Dict[str, Any]:
+    kwargs = _service_kwargs_from_cookies(cookies)
+    return {
+        "SESSDATA": kwargs["sessdata"],
+        "bili_jct": kwargs["bili_jct"],
+        "DedeUserID": kwargs["dedeuserid"],
+    }
+
+
 class BilibiliService:
     """B站 API 服务封装"""
 

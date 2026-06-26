@@ -16,7 +16,11 @@ from app.models import (
     LoginStatusResponse,
     UserSession as UserSessionModel,
 )
-from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
+from app.services.bilibili import (
+    BilibiliService,
+    bilibili_service_from_cookies,
+    normalize_bilibili_cookies,
+)
 import uuid
 
 router = APIRouter(prefix="/auth", tags=["认证"])
@@ -106,7 +110,7 @@ async def poll_qrcode_status(qrcode_key: str, db: AsyncSession = Depends(get_db)
 
         # 登录成功
         if result["status"] == "confirmed":
-            cookies = result.get("cookies", {})
+            cookies = normalize_bilibili_cookies(result.get("cookies", {}))
 
             # 创建会话
             session_id = str(uuid.uuid4())
@@ -134,9 +138,9 @@ async def poll_qrcode_status(qrcode_key: str, db: AsyncSession = Depends(get_db)
                     bili_mid=mid,
                     bili_uname=user_info.get("uname"),
                     bili_face=user_info.get("face"),
-                    sessdata=cookies.get("SESSDATA"),
-                    bili_jct=cookies.get("bili_jct"),
-                    dedeuserid=str(cookies.get("DedeUserID")),
+                    sessdata=cookies["SESSDATA"],
+                    bili_jct=cookies["bili_jct"],
+                    dedeuserid=str(cookies["DedeUserID"]),
                     is_valid=True,
                 )
                 db.add(db_session)
