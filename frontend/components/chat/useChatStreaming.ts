@@ -9,6 +9,7 @@ import {
 import type { ChatScopeSelection } from "@/lib/chatScope";
 import { toScopePayload } from "@/lib/chatScope";
 import { parseChatStream } from "@/lib/chatStream";
+import { copyText } from "@/lib/clipboard";
 import { getLocalAuthHeaders } from "@/lib/localConnection";
 import type { Message, Reaction } from "@/components/chat/types";
 
@@ -325,19 +326,7 @@ export function useChatStreaming({
 
   const handleCopyMessage = async (messageId: string, content: string) => {
     try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(content);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = content;
-        textarea.style.position = "fixed";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
+      await copyText(content);
       setCopiedMessageId(messageId);
       window.setTimeout(() => {
         setCopiedMessageId((current) =>
