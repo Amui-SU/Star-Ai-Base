@@ -67,7 +67,3 @@ logs/
 # Node
 node_modules/
 # Keep lockfiles tracked for reproducible installs.
-
-# Local collaboration notes, not project source.
-CLAUDE.md
-docs/
