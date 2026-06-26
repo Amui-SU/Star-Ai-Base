@@ -231,11 +231,18 @@ async def get_session_info(session_id: str):
 
 
 @router.delete("/session/{session_id}")
-async def logout(session_id: str):
+async def logout(session_id: str, db: AsyncSession = Depends(get_db)):
     """
     退出登录
     """
     login_sessions.pop(session_id, None)
+    result = await db.execute(
+        select(UserSessionModel).where(UserSessionModel.session_id == session_id)
+    )
+    db_session = result.scalar_one_or_none()
+    if db_session:
+        db_session.is_valid = False
+        await db.commit()
     return {"message": "已退出登录"}
 
 

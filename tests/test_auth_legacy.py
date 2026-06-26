@@ -114,3 +114,44 @@ async def test_legacy_plaintext_bilibili_session_cookies_still_restore(
         "bili_jct": "plain-csrf",
         "DedeUserID": "4242",
     }
+
+
+@pytest.mark.asyncio
+async def test_legacy_logout_revokes_persisted_bilibili_session(
+    client,
+    db_session_factory,
+):
+    import app.routers.auth as auth_router
+
+    auth_router.login_sessions.clear()
+    async with db_session_factory() as session:
+        session.add(
+            UserSession(
+                session_id="logout-session-id",
+                bili_mid=4242,
+                bili_uname="Legacy User",
+                sessdata="plain-sess",
+                bili_jct="plain-csrf",
+                dedeuserid="4242",
+                is_valid=True,
+            )
+        )
+        await session.commit()
+
+    response = await client.delete("/auth/session/logout-session-id")
+
+    assert response.status_code == 200
+    async with db_session_factory() as session:
+        db_session = (
+            (
+                await session.execute(
+                    select(UserSession).where(
+                        UserSession.session_id == "logout-session-id"
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+    assert db_session.is_valid is False
+    assert await auth_router.get_session("logout-session-id") is None
