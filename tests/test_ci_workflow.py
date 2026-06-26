@@ -24,3 +24,17 @@ def test_pytest_asyncio_fixture_loop_scope_is_explicit():
 
     assert read_files
     assert config.get("pytest", "asyncio_default_fixture_loop_scope") == "function"
+
+
+def test_pytest_warning_filters_only_known_upstream_multipart_warning():
+    config = configparser.ConfigParser()
+    config.read(Path(__file__).resolve().parents[1] / "pytest.ini")
+
+    filters = "\n".join(
+        value
+        for key, value in config.items("pytest")
+        if key.startswith("filterwarnings")
+    )
+
+    assert "Please use `import python_multipart` instead." in filters
+    assert "starlette.formparsers" in filters
