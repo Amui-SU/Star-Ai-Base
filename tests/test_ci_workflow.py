@@ -1,3 +1,4 @@
+import configparser
 from pathlib import Path
 
 
@@ -15,3 +16,11 @@ def test_github_actions_ci_runs_backend_and_frontend_quality_gates():
         "npm run build",
     ]:
         assert required in content
+
+
+def test_pytest_asyncio_fixture_loop_scope_is_explicit():
+    config = configparser.ConfigParser()
+    read_files = config.read(Path(__file__).resolve().parents[1] / "pytest.ini")
+
+    assert read_files
+    assert config.get("pytest", "asyncio_default_fixture_loop_scope") == "function"
