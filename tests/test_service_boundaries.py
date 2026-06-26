@@ -43,3 +43,11 @@ def test_favorite_router_uses_shared_default_folder_detection():
 
     assert "def _is_default_folder" not in source
     assert "is_legacy_default_favorite_folder" in source
+
+
+def test_system_auth_router_uses_logger_for_tracebacks():
+    project_root = Path(__file__).resolve().parents[1]
+    source = (project_root / "app/routers/system_auth.py").read_text(encoding="utf-8")
+
+    assert "traceback.print_exc" not in source
+    assert "import traceback" not in source

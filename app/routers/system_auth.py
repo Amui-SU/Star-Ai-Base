@@ -1180,10 +1180,7 @@ async def google_callback(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-
-        traceback.print_exc()
-        logger.error(f"Google OAuth httpx 阶段异常: {type(e).__name__}: {e}")
+        logger.exception(f"Google OAuth httpx 阶段异常: {type(e).__name__}: {e}")
         raise HTTPException(
             status_code=500, detail=f"Google 登录异常: {type(e).__name__}: {e}"
         )
@@ -1244,10 +1241,7 @@ async def google_callback(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-
-        traceback.print_exc()
-        logger.error(f"Google OAuth 回调异常: {type(e).__name__}: {e}")
+        logger.exception(f"Google OAuth 回调异常: {type(e).__name__}: {e}")
         raise HTTPException(
             status_code=500, detail=f"Google 登录异常: {type(e).__name__}: {e}"
         )
