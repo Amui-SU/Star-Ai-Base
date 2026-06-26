@@ -9,20 +9,11 @@ from loguru import logger
 from typing import List, Optional
 from pydantic import BaseModel
 from app.models import FavoriteFolderInfo
-from app.services.favorite_folders import is_default_favorite_folder
+from app.services.favorite_folders import is_legacy_default_favorite_folder
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.routers.auth import get_session
 
 router = APIRouter(prefix="/favorites", tags=["收藏夹"])
-
-
-def _is_default_folder(folder: dict) -> bool:
-    return is_default_favorite_folder(
-        folder,
-        explicit_flag_overrides=True,
-        include_alias_flags=True,
-        include_attr=True,
-    )
 
 
 class OrganizePreviewRequest(BaseModel):
@@ -87,7 +78,7 @@ async def get_favorites_list(session_id: str = Query(..., description="会话ID"
                     title=folder["title"],
                     media_count=folder.get("media_count", 0),
                     is_selected=True,
-                    is_default=_is_default_folder(folder),
+                    is_default=is_legacy_default_favorite_folder(folder),
                 )
             )
 
@@ -224,7 +215,9 @@ async def organize_preview(
         bili = bilibili_service_from_cookies(cookies, BilibiliService)
         mid = user_info.get("mid") or cookies.get("DedeUserID")
         folders = await bili.get_user_favorites(mid=mid)
-        default_folder = next((f for f in folders if _is_default_folder(f)), None)
+        default_folder = next(
+            (f for f in folders if is_legacy_default_favorite_folder(f)), None
+        )
         if not default_folder:
             raise HTTPException(status_code=400, detail="未找到默认收藏夹")
 

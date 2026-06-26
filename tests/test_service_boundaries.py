@@ -35,3 +35,11 @@ def test_chat_router_does_not_keep_mutable_current_llm_provider():
     source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
 
     assert "_current_llm_provider" not in source
+
+
+def test_favorite_router_uses_shared_default_folder_detection():
+    project_root = Path(__file__).resolve().parents[1]
+    source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")
+
+    assert "def _is_default_folder" not in source
+    assert "is_legacy_default_favorite_folder" in source
