@@ -32,6 +32,22 @@ def test_settings_imports_without_pydantic_field_env_deprecations():
     assert result.returncode == 0, result.stderr
 
 
+def test_models_import_without_sqlalchemy_declarative_base_deprecations():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-W",
+            "error",
+            "-c",
+            "import app.models",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_settings_read_uppercase_environment_names(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "deepseek")
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
