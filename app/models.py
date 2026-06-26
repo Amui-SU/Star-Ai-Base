@@ -83,7 +83,7 @@ class UserSession(Base):
     bili_uname = Column(String(100), nullable=True)  # B站用户名
     bili_face = Column(String(500), nullable=True)  # 头像URL
 
-    # Cookie 信息（加密存储更安全，这里简化处理）
+    # B站 Cookie 信息；新写入的敏感字段由 auth router 加密，仍兼容旧明文数据读取。
     sessdata = Column(Text, nullable=True)
     bili_jct = Column(Text, nullable=True)
     dedeuserid = Column(String(50), nullable=True)
