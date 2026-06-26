@@ -1,6 +1,8 @@
 from fastapi import Response
 from cryptography.fernet import Fernet
 import pytest
+import subprocess
+import sys
 
 from app.config import Settings, settings
 from app.security import _fernet_key, decrypt_text, encrypt_text, set_session_cookie
@@ -12,6 +14,37 @@ def test_settings_default_to_production_safe_debug(monkeypatch):
     loaded = Settings(_env_file=None)
 
     assert loaded.debug is False
+
+
+def test_settings_imports_without_pydantic_field_env_deprecations():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-W",
+            "error",
+            "-c",
+            "import app.config",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_settings_read_uppercase_environment_names(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
+    monkeypatch.setenv("SMTP_PORT", "2525")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-secret")
+
+    loaded = Settings(_env_file=None)
+
+    assert loaded.llm_provider == "deepseek"
+    assert loaded.session_cookie_secure is False
+    assert loaded.smtp_port == 2525
+    assert loaded.openai_api_key == "dashscope-secret"
+    assert loaded.dashscope_api_key == "dashscope-secret"
 
 
 def test_fernet_key_requires_app_encryption_key_when_not_debug(monkeypatch):

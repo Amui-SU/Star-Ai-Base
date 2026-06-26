@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     )
 
     # OpenAI / LLM 配置
-    llm_provider: str = Field(default="dashscope", env="LLM_PROVIDER")
+    llm_provider: str = Field(default="dashscope")
     openai_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("DASHSCOPE_API_KEY", "OPENAI_API_KEY"),
@@ -29,115 +29,86 @@ class Settings(BaseSettings):
         default="",
         validation_alias="DASHSCOPE_API_KEY",
     )
-    openai_base_url: str = Field(
-        default="https://api.openai.com/v1", env="OPENAI_BASE_URL"
-    )
-    llm_model: str = Field(default="gpt-4-turbo", env="LLM_MODEL")
-    deepseek_api_key: str = Field(default="", env="DEEPSEEK_API_KEY")
-    deepseek_base_url: str = Field(
-        default="https://api.deepseek.com/v1", env="DEEPSEEK_BASE_URL"
-    )
-    deepseek_model: str = Field(default="deepseek-chat", env="DEEPSEEK_MODEL")
-    deepseek_thinking_config: str = Field(default="", env="DEEPSEEK_THINKING_CONFIG")
-    openai_native_api_key: str = Field(default="", env="OPENAI_NATIVE_API_KEY")
-    openai_native_base_url: str = Field(
-        default="https://api.openai.com/v1", env="OPENAI_NATIVE_BASE_URL"
-    )
-    openai_native_model: str = Field(default="gpt-4o-mini", env="OPENAI_NATIVE_MODEL")
-    openai_native_thinking_config: str = Field(
-        default="", env="OPENAI_NATIVE_THINKING_CONFIG"
-    )
-    kimi_api_key: str = Field(default="", env="KIMI_API_KEY")
-    kimi_base_url: str = Field(
-        default="https://api.moonshot.cn/v1", env="KIMI_BASE_URL"
-    )
-    kimi_model: str = Field(default="moonshot-v1-8k", env="KIMI_MODEL")
-    kimi_thinking_config: str = Field(default="", env="KIMI_THINKING_CONFIG")
-    siliconflow_api_key: str = Field(default="", env="SILICONFLOW_API_KEY")
-    siliconflow_base_url: str = Field(
-        default="https://api.siliconflow.cn/v1", env="SILICONFLOW_BASE_URL"
-    )
-    siliconflow_model: str = Field(
-        default="Qwen/Qwen2.5-7B-Instruct", env="SILICONFLOW_MODEL"
-    )
-    siliconflow_thinking_config: str = Field(
-        default="", env="SILICONFLOW_THINKING_CONFIG"
-    )
-    zhipu_api_key: str = Field(default="", env="ZHIPU_API_KEY")
-    zhipu_base_url: str = Field(
-        default="https://open.bigmodel.cn/api/paas/v4", env="ZHIPU_BASE_URL"
-    )
-    zhipu_model: str = Field(default="glm-4-flash", env="ZHIPU_MODEL")
-    zhipu_thinking_config: str = Field(default="", env="ZHIPU_THINKING_CONFIG")
-    dashscope_thinking_config: str = Field(default="", env="DASHSCOPE_THINKING_CONFIG")
-    embedding_model: str = Field(
-        default="text-embedding-3-small", env="EMBEDDING_MODEL"
-    )
+    openai_base_url: str = Field(default="https://api.openai.com/v1")
+    llm_model: str = Field(default="gpt-4-turbo")
+    deepseek_api_key: str = Field(default="")
+    deepseek_base_url: str = Field(default="https://api.deepseek.com/v1")
+    deepseek_model: str = Field(default="deepseek-chat")
+    deepseek_thinking_config: str = Field(default="")
+    openai_native_api_key: str = Field(default="")
+    openai_native_base_url: str = Field(default="https://api.openai.com/v1")
+    openai_native_model: str = Field(default="gpt-4o-mini")
+    openai_native_thinking_config: str = Field(default="")
+    kimi_api_key: str = Field(default="")
+    kimi_base_url: str = Field(default="https://api.moonshot.cn/v1")
+    kimi_model: str = Field(default="moonshot-v1-8k")
+    kimi_thinking_config: str = Field(default="")
+    siliconflow_api_key: str = Field(default="")
+    siliconflow_base_url: str = Field(default="https://api.siliconflow.cn/v1")
+    siliconflow_model: str = Field(default="Qwen/Qwen2.5-7B-Instruct")
+    siliconflow_thinking_config: str = Field(default="")
+    zhipu_api_key: str = Field(default="")
+    zhipu_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4")
+    zhipu_model: str = Field(default="glm-4-flash")
+    zhipu_thinking_config: str = Field(default="")
+    dashscope_thinking_config: str = Field(default="")
+    embedding_model: str = Field(default="text-embedding-3-small")
 
     # DashScope ASR
-    dashscope_base_url: str = Field(
-        default="https://dashscope.aliyuncs.com/api/v1", env="DASHSCOPE_BASE_URL"
-    )
-    asr_model: str = Field(default="paraformer-v2", env="ASR_MODEL")
-    asr_timeout: int = Field(default=600, env="ASR_TIMEOUT")
-    asr_model_local: str = Field(
-        default="paraformer-realtime-v2", env="ASR_MODEL_LOCAL"
-    )
-    asr_input_format: str = Field(default="pcm", env="ASR_INPUT_FORMAT")
+    dashscope_base_url: str = Field(default="https://dashscope.aliyuncs.com/api/v1")
+    asr_model: str = Field(default="paraformer-v2")
+    asr_timeout: int = Field(default=600)
+    asr_model_local: str = Field(default="paraformer-realtime-v2")
+    asr_input_format: str = Field(default="pcm")
 
     # 应用配置
-    app_host: str = Field(default="0.0.0.0", env="APP_HOST")
-    app_port: int = Field(default=8000, env="APP_PORT")
-    debug: bool = Field(default=False, env="DEBUG")
+    app_host: str = Field(default="0.0.0.0")
+    app_port: int = Field(default=8000)
+    debug: bool = Field(default=False)
     session_cookie_secure: Optional[bool] = Field(
         default=None,
-        env="SESSION_COOKIE_SECURE",
     )
 
     # 数据库
-    database_url: str = Field(
-        default="sqlite+aiosqlite:///./data/bilibili_rag.db", env="DATABASE_URL"
-    )
+    database_url: str = Field(default="sqlite+aiosqlite:///./data/bilibili_rag.db")
 
     # ChromaDB
-    chroma_persist_directory: str = Field(
-        default="./data/chroma_db", env="CHROMA_PERSIST_DIRECTORY"
-    )
+    chroma_persist_directory: str = Field(default="./data/chroma_db")
 
     # Google OAuth
-    google_client_id: str = Field(default="", env="GOOGLE_CLIENT_ID")
-    google_client_secret: str = Field(default="", env="GOOGLE_CLIENT_SECRET")
-    google_redirect_uri: str = Field(default="", env="GOOGLE_REDIRECT_URI")
+    google_client_id: str = Field(default="")
+    google_client_secret: str = Field(default="")
+    google_redirect_uri: str = Field(default="")
 
     # WeChat OAuth
-    wechat_client_id: str = Field(default="", env="WECHAT_CLIENT_ID")
-    wechat_client_secret: str = Field(default="", env="WECHAT_CLIENT_SECRET")
-    wechat_redirect_uri: str = Field(default="", env="WECHAT_REDIRECT_URI")
+    wechat_client_id: str = Field(default="")
+    wechat_client_secret: str = Field(default="")
+    wechat_redirect_uri: str = Field(default="")
 
     # QQ OAuth
-    qq_client_id: str = Field(default="", env="QQ_CLIENT_ID")
-    qq_client_secret: str = Field(default="", env="QQ_CLIENT_SECRET")
-    qq_redirect_uri: str = Field(default="", env="QQ_REDIRECT_URI")
+    qq_client_id: str = Field(default="")
+    qq_client_secret: str = Field(default="")
+    qq_redirect_uri: str = Field(default="")
 
     # HTTP 代理（访问 Google 等境外服务时需要）
-    http_proxy: str = Field(default="", env="HTTP_PROXY")
+    http_proxy: str = Field(default="")
 
     # Web search provider configuration.
-    web_search_provider: str = Field(default="html", env="WEB_SEARCH_PROVIDER")
-    tavily_api_key: str = Field(default="", env="TAVILY_API_KEY")
-    web_search_fallback_html: bool = Field(default=True, env="WEB_SEARCH_FALLBACK_HTML")
-    tavily_search_depth: str = Field(default="basic", env="TAVILY_SEARCH_DEPTH")
+    web_search_provider: str = Field(default="html")
+    tavily_api_key: str = Field(default="")
+    web_search_fallback_html: bool = Field(default=True)
+    tavily_search_depth: str = Field(default="basic")
 
     # SMTP 邮件配置（用于发送邮箱验证码）
-    smtp_host: str = Field(default="smtp.qq.com", env="SMTP_HOST")
-    smtp_port: int = Field(default=587, env="SMTP_PORT")
-    smtp_user: str = Field(default="", env="SMTP_USER")
-    smtp_password: str = Field(default="", env="SMTP_PASSWORD")
-    smtp_from: str = Field(default="", env="SMTP_FROM")
-    smtp_use_tls: bool = Field(default=True, env="SMTP_USE_TLS")
+    smtp_host: str = Field(default="smtp.qq.com")
+    smtp_port: int = Field(default=587)
+    smtp_user: str = Field(default="")
+    smtp_password: str = Field(default="")
+    smtp_from: str = Field(default="")
+    smtp_use_tls: bool = Field(default=True)
 
     # 管理员账号。为空时首个注册用户自动成为管理员；多个邮箱用英文逗号分隔。
-    admin_emails: str = Field(default="", env="ADMIN_EMAILS")
+    admin_emails: str = Field(default="")
 
     @field_validator("deepseek_model", mode="before")
     @classmethod
