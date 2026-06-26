@@ -31,6 +31,7 @@ import {
   scopeSummary,
 } from "@/lib/chatScope";
 import { displayKnowledgeBaseName } from "@/lib/displayNames";
+import { LLM_PROVIDER_PRESETS, providerLogoMap } from "@/lib/providers";
 import {
   formatThinkingConfig,
   inferThinkingMode,
@@ -206,31 +207,6 @@ export default function ChatPanel({
       void persistConversation(settledMessages);
     },
   });
-  const providerLogoMap: Record<string, string> = {
-    deepseek: "/logos/deepseek-icon.png",
-    dashscope: "/logos/dashscope-icon.png",
-    openai: "/logos/openai-icon.png",
-    kimi: "/logos/kimi-icon.png",
-    siliconflow: "/logos/siliconflow-icon.png",
-    zhipu: "/logos/zhipu-icon.png",
-  };
-  const builtInProviders: Array<{
-    provider: string;
-    label: string;
-    model: string;
-  }> = [
-    { provider: "dashscope", label: "阿里云 DashScope", model: "qwen-max" },
-    { provider: "deepseek", label: "DeepSeek", model: "deepseek-chat" },
-    { provider: "openai", label: "OpenAI", model: "gpt-4o-mini" },
-    { provider: "kimi", label: "Moonshot Kimi", model: "moonshot-v1-8k" },
-    {
-      provider: "siliconflow",
-      label: "SiliconFlow",
-      model: "Qwen/Qwen2.5-7B-Instruct",
-    },
-    { provider: "zhipu", label: "智谱 GLM", model: "glm-4-flash" },
-  ];
-
   const openProviderConfig = (provider: ModelConfigProvider) => {
     if (!isAdmin) {
       setScopeNotice("需要管理员配置模型");
@@ -717,7 +693,7 @@ export default function ChatPanel({
     },
   ];
   const providersForMenu = [
-    ...builtInProviders.map((base) => {
+    ...LLM_PROVIDER_PRESETS.map((base) => {
       const remote = remoteProviderMap.get(base.provider);
       return {
         provider: base.provider,
@@ -732,7 +708,7 @@ export default function ChatPanel({
       };
     }),
     ...remoteProviders.filter(
-      (p) => !builtInProviders.some((b) => b.provider === p.provider),
+      (p) => !LLM_PROVIDER_PRESETS.some((b) => b.provider === p.provider),
     ),
   ];
   const currentProvider =
@@ -786,7 +762,7 @@ export default function ChatPanel({
                 <Image
                   src={
                     activeProvider
-                      ? providerLogoMap[activeProvider.provider] ||
+                      ? providerLogoMap.get(activeProvider.provider) ||
                         "/logos/qwen-icon.png"
                       : "/logos/qwen-icon.png"
                   }
@@ -875,7 +851,7 @@ export default function ChatPanel({
                           <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-(--paper)">
                             <Image
                               src={
-                                providerLogoMap[p.provider] ||
+                                providerLogoMap.get(p.provider) ||
                                 "/logos/qwen-icon.png"
                               }
                               alt={`${p.label} logo`}

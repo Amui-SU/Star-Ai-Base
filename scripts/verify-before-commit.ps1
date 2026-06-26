@@ -77,7 +77,7 @@ Invoke-Step "git diff --check" {
 }
 
 if ($pythonFiles.Count -gt 0) {
-    $existingPythonFiles = Select-ExistingFiles $pythonFiles
+    $existingPythonFiles = @(Select-ExistingFiles $pythonFiles)
     if ($existingPythonFiles.Count -gt 0) {
         if ($Format) {
             Invoke-Step "black format changed Python files" {
@@ -97,7 +97,7 @@ if (-not $SkipBackendTests) {
 }
 
 if ($webFiles.Count -gt 0) {
-    $existingWebFiles = Select-ExistingFiles $webFiles
+    $existingWebFiles = @(Select-ExistingFiles $webFiles)
     if ($existingWebFiles.Count -gt 0) {
         Push-Location $frontendRoot
         try {

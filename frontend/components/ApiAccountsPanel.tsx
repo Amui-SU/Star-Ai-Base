@@ -7,6 +7,7 @@ import {
   type ApiAccountCreateRequest,
   type ApiAccountUpdateRequest,
 } from "@/lib/api";
+import { PROVIDER_PRESETS, providerPresetMap } from "@/lib/providers";
 
 interface Props {
   open: boolean;
@@ -14,63 +15,7 @@ interface Props {
   onChanged?: () => void;
 }
 
-type ProviderPreset = {
-  provider: string;
-  label: string;
-  baseUrl: string;
-  model: string;
-};
-
-const PROVIDERS: ProviderPreset[] = [
-  {
-    provider: "deepseek",
-    label: "DeepSeek",
-    baseUrl: "https://api.deepseek.com/v1",
-    model: "deepseek-chat",
-  },
-  {
-    provider: "dashscope",
-    label: "阿里云 DashScope",
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    model: "qwen-max",
-  },
-  {
-    provider: "openai",
-    label: "OpenAI",
-    baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4o-mini",
-  },
-  {
-    provider: "kimi",
-    label: "Moonshot Kimi",
-    baseUrl: "https://api.moonshot.cn/v1",
-    model: "moonshot-v1-8k",
-  },
-  {
-    provider: "siliconflow",
-    label: "SiliconFlow",
-    baseUrl: "https://api.siliconflow.cn/v1",
-    model: "Qwen/Qwen2.5-7B-Instruct",
-  },
-  {
-    provider: "zhipu",
-    label: "智谱 GLM",
-    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    model: "glm-4-flash",
-  },
-  {
-    provider: "tavily",
-    label: "Tavily 搜索",
-    baseUrl: "https://api.tavily.com",
-    model: "tavily-search",
-  },
-];
-
-const providerMap = new Map(
-  PROVIDERS.map((provider) => [provider.provider, provider]),
-);
-
-const firstProvider = PROVIDERS[0];
+const firstProvider = PROVIDER_PRESETS[0];
 
 const emptyForm = () => ({
   accountId: null as number | null,
@@ -93,7 +38,7 @@ export default function ApiAccountsPanel({ open, onClose, onChanged }: Props) {
   const [form, setForm] = useState(emptyForm);
 
   const selectedPreset = useMemo(
-    () => providerMap.get(form.provider) ?? firstProvider,
+    () => providerPresetMap.get(form.provider) ?? firstProvider,
     [form.provider],
   );
   const editing = form.accountId !== null;
@@ -130,7 +75,7 @@ export default function ApiAccountsPanel({ open, onClose, onChanged }: Props) {
   if (!open) return null;
 
   const selectProvider = (provider: string) => {
-    const preset = providerMap.get(provider) ?? firstProvider;
+    const preset = providerPresetMap.get(provider) ?? firstProvider;
     setForm((prev) => ({
       ...prev,
       provider: preset.provider,
@@ -390,7 +335,7 @@ export default function ApiAccountsPanel({ open, onClose, onChanged }: Props) {
                 disabled={editing}
                 onChange={(event) => selectProvider(event.target.value)}
               >
-                {PROVIDERS.map((provider) => (
+                {PROVIDER_PRESETS.map((provider) => (
                   <option key={provider.provider} value={provider.provider}>
                     {provider.label}
                   </option>
