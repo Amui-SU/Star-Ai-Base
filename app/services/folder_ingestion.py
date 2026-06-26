@@ -73,6 +73,36 @@ async def _get_or_create_folder(
     return folder
 
 
+async def _get_existing_folder_for_scope(
+    db: AsyncSession,
+    session_id: str,
+    media_id: int,
+    workspace_id: Optional[int] = None,
+    knowledge_base_id: Optional[int] = None,
+    source_binding_id: Optional[int] = None,
+) -> Optional[FavoriteFolder]:
+    stmt = select(FavoriteFolder).where(
+        FavoriteFolder.session_id == session_id,
+        FavoriteFolder.media_id == media_id,
+    )
+    if _has_cache_scope(workspace_id, knowledge_base_id):
+        stmt = (
+            stmt.where(FavoriteFolder.workspace_id == workspace_id)
+            .where(FavoriteFolder.knowledge_base_id == knowledge_base_id)
+            .where(
+                FavoriteFolder.source_binding_id.is_(None)
+                if source_binding_id is None
+                else FavoriteFolder.source_binding_id == source_binding_id
+            )
+        )
+    else:
+        stmt = stmt.where(FavoriteFolder.workspace_id.is_(None)).where(
+            FavoriteFolder.knowledge_base_id.is_(None)
+        )
+    result = await db.execute(stmt.order_by(FavoriteFolder.id.asc()).limit(1))
+    return result.scalar_one_or_none()
+
+
 def _extract_video_info(media: dict) -> tuple[str, str, Optional[int]]:
     """抽取视频关键信息"""
     bvid = media.get("bvid") or media.get("bv_id")
@@ -202,7 +232,7 @@ async def sync_folder(
     folder_id: int,
     exclude_bvids: Optional[set[str]] = None,
     include_bvids: Optional[set[str]] = None,
-    progress_callback: Optional[Callable[[str], None]] = None,
+    progress_callback: Optional[Callable[[str, int, int], None]] = None,
     workspace_id: Optional[int] = None,
     knowledge_base_id: Optional[int] = None,
     source_binding_id: Optional[int] = None,
@@ -222,11 +252,21 @@ async def sync_folder(
     if not videos:
         if total_in_folder and total_in_folder > 0:
             logger.warning(f"[{folder_id}] 收藏夹返回空列表，跳过删除逻辑")
-            existing_count = await db.scalar(
-                select(func.count(FavoriteVideo.bvid)).where(
-                    FavoriteVideo.folder_id == folder_id
-                )
+            existing_folder = await _get_existing_folder_for_scope(
+                db,
+                session_id=session_id,
+                media_id=folder_id,
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                source_binding_id=source_binding_id,
             )
+            existing_count = 0
+            if existing_folder is not None:
+                existing_count = await db.scalar(
+                    select(func.count(FavoriteVideo.bvid)).where(
+                        FavoriteVideo.folder_id == existing_folder.id
+                    )
+                )
             return {
                 "folder_id": folder_id,
                 "total": total_in_folder,
