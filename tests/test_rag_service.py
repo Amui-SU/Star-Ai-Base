@@ -115,3 +115,27 @@ def test_delete_by_knowledge_base_uses_workspace_scope_and_reports_deleted_count
             {"knowledge_base_id": 22},
         ]
     }
+
+
+def test_delete_video_in_knowledge_base_logs_readable_message(monkeypatch):
+    messages = []
+
+    class FakeCollection:
+        def delete(self, where=None):
+            pass
+
+    service = _service_with_vectorstore(
+        type("VectorStore", (), {"_collection": FakeCollection()})()
+    )
+    monkeypatch.setattr(
+        "app.services.rag.logger.info",
+        lambda message, *args, **kwargs: messages.append(str(message)),
+    )
+
+    service.delete_video_in_knowledge_base(
+        workspace_id=3,
+        knowledge_base_id=7,
+        bvid="BVREADABLE",
+    )
+
+    assert messages == ["已删除知识库 7 内的视频 BVREADABLE"]

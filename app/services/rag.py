@@ -532,9 +532,9 @@ class RAGService:
         }
         try:
             self.vectorstore._collection.delete(where=where)
-            logger.info(f"宸插垹闄ょ煡璇嗗簱 {knowledge_base_id} 鍐呯殑瑙嗛 {bvid}")
+            logger.info(f"已删除知识库 {knowledge_base_id} 内的视频 {bvid}")
         except Exception as e:
-            logger.error(f"鍒犻櫎 scoped 瑙嗛澶辫触 [{knowledge_base_id}/{bvid}]: {e}")
+            logger.error(f"删除 scoped 视频失败 [{knowledge_base_id}/{bvid}]: {e}")
             raise
 
     def has_video_vectors_in_knowledge_base(

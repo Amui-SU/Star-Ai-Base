@@ -1,4 +1,5 @@
 import base64
+import binascii
 import hashlib
 import os
 import secrets
@@ -71,10 +72,21 @@ def _session_cookie_secure() -> bool:
     return not settings.debug
 
 
+def _derive_fernet_key(secret: str) -> bytes:
+    raw = secret.strip().encode("utf-8")
+    try:
+        decoded = base64.urlsafe_b64decode(raw)
+    except (binascii.Error, ValueError):
+        decoded = b""
+    if len(decoded) == 32:
+        return raw
+    return base64.urlsafe_b64encode(hashlib.sha256(raw).digest())
+
+
 def _fernet_key() -> bytes:
     raw_key = os.getenv("APP_ENCRYPTION_KEY", "")
     if raw_key:
-        return raw_key.encode("utf-8")
+        return _derive_fernet_key(raw_key)
     if settings.debug:
         return base64.urlsafe_b64encode(
             hashlib.sha256(_DEV_ENCRYPTION_KEY_SEED).digest()
