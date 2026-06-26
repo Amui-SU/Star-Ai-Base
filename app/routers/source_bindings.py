@@ -31,6 +31,7 @@ from app.routers.auth import (
 )
 from app.security import decrypt_text, encrypt_text
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
+from app.services.favorite_folders import is_default_favorite_folder
 from app.time_utils import utc_now
 
 router = APIRouter(prefix="/source-bindings", tags=["source-bindings"])
@@ -316,12 +317,7 @@ async def list_favorites_by_binding(
             title=f["title"],
             media_count=f.get("media_count", 0),
             is_selected=True,
-            is_default=(
-                f.get("is_default")
-                or f.get("type") == 1
-                or f.get("fav_state") == 1
-                or (f.get("title") or "").strip() == "默认收藏夹"
-            ),
+            is_default=is_default_favorite_folder(f),
         )
         for f in folders
     ]
@@ -523,16 +519,7 @@ async def organize_preview_by_binding(
         folders = await bili.get_user_favorites(mid=mid)
 
         default_folder = next(
-            (
-                f
-                for f in folders
-                if (
-                    f.get("is_default")
-                    or f.get("type") == 1
-                    or f.get("fav_state") == 1
-                    or (f.get("title") or "").strip() == "默认收藏夹"
-                )
-            ),
+            (f for f in folders if is_default_favorite_folder(f)),
             None,
         )
         if not default_folder:

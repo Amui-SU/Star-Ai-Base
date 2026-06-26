@@ -9,6 +9,7 @@ from loguru import logger
 from typing import List, Optional
 from pydantic import BaseModel
 from app.models import FavoriteFolderInfo
+from app.services.favorite_folders import is_default_favorite_folder
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.routers.auth import get_session
 
@@ -16,17 +17,12 @@ router = APIRouter(prefix="/favorites", tags=["收藏夹"])
 
 
 def _is_default_folder(folder: dict) -> bool:
-    for key in ("is_default", "default", "isDefault"):
-        if key in folder:
-            return bool(folder.get(key))
-    if folder.get("type") == 1:
-        return True
-    if folder.get("fav_state") == 1:
-        return True
-    if folder.get("attr") == 1:
-        return True
-    title = (folder.get("title") or "").strip()
-    return title == "默认收藏夹"
+    return is_default_favorite_folder(
+        folder,
+        explicit_flag_overrides=True,
+        include_alias_flags=True,
+        include_attr=True,
+    )
 
 
 class OrganizePreviewRequest(BaseModel):
