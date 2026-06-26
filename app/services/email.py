@@ -1,6 +1,7 @@
 """
 邮件发送服务 — 通过 SMTP 发送验证码邮件
 """
+
 import asyncio
 import smtplib
 from email.mime.text import MIMEText
@@ -28,7 +29,7 @@ VERIFICATION_HTML = """\
 async def send_verification_email(to_email: str, code: str) -> bool:
     """发送验证码邮件。成功返回 True，失败记录日志并返回 False。"""
     if not settings.smtp_user or not settings.smtp_password:
-        logger.warning("SMTP 未配置，验证码 {} 未发送到 {}", code, to_email)
+        logger.warning("SMTP 未配置，验证码邮件未发送到 {}", to_email)
         return False
 
     msg = MIMEMultipart("alternative")
@@ -44,7 +45,9 @@ async def send_verification_email(to_email: str, code: str) -> bool:
             server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15)
             server.starttls()
         else:
-            server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=15)
+            server = smtplib.SMTP_SSL(
+                settings.smtp_host, settings.smtp_port, timeout=15
+            )
         try:
             server.login(settings.smtp_user, settings.smtp_password)
             server.sendmail(msg["From"], [to_email], msg.as_string())

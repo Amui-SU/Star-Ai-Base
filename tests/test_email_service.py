@@ -23,6 +23,27 @@ async def test_send_verification_email_skips_when_smtp_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_verification_email_does_not_log_code_when_smtp_missing(
+    monkeypatch,
+):
+    warnings = []
+    monkeypatch.setattr(settings, "smtp_user", "")
+    monkeypatch.setattr(settings, "smtp_password", "")
+    monkeypatch.setattr(
+        "app.services.email.logger.warning",
+        lambda message, *args: warnings.append((message, args)),
+    )
+
+    assert await send_verification_email("user@example.com", "123456") is False
+
+    assert warnings
+    assert all("123456" not in message for message, _args in warnings)
+    assert all(
+        "123456" not in [str(arg) for arg in args] for _message, args in warnings
+    )
+
+
+@pytest.mark.asyncio
 async def test_send_verification_email_uses_starttls(monkeypatch):
     calls: list[tuple] = []
 
