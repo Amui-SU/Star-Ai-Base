@@ -87,12 +87,12 @@ def _patch_fake_llm(monkeypatch, captured_config: dict):
 def _configure_official_deepseek(monkeypatch):
     from app.routers import chat
 
+    monkeypatch.setattr(chat.settings, "llm_provider", "deepseek")
     monkeypatch.setattr(chat.settings, "deepseek_api_key", "sk-official-secret")
     monkeypatch.setattr(
         chat.settings, "deepseek_base_url", "https://api.deepseek.com/v1"
     )
     monkeypatch.setattr(chat.settings, "deepseek_model", "deepseek-chat")
-    monkeypatch.setattr(chat, "_current_llm_provider", "deepseek")
 
 
 @pytest.mark.asyncio

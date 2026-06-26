@@ -21,6 +21,7 @@ from app.services.bilibili import (
     bilibili_service_from_cookies,
     normalize_bilibili_cookies,
 )
+from app.security import decrypt_text, encrypt_text
 import uuid
 
 router = APIRouter(prefix="/auth", tags=["认证"])
@@ -31,6 +32,29 @@ login_sessions: dict = {}
 # 会话过期时间（秒）
 QRCODE_SESSION_TTL = 300  # 二维码 5 分钟过期
 LOGIN_SESSION_TTL = 14 * 86400  # 登录会话 14 天过期
+ENCRYPTED_COOKIE_PREFIX = "fernet:"
+
+
+def _encrypt_session_cookie(value: str | None) -> str | None:
+    if value in (None, ""):
+        return value
+    return f"{ENCRYPTED_COOKIE_PREFIX}{encrypt_text(value)}"
+
+
+def _decrypt_session_cookie(value: str | None) -> str | None:
+    if value in (None, ""):
+        return value
+    if not value.startswith(ENCRYPTED_COOKIE_PREFIX):
+        return value
+    return decrypt_text(value.removeprefix(ENCRYPTED_COOKIE_PREFIX))
+
+
+def _cookies_from_db_session(db_session: UserSessionModel) -> dict:
+    return {
+        "SESSDATA": _decrypt_session_cookie(db_session.sessdata),
+        "bili_jct": _decrypt_session_cookie(db_session.bili_jct),
+        "DedeUserID": db_session.dedeuserid,
+    }
 
 
 def _cleanup_expired_sessions():
@@ -138,8 +162,8 @@ async def poll_qrcode_status(qrcode_key: str, db: AsyncSession = Depends(get_db)
                     bili_mid=mid,
                     bili_uname=user_info.get("uname"),
                     bili_face=user_info.get("face"),
-                    sessdata=cookies["SESSDATA"],
-                    bili_jct=cookies["bili_jct"],
+                    sessdata=_encrypt_session_cookie(cookies["SESSDATA"]),
+                    bili_jct=_encrypt_session_cookie(cookies["bili_jct"]),
                     dedeuserid=str(cookies["DedeUserID"]),
                     is_valid=True,
                 )
@@ -194,11 +218,7 @@ async def get_session_info(session_id: str):
         if not db_session or not db_session.is_valid:
             raise HTTPException(status_code=404, detail="会话不存在或已过期")
         session = {
-            "cookies": {
-                "SESSDATA": db_session.sessdata,
-                "bili_jct": db_session.bili_jct,
-                "DedeUserID": db_session.dedeuserid,
-            },
+            "cookies": _cookies_from_db_session(db_session),
             "user_info": {
                 "mid": db_session.bili_mid,
                 "uname": db_session.bili_uname,
@@ -235,11 +255,7 @@ async def get_session(session_id: str) -> dict:
         if not db_session or not db_session.is_valid:
             return None
         session = {
-            "cookies": {
-                "SESSDATA": db_session.sessdata,
-                "bili_jct": db_session.bili_jct,
-                "DedeUserID": db_session.dedeuserid,
-            },
+            "cookies": _cookies_from_db_session(db_session),
             "user_info": {
                 "mid": db_session.bili_mid,
                 "uname": db_session.bili_uname,

@@ -65,11 +65,52 @@ async def test_qrcode_poll_persists_lowercase_cookie_aliases(
             .one()
         )
 
-    assert db_session.sessdata == "lower-sess"
-    assert db_session.bili_jct == "csrf-token"
+    assert db_session.sessdata != "lower-sess"
+    assert db_session.bili_jct != "csrf-token"
+    assert db_session.sessdata.startswith("fernet:")
+    assert db_session.bili_jct.startswith("fernet:")
     assert db_session.dedeuserid == "4242"
     assert auth_router.login_sessions["legacy-session-id"]["cookies"] == {
         "SESSDATA": "lower-sess",
         "bili_jct": "csrf-token",
+        "DedeUserID": "4242",
+    }
+
+    auth_router.login_sessions.clear()
+    restored = await auth_router.get_session("legacy-session-id")
+    assert restored["cookies"] == {
+        "SESSDATA": "lower-sess",
+        "bili_jct": "csrf-token",
+        "DedeUserID": "4242",
+    }
+
+
+@pytest.mark.asyncio
+async def test_legacy_plaintext_bilibili_session_cookies_still_restore(
+    client,
+    db_session_factory,
+):
+    import app.routers.auth as auth_router
+
+    auth_router.login_sessions.clear()
+    async with db_session_factory() as session:
+        session.add(
+            UserSession(
+                session_id="plaintext-session-id",
+                bili_mid=4242,
+                bili_uname="Legacy User",
+                sessdata="plain-sess",
+                bili_jct="plain-csrf",
+                dedeuserid="4242",
+                is_valid=True,
+            )
+        )
+        await session.commit()
+
+    restored = await auth_router.get_session("plaintext-session-id")
+
+    assert restored["cookies"] == {
+        "SESSDATA": "plain-sess",
+        "bili_jct": "plain-csrf",
         "DedeUserID": "4242",
     }

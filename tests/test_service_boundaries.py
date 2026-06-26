@@ -28,3 +28,10 @@ def test_primary_routers_do_not_import_legacy_knowledge_router():
     ]:
         source = (project_root / relative_path).read_text(encoding="utf-8")
         assert "app.routers.knowledge import" not in source
+
+
+def test_chat_router_does_not_keep_mutable_current_llm_provider():
+    project_root = Path(__file__).resolve().parents[1]
+    source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+
+    assert "_current_llm_provider" not in source

@@ -20,6 +20,7 @@ import AdminUsersPanel from "@/components/AdminUsersPanel";
 import ApiAccountsPanel from "@/components/ApiAccountsPanel";
 import { systemAuthApi, sourceBindingApi } from "@/lib/api";
 import type { KnowledgeBase, SystemUser } from "@/lib/api";
+import { useTheme } from "@/hooks/useTheme";
 
 const isMobileViewport = () =>
   typeof window !== "undefined" &&
@@ -54,13 +55,7 @@ export default function Home() {
   const [statsKey, setStatsKey] = useState(0);
   const [knowledgeBuilding, setKnowledgeBuilding] = useState(false);
 
-  // 主题
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    if (typeof window === "undefined") return true;
-    const saved = localStorage.getItem("theme");
-    return saved !== "light";
-  });
-  const [themeReady, setThemeReady] = useState(false);
+  const { isDarkMode, ready: themeReady, toggleTheme } = useTheme();
 
   // 拖拽调整宽度
   const [leftWidth, setLeftWidth] = useState(() => {
@@ -78,24 +73,6 @@ export default function Home() {
   const [newConversationRequestKey, setNewConversationRequestKey] = useState(0);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
-
-  // 主题初始化（默认深色）
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const t = window.setTimeout(() => setThemeReady(true), 0);
-    return () => window.clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !themeReady) return;
-    if (isDarkMode) {
-      document.documentElement.classList.remove("light");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.add("light");
-      localStorage.setItem("theme", "light");
-    }
-  }, [isDarkMode, themeReady]);
 
   // 检查系统登录态
   useEffect(() => {
@@ -275,7 +252,7 @@ export default function Home() {
               <LocalConnectionSettings />
               {themeReady && (
                 <button
-                  onClick={() => setIsDarkMode((p) => !p)}
+                  onClick={toggleTheme}
                   className="workspace-icon-btn"
                   title={isDarkMode ? "切换到白天模式" : "切换到夜间模式"}
                 >

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { systemAuthApi, SystemUser } from "@/lib/api";
 import LocalConnectionSettings from "@/components/LocalConnectionSettings";
+import { useForceDarkTheme } from "@/hooks/useTheme";
 
 interface Props {
   onAuthSuccess: (user: SystemUser) => void;
@@ -35,6 +36,8 @@ export default function AuthPage({ onAuthSuccess }: Props) {
   const [oauthNotice, setOauthNotice] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  useForceDarkTheme();
+
   // ─── 演示流程状态 ───
   type DemoStep = "idle" | "typing" | "searching" | "answering" | "done";
   const [demoStep, setDemoStep] = useState<DemoStep>("idle");
@@ -60,21 +63,6 @@ export default function AuthPage({ onAuthSuccess }: Props) {
   useEffect(() => {
     const t = window.setTimeout(() => setVisible(true), 80);
     return () => clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
-    const wasLightMode = document.documentElement.classList.contains("light");
-    document.documentElement.classList.remove("light");
-    document.documentElement.classList.add("auth-page-active");
-    document.body.classList.add("auth-page-active");
-
-    return () => {
-      document.documentElement.classList.remove("auth-page-active");
-      document.body.classList.remove("auth-page-active");
-      if (wasLightMode) {
-        document.documentElement.classList.add("light");
-      }
-    };
   }, []);
 
   useEffect(() => {

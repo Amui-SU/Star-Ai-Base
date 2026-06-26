@@ -134,3 +134,31 @@ async def test_admin_can_write_global_llm_and_web_search_config(client, monkeypa
     assert web_search_response.status_code == 200
     assert any(update.get("DEEPSEEK_API_KEY") == "admin-key" for update in writes)
     assert any(update.get("TAVILY_API_KEY") == "admin-tavily-key" for update in writes)
+
+
+@pytest.mark.asyncio
+async def test_admin_model_provider_switch_is_persisted(client, monkeypatch):
+    from app.config import settings
+    import app.routers.chat as chat_router
+
+    writes: list[dict[str, str]] = []
+
+    monkeypatch.setattr(settings, "deepseek_api_key", "configured-key")
+    monkeypatch.setattr(
+        chat_router, "_write_env_values", lambda updates: writes.append(updates)
+    )
+
+    admin = await _register_user(
+        client, "switch-admin@example.com", display_name="Admin"
+    )
+    client.cookies.clear()
+
+    response = await client.post(
+        "/chat/llm/config",
+        json={"provider": "deepseek"},
+        headers={"Authorization": f"Bearer {admin['session_token']}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["current_provider"] == "deepseek"
+    assert writes == [{"LLM_PROVIDER": "deepseek"}]

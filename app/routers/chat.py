@@ -94,11 +94,6 @@ PROVIDER_META = {
     },
 }
 SUPPORTED_LLM_PROVIDERS = set(PROVIDER_META.keys())
-_current_llm_provider = (
-    settings.llm_provider
-    if settings.llm_provider in SUPPORTED_LLM_PROVIDERS
-    else "dashscope"
-)
 THINKING_DELTA_MARKER = "[[THINKING_DELTA]]"
 
 
@@ -229,11 +224,19 @@ PROVIDER_THINKING_TEMPLATES = {
 
 def _normalize_provider(provider: Optional[str]) -> str:
     if not provider:
-        return _current_llm_provider
+        return _current_default_llm_provider()
     normalized = provider.strip().lower()
     if normalized not in SUPPORTED_LLM_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"不支持的模型提供方: {provider}")
     return normalized
+
+
+def _current_default_llm_provider() -> str:
+    return (
+        settings.llm_provider
+        if settings.llm_provider in SUPPORTED_LLM_PROVIDERS
+        else "dashscope"
+    )
 
 
 def _resolve_llm_config(provider: Optional[str] = None) -> Dict[str, str]:
@@ -486,7 +489,7 @@ async def _llm_config_response(current_user, db: AsyncSession) -> dict:
     current_provider = (
         default_account.provider
         if current_api_source == LLM_API_SOURCE_PERSONAL and default_account
-        else _current_llm_provider
+        else _current_default_llm_provider()
     )
 
     providers = []
@@ -564,8 +567,6 @@ async def save_llm_provider_config(
     _current_admin=Depends(_require_current_admin_user),
 ):
     """验证并保存模型提供方配置到 .env.local。"""
-    global _current_llm_provider
-
     provider = _normalize_provider(body.provider)
     env_fields = PROVIDER_ENV_FIELDS.get(provider)
     if not env_fields:
@@ -618,7 +619,6 @@ async def save_llm_provider_config(
     }
 
     _write_env_values(updates)
-    _current_llm_provider = provider
 
     try:
         reset_rag_service()
@@ -645,20 +645,19 @@ async def set_llm_config(
     _current_admin=Depends(_require_current_admin_user),
 ):
     """切换当前问答模型提供方"""
-    global _current_llm_provider
     llm_config = _resolve_llm_config(body.provider)
     if not llm_config["api_key"]:
         raise HTTPException(
             status_code=400,
             detail=f"{llm_config['provider_label']} API Key 未配置，请先在 .env.local 中配置后重启后端。",
         )
-    _current_llm_provider = llm_config["provider"]
+    _write_env_values({"LLM_PROVIDER": llm_config["provider"]})
     logger.info(
-        f"已切换 LLM 提供方: {_current_llm_provider} / model={llm_config['model']}"
+        f"已切换 LLM 提供方: {llm_config['provider']} / model={llm_config['model']}"
     )
     return {
         "ok": True,
-        "current_provider": _current_llm_provider,
+        "current_provider": llm_config["provider"],
         "model": llm_config["model"],
         "provider_label": llm_config["provider_label"],
     }
