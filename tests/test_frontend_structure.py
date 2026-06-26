@@ -13,6 +13,7 @@ def test_chat_panel_uses_chat_subcomponents():
         "frontend/components/chat/WebSearchConfigModal.tsx",
         "frontend/components/chat/ModelConfigModal.tsx",
         "frontend/components/chat/useChatStreaming.ts",
+        "frontend/components/chat/ChatEmptyState.tsx",
     ]:
         assert (project_root / relative_path).exists()
 
@@ -21,8 +22,11 @@ def test_chat_panel_uses_chat_subcomponents():
     assert "@/components/chat/WebSearchConfigModal" in chat_panel
     assert "@/components/chat/ModelConfigModal" in chat_panel
     assert "@/components/chat/useChatStreaming" in chat_panel
+    assert "@/components/chat/ChatEmptyState" in chat_panel
     assert "provider-config-body" not in chat_panel
     assert "thinking-config-fieldset" not in chat_panel
+    assert "探索你的收藏" not in chat_panel
+    assert "总结收藏夹里最有价值的内容" not in chat_panel
 
 
 def test_frontend_provider_presets_are_shared():
