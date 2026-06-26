@@ -3,9 +3,26 @@ import urllib.parse
 import pytest
 from app.config import settings
 from app.routers.system_auth import _IP_RATE_MAX, _MAX_ATTEMPTS
+from app.routers.system_auth import OAUTH_STATE_COOKIE_NAME
 from app.routers.system_auth import _decode_oauth_state
 from app.routers.system_auth import _make_oauth_state
 from app.routers.system_auth import _oauth_signing_key
+
+
+def _set_oauth_nonce_cookie(client, nonce: str) -> None:
+    client.cookies.set(
+        OAUTH_STATE_COOKIE_NAME,
+        nonce,
+        domain="testserver.local",
+        path="/system-auth",
+    )
+
+
+def _has_oauth_nonce_clear_cookie(response) -> bool:
+    return any(
+        cookie.startswith(f"{OAUTH_STATE_COOKIE_NAME}=") and "Max-Age=0" in cookie
+        for cookie in response.headers.get_list("set-cookie")
+    )
 
 
 async def _send_code(client, email: str) -> str | None:
@@ -474,7 +491,9 @@ async def test_google_callback_redirects_to_frontend_origin(client, monkeypatch)
     monkeypatch.setattr(settings, "google_client_id", "client-id")
     monkeypatch.setattr(settings, "google_client_secret", "test-secret")
 
-    state = _make_oauth_state("http://192.168.1.199:3000")
+    nonce = "google-callback-nonce"
+    state = _make_oauth_state("http://192.168.1.199:3000", nonce=nonce)
+    _set_oauth_nonce_cookie(client, nonce)
 
     class _FakeResponse:
         def __init__(self, status_code, payload):
@@ -517,6 +536,8 @@ async def test_google_callback_redirects_to_frontend_origin(client, monkeypatch)
 
     assert response.status_code in {302, 307}
     assert response.headers["location"] == "http://192.168.1.199:3000"
+    assert _has_oauth_nonce_clear_cookie(response)
+    assert client.cookies.get(OAUTH_STATE_COOKIE_NAME) is None
 
 
 @pytest.mark.asyncio
@@ -538,6 +559,40 @@ async def test_google_login_state_uses_explicit_frontend_url(client, monkeypatch
     data = _decode_oauth_state(state)
     assert data is not None
     assert data["frontend_url"] == "http://192.168.1.199:3000"
+
+
+@pytest.mark.asyncio
+async def test_google_login_sets_oauth_state_nonce_cookie(client, monkeypatch):
+    monkeypatch.setattr(settings, "google_client_id", "client-id")
+    monkeypatch.setattr(settings, "google_client_secret", "test-secret")
+
+    response = await client.get("/system-auth/google/login", follow_redirects=False)
+
+    assert response.status_code in {302, 307}
+    nonce_cookie = response.cookies.get(OAUTH_STATE_COOKIE_NAME)
+    assert nonce_cookie
+    redirect_url = urllib.parse.urlparse(response.headers["location"])
+    state = urllib.parse.parse_qs(redirect_url.query)["state"][0]
+    state_data = _decode_oauth_state(state)
+    assert state_data is not None
+    assert state_data["nonce"] == nonce_cookie
+
+
+@pytest.mark.asyncio
+async def test_google_callback_rejects_missing_oauth_state_nonce_cookie(
+    client, monkeypatch
+):
+    monkeypatch.setattr(settings, "google_client_id", "client-id")
+    monkeypatch.setattr(settings, "google_client_secret", "test-secret")
+    state = _make_oauth_state("http://localhost:3000", nonce="nonce-from-other-client")
+
+    response = await client.get(
+        f"/system-auth/google/callback?code=test-code&state={state}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "Invalid OAuth state" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -626,6 +681,7 @@ async def test_wechat_login_redirects_to_provider(client, monkeypatch):
     assert (
         state_data["redirect_uri"] == "https://example.com/system-auth/wechat/callback"
     )
+    assert state_data["nonce"] == response.cookies.get(OAUTH_STATE_COOKIE_NAME)
 
 
 @pytest.mark.asyncio
@@ -653,6 +709,7 @@ async def test_qq_login_redirects_to_provider(client, monkeypatch):
     state_data = _decode_oauth_state(query["state"][0])
     assert state_data is not None
     assert state_data["frontend_url"] == "http://localhost:3000"
+    assert state_data["nonce"] == response.cookies.get(OAUTH_STATE_COOKIE_NAME)
 
 
 @pytest.mark.asyncio
@@ -664,10 +721,13 @@ async def test_wechat_callback_creates_user_and_redirects(client, monkeypatch):
         "wechat_redirect_uri",
         "https://example.com/system-auth/wechat/callback",
     )
+    nonce = "wechat-callback-nonce"
     state = _make_oauth_state(
         "http://localhost:3000",
         "https://example.com/system-auth/wechat/callback",
+        nonce=nonce,
     )
+    _set_oauth_nonce_cookie(client, nonce)
 
     class _FakeResponse:
         def __init__(self, status_code, payload):
@@ -713,3 +773,5 @@ async def test_wechat_callback_creates_user_and_redirects(client, monkeypatch):
     assert response.status_code in {302, 307}
     assert response.headers["location"] == "http://localhost:3000"
     assert "system_session" in response.cookies
+    assert _has_oauth_nonce_clear_cookie(response)
+    assert client.cookies.get(OAUTH_STATE_COOKIE_NAME) is None

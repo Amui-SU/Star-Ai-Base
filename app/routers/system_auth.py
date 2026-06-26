@@ -559,6 +559,7 @@ QQ_TOKEN_URL = "https://graph.qq.com/oauth2.0/token"
 QQ_ME_URL = "https://graph.qq.com/oauth2.0/me"
 QQ_USERINFO_URL = "https://graph.qq.com/user/get_user_info"
 _OAUTH_STATE_TTL = 600  # 10 分钟
+OAUTH_STATE_COOKIE_NAME = "oauth_state_nonce"
 
 
 def _frontend_origin_is_allowed(url: str) -> bool:
@@ -626,7 +627,9 @@ def _oauth_signing_key() -> bytes:
 
 
 def _make_oauth_state(
-    frontend_url: str | None = None, redirect_uri: str | None = None
+    frontend_url: str | None = None,
+    redirect_uri: str | None = None,
+    nonce: str | None = None,
 ) -> str:
     """Create a signed OAuth state with the frontend and callback origins."""
     import base64
@@ -638,6 +641,8 @@ def _make_oauth_state(
         "exp": int(time.time()) + _OAUTH_STATE_TTL,
         "rnd": secrets.token_hex(8),
     }
+    if nonce:
+        payload["nonce"] = nonce
     safe_frontend_url = _frontend_url_from_state(frontend_url)
     if safe_frontend_url:
         payload["frontend_url"] = safe_frontend_url
@@ -685,6 +690,48 @@ def _decode_oauth_state(state: str) -> dict | None:
 def _verify_oauth_state(state: str) -> bool:
     """Validate OAuth state signature and expiry."""
     return _decode_oauth_state(state) is not None
+
+
+def _new_oauth_state_nonce() -> str:
+    return secrets.token_urlsafe(24)
+
+
+def _set_oauth_state_cookie(response: Response, nonce: str) -> None:
+    secure = (
+        bool(settings.session_cookie_secure)
+        if settings.session_cookie_secure is not None
+        else not settings.debug
+    )
+    response.set_cookie(
+        key=OAUTH_STATE_COOKIE_NAME,
+        value=nonce,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=_OAUTH_STATE_TTL,
+        path="/system-auth",
+    )
+
+
+def _clear_oauth_state_cookie(response: Response) -> None:
+    secure = (
+        bool(settings.session_cookie_secure)
+        if settings.session_cookie_secure is not None
+        else not settings.debug
+    )
+    response.delete_cookie(
+        key=OAUTH_STATE_COOKIE_NAME,
+        path="/system-auth",
+        secure=secure,
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def _oauth_state_nonce_is_valid(request: Request, state_data: dict) -> bool:
+    nonce = str(state_data.get("nonce") or "")
+    cookie_nonce = request.cookies.get(OAUTH_STATE_COOKIE_NAME, "")
+    return bool(nonce) and secrets.compare_digest(nonce, cookie_nonce)
 
 
 def _oauth_user_email(provider: str, external_id: str, email: str | None = None) -> str:
@@ -749,6 +796,7 @@ async def _redirect_with_oauth_session(
     await db.commit()
     redirect = RedirectResponse(_frontend_url_from_state(frontend_url))
     set_session_cookie(redirect, token)
+    _clear_oauth_state_cookie(redirect)
     return redirect
 
 
@@ -778,9 +826,11 @@ async def wechat_login(request: Request, frontend_url: str = ""):
         raise HTTPException(status_code=501, detail="WeChat login is not configured")
 
     redirect_uri = _wechat_redirect_uri()
+    nonce = _new_oauth_state_nonce()
     state = _make_oauth_state(
         _normalize_frontend_origin(frontend_url) or _frontend_url_from_request(request),
         redirect_uri,
+        nonce=nonce,
     )
     params = {
         "appid": settings.wechat_client_id,
@@ -790,7 +840,9 @@ async def wechat_login(request: Request, frontend_url: str = ""):
         "state": state,
     }
     url = f"{WECHAT_AUTH_URL}?{urllib.parse.urlencode(params)}#wechat_redirect"
-    return RedirectResponse(url)
+    redirect = RedirectResponse(url)
+    _set_oauth_state_cookie(redirect, nonce)
+    return redirect
 
 
 @router.get("/qq/login")
@@ -803,9 +855,11 @@ async def qq_login(request: Request, frontend_url: str = ""):
         raise HTTPException(status_code=501, detail="QQ login is not configured")
 
     redirect_uri = _qq_redirect_uri()
+    nonce = _new_oauth_state_nonce()
     state = _make_oauth_state(
         _normalize_frontend_origin(frontend_url) or _frontend_url_from_request(request),
         redirect_uri,
+        nonce=nonce,
     )
     params = {
         "client_id": settings.qq_client_id,
@@ -815,14 +869,16 @@ async def qq_login(request: Request, frontend_url: str = ""):
         "state": state,
     }
     url = f"{QQ_AUTH_URL}?{urllib.parse.urlencode(params)}"
-    return RedirectResponse(url)
+    redirect = RedirectResponse(url)
+    _set_oauth_state_cookie(redirect, nonce)
+    return redirect
 
 
-async def _validate_oauth_callback_state(state: str) -> dict:
+async def _validate_oauth_callback_state(request: Request, state: str) -> dict:
     if not state:
         raise HTTPException(status_code=400, detail="Missing OAuth state")
     state_data = _decode_oauth_state(state)
-    if state_data is None:
+    if state_data is None or not _oauth_state_nonce_is_valid(request, state_data):
         raise HTTPException(
             status_code=400, detail="Invalid OAuth state, please sign in again"
         )
@@ -831,6 +887,7 @@ async def _validate_oauth_callback_state(state: str) -> dict:
 
 @router.get("/wechat/callback")
 async def wechat_callback(
+    request: Request,
     code: str = "",
     error: str = "",
     state: str = "",
@@ -848,7 +905,7 @@ async def wechat_callback(
         or not _wechat_redirect_uri()
     ):
         raise HTTPException(status_code=501, detail="WeChat login is not configured")
-    state_data = await _validate_oauth_callback_state(state)
+    state_data = await _validate_oauth_callback_state(request, state)
 
     try:
         async with httpx.AsyncClient(
@@ -904,6 +961,7 @@ async def wechat_callback(
 
 @router.get("/qq/callback")
 async def qq_callback(
+    request: Request,
     code: str = "",
     error: str = "",
     state: str = "",
@@ -919,7 +977,7 @@ async def qq_callback(
         or not _qq_redirect_uri()
     ):
         raise HTTPException(status_code=501, detail="QQ login is not configured")
-    state_data = await _validate_oauth_callback_state(state)
+    state_data = await _validate_oauth_callback_state(request, state)
 
     try:
         async with httpx.AsyncClient(
@@ -988,9 +1046,11 @@ async def google_login(request: Request, frontend_url: str = ""):
         raise HTTPException(status_code=501, detail="Google 登录未配置")
 
     redirect_uri = _google_redirect_uri()
+    nonce = _new_oauth_state_nonce()
     state = _make_oauth_state(
         _normalize_frontend_origin(frontend_url) or _frontend_url_from_request(request),
         redirect_uri,
+        nonce=nonce,
     )
     params = {
         "client_id": settings.google_client_id,
@@ -1002,11 +1062,14 @@ async def google_login(request: Request, frontend_url: str = ""):
         "state": state,
     }
     url = f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
-    return RedirectResponse(url)
+    redirect = RedirectResponse(url)
+    _set_oauth_state_cookie(redirect, nonce)
+    return redirect
 
 
 @router.get("/google/callback")
 async def google_callback(
+    request: Request,
     code: str = "",
     error: str = "",
     state: str = "",
@@ -1021,13 +1084,7 @@ async def google_callback(
         raise HTTPException(status_code=501, detail="Google 登录未配置")
 
     # 校验 state（自包含签名，无需服务端存储）
-    if not state:
-        raise HTTPException(status_code=400, detail="Missing OAuth state")
-    state_data = _decode_oauth_state(state)
-    if state_data is None:
-        raise HTTPException(
-            status_code=400, detail="Invalid OAuth state, please sign in again"
-        )
+    state_data = await _validate_oauth_callback_state(request, state)
     httpx_timeout = httpx.Timeout(30.0, connect=15.0)
     proxy = settings.http_proxy.strip() or None
 
@@ -1136,6 +1193,7 @@ async def google_callback(
         frontend_url = _frontend_url_from_state(state_data.get("frontend_url"))
         redirect = RedirectResponse(frontend_url)
         set_session_cookie(redirect, token)
+        _clear_oauth_state_cookie(redirect)
         return redirect
     except HTTPException:
         raise
