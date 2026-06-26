@@ -5,13 +5,15 @@ Bilibili RAG 知识库系统
 """
 
 import time
+from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Depends
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from app.database import get_db, get_db_context
 from app.models import (
+    OAuthPendingState,
     QRCodeResponse,
     LoginStatusResponse,
     UserSession as UserSessionModel,
@@ -22,17 +24,19 @@ from app.services.bilibili import (
     normalize_bilibili_cookies,
 )
 from app.security import decrypt_text, encrypt_text
+from app.time_utils import utc_now_naive
 import uuid
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
-# 临时存储登录会话（生产环境应使用 Redis）
+# 旧登录热缓存；二维码 pending state 以数据库为准。
 login_sessions: dict = {}
 
 # 会话过期时间（秒）
 QRCODE_SESSION_TTL = 300  # 二维码 5 分钟过期
 LOGIN_SESSION_TTL = 14 * 86400  # 登录会话 14 天过期
 ENCRYPTED_COOKIE_PREFIX = "fernet:"
+LEGACY_QRCODE_PENDING_PURPOSE = "legacy_auth_qrcode"
 
 
 def _encrypt_session_cookie(value: str | None) -> str | None:
@@ -89,8 +93,62 @@ def _get_session(key: str) -> dict | None:
     return session
 
 
+async def _create_legacy_qrcode_pending_state(
+    db: AsyncSession, qrcode_key: str
+) -> None:
+    now = utc_now_naive()
+    await db.execute(
+        delete(OAuthPendingState).where(OAuthPendingState.expires_at < now)
+    )
+    result = await db.execute(
+        select(OAuthPendingState).where(OAuthPendingState.state_key == qrcode_key)
+    )
+    pending = result.scalar_one_or_none()
+    expires_at = now + timedelta(seconds=QRCODE_SESSION_TTL)
+    if pending is None:
+        db.add(
+            OAuthPendingState(
+                state_key=qrcode_key,
+                purpose=LEGACY_QRCODE_PENDING_PURPOSE,
+                expires_at=expires_at,
+            )
+        )
+    else:
+        pending.purpose = LEGACY_QRCODE_PENDING_PURPOSE
+        pending.user_id = None
+        pending.workspace_id = None
+        pending.expires_at = expires_at
+    await db.commit()
+
+
+async def _has_legacy_qrcode_pending_state(db: AsyncSession, qrcode_key: str) -> bool:
+    now = utc_now_naive()
+    await db.execute(
+        delete(OAuthPendingState).where(OAuthPendingState.expires_at < now)
+    )
+    result = await db.execute(
+        select(OAuthPendingState).where(OAuthPendingState.state_key == qrcode_key)
+    )
+    pending = result.scalar_one_or_none()
+    await db.commit()
+    return bool(
+        pending
+        and pending.purpose == LEGACY_QRCODE_PENDING_PURPOSE
+        and pending.expires_at > now
+    )
+
+
+async def _delete_legacy_qrcode_pending_state(
+    db: AsyncSession, qrcode_key: str
+) -> None:
+    await db.execute(
+        delete(OAuthPendingState).where(OAuthPendingState.state_key == qrcode_key)
+    )
+    await db.commit()
+
+
 @router.get("/qrcode", response_model=QRCodeResponse)
-async def generate_qrcode():
+async def generate_qrcode(db: AsyncSession = Depends(get_db)):
     """
     生成登录二维码
 
@@ -98,11 +156,18 @@ async def generate_qrcode():
     """
     try:
         bili = BilibiliService()
-        result = await bili.generate_qrcode()
-        await bili.close()
+        try:
+            result = await bili.generate_qrcode()
+        finally:
+            await bili.close()
 
         # 存储会话
-        _set_session(result["qrcode_key"], {"status": "waiting"}, QRCODE_SESSION_TTL)
+        _set_session(
+            result["qrcode_key"],
+            {"status": "waiting", "purpose": LEGACY_QRCODE_PENDING_PURPOSE},
+            QRCODE_SESSION_TTL,
+        )
+        await _create_legacy_qrcode_pending_state(db, result["qrcode_key"])
 
         return QRCodeResponse(
             qrcode_key=result["qrcode_key"],
@@ -124,9 +189,21 @@ async def poll_qrcode_status(qrcode_key: str, db: AsyncSession = Depends(get_db)
     from app.models import UserSession as UserSessionModel
 
     try:
+        pending = _get_session(qrcode_key)
+        pending_purpose = pending.get("purpose") if pending else None
+        pending_is_valid = bool(
+            pending and pending_purpose in (None, LEGACY_QRCODE_PENDING_PURPOSE)
+        )
+        if not pending_is_valid and not await _has_legacy_qrcode_pending_state(
+            db, qrcode_key
+        ):
+            raise HTTPException(status_code=404, detail="二维码不存在或已过期")
+
         bili = BilibiliService()
-        result = await bili.poll_qrcode_status(qrcode_key)
-        await bili.close()
+        try:
+            result = await bili.poll_qrcode_status(qrcode_key)
+        finally:
+            await bili.close()
 
         response = LoginStatusResponse(
             status=result["status"], message=result["message"]
@@ -144,8 +221,10 @@ async def poll_qrcode_status(qrcode_key: str, db: AsyncSession = Depends(get_db)
 
             user_info_dict = {}
             try:
-                user_info = await bili_auth.get_user_info()
-                await bili_auth.close()
+                try:
+                    user_info = await bili_auth.get_user_info()
+                finally:
+                    await bili_auth.close()
 
                 mid = int(user_info.get("mid") or cookies.get("DedeUserID"))
 
@@ -193,9 +272,16 @@ async def poll_qrcode_status(qrcode_key: str, db: AsyncSession = Depends(get_db)
 
             # 清理旧的 qrcode_key
             login_sessions.pop(qrcode_key, None)
+            await _delete_legacy_qrcode_pending_state(db, qrcode_key)
+
+        elif result["status"] == "expired":
+            login_sessions.pop(qrcode_key, None)
+            await _delete_legacy_qrcode_pending_state(db, qrcode_key)
 
         return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"轮询二维码状态失败: {e}")
         raise HTTPException(status_code=500, detail=f"轮询失败: {str(e)}")

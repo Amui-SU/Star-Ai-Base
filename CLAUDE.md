@@ -203,7 +203,7 @@ SMTP_PASSWORD=授权码
 HTTP_PROXY=http://127.0.0.1:7890                      # Google OAuth 后端回调需要（国内访问 Google API）
 CORS 锁定域名                                          # main.py 中 allow_origins
 Alembic 初始化                                         # 替换 Base.metadata.create_all
-legacy login_sessions → Redis                          # 旧 B 站扫码兼容缓存，多进程不共享；新内容源绑定二维码 pending state 已持久化
+legacy login_sessions 可选 Redis                       # 仅作旧 B 站已登录 session 热缓存；二维码 pending state 已持久化
 ```
 
 **开发模式自动跳过**：SMTP 邮件（验证码直接返回）、Fernet 加密（SHA-256 派生开发密钥）、CORS 宽松。
@@ -213,7 +213,7 @@ legacy login_sessions → Redis                          # 旧 B 站扫码兼容
 - **旧全局知识库/RAG 接口已禁用**：`/knowledge/*` 与 `/chat/ask|ask/stream|search` 返回 `410 Gone`，新业务必须使用 `/knowledge-bases/*`
 - **旧向量数据不自动清空**：缺失 scoped 向量时依赖 DB fallback 和后续重建补齐，不建议无备份清空 ChromaDB
 - **前端完全迁移**：SourcesPanel + ChatPanel 均走 scoped API，`bili_session` 已从 page.tsx 移除
-- **legacy `login_sessions` 内存字典**（已加 TTL 清理）：旧 `/auth/qrcode` 兼容缓存仍建议生产换 Redis；新 `/source-bindings/bilibili/qrcode` pending state 已持久化到数据库，可跨 worker 轮询。
+- **legacy `login_sessions` 内存字典**（已加 TTL 清理）：仅作为旧 B 站已登录 session 与二维码状态热缓存；旧 `/auth/qrcode` 与新 `/source-bindings/bilibili/qrcode` pending state 均已持久化到数据库，可跨 worker 轮询。
 - **OAuth state**：HMAC 签名自包含 token，并通过 HttpOnly/SameSite=Lax 临时 nonce cookie 绑定同一浏览器回调；成功登录后清理临时 cookie。
 - **验证码 IP 限流**：邮箱验证码发送窗口已持久化到数据库，避免多 worker 绕过；生产仍建议叠加网关层限流。
 - **bcrypt 4.0.1 固定**：bcrypt 5.x 与 passlib 1.7.4 不兼容，不要升级

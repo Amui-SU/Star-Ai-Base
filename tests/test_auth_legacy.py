@@ -1,8 +1,23 @@
+from datetime import timedelta
+
 from sqlalchemy import select
 
 import pytest
 
-from app.models import UserSession
+from app.models import OAuthPendingState, UserSession
+from app.time_utils import utc_now_naive
+
+
+async def _add_legacy_qrcode_pending_state(db_session_factory, qrcode_key: str):
+    async with db_session_factory() as session:
+        session.add(
+            OAuthPendingState(
+                state_key=qrcode_key,
+                purpose="legacy_auth_qrcode",
+                expires_at=utc_now_naive() + timedelta(minutes=5),
+            )
+        )
+        await session.commit()
 
 
 @pytest.mark.asyncio
@@ -14,6 +29,7 @@ async def test_qrcode_poll_persists_lowercase_cookie_aliases(
     import app.routers.auth as auth_router
 
     auth_router.login_sessions.clear()
+    await _add_legacy_qrcode_pending_state(db_session_factory, "qr-key")
     monkeypatch.setattr(auth_router.uuid, "uuid4", lambda: "legacy-session-id")
 
     class FakeBilibiliService:
@@ -155,3 +171,196 @@ async def test_legacy_logout_revokes_persisted_bilibili_session(
         )
     assert db_session.is_valid is False
     assert await auth_router.get_session("logout-session-id") is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_qrcode_generate_persists_pending_state(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    import app.routers.auth as auth_router
+
+    auth_router.login_sessions.clear()
+
+    class FakeBilibiliService:
+        async def generate_qrcode(self):
+            return {
+                "qrcode_key": "legacy-generated-qr",
+                "qrcode_url": "https://passport.bilibili.com/qrcode",
+                "qrcode_image_base64": "base64-image",
+            }
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(auth_router, "BilibiliService", FakeBilibiliService)
+
+    response = await client.get("/auth/qrcode")
+
+    assert response.status_code == 200
+    async with db_session_factory() as session:
+        pending = (
+            (
+                await session.execute(
+                    select(OAuthPendingState).where(
+                        OAuthPendingState.state_key == "legacy-generated-qr"
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+    assert pending is not None
+    assert pending.purpose == "legacy_auth_qrcode"
+
+
+@pytest.mark.asyncio
+async def test_legacy_qrcode_generate_closes_service_on_upstream_error(
+    client,
+    monkeypatch,
+):
+    import app.routers.auth as auth_router
+
+    closed = False
+
+    class FakeBilibiliService:
+        async def generate_qrcode(self):
+            raise Exception("upstream timeout")
+
+        async def close(self):
+            nonlocal closed
+            closed = True
+
+    monkeypatch.setattr(auth_router, "BilibiliService", FakeBilibiliService)
+
+    response = await client.get("/auth/qrcode")
+
+    assert response.status_code == 500
+    assert closed is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_qrcode_poll_closes_authenticated_service_on_user_info_error(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    import app.routers.auth as auth_router
+
+    auth_router.login_sessions.clear()
+    await _add_legacy_qrcode_pending_state(db_session_factory, "close-auth-qr-key")
+    monkeypatch.setattr(auth_router.uuid, "uuid4", lambda: "close-auth-session-id")
+    auth_service_closed = False
+
+    class FakeBilibiliService:
+        def __init__(self, *args, **kwargs):
+            self.is_authenticated_service = bool(kwargs.get("sessdata"))
+
+        async def poll_qrcode_status(self, qrcode_key):
+            return {
+                "status": "confirmed",
+                "message": "登录成功",
+                "cookies": {
+                    "SESSDATA": "sess",
+                    "bili_jct": "csrf",
+                    "DedeUserID": "4242",
+                },
+            }
+
+        async def get_user_info(self):
+            raise Exception("user info failed")
+
+        async def close(self):
+            nonlocal auth_service_closed
+            if self.is_authenticated_service:
+                auth_service_closed = True
+
+    monkeypatch.setattr(auth_router, "BilibiliService", FakeBilibiliService)
+
+    response = await client.get("/auth/qrcode/poll/close-auth-qr-key")
+
+    assert response.status_code == 200
+    assert response.json()["session_id"] == "close-auth-session-id"
+    assert auth_service_closed is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_qrcode_poll_rejects_unknown_pending_state(
+    client,
+    monkeypatch,
+):
+    import app.routers.auth as auth_router
+
+    auth_router.login_sessions.clear()
+
+    class FakeBilibiliService:
+        async def poll_qrcode_status(self, qrcode_key):
+            raise AssertionError("unknown QR keys must not reach upstream polling")
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(auth_router, "BilibiliService", FakeBilibiliService)
+
+    response = await client.get("/auth/qrcode/poll/missing-qr")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_legacy_qrcode_poll_rejects_source_binding_pending_session(
+    client,
+    monkeypatch,
+):
+    import app.routers.auth as auth_router
+
+    auth_router.login_sessions.clear()
+    auth_router._set_session(
+        "binding-qr-key",
+        {"status": "waiting", "purpose": "source_binding", "user_id": 1},
+        auth_router.QRCODE_SESSION_TTL,
+    )
+
+    class FakeBilibiliService:
+        async def poll_qrcode_status(self, qrcode_key):
+            raise AssertionError("source binding QR keys must not reach legacy polling")
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(auth_router, "BilibiliService", FakeBilibiliService)
+
+    response = await client.get("/auth/qrcode/poll/binding-qr-key")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_legacy_qrcode_poll_accepts_inflight_unscoped_memory_session(
+    client,
+    monkeypatch,
+):
+    import app.routers.auth as auth_router
+
+    auth_router.login_sessions.clear()
+    auth_router._set_session(
+        "old-memory-qr-key",
+        {"status": "waiting"},
+        auth_router.QRCODE_SESSION_TTL,
+    )
+
+    class FakeBilibiliService:
+        async def poll_qrcode_status(self, qrcode_key):
+            assert qrcode_key == "old-memory-qr-key"
+            return {"status": "waiting", "message": "等待扫码"}
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(auth_router, "BilibiliService", FakeBilibiliService)
+
+    response = await client.get("/auth/qrcode/poll/old-memory-qr-key")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "waiting"
