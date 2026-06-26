@@ -183,6 +183,66 @@ async def test_delete_knowledge_base_continues_when_vector_cleanup_fails(
 
 
 @pytest.mark.asyncio
+async def test_delete_knowledge_base_does_not_retry_without_workspace_on_runtime_type_error(
+    client, monkeypatch
+):
+    code_resp = await client.post(
+        "/system-auth/send-code", json={"email": "delete-type-error@example.com"}
+    )
+    assert code_resp.status_code == 200
+    code = code_resp.json()["code"]
+
+    register_response = await client.post(
+        "/system-auth/register",
+        json={
+            "email": "delete-type-error@example.com",
+            "password": "correct horse battery staple",
+            "display_name": "Delete Type Error User",
+            "code": code,
+        },
+    )
+    assert register_response.status_code == 200
+
+    create_response = await client.post(
+        "/knowledge-bases",
+        json={"name": "Delete Type Error Target"},
+    )
+    assert create_response.status_code == 200
+    knowledge_base = create_response.json()
+    calls = []
+
+    class BrokenScopedRag:
+        def delete_by_knowledge_base(self, knowledge_base_id: int, workspace_id=None):
+            calls.append(
+                {
+                    "knowledge_base_id": knowledge_base_id,
+                    "workspace_id": workspace_id,
+                }
+            )
+            if workspace_id is not None:
+                raise TypeError("internal vector store type mismatch")
+            return 999
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service", lambda: BrokenScopedRag()
+    )
+
+    delete_response = await client.delete(f"/knowledge-bases/{knowledge_base['id']}")
+
+    assert delete_response.status_code == 200
+    payload = delete_response.json()
+    assert payload["ok"] is True
+    assert payload["deleted_vectors"] == 0
+    assert "internal vector store type mismatch" in payload["warning"]
+    assert calls == [
+        {
+            "knowledge_base_id": knowledge_base["id"],
+            "workspace_id": knowledge_base["workspace_id"],
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_chat_falls_back_to_database_content_when_vector_retrieval_fails(
     client, db_session_factory, monkeypatch
 ):

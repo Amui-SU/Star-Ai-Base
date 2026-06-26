@@ -1562,12 +1562,12 @@ async def delete_knowledge_base(
     warning: str | None = None
     try:
         rag = get_rag_service()
-        try:
+        if _supports_keyword_argument(rag.delete_by_knowledge_base, "workspace_id"):
             deleted_vectors = rag.delete_by_knowledge_base(
                 kb_id,
                 workspace_id=current_workspace.id,
             )
-        except TypeError:
+        else:
             deleted_vectors = rag.delete_by_knowledge_base(kb_id)
         logger.info(
             f"已删除知识库 {kb_id}（{knowledge_base.name}）的 {deleted_vectors} 个向量"
