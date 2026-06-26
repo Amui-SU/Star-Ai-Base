@@ -197,17 +197,20 @@ class RAGService:
         # 创建文档
         documents = []
         for i, chunk in enumerate(valid_chunks):
+            metadata = {
+                "workspace_id": workspace_id,
+                "knowledge_base_id": knowledge_base_id,
+                "source_binding_id": source_binding_id,
+                "bvid": video.bvid,
+                "title": title,
+                "source": video.source.value,
+                "chunk_index": i,
+                "url": f"https://www.bilibili.com/video/{video.bvid}",
+            }
             doc = Document(
                 page_content=chunk.strip(),  # 确保是干净的字符串
                 metadata={
-                    "workspace_id": workspace_id,
-                    "knowledge_base_id": knowledge_base_id,
-                    "source_binding_id": source_binding_id,
-                    "bvid": video.bvid,
-                    "title": title,
-                    "source": video.source.value,
-                    "chunk_index": i,
-                    "url": f"https://www.bilibili.com/video/{video.bvid}",
+                    key: value for key, value in metadata.items() if value is not None
                 },
             )
             documents.append(doc)
