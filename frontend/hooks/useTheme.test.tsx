@@ -1,6 +1,6 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useForceDarkTheme, useTheme } from "@/hooks/useTheme";
 
@@ -21,6 +21,7 @@ function ForceDarkHarness() {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   localStorage.clear();
   document.documentElement.className = "";
   document.body.className = "";
@@ -45,6 +46,17 @@ describe("theme hooks", () => {
     });
     expect(document.documentElement).not.toHaveClass("light");
     expect(localStorage.getItem("theme")).toBe("dark");
+  });
+
+  it("becomes ready without waiting for pending timers", async () => {
+    vi.useFakeTimers();
+    localStorage.setItem("theme", "light");
+
+    render(<ThemeHarness />);
+
+    await act(async () => {});
+
+    expect(screen.getByRole("button", { name: "light" })).toBeVisible();
   });
 
   it("forces auth screens to dark mode and restores previous light mode", () => {

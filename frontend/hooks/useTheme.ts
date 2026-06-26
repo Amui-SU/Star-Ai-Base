@@ -9,15 +9,11 @@ const getInitialDarkMode = () => {
   return localStorage.getItem(THEME_STORAGE_KEY) !== "light";
 };
 
+const getInitialReady = () => typeof window !== "undefined";
+
 export function useTheme() {
   const [isDarkMode, setIsDarkMode] = useState(getInitialDarkMode);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const timer = window.setTimeout(() => setReady(true), 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+  const [ready] = useState(getInitialReady);
 
   useEffect(() => {
     if (typeof window === "undefined" || !ready) return;

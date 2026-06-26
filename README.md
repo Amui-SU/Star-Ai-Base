@@ -276,6 +276,14 @@ npm run build
 npm run start
 ```
 
+**Docker Compose**：
+
+```bash
+docker compose up --build
+```
+
+Compose 默认读取 `.env.example`，如果存在 `.env.local` 会用其中的真实密钥覆盖模板值。启动后前端访问 [http://localhost:3000](http://localhost:3000)，后端健康检查访问 [http://localhost:8000/health](http://localhost:8000/health)。
+
 ---
 
 ## 手机端 APK / 局域网连接
