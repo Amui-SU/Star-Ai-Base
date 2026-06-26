@@ -2,13 +2,14 @@ import base64
 import hashlib
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Response
 from passlib.context import CryptContext
 
 from app.config import settings
+from app.time_utils import utc_now
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
@@ -38,7 +39,7 @@ def hash_token(token: str) -> str:
 
 
 def session_expires_at() -> datetime:
-    return datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
+    return utc_now() + timedelta(days=SESSION_TTL_DAYS)
 
 
 def set_session_cookie(response: Response, token: str) -> None:

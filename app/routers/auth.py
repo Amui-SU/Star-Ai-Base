@@ -3,6 +3,7 @@ Bilibili RAG 知识库系统
 
 认证路由 - 处理 B站登录
 """
+
 import time
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -10,8 +11,12 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database import get_db, get_db_context
-from app.models import QRCodeResponse, LoginStatusResponse, UserSession as UserSessionModel
-from app.services.bilibili import BilibiliService
+from app.models import (
+    QRCodeResponse,
+    LoginStatusResponse,
+    UserSession as UserSessionModel,
+)
+from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 import uuid
 
 router = APIRouter(prefix="/auth", tags=["认证"])
@@ -20,7 +25,7 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 login_sessions: dict = {}
 
 # 会话过期时间（秒）
-QRCODE_SESSION_TTL = 300        # 二维码 5 分钟过期
+QRCODE_SESSION_TTL = 300  # 二维码 5 分钟过期
 LOGIN_SESSION_TTL = 14 * 86400  # 登录会话 14 天过期
 
 
@@ -28,7 +33,8 @@ def _cleanup_expired_sessions():
     """清理过期会话（在每次访问时触发）"""
     now = time.time()
     expired_keys = [
-        key for key, val in login_sessions.items()
+        key
+        for key, val in login_sessions.items()
         if now - val.get("_created_at", 0) > val.get("_ttl", QRCODE_SESSION_TTL)
     ]
     for key in expired_keys:
@@ -59,23 +65,23 @@ def _get_session(key: str) -> dict | None:
 async def generate_qrcode():
     """
     生成登录二维码
-    
+
     返回二维码 key 和 base64 编码的二维码图片
     """
     try:
         bili = BilibiliService()
         result = await bili.generate_qrcode()
         await bili.close()
-        
+
         # 存储会话
         _set_session(result["qrcode_key"], {"status": "waiting"}, QRCODE_SESSION_TTL)
-        
+
         return QRCodeResponse(
             qrcode_key=result["qrcode_key"],
             qrcode_url=result["qrcode_url"],
-            qrcode_image_base64=result["qrcode_image_base64"]
+            qrcode_image_base64=result["qrcode_image_base64"],
         )
-        
+
     except Exception as e:
         logger.error(f"生成二维码失败: {e}")
         raise HTTPException(status_code=500, detail=f"生成二维码失败: {str(e)}")
@@ -88,45 +94,40 @@ async def poll_qrcode_status(qrcode_key: str, db: AsyncSession = Depends(get_db)
     """
     from sqlalchemy import select
     from app.models import UserSession as UserSessionModel
-    
+
     try:
         bili = BilibiliService()
         result = await bili.poll_qrcode_status(qrcode_key)
         await bili.close()
-        
+
         response = LoginStatusResponse(
-            status=result["status"],
-            message=result["message"]
+            status=result["status"], message=result["message"]
         )
-        
+
         # 登录成功
         if result["status"] == "confirmed":
             cookies = result.get("cookies", {})
-            
+
             # 创建会话
             session_id = str(uuid.uuid4())
-            
+
             # 获取用户信息
-            bili_auth = BilibiliService(
-                sessdata=cookies.get("SESSDATA"),
-                bili_jct=cookies.get("bili_jct"),
-                dedeuserid=cookies.get("DedeUserID")
-            )
-            
+            bili_auth = bilibili_service_from_cookies(cookies, BilibiliService)
+
             user_info_dict = {}
             try:
                 user_info = await bili_auth.get_user_info()
                 await bili_auth.close()
-                
+
                 mid = int(user_info.get("mid") or cookies.get("DedeUserID"))
-                
+
                 user_info_dict = {
                     "mid": mid,
                     "uname": user_info.get("uname"),
                     "face": user_info.get("face"),
-                    "level": user_info.get("level_info", {}).get("current_level")
+                    "level": user_info.get("level_info", {}).get("current_level"),
                 }
-                
+
                 # 持久化到数据库
                 db_session = UserSessionModel(
                     session_id=session_id,
@@ -136,34 +137,37 @@ async def poll_qrcode_status(qrcode_key: str, db: AsyncSession = Depends(get_db)
                     sessdata=cookies.get("SESSDATA"),
                     bili_jct=cookies.get("bili_jct"),
                     dedeuserid=str(cookies.get("DedeUserID")),
-                    is_valid=True
+                    is_valid=True,
                 )
                 db.add(db_session)
                 await db.commit()
-                
+
                 response.user_info = user_info_dict
-                
+
             except Exception as e:
                 logger.warning(f"获取用户信息失败: {e}")
                 response.user_info = {
                     "mid": cookies.get("DedeUserID"),
-                    "uname": "未知用户"
+                    "uname": "未知用户",
                 }
 
             # 内存缓存（为了兼容旧代码）
-            _set_session(session_id, {
-                "cookies": cookies,
-                "user_info": user_info_dict,
-                "refresh_token": result.get("refresh_token")
-            })
-            
+            _set_session(
+                session_id,
+                {
+                    "cookies": cookies,
+                    "user_info": user_info_dict,
+                    "refresh_token": result.get("refresh_token"),
+                },
+            )
+
             response.session_id = session_id
-            
+
             # 清理旧的 qrcode_key
             login_sessions.pop(qrcode_key, None)
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"轮询二维码状态失败: {e}")
         raise HTTPException(status_code=500, detail=f"轮询失败: {str(e)}")
@@ -178,7 +182,9 @@ async def get_session_info(session_id: str):
     if not session:
         async with get_db_context() as db:
             result = await db.execute(
-                select(UserSessionModel).where(UserSessionModel.session_id == session_id)
+                select(UserSessionModel).where(
+                    UserSessionModel.session_id == session_id
+                )
             )
             db_session = result.scalar_one_or_none()
         if not db_session or not db_session.is_valid:

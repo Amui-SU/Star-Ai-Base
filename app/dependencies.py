@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,21 +11,7 @@ from app.models import (
     WorkspaceMember,
 )
 from app.security import SESSION_COOKIE_NAME, hash_token
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _utc_now_naive() -> datetime:
-    """返回 naive UTC 时间（与旧数据兼容；新代码优先用 _utc_now）"""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _as_aware_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+from app.time_utils import as_aware_utc, utc_now, utc_now_naive
 
 
 def _unauthorized() -> HTTPException:
@@ -65,7 +49,7 @@ async def _resolve_current_user(
     if session is None or session.revoked_at is not None:
         raise _unauthorized()
 
-    if _as_aware_utc(session.expires_at) <= _utc_now():
+    if as_aware_utc(session.expires_at) <= utc_now():
         raise _unauthorized()
 
     user_result = await db.execute(
@@ -79,7 +63,7 @@ async def _resolve_current_user(
         raise _unauthorized()
 
     if touch_last_seen:
-        session.last_seen_at = _utc_now_naive()
+        session.last_seen_at = utc_now_naive()
         await db.commit()
     return user
 

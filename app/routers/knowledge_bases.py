@@ -56,7 +56,7 @@ from app.routers.chat import (
 )
 from app.security import decrypt_text
 from app.services.asr import ASRService
-from app.services.bilibili import BilibiliService
+from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.services.content_fetcher import ContentFetcher
 from app.services.knowledge_scope import (
     InvalidKnowledgeScope,
@@ -1171,11 +1171,7 @@ async def build_knowledge_base(
     db.add(task)
     await db.commit()
 
-    bili = BilibiliService(
-        sessdata=cred_payload.get("SESSDATA"),
-        bili_jct=cred_payload.get("bili_jct"),
-        dedeuserid=cred_payload.get("DedeUserID"),
-    )
+    bili = bilibili_service_from_cookies(cred_payload, BilibiliService)
     asr_service = ASRService()
     content_fetcher = ContentFetcher(bili, asr_service)
     rag = _get_rag_service_for_build()

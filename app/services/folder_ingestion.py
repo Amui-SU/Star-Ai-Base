@@ -1,6 +1,5 @@
 """Favorite-folder ingestion service shared by legacy and scoped routes."""
 
-from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from loguru import logger
@@ -17,6 +16,7 @@ from app.models import (
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
 from app.services.rag import RAGService
+from app.time_utils import utc_now
 
 
 async def _get_or_create_folder(
@@ -234,7 +234,7 @@ async def sync_folder(
                 "removed": 0,
                 "indexed": existing_count or 0,
                 "message": "本次同步异常：空列表，已跳过",
-                "last_sync_at": datetime.now(timezone.utc),
+                "last_sync_at": utc_now(),
             }
 
     video_map = {}
@@ -576,7 +576,7 @@ async def sync_folder(
             )
         )
 
-    folder.last_sync_at = datetime.now(timezone.utc)
+    folder.last_sync_at = utc_now()
 
     await db.commit()
 

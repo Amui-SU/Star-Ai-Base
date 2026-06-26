@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select, update
@@ -7,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ApiAccountResponse, SystemUser, UsageEvent, UserApiAccount
 from app.security import decrypt_text, encrypt_text
+from app.time_utils import utc_now
 
 
 @dataclass(frozen=True)
@@ -167,10 +167,6 @@ async def ensure_single_default(
         .values(is_default=False)
     )
     account.is_default = True
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class ApiAccountRequired(HTTPException):

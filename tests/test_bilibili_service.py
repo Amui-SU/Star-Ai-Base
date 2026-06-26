@@ -2,6 +2,53 @@ import httpx
 import pytest
 
 
+def test_bilibili_service_from_cookies_maps_common_cookie_names(monkeypatch):
+    from app.services import bilibili
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(bilibili.httpx, "AsyncClient", FakeAsyncClient)
+
+    service = bilibili.BilibiliService.from_cookies(
+        {
+            "SESSDATA": "sess",
+            "bili_jct": "csrf",
+            "DedeUserID": "42",
+            "ignored": "value",
+        }
+    )
+
+    assert service.sessdata == "sess"
+    assert service.bili_jct == "csrf"
+    assert service.dedeuserid == "42"
+
+
+def test_bilibili_service_from_cookies_accepts_lowercase_aliases(monkeypatch):
+    from app.services import bilibili
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(bilibili.httpx, "AsyncClient", FakeAsyncClient)
+
+    service = bilibili.BilibiliService.from_cookies(
+        {
+            "sessdata": "sess",
+            "bili_jct": "csrf",
+            "dedeuserid": "42",
+        }
+    )
+
+    assert service._get_cookies() == {
+        "SESSDATA": "sess",
+        "bili_jct": "csrf",
+        "DedeUserID": "42",
+    }
+
+
 @pytest.mark.asyncio
 async def test_qrcode_generation_retries_transient_connect_timeout(monkeypatch):
     from app.services import bilibili

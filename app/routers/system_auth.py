@@ -3,7 +3,7 @@ import ipaddress
 import os
 import secrets
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import urllib.parse
 
@@ -46,6 +46,7 @@ from app.security import (
     set_session_cookie,
     verify_password,
 )
+from app.time_utils import as_aware_utc, utc_now, utc_now_naive
 
 router = APIRouter(prefix="/system-auth", tags=["系统认证"])
 
@@ -95,20 +96,6 @@ def _hash_code(code: str) -> str:
 
 class SendCodeRequest(BaseModel):
     email: str
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _naive_utc_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _as_aware_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def _password_exceeds_bcrypt_limit(password: str) -> bool:
@@ -231,7 +218,7 @@ async def _get_current_user(request: Request, db: AsyncSession) -> SystemUser:
     if session is None or session.revoked_at is not None:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
-    if _as_aware_utc(session.expires_at) <= _utc_now():
+    if as_aware_utc(session.expires_at) <= utc_now():
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
     user_result = await db.execute(
@@ -241,7 +228,7 @@ async def _get_current_user(request: Request, db: AsyncSession) -> SystemUser:
     if user is None or user.status != "active":
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
-    session.last_seen_at = _naive_utc_now()
+    session.last_seen_at = utc_now_naive()
     await db.commit()
     return user
 
@@ -270,7 +257,7 @@ async def send_verification_code(
         raise HTTPException(status_code=429, detail="发送过于频繁，请稍后再试")
 
     # 清理过期验证码
-    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    now_naive = utc_now_naive()
     await db.execute(
         delete(VerificationCode).where(VerificationCode.expires_at < now_naive)
     )
@@ -325,7 +312,7 @@ async def register(
         raise HTTPException(status_code=400, detail="密码长度不能超过 72 字节")
 
     # 校验验证码
-    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    now_naive = utc_now_naive()
     code_result = await db.execute(
         select(VerificationCode).where(
             VerificationCode.email == email,
@@ -441,7 +428,7 @@ async def logout(
         )
         session = result.scalar_one_or_none()
         if session is not None and session.revoked_at is None:
-            session.revoked_at = _naive_utc_now()
+            session.revoked_at = utc_now_naive()
             await db.commit()
 
     clear_session_cookie(response)

@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,12 +14,9 @@ from app.models import (
     ChatMessage,
     SystemUser,
 )
+from app.time_utils import utc_now
 
 router = APIRouter(prefix="/chat/conversations", tags=["chat-history"])
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _default_title(body: ChatConversationSaveRequest) -> str:
@@ -196,7 +191,7 @@ async def update_conversation(
     conversation.scope = body.scope
     conversation.web_search = body.web_search
     conversation.web_search_provider = body.web_search_provider
-    conversation.updated_at = _utc_now()
+    conversation.updated_at = utc_now()
     await _replace_messages(db, conversation, body)
     await db.commit()
     await db.refresh(conversation)

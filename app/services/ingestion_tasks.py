@@ -1,22 +1,17 @@
 """Helpers for persisted ingestion task lifecycle management."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import IngestionTask
+from app.time_utils import as_aware_utc, utc_now
 
 
 DEFAULT_STALE_AFTER = timedelta(minutes=30)
 INTERRUPTED_STEP = "任务已中断，请重新发起"
 INTERRUPTED_MESSAGE = "服务重启或后台任务中断，任务未自动恢复，请重新发起。"
-
-
-def _as_aware_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 async def mark_stale_active_tasks_interrupted(
@@ -26,7 +21,7 @@ async def mark_stale_active_tasks_interrupted(
     now: datetime | None = None,
 ) -> int:
     """Mark old pending/running ingestion tasks as interrupted after restart."""
-    current_time = _as_aware_utc(now or datetime.now(timezone.utc))
+    current_time = as_aware_utc(now or utc_now())
     cutoff = current_time - stale_after
     interrupted_count = 0
 
@@ -37,7 +32,7 @@ async def mark_stale_active_tasks_interrupted(
             )
         )
         for task in result.scalars():
-            last_update = _as_aware_utc(task.updated_at or task.created_at)
+            last_update = as_aware_utc(task.updated_at or task.created_at)
             if last_update > cutoff:
                 continue
             task.status = "interrupted"

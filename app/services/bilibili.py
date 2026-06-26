@@ -10,9 +10,22 @@ import qrcode
 import io
 import base64
 import json
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Mapping
 from loguru import logger
 from app.services.wbi import wbi_signer
+
+
+def _service_kwargs_from_cookies(cookies: Mapping[str, Any] | None) -> Dict[str, Any]:
+    cookies = cookies or {}
+    return {
+        "sessdata": cookies.get("SESSDATA") or cookies.get("sessdata"),
+        "bili_jct": cookies.get("bili_jct"),
+        "dedeuserid": (
+            cookies.get("DedeUserID")
+            or cookies.get("dedeuserid")
+            or cookies.get("Dedeuserid")
+        ),
+    }
 
 
 class BilibiliService:
@@ -29,7 +42,10 @@ class BilibiliService:
     }
 
     def __init__(
-        self, sessdata: str = None, bili_jct: str = None, dedeuserid: str = None
+        self,
+        sessdata: str | None = None,
+        bili_jct: str | None = None,
+        dedeuserid: str | None = None,
     ):
         """
         初始化 B站服务
@@ -48,6 +64,10 @@ class BilibiliService:
             headers=self.HEADERS,
             trust_env=False,
         )
+
+    @classmethod
+    def from_cookies(cls, cookies: Mapping[str, Any] | None) -> "BilibiliService":
+        return cls(**_service_kwargs_from_cookies(cookies))
 
     def _get_cookies(self) -> Dict[str, str]:
         """获取 Cookie"""
@@ -636,3 +656,10 @@ class BilibiliService:
         except Exception as e:
             logger.warning(f"下载音频异常: {e}")
             return False
+
+
+def bilibili_service_from_cookies(
+    cookies: Mapping[str, Any] | None,
+    service_cls: type[BilibiliService] = BilibiliService,
+) -> BilibiliService:
+    return service_cls(**_service_kwargs_from_cookies(cookies))

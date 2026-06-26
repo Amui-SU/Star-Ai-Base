@@ -3,12 +3,13 @@ Bilibili RAG 知识库系统
 
 收藏夹路由
 """
+
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 from typing import List, Optional
 from pydantic import BaseModel
 from app.models import FavoriteFolderInfo
-from app.services.bilibili import BilibiliService
+from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.routers.auth import get_session
 
 router = APIRouter(prefix="/favorites", tags=["收藏夹"])
@@ -73,31 +74,29 @@ async def get_favorites_list(session_id: str = Query(..., description="会话ID"
     session = await get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
-    
+
     cookies = session.get("cookies", {})
     user_info = session.get("user_info", {})
-    
-    bili = BilibiliService(
-        sessdata=cookies.get("SESSDATA"),
-        bili_jct=cookies.get("bili_jct"),
-        dedeuserid=cookies.get("DedeUserID")
-    )
+
+    bili = bilibili_service_from_cookies(cookies, BilibiliService)
     try:
         mid = user_info.get("mid") or cookies.get("DedeUserID")
         folders = await bili.get_user_favorites(mid=mid)
-        
+
         result = []
         for folder in folders:
-            result.append(FavoriteFolderInfo(
-                media_id=folder["id"],
-                title=folder["title"],
-                media_count=folder.get("media_count", 0),
-                is_selected=True,
-                is_default=_is_default_folder(folder)
-            ))
-        
+            result.append(
+                FavoriteFolderInfo(
+                    media_id=folder["id"],
+                    title=folder["title"],
+                    media_count=folder.get("media_count", 0),
+                    is_selected=True,
+                    is_default=_is_default_folder(folder),
+                )
+            )
+
         return result
-        
+
     except Exception as e:
         logger.exception(f"获取收藏夹列表失败: {type(e).__name__}: {e!r}")
         raise HTTPException(status_code=500, detail=f"获取收藏夹失败: {str(e)}")
@@ -110,7 +109,7 @@ async def get_favorite_videos(
     media_id: int,
     session_id: str = Query(..., description="会话ID"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=20)
+    page_size: int = Query(20, ge=1, le=20),
 ):
     """
     获取收藏夹中的视频列表
@@ -118,41 +117,39 @@ async def get_favorite_videos(
     session = await get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
-    
+
     cookies = session.get("cookies", {})
-    
+
     try:
-        bili = BilibiliService(
-            sessdata=cookies.get("SESSDATA"),
-            bili_jct=cookies.get("bili_jct"),
-            dedeuserid=cookies.get("DedeUserID")
-        )
-        
+        bili = bilibili_service_from_cookies(cookies, BilibiliService)
+
         result = await bili.get_favorite_content(media_id, pn=page, ps=page_size)
         await bili.close()
-        
+
         # 处理视频列表
         videos = []
         for media in result.get("medias", []):
-            videos.append({
-                "bvid": media.get("bvid") or media.get("bv_id"),
-                "title": media.get("title"),
-                "cover": media.get("cover"),
-                "duration": media.get("duration"),
-                "owner": media.get("upper", {}).get("name"),
-                "play_count": media.get("cnt_info", {}).get("play"),
-                "intro": media.get("intro"),
-                "is_selected": True  # 默认选中
-            })
-        
+            videos.append(
+                {
+                    "bvid": media.get("bvid") or media.get("bv_id"),
+                    "title": media.get("title"),
+                    "cover": media.get("cover"),
+                    "duration": media.get("duration"),
+                    "owner": media.get("upper", {}).get("name"),
+                    "play_count": media.get("cnt_info", {}).get("play"),
+                    "intro": media.get("intro"),
+                    "is_selected": True,  # 默认选中
+                }
+            )
+
         return {
             "folder_info": result.get("info"),
             "videos": videos,
             "has_more": result.get("has_more", False),
             "page": page,
-            "page_size": page_size
+            "page_size": page_size,
         }
-        
+
     except Exception as e:
         logger.error(f"获取收藏夹视频失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取视频失败: {str(e)}")
@@ -160,8 +157,7 @@ async def get_favorite_videos(
 
 @router.get("/{media_id}/all-videos")
 async def get_all_favorite_videos(
-    media_id: int,
-    session_id: str = Query(..., description="会话ID")
+    media_id: int, session_id: str = Query(..., description="会话ID")
 ):
     """
     获取收藏夹中的所有视频（用于构建知识库）
@@ -169,19 +165,15 @@ async def get_all_favorite_videos(
     session = await get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
-    
+
     cookies = session.get("cookies", {})
-    
+
     try:
-        bili = BilibiliService(
-            sessdata=cookies.get("SESSDATA"),
-            bili_jct=cookies.get("bili_jct"),
-            dedeuserid=cookies.get("DedeUserID")
-        )
-        
+        bili = bilibili_service_from_cookies(cookies, BilibiliService)
+
         all_videos = await bili.get_all_favorite_videos(media_id)
         await bili.close()
-        
+
         # 处理视频列表（过滤失效视频）
         videos = []
         for media in all_videos:
@@ -189,26 +181,29 @@ async def get_all_favorite_videos(
             title = media.get("title", "")
             if not bvid:
                 continue
-            
+
             # 过滤失效视频
             attr = media.get("attr", 0)
             if attr == 9 or title in ["已失效视频", "已删除视频"]:
                 continue
-                
-            videos.append({
-                "bvid": bvid,
-                "title": title,
-                "cover": media.get("cover"),
-                "duration": media.get("duration"),
-                "owner": media.get("upper", {}).get("name"),
-                "cid": media.get("ugc", {}).get("first_cid") if media.get("ugc") else None
-            })
-        
-        return {
-            "total": len(videos),
-            "videos": videos
-        }
-        
+
+            videos.append(
+                {
+                    "bvid": bvid,
+                    "title": title,
+                    "cover": media.get("cover"),
+                    "duration": media.get("duration"),
+                    "owner": media.get("upper", {}).get("name"),
+                    "cid": (
+                        media.get("ugc", {}).get("first_cid")
+                        if media.get("ugc")
+                        else None
+                    ),
+                }
+            )
+
+        return {"total": len(videos), "videos": videos}
+
     except Exception as e:
         logger.error(f"获取所有视频失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取视频失败: {str(e)}")
@@ -230,11 +225,7 @@ async def organize_preview(
     user_info = session.get("user_info", {})
 
     try:
-        bili = BilibiliService(
-            sessdata=cookies.get("SESSDATA"),
-            bili_jct=cookies.get("bili_jct"),
-            dedeuserid=cookies.get("DedeUserID"),
-        )
+        bili = bilibili_service_from_cookies(cookies, BilibiliService)
         mid = user_info.get("mid") or cookies.get("DedeUserID")
         folders = await bili.get_user_favorites(mid=mid)
         default_folder = next((f for f in folders if _is_default_folder(f)), None)
@@ -344,11 +335,7 @@ async def organize_execute(
     cookies = session.get("cookies", {})
 
     try:
-        bili = BilibiliService(
-            sessdata=cookies.get("SESSDATA"),
-            bili_jct=cookies.get("bili_jct"),
-            dedeuserid=cookies.get("DedeUserID"),
-        )
+        bili = bilibili_service_from_cookies(cookies, BilibiliService)
 
         move_groups: dict[int, List[str]] = {}
         for item in payload.moves:
@@ -395,11 +382,7 @@ async def clean_invalid_resources(
     cookies = session.get("cookies", {})
 
     try:
-        bili = BilibiliService(
-            sessdata=cookies.get("SESSDATA"),
-            bili_jct=cookies.get("bili_jct"),
-            dedeuserid=cookies.get("DedeUserID"),
-        )
+        bili = bilibili_service_from_cookies(cookies, BilibiliService)
         data = await bili.clean_favorite_resources(payload.folder_id)
         await bili.close()
         return {"message": "清理完成", "data": data}

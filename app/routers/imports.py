@@ -1,7 +1,6 @@
 import re
 import shutil
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -30,6 +29,7 @@ from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
 from app.services.rag_runtime import get_rag_service
+from app.time_utils import utc_now
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 _LOCAL_IMPORT_DIR = Path("data/local_imports")
@@ -416,7 +416,7 @@ async def _store_imported_video_content(
                 )
             )
             folder.media_count = (folder.media_count or 0) + 1
-        folder.last_sync_at = datetime.now(timezone.utc)
+        folder.last_sync_at = utc_now()
         await db.commit()
 
 

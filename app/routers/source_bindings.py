@@ -1,6 +1,5 @@
 import json
 from collections import defaultdict
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,7 +30,8 @@ from app.routers.auth import (
     _get_session,
 )
 from app.security import decrypt_text, encrypt_text
-from app.services.bilibili import BilibiliService
+from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
+from app.time_utils import utc_now
 
 router = APIRouter(prefix="/source-bindings", tags=["source-bindings"])
 
@@ -202,11 +202,7 @@ async def poll_bilibili_binding_qrcode(
         return response
 
     cookies = result.get("cookies", {})
-    bili_auth = BilibiliService(
-        sessdata=cookies.get("SESSDATA"),
-        bili_jct=cookies.get("bili_jct"),
-        dedeuserid=cookies.get("DedeUserID"),
-    )
+    bili_auth = bilibili_service_from_cookies(cookies, BilibiliService)
     try:
         user_info = await bili_auth.get_user_info()
     finally:
@@ -224,7 +220,7 @@ async def poll_bilibili_binding_qrcode(
         external_account_name=user_info.get("uname"),
         external_avatar_url=user_info.get("face"),
         status="active",
-        last_verified_at=datetime.now(timezone.utc),
+        last_verified_at=utc_now(),
     )
     db.add(binding)
     await db.flush()
@@ -292,11 +288,7 @@ async def _get_bilibili_service_for_binding(
     except Exception:
         raise HTTPException(status_code=500, detail="凭据解密失败")
 
-    return BilibiliService(
-        sessdata=payload.get("SESSDATA"),
-        bili_jct=payload.get("bili_jct"),
-        dedeuserid=payload.get("DedeUserID"),
-    )
+    return bilibili_service_from_cookies(payload, BilibiliService)
 
 
 @router.get("/{binding_id}/favorites", response_model=List[FavoriteFolderInfo])

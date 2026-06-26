@@ -9,15 +9,17 @@ from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
+from app.time_utils import utc_now
+
 
 def _utc_now() -> datetime:
     """返回 aware UTC 时间（替代已弃用的 datetime.utcnow）"""
-    return datetime.now(timezone.utc)
+    return utc_now()
 
 
 Base = declarative_base()

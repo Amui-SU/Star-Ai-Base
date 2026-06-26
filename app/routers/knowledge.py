@@ -19,7 +19,7 @@ from app.models import (
     FavoriteVideo,
     UserSession,
 )
-from app.services.bilibili import BilibiliService
+from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.services.content_fetcher import ContentFetcher
 from app.services.asr import ASRService
 from app.services.folder_ingestion import sync_folder as _sync_folder
@@ -205,11 +205,7 @@ async def sync_folders(
     cookies = session.get("cookies", {})
     user_info = session.get("user_info", {})
 
-    bili = BilibiliService(
-        sessdata=cookies.get("SESSDATA"),
-        bili_jct=cookies.get("bili_jct"),
-        dedeuserid=cookies.get("DedeUserID"),
-    )
+    bili = bilibili_service_from_cookies(cookies, BilibiliService)
     rag = get_rag_service()
     asr_service = ASRService()
     content_fetcher = ContentFetcher(bili, asr_service)
@@ -305,11 +301,7 @@ async def _build_knowledge_base_task(
         build_tasks[task_id]["status"] = "running"
         build_tasks[task_id]["current_step"] = "同步收藏夹..."
 
-        bili = BilibiliService(
-            sessdata=cookies.get("SESSDATA"),
-            bili_jct=cookies.get("bili_jct"),
-            dedeuserid=cookies.get("DedeUserID"),
-        )
+        bili = bilibili_service_from_cookies(cookies, BilibiliService)
         asr_service = ASRService()
         content_fetcher = ContentFetcher(bili, asr_service)
         rag = get_rag_service()
