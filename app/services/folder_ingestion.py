@@ -533,13 +533,14 @@ async def sync_folder(
                     )
                 except Exception as e:
                     logger.warning(f"删除旧向量失败 [{bvid}]: {e}")
-                chunks = rag.add_video_content(
-                    content,
-                    workspace_id=workspace_id,
-                    knowledge_base_id=knowledge_base_id,
-                    source_binding_id=source_binding_id,
-                )
-                logger.info(f"[{bvid}] 向量化完成，块数={chunks}")
+                else:
+                    chunks = rag.add_video_content(
+                        content,
+                        workspace_id=workspace_id,
+                        knowledge_base_id=knowledge_base_id,
+                        source_binding_id=source_binding_id,
+                    )
+                    logger.info(f"[{bvid}] 向量化完成，块数={chunks}")
             else:
                 logger.info(f"[{bvid}] 内容未变化或无需升级，跳过向量化")
         except Exception as e:
