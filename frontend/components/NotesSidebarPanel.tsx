@@ -14,6 +14,7 @@ export default function NotesSidebarPanel() {
         </div>
       </div>
       <textarea
+        aria-label="学习笔记"
         className="notes-sidebar-editor"
         value={note}
         onChange={(event) => setNote(event.target.value)}
