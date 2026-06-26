@@ -13,6 +13,8 @@ import KnowledgeBasePanel from "@/components/KnowledgeBasePanel";
 import ImportModal from "@/components/ImportModal";
 import SourcesPanel from "@/components/SourcesPanel";
 import ChatPanel from "@/components/ChatPanel";
+import ChatHistorySidebarPanel from "@/components/ChatHistorySidebarPanel";
+import NotesSidebarPanel from "@/components/NotesSidebarPanel";
 import LocalConnectionSettings from "@/components/LocalConnectionSettings";
 import AdminUsersPanel from "@/components/AdminUsersPanel";
 import ApiAccountsPanel from "@/components/ApiAccountsPanel";
@@ -29,6 +31,9 @@ const getInitialSidebarOpen = () => {
   if (saved !== null) return saved === "true";
   return !isMobileViewport();
 };
+
+type SidebarMode = "sources" | "history" | "notes";
+
 export default function Home() {
   const MIN_SIDEBAR_WIDTH = 310;
   const [systemUser, setSystemUser] = useState<SystemUser | null>(null);
@@ -64,6 +69,14 @@ export default function Home() {
     return Number.isFinite(raw) && raw >= MIN_SIDEBAR_WIDTH ? raw : 320;
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(getInitialSidebarOpen);
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>("sources");
+  const conversationOpenRequestKeyRef = useRef(0);
+  const [conversationOpenRequest, setConversationOpenRequest] = useState<{
+    id: number;
+    key: number;
+  } | null>(null);
+  const [newConversationRequestKey, setNewConversationRequestKey] = useState(0);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
 
   // 主题初始化（默认深色）
@@ -124,14 +137,36 @@ export default function Home() {
     setIsDragging(false);
   }, []);
 
-  const toggleSidebar = useCallback(() => {
-    setIsSidebarOpen((prev) => {
-      const next = !prev;
-      if (typeof window !== "undefined") {
-        localStorage.setItem("sidebar_open", String(next));
-      }
-      return next;
+  const setSidebarOpen = useCallback((next: boolean) => {
+    setIsSidebarOpen(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sidebar_open", String(next));
+    }
+  }, []);
+
+  const openSidebarMode = useCallback(
+    (mode: SidebarMode) => {
+      setSidebarMode(mode);
+      setSidebarOpen(true);
+    },
+    [setSidebarOpen],
+  );
+
+  const collapseSidebar = useCallback(() => {
+    setSidebarOpen(false);
+  }, [setSidebarOpen]);
+
+  const requestOpenConversation = useCallback((conversationId: number) => {
+    conversationOpenRequestKeyRef.current += 1;
+    setConversationOpenRequest({
+      id: conversationId,
+      key: conversationOpenRequestKeyRef.current,
     });
+  }, []);
+
+  const requestNewConversation = useCallback(() => {
+    setNewConversationRequestKey((key) => key + 1);
+    setSidebarMode("history");
   }, []);
 
   useEffect(() => {
@@ -286,42 +321,121 @@ export default function Home() {
           </header>
 
           <div className="workspace">
-            {/* 侧边栏折叠按钮 */}
-            <button
-              onClick={toggleSidebar}
-              className={`workspace-sidebar-toggle ${
-                isSidebarOpen
-                  ? "left-[calc(var(--sidebar-width)-16px)]"
-                  : "left-1"
-              }`}
-              style={sidebarHandleStyle}
-              title={isSidebarOpen ? "收起收藏夹" : "展开收藏夹"}
-              aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-            >
-              <svg
-                className={`sidebar-toggle-icon w-4 h-4 transition-transform ${
-                  isSidebarOpen ? "" : "rotate-180"
-                }`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                aria-hidden="true"
+            {!isSidebarOpen && (
+              <div
+                className="workspace-corner-tools"
+                role="toolbar"
+                aria-label="工作区快捷入口"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-              <span
-                className={`sidebar-toggle-lines ${isSidebarOpen ? "open" : "closed"}`}
-                aria-hidden="true"
+                <button
+                  type="button"
+                  className="workspace-corner-tool"
+                  title="展开资料"
+                  aria-label="展开资料"
+                  onClick={() => openSidebarMode("sources")}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <rect
+                      x="4"
+                      y="5"
+                      width="16"
+                      height="14"
+                      rx="3"
+                      strokeWidth="1.8"
+                    />
+                    <path d="M9 5v14" strokeWidth="1.8" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="workspace-corner-tool"
+                  title="对话历史"
+                  aria-label="打开对话历史"
+                  onClick={() => openSidebarMode("history")}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M4 12a8 8 0 1 0 2.34-5.66"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M4 5.5v4h4"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M12 8v4l3 2"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="workspace-corner-tool"
+                  title="笔记"
+                  aria-label="打开笔记"
+                  onClick={() => openSidebarMode("notes")}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M6 4h9l3 3v13H6z"
+                      strokeWidth="1.8"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M14 4v4h4M9 12h6M9 16h4"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            )}
+
+            {isSidebarOpen && sidebarMode !== "history" && (
+              <button
+                onClick={collapseSidebar}
+                className="workspace-sidebar-toggle left-[calc(var(--sidebar-width)-16px)]"
+                style={sidebarHandleStyle}
+                title="收起展开页"
+                aria-label="收起展开页"
               >
-                <span className="sidebar-toggle-line long" />
-                <span className="sidebar-toggle-line short" />
-              </span>
-            </button>
+                <svg
+                  className="sidebar-toggle-icon w-4 h-4 transition-transform"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+              </button>
+            )}
 
             {/* 收藏夹侧栏 */}
             <div
@@ -333,54 +447,70 @@ export default function Home() {
               }
             >
               <aside className="panel panel-sources" style={sidebarPanelStyle}>
-                {/* 知识库选择 */}
-                <KnowledgeBasePanel
-                  activeId={activeKbId}
-                  onSelect={handleKnowledgeBaseSelect}
-                  onActiveKnowledgeBase={setActiveKnowledgeBase}
-                  refreshKey={kbRefreshKey}
-                  disabled={knowledgeBuilding}
-                />
+                {sidebarMode === "sources" ? (
+                  <>
+                    {/* 知识库选择 */}
+                    <KnowledgeBasePanel
+                      activeId={activeKbId}
+                      onSelect={handleKnowledgeBaseSelect}
+                      onActiveKnowledgeBase={setActiveKnowledgeBase}
+                      refreshKey={kbRefreshKey}
+                      disabled={knowledgeBuilding}
+                    />
 
-                {/* 导入入口 */}
-                {!activeBindingId && (
-                  <div className="import-sidebar-entry">
-                    <button
-                      onClick={() => setShowImport(true)}
-                      className="import-sidebar-btn"
-                    >
-                      + 导入
-                    </button>
-                    <p>选择 B 站收藏夹、视频 URL 或更多平台导入资料</p>
-                  </div>
-                )}
-                {activeBindingId ? (
-                  <SourcesPanel
-                    sourceBindingId={activeBindingId}
-                    knowledgeBaseId={activeKbId ?? 0}
-                    knowledgeBaseName={activeKnowledgeBase?.name}
-                    onImportClick={() => setShowImport(true)}
-                    onBuildDone={() => setStatsKey((v) => v + 1)}
-                    onBuildingChange={setKnowledgeBuilding}
+                    {/* 导入入口 */}
+                    {!activeBindingId && (
+                      <div className="import-sidebar-entry">
+                        <button
+                          onClick={() => setShowImport(true)}
+                          className="import-sidebar-btn"
+                        >
+                          + 导入
+                        </button>
+                        <p>选择 B 站收藏夹、视频 URL 或更多平台导入资料</p>
+                      </div>
+                    )}
+                    {activeBindingId ? (
+                      <SourcesPanel
+                        sourceBindingId={activeBindingId}
+                        knowledgeBaseId={activeKbId ?? 0}
+                        knowledgeBaseName={activeKnowledgeBase?.name}
+                        onImportClick={() => setShowImport(true)}
+                        onBuildDone={() => setStatsKey((v) => v + 1)}
+                        onBuildingChange={setKnowledgeBuilding}
+                      />
+                    ) : (
+                      <div className="sources-initial-empty">
+                        <div className="sources-empty-card">
+                          <div className="sources-empty-kicker">收藏夹资料</div>
+                          <div className="sources-empty-title">
+                            暂无收藏夹资料
+                          </div>
+                          <p>
+                            导入 B 站收藏夹、视频 URL
+                            或更多平台资料后，会显示在这里。
+                          </p>
+                          <button
+                            type="button"
+                            className="sources-empty-action"
+                            onClick={() => setShowImport(true)}
+                          >
+                            选择资料来源
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : sidebarMode === "history" ? (
+                  <ChatHistorySidebarPanel
+                    knowledgeBaseId={activeKbId}
+                    refreshKey={historyRefreshKey}
+                    onOpenConversation={requestOpenConversation}
+                    onNewConversation={requestNewConversation}
+                    onCollapse={collapseSidebar}
                   />
                 ) : (
-                  <div className="sources-initial-empty">
-                    <div className="sources-empty-card">
-                      <div className="sources-empty-kicker">收藏夹资料</div>
-                      <div className="sources-empty-title">暂无收藏夹资料</div>
-                      <p>
-                        导入 B 站收藏夹、视频 URL
-                        或更多平台资料后，会显示在这里。
-                      </p>
-                      <button
-                        type="button"
-                        className="sources-empty-action"
-                        onClick={() => setShowImport(true)}
-                      >
-                        选择资料来源
-                      </button>
-                    </div>
-                  </div>
+                  <NotesSidebarPanel />
                 )}
               </aside>
             </div>
@@ -407,6 +537,9 @@ export default function Home() {
                 isAdmin={Boolean(systemUser?.is_admin)}
                 apiAccountsKey={apiAccountsKey}
                 onOpenApiAccounts={() => setShowApiAccounts(true)}
+                conversationOpenRequest={conversationOpenRequest}
+                newConversationRequestKey={newConversationRequestKey}
+                onConversationSaved={() => setHistoryRefreshKey((v) => v + 1)}
               />
             </section>
           </div>

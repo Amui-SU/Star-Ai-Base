@@ -11,11 +11,12 @@ from loguru import logger
 import sys
 
 from app.config import settings, ensure_directories
-from app.database import init_db
+from app.database import async_session_factory, init_db
 from app.routers import (
     auth,
     api_accounts,
     chat,
+    chat_history,
     favorites,
     imports,
     knowledge,
@@ -24,6 +25,7 @@ from app.routers import (
     source_bindings,
     system_auth,
 )
+from app.services.ingestion_tasks import mark_stale_active_tasks_interrupted
 
 
 # 配置日志
@@ -44,6 +46,9 @@ async def lifespan(app: FastAPI):
     ensure_directories()
     await init_db()
     logger.info("✅ 数据库初始化完成")
+    interrupted_count = await mark_stale_active_tasks_interrupted(async_session_factory)
+    if interrupted_count:
+        logger.warning(f"已将 {interrupted_count} 个未完成入库任务标记为 interrupted")
 
     yield
 
@@ -98,6 +103,7 @@ async def allow_private_network_preflight(request, call_next):
 # 注册路由
 app.include_router(system_auth.router)
 app.include_router(api_accounts.router)
+app.include_router(chat_history.router)
 app.include_router(knowledge_bases.router)
 app.include_router(local_connection.router)
 app.include_router(source_bindings.router)

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { knowledgeBaseApi, type KnowledgeBase } from "@/lib/api";
+import { displayKnowledgeBaseName } from "@/lib/displayNames";
 
 interface Props {
   activeId: number | null;
@@ -33,6 +34,9 @@ export default function KnowledgeBasePanel({
     () => kbs.find((kb) => kb.id === activeId) ?? null,
     [activeId, kbs],
   );
+  const activeKbName = activeKb
+    ? displayKnowledgeBaseName(activeKb.name)
+    : "选择知识库";
 
   useEffect(() => {
     let cancelled = false;
@@ -222,9 +226,7 @@ export default function KnowledgeBasePanel({
           >
             <span className="knowledge-select-dot" aria-hidden="true" />
             <span className="knowledge-select-main">
-              <span className="knowledge-select-name">
-                {activeKb?.name ?? "选择知识库"}
-              </span>
+              <span className="knowledge-select-name">{activeKbName}</span>
               <span className="knowledge-select-meta">
                 {disabled ? "入库处理中，暂不可切换" : "用于当前聊天"}
               </span>
@@ -240,6 +242,7 @@ export default function KnowledgeBasePanel({
                 {kbs.map((kb) => {
                   const active = activeId === kb.id;
                   const deleting = deletingId === kb.id;
+                  const kbName = displayKnowledgeBaseName(kb.name);
                   return (
                     <div
                       key={kb.id}
@@ -252,12 +255,12 @@ export default function KnowledgeBasePanel({
                         disabled={disabled}
                         role="option"
                         aria-selected={active}
-                        title={kb.name}
+                        title={kbName}
                       >
                         <span className="knowledge-option-dot" />
                         <span className="knowledge-option-text">
                           <span className="knowledge-option-name">
-                            {kb.name}
+                            {kbName}
                           </span>
                           <span className="knowledge-option-meta">
                             {active ? "当前聊天" : "切换到这个知识库"}
@@ -269,8 +272,8 @@ export default function KnowledgeBasePanel({
                         className="knowledge-delete-icon"
                         disabled={disabled || deleting}
                         onClick={() => setDeleteTarget(kb)}
-                        title={`删除 ${kb.name}`}
-                        aria-label={`删除 ${kb.name}`}
+                        title={`删除 ${kbName}`}
+                        aria-label={`删除 ${kbName}`}
                       >
                         {deleting ? "..." : "×"}
                       </button>
@@ -283,7 +286,7 @@ export default function KnowledgeBasePanel({
                 <div className="knowledge-delete-card">
                   <div>
                     <div className="knowledge-delete-title">
-                      删除「{deleteTarget.name}」？
+                      删除「{displayKnowledgeBaseName(deleteTarget.name)}」？
                     </div>
                     <div className="knowledge-delete-copy">
                       会移除该知识库记录与入库索引，操作不可撤销。

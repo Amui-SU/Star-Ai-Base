@@ -46,7 +46,7 @@ def set_session_cookie(response: Response, token: str) -> None:
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=False,  # 本地开发用 HTTP，生产部署需改为 True
+        secure=_session_cookie_secure(),
         samesite="lax",
         max_age=SESSION_TTL_DAYS * 24 * 60 * 60,
         path="/",
@@ -54,7 +54,20 @@ def set_session_cookie(response: Response, token: str) -> None:
 
 
 def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path="/",
+        secure=_session_cookie_secure(),
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def _session_cookie_secure() -> bool:
+    configured = settings.session_cookie_secure
+    if configured is not None:
+        return bool(configured)
+    return not settings.debug
 
 
 def _fernet_key() -> bytes:

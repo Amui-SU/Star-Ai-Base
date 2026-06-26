@@ -103,6 +103,28 @@ async def _ensure_sqlite_legacy_columns(conn: AsyncConnection) -> None:
         "system_users": {
             "llm_api_source": "VARCHAR(20)",
         },
+        "chat_conversations": {
+            "user_id": "INTEGER",
+            "workspace_id": "INTEGER",
+            "knowledge_base_id": "INTEGER",
+            "title": "VARCHAR(200)",
+            "scope": "JSON",
+            "web_search": "BOOLEAN",
+            "web_search_provider": "VARCHAR(20)",
+            "created_at": "DATETIME",
+            "updated_at": "DATETIME",
+        },
+        "chat_messages": {
+            "conversation_id": "INTEGER",
+            "user_id": "INTEGER",
+            "role": "VARCHAR(20)",
+            "content": "TEXT",
+            "thinking": "TEXT",
+            "sources": "JSON",
+            "web_search": "JSON",
+            "sequence": "INTEGER",
+            "created_at": "DATETIME",
+        },
     }
 
     def ensure_columns(sync_conn):
@@ -391,10 +413,35 @@ async def _ensure_sqlite_legacy_columns(conn: AsyncConnection) -> None:
                     'ON "usage_events" ("user_id", "feature")'
                 )
 
+        def create_chat_history_indexes() -> None:
+            if table_columns("chat_conversations"):
+                sync_conn.exec_driver_sql(
+                    'CREATE INDEX IF NOT EXISTS "ix_chat_conversations_user_id" '
+                    'ON "chat_conversations" ("user_id")'
+                )
+                sync_conn.exec_driver_sql(
+                    'CREATE INDEX IF NOT EXISTS "ix_chat_conversations_knowledge_base_id" '
+                    'ON "chat_conversations" ("knowledge_base_id")'
+                )
+                sync_conn.exec_driver_sql(
+                    'CREATE INDEX IF NOT EXISTS "ix_chat_conversations_updated_at" '
+                    'ON "chat_conversations" ("updated_at")'
+                )
+            if table_columns("chat_messages"):
+                sync_conn.exec_driver_sql(
+                    'CREATE INDEX IF NOT EXISTS "ix_chat_messages_conversation_id" '
+                    'ON "chat_messages" ("conversation_id")'
+                )
+                sync_conn.exec_driver_sql(
+                    'CREATE INDEX IF NOT EXISTS "ix_chat_messages_user_id" '
+                    'ON "chat_messages" ("user_id")'
+                )
+
         rebuild_video_cache_without_unique_bvid()
         create_video_cache_indexes()
         clone_scoped_video_cache_rows()
         create_api_account_indexes()
+        create_chat_history_indexes()
 
     await conn.run_sync(ensure_columns)
 

@@ -123,4 +123,102 @@ describe("SourcesPanel", () => {
       });
     });
   });
+
+  it("uses fallback names for corrupted folder and video titles", async () => {
+    const user = userEvent.setup();
+    vi.mocked(sourceBindingApi.getFavorites).mockResolvedValue([
+      {
+        media_id: 10,
+        title: "????",
+        media_count: 1,
+        is_selected: true,
+      },
+    ]);
+    vi.mocked(sourceBindingApi.getAllFavoriteVideos).mockResolvedValue({
+      total: 1,
+      valid: 1,
+      videos: [
+        {
+          bvid: "BVEMPTY",
+          title: "",
+          display_title: "",
+          original_title: "????",
+          custom_title: null,
+        },
+      ],
+    });
+    vi.mocked(knowledgeBaseApi.stats).mockResolvedValue({
+      knowledge_base_id: 1,
+      workspace_id: 1,
+      total_videos: 0,
+      folders: [],
+      scoped: true,
+    });
+
+    render(<SourcesPanel sourceBindingId={7} knowledgeBaseId={1} />);
+
+    await user.click(await screen.findByText("未命名收藏夹"));
+
+    expect(screen.queryByText("????")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "选择收藏夹 未命名收藏夹" }),
+    ).toBeInTheDocument();
+    expect(await screen.findAllByText("未命名视频")).not.toHaveLength(0);
+    expect(
+      screen.getByRole("checkbox", { name: "选择视频 未命名视频" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "未命名视频" }),
+    ).toBeInTheDocument();
+  });
+
+  it("stops polling and shows a restart hint when a build is interrupted", async () => {
+    const user = userEvent.setup();
+    vi.mocked(sourceBindingApi.getFavorites).mockResolvedValue([
+      {
+        media_id: 10,
+        title: "Folder A",
+        media_count: 1,
+        is_selected: true,
+      },
+    ]);
+    vi.mocked(knowledgeBaseApi.stats).mockResolvedValue({
+      knowledge_base_id: 1,
+      workspace_id: 1,
+      total_videos: 0,
+      folders: [],
+      scoped: true,
+    });
+    vi.mocked(knowledgeBaseApi.build).mockResolvedValue({
+      task_id: "task-interrupted",
+      status: "pending",
+      workspace_id: 1,
+      knowledge_base_id: 1,
+      source_binding_id: 7,
+    });
+    vi.mocked(knowledgeBaseApi.getBuildStatus).mockResolvedValue({
+      task_id: "task-interrupted",
+      status: "interrupted",
+      progress: 48,
+      current_step: "任务已中断，请重新发起",
+      total_videos: 1,
+      processed_videos: 0,
+      message: "服务重启或后台任务中断，任务未自动恢复，请重新发起。",
+    });
+
+    const { container } = render(
+      <SourcesPanel sourceBindingId={7} knowledgeBaseId={1} />,
+    );
+
+    await user.click(await screen.findByLabelText("选择收藏夹 Folder A"));
+    const ingestButton = container.querySelector(
+      ".sources-ingest-button",
+    ) as HTMLButtonElement;
+    await user.click(ingestButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/构建已中断/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/请重新发起/)).toBeInTheDocument();
+  });
 });

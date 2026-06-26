@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ChatPanel from "@/components/ChatPanel";
-import { chatApi, knowledgeBaseApi } from "@/lib/api";
+import { chatApi, chatHistoryApi, knowledgeBaseApi } from "@/lib/api";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -31,6 +31,13 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getScopeOptions: vi.fn(),
       chatStreamUrl: vi.fn(),
       chat: vi.fn(),
+    },
+    chatHistoryApi: {
+      list: vi.fn(),
+      get: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
     },
   };
 });
@@ -108,6 +115,45 @@ function mockChatPanelDependencies() {
   vi.mocked(knowledgeBaseApi.chatStreamUrl).mockReturnValue(
     "http://localhost:8000/knowledge-bases/1/chat/stream",
   );
+  vi.mocked(chatHistoryApi.list).mockResolvedValue({ items: [] });
+  vi.mocked(chatHistoryApi.create).mockImplementation(async (data) => ({
+    id: 101,
+    user_id: 1,
+    workspace_id: data.workspace_id ?? null,
+    knowledge_base_id: data.knowledge_base_id ?? null,
+    title: data.title || data.messages[0]?.content || "新对话",
+    scope: data.scope ?? null,
+    web_search: data.web_search,
+    web_search_provider: data.web_search_provider,
+    message_count: data.messages.length,
+    created_at: "2026-06-26T00:00:00Z",
+    updated_at: "2026-06-26T00:00:00Z",
+    messages: data.messages.map((message, index) => ({
+      id: index + 1,
+      sequence: index,
+      created_at: "2026-06-26T00:00:00Z",
+      ...message,
+    })),
+  }));
+  vi.mocked(chatHistoryApi.update).mockImplementation(async (id, data) => ({
+    id,
+    user_id: 1,
+    workspace_id: data.workspace_id ?? null,
+    knowledge_base_id: data.knowledge_base_id ?? null,
+    title: data.title || data.messages[0]?.content || "新对话",
+    scope: data.scope ?? null,
+    web_search: data.web_search,
+    web_search_provider: data.web_search_provider,
+    message_count: data.messages.length,
+    created_at: "2026-06-26T00:00:00Z",
+    updated_at: "2026-06-26T00:00:00Z",
+    messages: data.messages.map((message, index) => ({
+      id: index + 1,
+      sequence: index,
+      created_at: "2026-06-26T00:00:00Z",
+      ...message,
+    })),
+  }));
 }
 
 afterEach(() => {
@@ -118,6 +164,204 @@ afterEach(() => {
 });
 
 describe("ChatPanel", () => {
+  it("keeps send disabled when no knowledge base is selected", async () => {
+    mockChatPanelDependencies();
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    await screen.findByText("探索你的收藏");
+    await user.click(
+      screen.getByRole("button", { name: "总结收藏夹里最有价值的内容" }),
+    );
+
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  });
+
+  it("opens a requested conversation from the expanded history panel", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatHistoryApi.get).mockResolvedValue({
+      id: 42,
+      user_id: 1,
+      workspace_id: 1,
+      knowledge_base_id: 1,
+      title: "RAG follow-up",
+      scope: { folder_ids: [10], bvids: ["BV1ABC"] },
+      web_search: true,
+      web_search_provider: "tavily",
+      message_count: 2,
+      created_at: "2026-06-26T00:00:00Z",
+      updated_at: "2026-06-26T01:00:00Z",
+      messages: [
+        {
+          id: 1,
+          role: "user",
+          content: "Explain RAG",
+          sequence: 0,
+          created_at: "2026-06-26T00:00:00Z",
+        },
+        {
+          id: 2,
+          role: "assistant",
+          content: "RAG combines retrieval and generation.",
+          thinking: "Need concise answer",
+          sources: [
+            {
+              type: "knowledge",
+              title: "RAG 入门",
+              url: "https://www.bilibili.com/video/BV1ABC",
+              bvid: "BV1ABC",
+            },
+          ],
+          web_search: { status: "success", message: "used web" },
+          sequence: 1,
+          created_at: "2026-06-26T00:00:01Z",
+        },
+      ],
+    });
+
+    render(
+      <ChatPanel
+        knowledgeBaseId={1}
+        knowledgeBaseName="Test KB"
+        conversationOpenRequest={{ id: 42, key: 1 }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(chatHistoryApi.get).toHaveBeenCalledWith(42);
+    });
+    expect(screen.getByText("Explain RAG")).toBeVisible();
+    expect(
+      screen.getByText("RAG combines retrieval and generation."),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "最近对话" })).toBeNull();
+  });
+
+  it("saves the completed streaming answer with scope and web search metadata", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(knowledgeBaseApi.getScopeOptions).mockResolvedValue({
+      folders: [
+        {
+          media_id: 10,
+          title: "AI 收藏夹",
+          video_count: 1,
+          videos: [],
+        },
+      ],
+    });
+    const encoder = new TextEncoder();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => {
+            let read = false;
+            return {
+              read: vi.fn().mockImplementation(() => {
+                if (read)
+                  return Promise.resolve({ done: true, value: undefined });
+                read = true;
+                return Promise.resolve({
+                  done: false,
+                  value: encoder.encode("stream answer"),
+                });
+              }),
+            };
+          },
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    const { container } = render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^提问范围/ }));
+    await user.click(screen.getByRole("checkbox", { name: /AI 收藏夹/ }));
+    await user.click(screen.getByRole("button", { name: "联网搜索" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox"), "stream sources");
+    await user.click(container.querySelector(".composer-send-button")!);
+
+    await waitFor(() => {
+      expect(chatHistoryApi.create).toHaveBeenCalled();
+    });
+    expect(chatHistoryApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        knowledge_base_id: 1,
+        scope: { folder_ids: [10], bvids: [] },
+        web_search: true,
+        web_search_provider: "auto",
+        messages: [
+          expect.objectContaining({
+            role: "user",
+            content: "stream sources",
+          }),
+          expect.objectContaining({
+            role: "assistant",
+            content: "stream answer",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("starts a new conversation from an expanded-page request without deleting saved history", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatHistoryApi.get).mockResolvedValue({
+      id: 42,
+      user_id: 1,
+      workspace_id: 1,
+      knowledge_base_id: 1,
+      title: "Saved chat",
+      scope: null,
+      web_search: false,
+      web_search_provider: "auto",
+      message_count: 2,
+      created_at: "2026-06-26T00:00:00Z",
+      updated_at: "2026-06-26T01:00:00Z",
+      messages: [
+        {
+          id: 1,
+          role: "user",
+          content: "old question",
+          sequence: 0,
+          created_at: "2026-06-26T00:00:00Z",
+        },
+        {
+          id: 2,
+          role: "assistant",
+          content: "old answer",
+          sequence: 1,
+          created_at: "2026-06-26T00:00:01Z",
+        },
+      ],
+    });
+
+    const { rerender } = render(
+      <ChatPanel
+        knowledgeBaseId={1}
+        knowledgeBaseName="Test KB"
+        conversationOpenRequest={{ id: 42, key: 1 }}
+        newConversationRequestKey={0}
+      />,
+    );
+    expect(await screen.findByText("old answer")).toBeVisible();
+
+    rerender(
+      <ChatPanel
+        knowledgeBaseId={1}
+        knowledgeBaseName="Test KB"
+        conversationOpenRequest={{ id: 42, key: 1 }}
+        newConversationRequestKey={1}
+      />,
+    );
+
+    expect(screen.queryByText("old answer")).not.toBeInTheDocument();
+    expect(chatHistoryApi.delete).not.toHaveBeenCalled();
+  });
+
   it("marks the AI disclaimer so mobile layout can hide it without changing desktop", async () => {
     mockChatPanelDependencies();
 
@@ -240,7 +484,7 @@ describe("ChatPanel", () => {
     expect(screen.getByRole("button", { name: "配置密钥" })).toBeVisible();
   });
 
-  it("marks the knowledge-base meta so the mobile header can hide it", async () => {
+  it("places the knowledge-base meta next to the model selector", async () => {
     mockChatPanelDependencies();
 
     const { container } = render(
@@ -248,9 +492,12 @@ describe("ChatPanel", () => {
     );
 
     expect(await screen.findByText("Test KB")).toBeVisible();
-    expect(container.querySelector(".chat-kb-meta")).toHaveTextContent(
+    const contextActions = container.querySelector(".chat-context-actions");
+    expect(contextActions).toHaveTextContent("Test KB");
+    expect(contextActions?.querySelector(".chat-kb-meta")).toHaveTextContent(
       "1 个视频",
     );
+    expect(contextActions?.querySelector(".model-status-card")).not.toBeNull();
   });
 
   it("hides global provider and Tavily configuration controls from regular users", async () => {

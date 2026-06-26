@@ -133,30 +133,24 @@ describe("mobile chat message layout", () => {
     );
   });
 
-  it("uses a frameless long-short mobile sidebar handle aligned with the context row", () => {
+  it("uses a collapsed three-icon toolstrip and keeps the expanded round collapse button", () => {
     expect(stylesheet).toMatch(
-      /\.sidebar-toggle-lines\s*\{[^}]*display:\s*none;/s,
+      /\.workspace-corner-tools\s*\{[^}]*position:\s*absolute;[^}]*top:\s*11px;[^}]*left:\s*16px;/s,
     );
     expect(stylesheet).toMatch(
-      /\.workspace-sidebar-toggle\s*\{[^}]*top:\s*11px;[^}]*height:\s*24px;[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s,
+      /\.workspace-corner-tools\s*\{[^}]*border-radius:\s*999px;[^}]*background:\s*var\(--paper-2\);[^}]*padding:\s*2px;[^}]*box-shadow:\s*none;/s,
     );
     expect(stylesheet).toMatch(
-      /\.workspace-sidebar-toggle \.sidebar-toggle-icon\s*\{[^}]*display:\s*none;/s,
+      /\.workspace-corner-tool\s*\{[^}]*width:\s*26px;[^}]*height:\s*26px;/s,
     );
     expect(stylesheet).toMatch(
-      /\.workspace-sidebar-toggle \.sidebar-toggle-lines\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*7px;/s,
+      /\.workspace-sidebar-toggle\s*\{[^}]*top:\s*11px;[^}]*left:\s*16px !important;[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;[^}]*box-shadow:\s*none;/s,
     );
     expect(stylesheet).toMatch(
-      /\.workspace-sidebar-toggle \.sidebar-toggle-line\s*\{[^}]*height:\s*2px;[^}]*min-height:\s*2px;/s,
+      /\.workspace-sidebar-toggle \.sidebar-toggle-icon\s*\{[^}]*display:\s*block;/s,
     );
     expect(stylesheet).toMatch(
-      /\.workspace-sidebar-toggle \.sidebar-toggle-line\.long\s*\{[^}]*width:\s*22px;/s,
-    );
-    expect(stylesheet).toMatch(
-      /\.workspace-sidebar-toggle \.sidebar-toggle-line\.short\s*\{[^}]*width:\s*14px;/s,
-    );
-    expect(stylesheet).toMatch(
-      /\.chat-kb-context\s*\{[^}]*padding-left:\s*clamp\(42px, 12vw, 58px\);/s,
+      /\.chat-context-row\s*\{[^}]*justify-content:\s*flex-end;/s,
     );
     expect(stylesheet).toMatch(/\.chat-kb-meta\s*\{[^}]*display:\s*none;/s);
     expect(stylesheet).toMatch(
@@ -216,6 +210,39 @@ describe("mobile chat message layout", () => {
     );
     expect(stylesheet).toMatch(
       /\.composer-send-button\s*\{[^}]*position:\s*static;/s,
+    );
+  });
+
+  it("keeps the chat history sidebar header compact and uses existing control styling", () => {
+    expect(stylesheet).toMatch(
+      /\.chat-history-sidebar-panel\s*\{[^}]*gap:\s*8px;[^}]*padding:\s*8px 12px 14px;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.sidebar-history-topbar\s*\{[^}]*align-items:\s*center;[^}]*justify-content:\s*space-between;[^}]*min-height:\s*34px;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.sidebar-history-actions\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*8px;[^}]*padding-right:\s*4px;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.sidebar-history-new-chat\s*\{[^}]*width:\s*min\(100%, 220px\);[^}]*min-height:\s*32px;[^}]*background:\s*var\(--paper-2\);/s,
+    );
+    expect(stylesheet).toMatch(
+      /html\.light \.sidebar-history-new-chat\s*\{[^}]*border-color:\s*var\(--border-strong\);[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.55\);[^}]*box-shadow:\s*none;[^}]*color:\s*var\(--ink-soft\);/s,
+    );
+    expect(stylesheet).toMatch(
+      /html\.light \.sidebar-history-new-chat:hover\s*\{[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.78\);/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.sidebar-history-collapse\s*\{[^}]*width:\s*26px;[^}]*height:\s*26px;[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.sidebar-history-list\s*\{[^}]*padding:\s*8px 6px 4px 4px;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.chat-history-sidebar-panel \.sidebar-tool-empty\s*\{[^}]*margin-top:\s*18px;/s,
+    );
+    expect(stylesheet).toMatch(
+      /html\.light \.chat-history-sidebar-panel \.sidebar-tool-empty\s*\{[^}]*border-color:\s*rgba\(205,\s*187,\s*159,\s*0\.72\);[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.16\);[^}]*box-shadow:\s*none;/s,
     );
   });
 });

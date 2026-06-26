@@ -41,7 +41,8 @@ from app.models import (
     VideoTitleOverride,
     Workspace,
 )
-from app.routers.knowledge import _sync_folder, get_rag_service
+from app.services.folder_ingestion import sync_folder as _sync_folder
+from app.services.rag_runtime import get_rag_service
 from app.routers.chat import (
     LLMToolRunResult,
     _apply_mode_instructions,

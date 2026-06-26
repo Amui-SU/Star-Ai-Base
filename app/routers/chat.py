@@ -30,7 +30,6 @@ from app.models import (
     VideoCache,
 )
 from app.config import settings
-from app.routers.knowledge import get_rag_service
 from app.routers.system_auth import _get_current_admin_user
 from app.services.api_credentials import (
     LLM_API_SOURCE_OFFICIAL,
@@ -39,6 +38,7 @@ from app.services.api_credentials import (
     provider_defaults,
     resolve_user_llm_credentials,
 )
+from app.services.rag_runtime import get_rag_service, reset_rag_service
 
 router = APIRouter(prefix="/chat", tags=["对话"])
 LEGACY_SCOPED_API_DETAIL = "旧全局接口已禁用，请使用 /knowledge-bases/* 范围化 API。"
@@ -621,9 +621,7 @@ async def save_llm_provider_config(
     _current_llm_provider = provider
 
     try:
-        from app.routers import knowledge
-
-        knowledge._rag_service = None
+        reset_rag_service()
     except Exception as e:
         logger.warning(f"重置 RAG 服务失败，将在下次重启后生效: {e}")
 

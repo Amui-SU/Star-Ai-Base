@@ -211,6 +211,49 @@ describe("ChatScopePicker", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("uses fallback names for empty or corrupted scope options", async () => {
+    const user = userEvent.setup();
+    const corruptedOptions = {
+      folders: [
+        {
+          media_id: 404,
+          title: "????",
+          video_count: 1,
+          videos: [{ bvid: "BVMISSING", title: "" }],
+        },
+      ],
+    };
+
+    render(
+      <ChatScopePicker
+        options={corruptedOptions}
+        value={{ folderIds: [], bvids: [] }}
+        webSearchEnabled={false}
+        webSearchProvider="auto"
+        tavilyConfigured={false}
+        onChange={vi.fn()}
+        onWebSearchChange={vi.fn()}
+        onWebSearchProviderChange={vi.fn()}
+        onConfigureTavily={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^提问范围/ }));
+
+    expect(
+      screen.getByRole("checkbox", { name: "未命名收藏夹" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("????")).not.toBeInTheDocument();
+    await user.type(
+      screen.getByRole("textbox", { name: "搜索视频" }),
+      "BVMISSING",
+    );
+    expect(
+      screen.getByRole("checkbox", { name: "未命名视频" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/未命名收藏夹 · BVMISSING/)).toBeInTheDocument();
+  });
+
   it("deduplicates videos that appear in multiple folders", async () => {
     const user = userEvent.setup();
     const duplicatedOptions = {

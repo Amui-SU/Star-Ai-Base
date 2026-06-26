@@ -157,6 +157,15 @@ npm install
 Copy-Item .env.example .env.local
 ```
 
+本地 HTTP 快速试用时，建议在 `.env.local` 中显式设置：
+
+```env
+DEBUG=true
+SESSION_COOKIE_SECURE=false
+```
+
+这样邮箱验证码会直接在接口响应中返回，浏览器也能在 `http://localhost` 下保存会话 Cookie。准备给其他设备或生产环境使用时，再切回 `DEBUG=false`，并配置 `APP_ENCRYPTION_KEY`、SMTP/OAuth 等真实密钥。
+
 正式使用时，普通用户不需要修改全局 `.env.local` 模型 Key；登录后从右上角用户菜单进入 **AI 服务密钥**，添加自己的 DeepSeek、OpenAI、DashScope、Kimi、SiliconFlow、智谱或 Tavily Key。
 
 ---
@@ -167,13 +176,14 @@ Copy-Item .env.example .env.local
 
 ### 应用与存储
 
-| 变量                       | 默认值                                       | 说明                       |
-| -------------------------- | -------------------------------------------- | -------------------------- |
-| `APP_HOST`                 | `0.0.0.0`                                    | 后端监听地址               |
-| `APP_PORT`                 | `8000`                                       | 后端端口                   |
-| `DEBUG`                    | `true`                                       | 调试模式（影响日志级别等） |
-| `DATABASE_URL`             | `sqlite+aiosqlite:///./data/bilibili_rag.db` | 异步 SQLite 连接串         |
-| `CHROMA_PERSIST_DIRECTORY` | `./data/chroma_db`                           | Chroma 持久化目录          |
+| 变量                       | 默认值                                       | 说明                                                                |
+| -------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| `APP_HOST`                 | `0.0.0.0`                                    | 后端监听地址                                                        |
+| `APP_PORT`                 | `8000`                                       | 后端端口                                                            |
+| `DEBUG`                    | `false`                                      | 调试模式（影响日志级别和本地开发降级行为）                          |
+| `SESSION_COOKIE_SECURE`    | 自动：`DEBUG=false` 时为 `true`              | 会话 Cookie 是否仅通过 HTTPS 发送；本地 HTTP 调试可显式设为 `false` |
+| `DATABASE_URL`             | `sqlite+aiosqlite:///./data/bilibili_rag.db` | 异步 SQLite 连接串                                                  |
+| `CHROMA_PERSIST_DIRECTORY` | `./data/chroma_db`                           | Chroma 持久化目录                                                   |
 
 ### LLM 路由
 

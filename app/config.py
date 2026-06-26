@@ -88,7 +88,11 @@ class Settings(BaseSettings):
     # 应用配置
     app_host: str = Field(default="0.0.0.0", env="APP_HOST")
     app_port: int = Field(default=8000, env="APP_PORT")
-    debug: bool = Field(default=True, env="DEBUG")
+    debug: bool = Field(default=False, env="DEBUG")
+    session_cookie_secure: Optional[bool] = Field(
+        default=None,
+        env="SESSION_COOKIE_SECURE",
+    )
 
     # 数据库
     database_url: str = Field(

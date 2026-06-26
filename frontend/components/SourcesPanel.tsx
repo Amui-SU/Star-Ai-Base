@@ -12,6 +12,12 @@ import {
   OrganizePreviewResponse,
   KnowledgeBaseBuildRequest,
 } from "@/lib/api";
+import {
+  displayFolderTitle,
+  displayKnowledgeBaseName,
+  displayVideoTitle,
+  isMissingDisplayText,
+} from "@/lib/displayNames";
 import OrganizePreviewModal from "@/components/OrganizePreviewModal";
 
 interface Props {
@@ -63,8 +69,8 @@ export default function SourcesPanel({
     bvid: string;
     title: string;
   } | null>(null);
-  const targetKnowledgeBase = knowledgeBaseName
-    ? `「${knowledgeBaseName}」`
+  const targetKnowledgeBase = !isMissingDisplayText(knowledgeBaseName)
+    ? `「${displayKnowledgeBaseName(knowledgeBaseName)}」`
     : "当前知识库";
 
   // 加载收藏夹列表（从B站获取）
@@ -135,13 +141,15 @@ export default function SourcesPanel({
   }, [building, onBuildingChange]);
 
   const getVideoTitle = (video: Video) =>
-    customVideoNames[video.bvid] ||
-    video.display_title ||
-    video.custom_title ||
-    video.title;
+    displayVideoTitle(
+      customVideoNames[video.bvid] ||
+        video.display_title ||
+        video.custom_title ||
+        video.title,
+    );
 
   const getOriginalVideoTitle = (video: Video) =>
-    video.original_title || video.title || video.bvid;
+    displayVideoTitle(video.original_title || video.title);
 
   const startRenameVideo = (video: Video) => {
     setEditingVideoId(video.bvid);
@@ -350,6 +358,10 @@ export default function SourcesPanel({
             onBuildDone?.();
           } else if (s.status === "failed") {
             setMessage(`构建失败: ${s.message}`);
+          } else if (s.status === "interrupted") {
+            setMessage(`构建已中断: ${s.message || "请重新发起"}`);
+          } else {
+            setMessage(s.message || `构建已停止: ${s.status}`);
           }
         }
       };
@@ -537,6 +549,7 @@ export default function SourcesPanel({
                 const lastSync = formatTime(
                   statusMap[f.media_id]?.last_sync_at ?? undefined,
                 );
+                const folderTitle = displayFolderTitle(f.title);
 
                 return (
                   <div
@@ -552,12 +565,12 @@ export default function SourcesPanel({
                         checked={selected.has(f.media_id)}
                         onChange={() => toggleSelect(f.media_id)}
                         onClick={(e) => e.stopPropagation()}
-                        aria-label={`选择收藏夹 ${f.title}`}
+                        aria-label={`选择收藏夹 ${folderTitle}`}
                         className="folder-checkbox"
                       />
                       <div className="folder-meta">
-                        <div className="folder-title" title={f.title}>
-                          {f.title}
+                        <div className="folder-title" title={folderTitle}>
+                          {folderTitle}
                         </div>
                         <div className="folder-count">
                           {status.indexedCount}/

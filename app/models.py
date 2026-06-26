@@ -382,6 +382,46 @@ class IngestionTask(Base):
     updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
 
+class ChatConversation(Base):
+    """Persisted chat conversation owned by a system user."""
+
+    __tablename__ = "chat_conversations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id"), index=True, nullable=True
+    )
+    knowledge_base_id = Column(
+        Integer, ForeignKey("knowledge_bases.id"), index=True, nullable=True
+    )
+    title = Column(String(200), nullable=False)
+    scope = Column(JSON, nullable=True)
+    web_search = Column(Boolean, default=False, nullable=False)
+    web_search_provider = Column(String(20), default="auto", nullable=False)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
+
+
+class ChatMessage(Base):
+    """Single persisted message in a chat conversation."""
+
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(
+        Integer, ForeignKey("chat_conversations.id"), index=True, nullable=False
+    )
+    user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    thinking = Column(Text, nullable=True)
+    sources = Column(JSON, nullable=True)
+    web_search = Column(JSON, nullable=True)
+    sequence = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=_utc_now)
+
+
 # ==================== Pydantic 模型 (API 用) ====================
 
 
@@ -640,3 +680,70 @@ class ChatResponse(BaseModel):
     sources: list[dict]  # 来源视频列表
     thinking: Optional[str] = None  # 思考过程（模型支持时返回）
     web_search: Optional[dict] = None  # 联网搜索状态
+
+
+class ChatHistoryMessageRequest(BaseModel):
+    role: str
+    content: str
+    thinking: Optional[str] = None
+    sources: Optional[list[dict]] = None
+    web_search: Optional[dict] = None
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        role = (value or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            raise ValueError("unsupported message role")
+        return role
+
+
+class ChatConversationSaveRequest(BaseModel):
+    title: Optional[str] = None
+    workspace_id: Optional[int] = None
+    knowledge_base_id: Optional[int] = None
+    scope: Optional[dict] = None
+    web_search: bool = False
+    web_search_provider: str = "auto"
+    messages: list[ChatHistoryMessageRequest] = Field(default_factory=list)
+
+    @field_validator("web_search_provider")
+    @classmethod
+    def normalize_history_web_search_provider(cls, value: str) -> str:
+        provider = (value or "auto").strip().lower()
+        if provider not in {"auto", "tavily", "html"}:
+            raise ValueError("unsupported web search provider")
+        return provider
+
+
+class ChatHistoryMessageResponse(BaseModel):
+    id: int
+    role: str
+    content: str
+    thinking: Optional[str] = None
+    sources: Optional[list[dict]] = None
+    web_search: Optional[dict] = None
+    sequence: int
+    created_at: datetime
+
+
+class ChatConversationSummaryResponse(BaseModel):
+    id: int
+    user_id: int
+    workspace_id: Optional[int] = None
+    knowledge_base_id: Optional[int] = None
+    title: str
+    scope: Optional[dict] = None
+    web_search: bool
+    web_search_provider: str
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatConversationResponse(ChatConversationSummaryResponse):
+    messages: list[ChatHistoryMessageResponse]
+
+
+class ChatConversationListResponse(BaseModel):
+    items: list[ChatConversationSummaryResponse]

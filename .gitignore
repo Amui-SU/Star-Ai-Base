@@ -59,6 +59,7 @@ logs/
 
 # Git worktrees
 .worktrees/
+.superpowers/
 
 # macOS
 .DS_Store

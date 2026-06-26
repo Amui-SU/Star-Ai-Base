@@ -5,6 +5,7 @@ from app.config import settings
 from app.routers.system_auth import _IP_RATE_MAX, _MAX_ATTEMPTS
 from app.routers.system_auth import _decode_oauth_state
 from app.routers.system_auth import _make_oauth_state
+from app.routers.system_auth import _oauth_signing_key
 
 
 async def _send_code(client, email: str) -> str | None:
@@ -456,6 +457,16 @@ def test_oauth_state_uses_non_google_provider_secret(monkeypatch):
     monkeypatch.setattr(settings, "wechat_client_secret", "rotated-secret")
 
     assert _decode_oauth_state(state) is None
+
+
+def test_oauth_signing_key_rejects_empty_secret_material(monkeypatch):
+    monkeypatch.delenv("APP_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setattr(settings, "google_client_secret", "")
+    monkeypatch.setattr(settings, "wechat_client_secret", "")
+    monkeypatch.setattr(settings, "qq_client_secret", "")
+
+    with pytest.raises(RuntimeError, match="OAuth state signing"):
+        _oauth_signing_key()
 
 
 @pytest.mark.asyncio

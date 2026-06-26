@@ -12,6 +12,88 @@ from app.models import (
 )
 
 
+def test_import_vector_delete_failure_is_logged(monkeypatch):
+    from app.routers.imports import _delete_existing_import_vectors
+
+    warnings = []
+
+    class FailingRAGService:
+        def delete_video_in_knowledge_base(self, **kwargs):
+            raise RuntimeError("vector store is locked")
+
+    monkeypatch.setattr(
+        "app.routers.imports.logger.warning",
+        lambda message, *args, **kwargs: warnings.append(str(message)),
+    )
+
+    _delete_existing_import_vectors(
+        FailingRAGService(),
+        workspace_id=3,
+        knowledge_base_id=9,
+        bvid="BVDELETEFAIL",
+    )
+
+    assert warnings
+    assert "BVDELETEFAIL" in warnings[0]
+    assert "vector" in warnings[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_local_video_import_logs_cleanup_failure(
+    db_session_factory,
+    monkeypatch,
+    tmp_path,
+):
+    import app.database as database
+    from app.routers.imports import _run_local_video_import
+
+    monkeypatch.setattr(database, "async_session_factory", db_session_factory)
+    warnings = []
+
+    class FakeASRService:
+        async def transcribe_local_file(self, file_path):
+            return None
+
+    monkeypatch.setattr("app.routers.imports.ASRService", FakeASRService)
+    monkeypatch.setattr("app.routers.imports.get_rag_service", lambda: object())
+    monkeypatch.setattr(
+        "app.routers.imports.logger.warning",
+        lambda message, *args, **kwargs: warnings.append(str(message)),
+    )
+
+    def fail_unlink(self):
+        raise PermissionError("file is locked")
+
+    monkeypatch.setattr("app.routers.imports.Path.unlink", fail_unlink)
+    file_path = tmp_path / "locked.mp4"
+    file_path.write_bytes(b"video bytes")
+
+    async with db_session_factory() as session:
+        session.add(
+            IngestionTask(
+                task_id="cleanup-failure-task",
+                workspace_id=3,
+                knowledge_base_id=9,
+                source_binding_id=None,
+                created_by=5,
+                status="pending",
+                total_items=1,
+            )
+        )
+        await session.commit()
+
+    await _run_local_video_import(
+        task_id="cleanup-failure-task",
+        local_id="LVCLEANUPFAIL",
+        title="Local Video",
+        file_path=str(file_path),
+        workspace_id=3,
+        knowledge_base_id=9,
+    )
+
+    assert any("cleanup" in warning.lower() for warning in warnings)
+
+
 async def _get_code(client, email: str) -> str:
     response = await client.post("/system-auth/send-code", json={"email": email})
     assert response.status_code == 200

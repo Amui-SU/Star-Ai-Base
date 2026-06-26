@@ -13,6 +13,7 @@ import {
   normalizeScope,
   scopeSummary,
 } from "@/lib/chatScope";
+import { displayFolderTitle, displayVideoTitle } from "@/lib/displayNames";
 
 interface Props {
   options: KnowledgeScopeOptions;
@@ -72,10 +73,15 @@ export default function ChatScopePicker({
     const seen = new Set<string>();
     const result: Array<KnowledgeScopeVideo & { folderTitle: string }> = [];
     for (const folder of options.folders) {
+      const folderTitle = displayFolderTitle(folder.title);
       for (const video of folder.videos) {
         if (seen.has(video.bvid)) continue;
         seen.add(video.bvid);
-        result.push({ ...video, folderTitle: folder.title });
+        result.push({
+          ...video,
+          title: displayVideoTitle(video.title),
+          folderTitle,
+        });
       }
     }
     return result;
@@ -151,23 +157,29 @@ export default function ChatScopePicker({
 
   const renderVideoOption = (
     video: KnowledgeScopeVideo & { folderTitle?: string },
-  ) => (
-    <label key={video.bvid} className="scope-option scope-video-option">
-      <input
-        type="checkbox"
-        checked={normalized.bvids.includes(video.bvid)}
-        onChange={() => toggleVideo(video.bvid)}
-        aria-label={video.title}
-      />
-      <span className="min-w-0">
-        <span className="scope-option-title">{video.title}</span>
-        <span className="scope-option-subtitle">
-          {video.folderTitle ? `${video.folderTitle} · ` : ""}
-          {video.bvid}
+  ) => {
+    const videoTitle = displayVideoTitle(video.title);
+    const folderTitle = video.folderTitle
+      ? displayFolderTitle(video.folderTitle)
+      : "";
+    return (
+      <label key={video.bvid} className="scope-option scope-video-option">
+        <input
+          type="checkbox"
+          checked={normalized.bvids.includes(video.bvid)}
+          onChange={() => toggleVideo(video.bvid)}
+          aria-label={videoTitle}
+        />
+        <span className="min-w-0">
+          <span className="scope-option-title">{videoTitle}</span>
+          <span className="scope-option-subtitle">
+            {folderTitle ? `${folderTitle} · ` : ""}
+            {video.bvid}
+          </span>
         </span>
-      </span>
-    </label>
-  );
+      </label>
+    );
+  };
 
   return (
     <div className="scope-picker" ref={rootRef}>
@@ -320,6 +332,7 @@ export default function ChatScopePicker({
               options.folders.map((folder) => {
                 const isExpanded = expanded.has(folder.media_id);
                 const canExpand = folder.videos.length > 0;
+                const folderTitle = displayFolderTitle(folder.title);
                 return (
                   <div key={folder.media_id} className="scope-folder">
                     <div className="scope-folder-row">
@@ -330,11 +343,11 @@ export default function ChatScopePicker({
                             folder.media_id,
                           )}
                           onChange={() => toggleFolder(folder.media_id)}
-                          aria-label={folder.title}
+                          aria-label={folderTitle}
                         />
                         <span className="min-w-0">
                           <span className="scope-option-title">
-                            {folder.title}
+                            {folderTitle}
                           </span>
                           <span className="scope-option-subtitle">
                             {folder.video_count} 个已入库视频
@@ -349,7 +362,7 @@ export default function ChatScopePicker({
                           canExpand && toggleExpanded(folder.media_id)
                         }
                         aria-expanded={isExpanded}
-                        aria-label={`${isExpanded ? "收起" : "展开"} ${folder.title}`}
+                        aria-label={`${isExpanded ? "收起" : "展开"} ${folderTitle}`}
                       >
                         ›
                       </button>
@@ -359,7 +372,7 @@ export default function ChatScopePicker({
                         {folder.videos.map((video) =>
                           renderVideoOption({
                             ...video,
-                            folderTitle: folder.title,
+                            folderTitle,
                           }),
                         )}
                       </div>

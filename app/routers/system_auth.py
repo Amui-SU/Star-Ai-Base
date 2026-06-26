@@ -631,7 +631,11 @@ def _oauth_signing_key() -> bytes:
             settings.qq_client_secret,
         ]
         material = "|".join(item.strip() for item in secrets_material if item.strip())
-    return hashlib.sha256((material or "dev").encode("utf-8")).digest()
+    if not material:
+        raise RuntimeError(
+            "OAuth state signing requires APP_ENCRYPTION_KEY or an OAuth client secret"
+        )
+    return hashlib.sha256(material.encode("utf-8")).digest()
 
 
 def _make_oauth_state(

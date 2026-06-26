@@ -282,6 +282,57 @@ export interface ChatResponse {
 
 export type WebSearchProvider = "auto" | "tavily" | "html";
 
+export interface ChatConversationScope {
+  folder_ids?: number[];
+  bvids?: string[];
+}
+
+export interface ChatHistoryMessageRequest {
+  role: "user" | "assistant";
+  content: string;
+  thinking?: string;
+  sources?: ChatSource[];
+  web_search?: ChatWebSearchStatus | null;
+}
+
+export interface ChatConversationSaveRequest {
+  title?: string;
+  workspace_id?: number | null;
+  knowledge_base_id?: number | null;
+  scope?: ChatConversationScope | null;
+  web_search: boolean;
+  web_search_provider: WebSearchProvider;
+  messages: ChatHistoryMessageRequest[];
+}
+
+export interface ChatHistoryMessage extends ChatHistoryMessageRequest {
+  id: number;
+  sequence: number;
+  created_at: string;
+}
+
+export interface ChatConversationSummary {
+  id: number;
+  user_id: number;
+  workspace_id?: number | null;
+  knowledge_base_id?: number | null;
+  title: string;
+  scope?: ChatConversationScope | null;
+  web_search: boolean;
+  web_search_provider: WebSearchProvider;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatConversation extends ChatConversationSummary {
+  messages: ChatHistoryMessage[];
+}
+
+export interface ChatConversationListResponse {
+  items: ChatConversationSummary[];
+}
+
 export interface WebSearchConfigResponse {
   provider: WebSearchProvider;
   tavily_configured: boolean;
@@ -899,4 +950,31 @@ export const chatApi = {
     }),
 
   health: () => request<LLMHealthResponse>("/chat/health/llm"),
+};
+
+export const chatHistoryApi = {
+  list: (params?: { knowledge_base_id?: number | null }) =>
+    request<ChatConversationListResponse>("/chat/conversations", {
+      query: params,
+    }),
+
+  get: (conversationId: number) =>
+    request<ChatConversation>(`/chat/conversations/${conversationId}`),
+
+  create: (data: ChatConversationSaveRequest) =>
+    request<ChatConversation>("/chat/conversations", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  update: (conversationId: number, data: ChatConversationSaveRequest) =>
+    request<ChatConversation>(`/chat/conversations/${conversationId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  delete: (conversationId: number) =>
+    request<void>(`/chat/conversations/${conversationId}`, {
+      method: "DELETE",
+    }),
 };

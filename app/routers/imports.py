@@ -14,6 +14,7 @@ from fastapi import (
     HTTPException,
     UploadFile,
 )
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,10 +26,10 @@ from app.dependencies import (
 )
 from app.models import FavoriteFolder, FavoriteVideo, IngestionTask, KnowledgeBase
 from app.models import ContentSource, SystemUser, VideoCache, VideoContent, Workspace
-from app.routers.knowledge import get_rag_service
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
+from app.services.rag_runtime import get_rag_service
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 _LOCAL_IMPORT_DIR = Path("data/local_imports")
@@ -301,6 +302,36 @@ async def _update_import_task(task_id: str, **kwargs) -> None:
             await session.commit()
 
 
+def _delete_existing_import_vectors(
+    rag,
+    *,
+    workspace_id: int,
+    knowledge_base_id: int,
+    bvid: str,
+) -> None:
+    try:
+        rag.delete_video_in_knowledge_base(
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            bvid=bvid,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Import vector cleanup failed "
+            f"[workspace={workspace_id}, knowledge_base={knowledge_base_id}, "
+            f"bvid={bvid}]: {exc}"
+        )
+
+
+def _cleanup_local_upload(file_path: str) -> None:
+    try:
+        upload_path = Path(file_path)
+        if upload_path.exists():
+            upload_path.unlink()
+    except Exception as exc:
+        logger.warning(f"Local upload cleanup failed [{file_path}]: {exc}")
+
+
 async def _store_imported_video_content(
     *,
     content: VideoContent,
@@ -425,14 +456,12 @@ async def _run_bilibili_video_import(
         )
 
         await _update_import_task(task_id, current_step="写入向量索引...", progress=76)
-        try:
-            rag.delete_video_in_knowledge_base(
-                workspace_id=workspace_id,
-                knowledge_base_id=knowledge_base_id,
-                bvid=bvid,
-            )
-        except Exception:
-            pass
+        _delete_existing_import_vectors(
+            rag,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            bvid=bvid,
+        )
         rag.add_video_content(
             content,
             workspace_id=workspace_id,
@@ -494,14 +523,12 @@ async def _run_local_video_import(
         )
 
         await _update_import_task(task_id, current_step="写入向量索引...", progress=76)
-        try:
-            rag.delete_video_in_knowledge_base(
-                workspace_id=workspace_id,
-                knowledge_base_id=knowledge_base_id,
-                bvid=local_id,
-            )
-        except Exception:
-            pass
+        _delete_existing_import_vectors(
+            rag,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            bvid=local_id,
+        )
         rag.add_video_content(
             content,
             workspace_id=workspace_id,
@@ -524,9 +551,4 @@ async def _run_local_video_import(
             error_message=str(exc),
         )
     finally:
-        try:
-            upload_path = Path(file_path)
-            if upload_path.exists():
-                upload_path.unlink()
-        except Exception:
-            pass
+        _cleanup_local_upload(file_path)
