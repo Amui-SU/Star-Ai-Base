@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ImportModal from "@/components/ImportModal";
-import { importApi } from "@/lib/api";
+import { importApi, sourceBindingApi } from "@/lib/api";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -26,6 +26,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("ImportModal", () => {
@@ -126,5 +127,57 @@ describe("ImportModal", () => {
         knowledge_base_id: 7,
       });
     });
+  });
+
+  it("stops Bilibili QR polling after the maximum wait time", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.mocked(importApi.methods).mockResolvedValue({
+      methods: [
+        {
+          id: "bilibili_favorites",
+          label: "B 站收藏夹",
+          description: "扫码绑定账号后导入收藏夹资料",
+          status: "available",
+          level: 2,
+        },
+      ],
+    });
+    vi.mocked(sourceBindingApi.getBilibiliQRCode).mockResolvedValue({
+      qrcode_key: "qr-key",
+      qrcode_url: "https://example.com/qr",
+      qrcode_image_base64:
+        "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=",
+    });
+    vi.mocked(sourceBindingApi.pollBilibiliQRCode).mockResolvedValue({
+      status: "waiting",
+      message: "等待扫码",
+    });
+
+    render(
+      <ImportModal
+        open
+        knowledgeBaseId={7}
+        hasBilibiliBinding={false}
+        onClose={vi.fn()}
+        onBound={vi.fn()}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /B 站收藏夹/ }));
+    await screen.findByAltText("B站绑定二维码");
+
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      await vi.advanceTimersByTimeAsync(2000);
+    }
+
+    expect(
+      await screen.findByText("二维码等待超时，请重新获取"),
+    ).toBeInTheDocument();
+    expect(sourceBindingApi.pollBilibiliQRCode).toHaveBeenCalledTimes(150);
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(sourceBindingApi.pollBilibiliQRCode).toHaveBeenCalledTimes(150);
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 
 import {
@@ -21,6 +21,7 @@ interface Props {
 
 type Step = "methods" | "bilibili" | "video";
 type VideoImportMode = "url" | "local";
+const MAX_QR_POLL_ATTEMPTS = 150;
 
 export default function ImportModal({
   open,
@@ -39,6 +40,7 @@ export default function ImportModal({
   const [qrErrorMessage, setQrErrorMessage] =
     useState("二维码获取失败，请检查网络或重试");
   const [polling, setPolling] = useState(false);
+  const qrPollAttemptsRef = useRef(0);
   const [videoMode, setVideoMode] = useState<VideoImportMode>("url");
   const [url, setUrl] = useState("");
   const [urlMessage, setUrlMessage] = useState("");
@@ -55,6 +57,7 @@ export default function ImportModal({
         setQr(null);
         setQrStatus("idle");
         setQrErrorMessage("二维码获取失败，请检查网络或重试");
+        qrPollAttemptsRef.current = 0;
         setVideoMode("url");
         setUrl("");
         setUrlMessage("");
@@ -78,6 +81,7 @@ export default function ImportModal({
       const data = await sourceBindingApi.getBilibiliQRCode();
       setQr(data);
       setQrStatus("ready");
+      qrPollAttemptsRef.current = 0;
       setPolling(true);
     } catch (err) {
       setQrErrorMessage(
@@ -96,6 +100,7 @@ export default function ImportModal({
   useEffect(() => {
     if (!polling || !qr) return;
     const timer = window.setInterval(async () => {
+      qrPollAttemptsRef.current += 1;
       try {
         const res = await sourceBindingApi.pollBilibiliQRCode(qr.qrcode_key);
         if (res.status === "scanned") setQrStatus("scanned");
@@ -110,6 +115,15 @@ export default function ImportModal({
         if (res.status === "expired") {
           setPolling(false);
           setQrErrorMessage("二维码已过期");
+          setQrStatus("error");
+        }
+        if (
+          qrPollAttemptsRef.current >= MAX_QR_POLL_ATTEMPTS &&
+          res.status !== "confirmed" &&
+          res.status !== "expired"
+        ) {
+          setPolling(false);
+          setQrErrorMessage("二维码等待超时，请重新获取");
           setQrStatus("error");
         }
       } catch {
@@ -215,6 +229,7 @@ export default function ImportModal({
               onClick={() => {
                 setStep("methods");
                 setPolling(false);
+                qrPollAttemptsRef.current = 0;
               }}
             >
               返回
