@@ -650,6 +650,103 @@ async def test_google_login_uses_configured_redirect_uri(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider,settings_patch,callback_path,nonce,redirect_uri,secret",
+    [
+        (
+            "wechat",
+            {
+                "wechat_client_id": "wechat-id",
+                "wechat_client_secret": "wechat-secret",
+                "wechat_redirect_uri": "https://example.com/system-auth/wechat/callback",
+            },
+            "/system-auth/wechat/callback",
+            "wechat-network-nonce",
+            "https://example.com/system-auth/wechat/callback",
+            "wechat-secret",
+        ),
+        (
+            "qq",
+            {
+                "qq_client_id": "qq-id",
+                "qq_client_secret": "qq-secret",
+                "qq_redirect_uri": "https://example.com/system-auth/qq/callback",
+            },
+            "/system-auth/qq/callback",
+            "qq-network-nonce",
+            "https://example.com/system-auth/qq/callback",
+            "qq-secret",
+        ),
+        (
+            "google",
+            {
+                "google_client_id": "google-id",
+                "google_client_secret": "google-secret",
+                "google_redirect_uri": "https://example.com/system-auth/google/callback",
+            },
+            "/system-auth/google/callback",
+            "google-network-nonce",
+            "https://example.com/system-auth/google/callback",
+            "google-secret",
+        ),
+    ],
+)
+async def test_oauth_network_errors_do_not_echo_client_secret(
+    client,
+    monkeypatch,
+    provider,
+    settings_patch,
+    callback_path,
+    nonce,
+    redirect_uri,
+    secret,
+):
+    import httpx
+    import app.routers.system_auth as system_auth_router
+
+    for key, value in settings_patch.items():
+        monkeypatch.setattr(settings, key, value)
+    state = _make_oauth_state("http://localhost:3000", redirect_uri, nonce=nonce)
+    _set_oauth_nonce_cookie(client, nonce)
+    errors = []
+
+    class _FailingAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, *args, **kwargs):
+            raise httpx.ConnectError(f"connect failed with secret={secret}")
+
+        async def post(self, *args, **kwargs):
+            raise httpx.ConnectError(f"connect failed with secret={secret}")
+
+    monkeypatch.setattr(system_auth_router.httpx, "AsyncClient", _FailingAsyncClient)
+    if hasattr(system_auth_router, "logger"):
+        monkeypatch.setattr(
+            system_auth_router.logger,
+            "error",
+            lambda message, *args: errors.append((message, args)),
+        )
+
+    response = await client.get(
+        f"{callback_path}?code=test-code&state={state}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 502
+    assert secret not in response.text
+    assert errors
+    assert all(secret not in message for message, _args in errors)
+    assert all(secret not in [str(arg) for arg in args] for _message, args in errors)
+
+
+@pytest.mark.asyncio
 async def test_email_config_status_reports_debug_and_smtp(client, monkeypatch):
     monkeypatch.setattr(settings, "debug", True)
     monkeypatch.setattr(settings, "smtp_user", "")

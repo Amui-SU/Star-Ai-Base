@@ -10,6 +10,7 @@ import urllib.parse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import select, delete
 from sqlalchemy.exc import IntegrityError
@@ -709,7 +710,6 @@ def _decode_oauth_state(state: str) -> dict | None:
     import hashlib
     import hmac
     import json
-    from loguru import logger
 
     try:
         payload_b64, sig = state.rsplit(".", 1)
@@ -736,6 +736,14 @@ def _decode_oauth_state(state: str) -> dict | None:
 def _verify_oauth_state(state: str) -> bool:
     """Validate OAuth state signature and expiry."""
     return _decode_oauth_state(state) is not None
+
+
+def _oauth_network_error(provider: str, exc: httpx.HTTPError) -> HTTPException:
+    logger.error(f"{provider} OAuth network request failed: {type(exc).__name__}")
+    return HTTPException(
+        status_code=502,
+        detail=f"Cannot connect to {provider} OAuth service",
+    )
 
 
 def _new_oauth_state_nonce() -> str:
@@ -987,10 +995,7 @@ async def wechat_callback(
             if user_resp.status_code != 200:
                 raise HTTPException(status_code=400, detail="WeChat user info failed")
     except httpx.HTTPError as e:
-        logger.error(f"WeChat OAuth network request failed: {type(e).__name__}: {e}")
-        raise HTTPException(
-            status_code=502, detail=f"Cannot connect to WeChat service: {e}"
-        )
+        raise _oauth_network_error("WeChat", e) from e
     except HTTPException:
         raise
 
@@ -1068,10 +1073,7 @@ async def qq_callback(
             if user_resp.status_code != 200 or user_info.get("ret", 0) != 0:
                 raise HTTPException(status_code=400, detail="QQ user info failed")
     except httpx.HTTPError as e:
-        logger.error(f"QQ OAuth network request failed: {type(e).__name__}: {e}")
-        raise HTTPException(
-            status_code=502, detail=f"Cannot connect to QQ service: {e}"
-        )
+        raise _oauth_network_error("QQ", e) from e
     except HTTPException:
         raise
 
@@ -1175,14 +1177,13 @@ async def google_callback(
                 raise HTTPException(status_code=400, detail="获取 Google 用户信息失败")
             user_info = user_resp.json()
     except httpx.HTTPError as e:
-        logger.error(f"Google OAuth 网络请求失败: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=502, detail=f"无法连接 Google 服务: {e}")
+        raise _oauth_network_error("Google", e) from e
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Google OAuth httpx 阶段异常: {type(e).__name__}: {e}")
+        logger.exception(f"Google OAuth httpx 阶段异常: {type(e).__name__}")
         raise HTTPException(
-            status_code=500, detail=f"Google 登录异常: {type(e).__name__}: {e}"
+            status_code=500, detail=f"Google 登录异常: {type(e).__name__}"
         )
 
     try:
@@ -1241,7 +1242,7 @@ async def google_callback(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Google OAuth 回调异常: {type(e).__name__}: {e}")
+        logger.exception(f"Google OAuth 回调异常: {type(e).__name__}")
         raise HTTPException(
-            status_code=500, detail=f"Google 登录异常: {type(e).__name__}: {e}"
+            status_code=500, detail=f"Google 登录异常: {type(e).__name__}"
         )
