@@ -6,6 +6,7 @@ import {
   OrganizePreviewItem,
   sourceBindingApi,
 } from "@/lib/api";
+import ModalShell from "@/components/ui/ModalShell";
 
 interface Props {
   open: boolean;
@@ -104,87 +105,84 @@ export default function OrganizePreviewModal({
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-card organize-modal"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="organize-header">
-          <div>
-            <div className="modal-title">一键整理预览</div>
-            <div className="modal-subtitle">
-              默认收藏夹：{defaultFolderTitle}
-            </div>
-          </div>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={handleClean}
-            disabled={cleaning || loading || !preview}
-          >
-            {cleaning ? "清理中..." : "清理失效"}
-          </button>
+    <ModalShell
+      cardClassName="organize-modal"
+      onClose={onClose}
+      eventType="click"
+    >
+      <div className="organize-header">
+        <div>
+          <div className="modal-title">一键整理预览</div>
+          <div className="modal-subtitle">默认收藏夹：{defaultFolderTitle}</div>
         </div>
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={handleClean}
+          disabled={cleaning || loading || !preview}
+        >
+          {cleaning ? "清理中..." : "清理失效"}
+        </button>
+      </div>
 
-        {preview && (
-          <div className="organize-stats">
-            <span>总计 {stats.total}</span>
-            <span>已匹配 {stats.matched}</span>
-            <span>未匹配 {stats.unmatched}</span>
-          </div>
-        )}
+      {preview && (
+        <div className="organize-stats">
+          <span>总计 {stats.total}</span>
+          <span>已匹配 {stats.matched}</span>
+          <span>未匹配 {stats.unmatched}</span>
+        </div>
+      )}
 
-        <div className="organize-list">
-          {loading ? (
-            <div className="organize-empty">正在生成预览...</div>
-          ) : preview ? (
-            items.map((item) => (
-              <div key={item.bvid} className="organize-item">
-                <div className="organize-info">
-                  <div className="organize-title" title={item.title}>
-                    {item.title}
-                  </div>
-                  <div className="organize-meta">
-                    <span>{item.bvid}</span>
-                    {item.reason && <span>· {item.reason}</span>}
-                  </div>
+      <div className="organize-list">
+        {loading ? (
+          <div className="organize-empty">正在生成预览...</div>
+        ) : preview ? (
+          items.map((item) => (
+            <div key={item.bvid} className="organize-item">
+              <div className="organize-info">
+                <div className="organize-title" title={item.title}>
+                  {item.title}
                 </div>
-                <div className="organize-select">
-                  <select
-                    value={item.target_folder_id ?? ""}
-                    onChange={(e) => updateTarget(item.bvid, e.target.value)}
-                  >
-                    <option value="">留在 {defaultFolderTitle}</option>
-                    {folders.map((folder) => (
-                      <option key={folder.media_id} value={folder.media_id}>
-                        {folder.title}
-                      </option>
-                    ))}
-                  </select>
+                <div className="organize-meta">
+                  <span>{item.bvid}</span>
+                  {item.reason && <span>· {item.reason}</span>}
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="organize-empty">预览失败，请重试</div>
-          )}
-        </div>
-
-        {(errorMessage || message) && (
-          <div className="organize-message">{errorMessage || message}</div>
+              <div className="organize-select">
+                <select
+                  value={item.target_folder_id ?? ""}
+                  onChange={(e) => updateTarget(item.bvid, e.target.value)}
+                >
+                  <option value="">留在 {defaultFolderTitle}</option>
+                  {folders.map((folder) => (
+                    <option key={folder.media_id} value={folder.media_id}>
+                      {folder.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="organize-empty">预览失败，请重试</div>
         )}
-
-        <div className="organize-actions">
-          <button className="btn btn-outline" onClick={onClose}>
-            取消
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleExecute}
-            disabled={submitting || loading || !preview}
-          >
-            {submitting ? "移动中..." : "确认移动"}
-          </button>
-        </div>
       </div>
-    </div>
+
+      {(errorMessage || message) && (
+        <div className="organize-message">{errorMessage || message}</div>
+      )}
+
+      <div className="organize-actions">
+        <button className="btn btn-outline" onClick={onClose}>
+          取消
+        </button>
+        <button
+          className="btn btn-primary"
+          onClick={handleExecute}
+          disabled={submitting || loading || !preview}
+        >
+          {submitting ? "移动中..." : "确认移动"}
+        </button>
+      </div>
+    </ModalShell>
   );
 }

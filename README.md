@@ -410,11 +410,11 @@ Embedding 与 ASR 仍以项目当前实现为准（默认与 DashScope 体系配
 ├── tests/                    # 自动化测试与诊断脚本（见下文运行方式）
 ├── requirements.txt
 ├── setup_dependencies.ps1
-├── setup_dependencies.bat
-├── start.bat
-├── stop.bat
-├── status.bat
-├── logs.bat
+├── 安装依赖.bat
+├── 启动.bat
+├── 停止.bat
+├── 状态.bat
+├── 日志.bat
 └── README.md
 ```
 
@@ -484,10 +484,11 @@ python tests/sync_cache_vectors.py
 
 ## 相关文档
 
-| 文档                                                                 | 内容                             |
-| -------------------------------------------------------------------- | -------------------------------- |
-| [docs/功能大纲.md](docs/功能大纲.md)                                 | 功能模块、接口索引、用户路径说明 |
-| [docs/frontend-ui-optimization.md](docs/frontend-ui-optimization.md) | 前端交互与 UI 优化记录           |
+| 文档                                                     | 内容                               |
+| -------------------------------------------------------- | ---------------------------------- |
+| [docs/功能大纲.md](docs/功能大纲.md)                     | 功能模块、接口索引、用户路径说明   |
+| [docs/大版本完善执行方案.md](docs/大版本完善执行方案.md) | 大版本维护路线、执行记录与风险清单 |
+| [docs/移动端发布检查清单.md](docs/移动端发布检查清单.md) | APK 发布前配置、网络与真机验证清单 |
 
 ---
 
@@ -512,7 +513,7 @@ A：新版后端会缓存二维码 PNG，并在 `电脑局域网地址` 接口�
 A：复制仓库根目录的 `.env.example` 为 `.env.local`，再按需填写模型、ASR、联网搜索、OAuth 或邮件配置。
 
 **Q：启动器提示缺依赖，或用的不是我想用的 Python？**
-A：先运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 doctor` 查看诊断，再运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 install` 或双击 **`setup_dependencies.bat`** 安装依赖。若系统里有多个 Python，可在用户环境变量中设置 **`BILIBILI_RAG_PYTHON`** 为目标解释器完整路径。
+A：先运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 doctor` 查看诊断，再运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1 install` 或双击 **`安装依赖.bat`** 安装依赖。若系统里有多个 Python，可在用户环境变量中设置 **`BILIBILI_RAG_PYTHON`** 为目标解释器完整路径。
 
 ---
 

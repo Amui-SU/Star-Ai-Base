@@ -8,6 +8,7 @@ import {
   systemAuthApi,
   type SystemUser,
 } from "@/lib/api";
+import ModalShell from "@/components/ui/ModalShell";
 
 interface Props {
   user: SystemUser;
@@ -336,48 +337,43 @@ export default function UserMenu({
         (lanAddress.qr_data_url ||
           lanAddress.qr_image_url ||
           lanAddress.qr_url) && (
-          <div
-            className="modal-backdrop"
-            onMouseDown={() => setShowLanQr(false)}
+          <ModalShell
+            cardClassName="local-connection-qr-card"
+            onClose={() => setShowLanQr(false)}
           >
-            <div
-              className="modal-card local-connection-qr-card"
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              <div className="local-connection-qr-head">
-                <div>
-                  <div className="modal-title text-left">手机扫码连接</div>
-                  <div className="modal-subtitle text-left">
-                    打开手机端连接设置，点“扫码”识别这个二维码。
-                  </div>
+            <div className="local-connection-qr-head">
+              <div>
+                <div className="modal-title text-left">手机扫码连接</div>
+                <div className="modal-subtitle text-left">
+                  打开手机端连接设置，点“扫码”识别这个二维码。
                 </div>
-                <button
-                  type="button"
-                  className="provider-config-close"
-                  onClick={() => setShowLanQr(false)}
-                  aria-label="关闭手机扫码连接"
-                >
-                  ×
-                </button>
               </div>
-
-              <Image
-                className="local-connection-qr-image"
-                src={
-                  lanAddress.qr_data_url ||
-                  lanAddress.qr_image_url ||
-                  lanAddress.qr_url ||
-                  ""
-                }
-                alt="手机连接二维码"
-                width={220}
-                height={220}
-              />
-              <div className="local-connection-qr-address">
-                {lanAddress.api_url}
-              </div>
+              <button
+                type="button"
+                className="provider-config-close"
+                onClick={() => setShowLanQr(false)}
+                aria-label="关闭手机扫码连接"
+              >
+                ×
+              </button>
             </div>
-          </div>
+
+            <Image
+              className="local-connection-qr-image"
+              src={
+                lanAddress.qr_data_url ||
+                lanAddress.qr_image_url ||
+                lanAddress.qr_url ||
+                ""
+              }
+              alt="手机连接二维码"
+              width={220}
+              height={220}
+            />
+            <div className="local-connection-qr-address">
+              {lanAddress.api_url}
+            </div>
+          </ModalShell>
         )}
     </div>
   );

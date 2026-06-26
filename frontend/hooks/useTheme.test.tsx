@@ -34,7 +34,9 @@ describe("theme hooks", () => {
     render(<ThemeHarness />);
 
     expect(await screen.findByRole("button", { name: "light" })).toBeVisible();
-    expect(document.documentElement).toHaveClass("light");
+    await waitFor(() => {
+      expect(document.documentElement).toHaveClass("light");
+    });
 
     await user.click(screen.getByRole("button"));
 

@@ -41,3 +41,23 @@ def test_frontend_provider_presets_are_shared():
     assert "const PROVIDERS" not in api_accounts_panel
     assert "const builtInProviders" not in chat_panel
     assert "const providerLogoMap" not in chat_panel
+
+
+def test_common_modals_use_shared_shell():
+    project_root = Path(__file__).resolve().parents[1]
+    modal_shell = project_root / "frontend" / "components" / "ui" / "ModalShell.tsx"
+
+    assert modal_shell.exists()
+    for relative_path in [
+        "frontend/components/AdminUsersPanel.tsx",
+        "frontend/components/ApiAccountsPanel.tsx",
+        "frontend/components/ImportModal.tsx",
+        "frontend/components/LocalConnectionSettings.tsx",
+        "frontend/components/OrganizePreviewModal.tsx",
+        "frontend/components/UserMenu.tsx",
+        "frontend/components/chat/ModelConfigModal.tsx",
+        "frontend/components/chat/WebSearchConfigModal.tsx",
+    ]:
+        source = (project_root / relative_path).read_text(encoding="utf-8")
+        assert "@/components/ui/ModalShell" in source
+        assert 'className="modal-backdrop' not in source

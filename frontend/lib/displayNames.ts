@@ -1,18 +1,22 @@
 const CORRUPTED_PLACEHOLDER_RE = /^[?\uFF1F\uFFFD]+$/;
 
-export function isMissingDisplayText(value?: string | null) {
+function cleanDisplayText(value?: string | null) {
   const text = value?.trim() ?? "";
-  return !text || CORRUPTED_PLACEHOLDER_RE.test(text);
+  return !text || CORRUPTED_PLACEHOLDER_RE.test(text) ? null : text;
+}
+
+export function isMissingDisplayText(value?: string | null) {
+  return cleanDisplayText(value) === null;
 }
 
 export function displayKnowledgeBaseName(value?: string | null) {
-  return isMissingDisplayText(value) ? "未命名知识库" : value!.trim();
+  return cleanDisplayText(value) ?? "未命名知识库";
 }
 
 export function displayFolderTitle(value?: string | null) {
-  return isMissingDisplayText(value) ? "未命名收藏夹" : value!.trim();
+  return cleanDisplayText(value) ?? "未命名收藏夹";
 }
 
 export function displayVideoTitle(value?: string | null) {
-  return isMissingDisplayText(value) ? "未命名视频" : value!.trim();
+  return cleanDisplayText(value) ?? "未命名视频";
 }

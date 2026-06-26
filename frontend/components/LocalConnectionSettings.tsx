@@ -10,6 +10,7 @@ import {
 } from "@/lib/localConnection";
 import { scanLocalConnectionQrCode } from "@/lib/localConnectionScanner";
 import { requestWithNativeFallback } from "@/lib/nativeHttp";
+import ModalShell from "@/components/ui/ModalShell";
 
 const CONNECTION_SAVED_MESSAGE =
   "\u8fde\u63a5\u53ef\u7528\uff0c\u5df2\u4fdd\u5b58";
@@ -109,79 +110,75 @@ export default function LocalConnectionSettings() {
   ) : null;
 
   const settingsModalNode = open ? (
-    <div
-      className="modal-backdrop local-connection-modal-backdrop"
-      onMouseDown={() => setOpen(false)}
+    <ModalShell
+      cardClassName="local-connection-modal"
+      backdropClassName="local-connection-modal-backdrop"
+      onClose={() => setOpen(false)}
     >
-      <div
-        className="modal-card local-connection-modal"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="local-connection-head">
-          <div>
-            <div className="modal-title text-left">连接电脑端</div>
-            <div className="modal-subtitle text-left">
-              换局域网后只需要改这里的电脑地址。
-            </div>
+      <div className="local-connection-head">
+        <div>
+          <div className="modal-title text-left">连接电脑端</div>
+          <div className="modal-subtitle text-left">
+            换局域网后只需要改这里的电脑地址。
           </div>
-          <button
-            type="button"
-            className="provider-config-close"
-            onClick={() => setOpen(false)}
-            aria-label="关闭连接设置"
-          >
-            ×
-          </button>
         </div>
-
-        <label className="local-connection-field">
-          <span>电脑端地址</span>
-          <input
-            className="input local-connection-input"
-            value={address}
-            onChange={(event) => setAddress(event.target.value)}
-            placeholder="192.168.1.200 或 http://192.168.1.200:8000"
-          />
-        </label>
-
-        {message && (
-          <div
-            className={`local-connection-message ${
-              messageKind === "error" ? "local-connection-message-error" : ""
-            }`}
-            role="status"
-          >
-            {message}
-          </div>
-        )}
-
-        <div className="local-connection-actions">
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={() => void scanAndSave()}
-            disabled={scanning || testing}
-          >
-            {scanning ? "扫码中..." : "扫码"}
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={() => setOpen(false)}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void testAndSave()}
-            disabled={testing || !address.trim()}
-          >
-            {testing ? "测试中..." : "测试并保存"}
-          </button>
-        </div>
+        <button
+          type="button"
+          className="provider-config-close"
+          onClick={() => setOpen(false)}
+          aria-label="关闭连接设置"
+        >
+          ×
+        </button>
       </div>
-    </div>
+
+      <label className="local-connection-field">
+        <span>电脑端地址</span>
+        <input
+          className="input local-connection-input"
+          value={address}
+          onChange={(event) => setAddress(event.target.value)}
+          placeholder="192.168.1.200 或 http://192.168.1.200:8000"
+        />
+      </label>
+
+      {message && (
+        <div
+          className={`local-connection-message ${
+            messageKind === "error" ? "local-connection-message-error" : ""
+          }`}
+          role="status"
+        >
+          {message}
+        </div>
+      )}
+
+      <div className="local-connection-actions">
+        <button
+          type="button"
+          className="btn btn-outline"
+          onClick={() => void scanAndSave()}
+          disabled={scanning || testing}
+        >
+          {scanning ? "扫码中..." : "扫码"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-outline"
+          onClick={() => setOpen(false)}
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => void testAndSave()}
+          disabled={testing || !address.trim()}
+        >
+          {testing ? "测试中..." : "测试并保存"}
+        </button>
+      </div>
+    </ModalShell>
   ) : null;
 
   return (
