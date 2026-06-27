@@ -242,3 +242,69 @@ def test_global_styles_delegate_knowledge_sidebar_styles_to_feature_file():
         "\n.knowledge-active-hint {",
     ]:
         assert selector not in globals_css
+
+
+def test_global_styles_delegate_chat_styles_to_feature_file():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    chat_css = project_root / "frontend" / "app" / "styles" / "chat.css"
+
+    assert chat_css.exists()
+    assert '@import "./styles/chat.css";' in globals_css
+    for selector in [
+        "\n.progress {",
+        "\n.code-block-wrap {",
+        "\n.thinking-process {",
+        "\n.message {",
+        "\n.markdown {",
+        "\n.web-search-live-status {",
+        "\n.web-search-status {",
+        "\n.message-actions {",
+        "\n.empty-state {",
+        "\n.prompt-grid {",
+    ]:
+        assert selector not in globals_css
+
+
+def test_global_styles_delegate_chat_control_styles_to_feature_file():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    controls_css = project_root / "frontend" / "app" / "styles" / "chat-controls.css"
+
+    assert controls_css.exists()
+    assert '@import "./styles/chat-controls.css";' in globals_css
+    for selector in [
+        "\n.composer-shell {",
+        "\n.composer-input {",
+        "\n.scope-picker {",
+        "\n.scope-picker-trigger {",
+        "\n.model-status-card {",
+        "\n.model-provider-menu {",
+        "\n.input {",
+        "\n.btn {",
+        "\n.status-pill {",
+    ]:
+        assert selector not in globals_css
+
+
+def test_global_styles_delegate_import_organize_styles_to_feature_file():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    import_css = project_root / "frontend" / "app" / "styles" / "import-organize.css"
+
+    assert import_css.exists()
+    assert '@import "./styles/import-organize.css";' in globals_css
+    for selector in [
+        "\n.import-modal {",
+        "\n.import-method-card {",
+        "\n.import-local-video-card {",
+        "\n.organize-modal {",
+        "\n.organize-item {",
+    ]:
+        assert selector not in globals_css
