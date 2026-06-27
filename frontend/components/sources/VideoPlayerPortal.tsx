@@ -29,6 +29,7 @@ export default function VideoPlayerPortal({
             {video.title}
           </div>
           <button
+            type="button"
             className="btn btn-ghost btn-sm"
             onClick={onClose}
             title="关闭"

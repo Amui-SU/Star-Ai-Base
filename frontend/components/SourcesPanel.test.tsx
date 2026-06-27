@@ -255,6 +255,9 @@ describe("SourcesPanel", () => {
       "src",
       expect.stringContaining("bvid=BV1PLAY"),
     );
-    expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭" })).toHaveAttribute(
+      "type",
+      "button",
+    );
   });
 });

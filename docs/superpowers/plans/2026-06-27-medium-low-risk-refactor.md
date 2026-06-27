@@ -133,3 +133,37 @@ Run:
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-before-commit.ps1`
 
 Expected: backend, frontend lint, frontend tests, and build all pass.
+
+### Task 5: Adversarial Review Follow-ups
+
+**Files:**
+
+- Modify: `frontend/package.json`
+- Modify: `frontend/package-lock.json`
+- Modify: `frontend/components/SourcesPanel.test.tsx`
+- Modify: `frontend/components/sources/VideoPlayerPortal.tsx`
+- Modify: `docs/大版本完善执行方案.md`
+
+- [x] **Step 1: Reproduce dependency audit risk**
+
+Run: `cd frontend; npm audit --audit-level=moderate`
+
+Expected: FAIL before remediation with existing Next.js/transitive dependency advisories.
+
+- [x] **Step 2: Apply minimal dependency remediation**
+
+Upgrade `next` and `eslint-config-next` to `16.2.9`, run non-force `npm audit fix`, and add a single-package `postcss` override to keep Next's internal PostCSS on the audited-safe `8.5.15`.
+
+- [x] **Step 3: Verify dependency audit**
+
+Run: `cd frontend; npm audit --audit-level=moderate`
+
+Expected: PASS with 0 vulnerabilities.
+
+- [x] **Step 4: Harden player close button test-first**
+
+Add a failing assertion that the player close button has `type="button"`, then add the attribute in `VideoPlayerPortal`.
+
+Run: `cd frontend; npm test -- SourcesPanel.test.tsx`
+
+Expected: PASS.
