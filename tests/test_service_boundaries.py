@@ -38,6 +38,47 @@ def test_chat_router_does_not_keep_mutable_current_llm_provider():
     assert "_current_llm_provider" not in source
 
 
+def test_chat_router_delegates_configuration_boundaries_to_service():
+    project_root = Path(__file__).resolve().parents[1]
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    chat_module = ast.parse(chat_source)
+
+    declared_names = set()
+    for node in chat_module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            declared_names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    declared_names.add(target.id)
+
+    assert (project_root / "app/services/chat_config.py").exists()
+    assert "from app.services.chat_config import" in chat_source
+    assert declared_names.isdisjoint(
+        {
+            "PROVIDER_META",
+            "PROVIDER_ENV_FIELDS",
+            "SETTINGS_FIELD_BY_ENV",
+            "PROVIDER_THINKING_SETTINGS_FIELDS",
+            "PROVIDER_THINKING_TEMPLATES",
+            "SUPPORTED_WEB_SEARCH_PROVIDERS",
+            "SUPPORTED_TAVILY_SEARCH_DEPTHS",
+            "_normalize_provider",
+            "_current_default_llm_provider",
+            "_resolve_llm_config",
+            "_get_provider_thinking_template",
+            "_parse_thinking_config",
+            "_get_provider_thinking_config",
+            "_env_file_path",
+            "_read_env_values",
+            "_write_env_values",
+            "_normalize_web_search_provider",
+            "_normalize_tavily_search_depth",
+            "_web_search_config_response",
+        }
+    )
+
+
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = Path(__file__).resolve().parents[1]
     source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")

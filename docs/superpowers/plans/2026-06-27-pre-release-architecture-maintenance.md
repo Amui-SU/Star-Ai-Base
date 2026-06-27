@@ -81,7 +81,7 @@ Expected: PASS.
 - Modify: `tests/test_service_boundaries.py`
 - Verify: `tests/test_chat_config_permissions.py`, `tests/test_chat_user_credentials.py`
 
-- [ ] **Step 1: Write the failing boundary test**
+- [x] **Step 1: Write the failing boundary test**
 
 Add a service-boundary test that asserts provider metadata, provider env mappings, settings env writes, and web-search normalization are no longer declared in `app/routers/chat.py`.
 
@@ -89,11 +89,11 @@ Run: `python -m pytest tests/test_service_boundaries.py -q -k chat_config`
 
 Expected: FAIL because config helpers are still in the router.
 
-- [ ] **Step 2: Move config helpers into service**
+- [x] **Step 2: Move config helpers into service**
 
 Move only configuration metadata and pure/persistence helpers into `app/services/chat_config.py`. Keep FastAPI route handlers in `chat.py`.
 
-- [ ] **Step 3: Verify route behavior**
+- [x] **Step 3: Verify route behavior**
 
 Run:
 
