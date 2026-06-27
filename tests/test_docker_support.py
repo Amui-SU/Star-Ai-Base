@@ -32,3 +32,21 @@ def test_docker_support_files_define_backend_frontend_and_compose():
     ignored = dockerignore.read_text(encoding="utf-8")
     for entry in [".env.local", "data/", "logs/", "frontend/node_modules/"]:
         assert entry in ignored
+
+
+def test_production_docs_require_gateway_verification_code_rate_limit():
+    project_root = Path(__file__).resolve().parents[1]
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    release_checklist = (project_root / "docs" / "移动端发布检查清单.md").read_text(
+        encoding="utf-8"
+    )
+    maintenance_plan = (project_root / "docs" / "大版本完善执行方案.md").read_text(
+        encoding="utf-8"
+    )
+    combined = "\n".join([readme, release_checklist, maintenance_plan])
+
+    assert "POST /system-auth/send-code" in combined
+    assert "网关限流" in combined or "反向代理限流" in combined
+    assert "X-Forwarded-For" in combined
+    assert "真实客户端 IP" in combined
+    assert "per-IP" in combined

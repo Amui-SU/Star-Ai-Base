@@ -308,3 +308,30 @@ def test_global_styles_delegate_import_organize_styles_to_feature_file():
         "\n.organize-item {",
     ]:
         assert selector not in globals_css
+
+
+def test_global_styles_delegate_residual_feature_styles_to_feature_files():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    demo_css = project_root / "frontend" / "app" / "styles" / "demo.css"
+
+    assert demo_css.exists()
+    assert '@import "./styles/demo.css";' in globals_css
+    for selector in [
+        "\n.user-message-actions {",
+        "\n.empty-hero {",
+        "\n.empty-hero-title {",
+        "\n.empty-hero-copy {",
+        "\n.kb-subtle-stat {",
+        "\n.glass-action-btn {",
+        "\n.demo-modal {",
+        "\n.demo-grid {",
+        "\n.demo-preview {",
+        "\n.demo-sources {",
+        "\n.demo-answer {",
+        "\n.demo-actions {",
+        "\n@keyframes fadeUp",
+    ]:
+        assert selector not in globals_css

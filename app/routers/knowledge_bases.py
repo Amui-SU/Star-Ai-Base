@@ -2,7 +2,6 @@ import asyncio
 import inspect
 import json
 import re
-import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -42,6 +41,7 @@ from app.models import (
     Workspace,
 )
 from app.services.folder_ingestion import sync_folder as _sync_folder
+from app.services.ingestion_tasks import build_status_payload, create_ingestion_task
 from app.services.rag_runtime import get_rag_service
 from app.routers.chat import (
     LLMToolRunResult,
@@ -1158,18 +1158,14 @@ async def build_knowledge_base(
     except Exception:
         raise HTTPException(status_code=500, detail="凭据解密失败")
 
-    task_id = str(uuid.uuid4())
-    task = IngestionTask(
-        task_id=task_id,
+    task_id = await create_ingestion_task(
+        db,
         workspace_id=current_workspace.id,
         knowledge_base_id=knowledge_base.id,
         source_binding_id=binding.id,
-        created_by=current_user.id,
-        status="pending",
+        user_id=current_user.id,
         current_step="初始化中...",
     )
-    db.add(task)
-    await db.commit()
 
     bili = bilibili_service_from_cookies(cred_payload, BilibiliService)
     asr_service = ASRService()
@@ -1293,17 +1289,7 @@ async def get_build_status(
         raise HTTPException(status_code=404, detail="任务不存在")
     if task.knowledge_base_id != knowledge_base.id:
         raise HTTPException(status_code=404, detail="任务不属于当前知识库")
-    return {
-        "task_id": task.task_id,
-        "status": task.status,
-        "progress": task.progress,
-        "current_step": task.current_step,
-        "total_videos": task.total_items,
-        "processed_videos": task.processed_items,
-        "message": task.error_message or "",
-        "workspace_id": task.workspace_id,
-        "knowledge_base_id": task.knowledge_base_id,
-    }
+    return build_status_payload(task)
 
 
 @router.post("/{knowledge_base_id}/search", response_model=KnowledgeBaseSearchResponse)

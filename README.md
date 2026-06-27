@@ -284,6 +284,8 @@ docker compose up --build
 
 Compose 默认读取 `.env.example`，如果存在 `.env.local` 会用其中的真实密钥覆盖模板值。启动后前端访问 [http://localhost:3000](http://localhost:3000)，后端健康检查访问 [http://localhost:8000/health](http://localhost:8000/health)。
 
+生产部署时，验证码发送接口必须叠加网关限流或反向代理限流：对 `POST /system-auth/send-code` 按真实客户端 IP 做 per-IP 频率限制，并确保反向代理向后端传递可信的 `X-Forwarded-For` 或等价真实客户端 IP。应用内已有数据库持久化的 IP 窗口计数，用于抵抗多 worker 或进程重启绕过；外层网关限流用于在请求进入应用前吸收暴力发送和短信/邮件资源滥用。初始建议策略是同一真实客户端 IP 每分钟不超过 3 次，生产可结合实际 SMTP 成本与误伤情况调整。
+
 ---
 
 ## 手机端 APK / 局域网连接

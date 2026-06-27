@@ -7,6 +7,73 @@ from app.models import IngestionTask
 
 
 @pytest.mark.asyncio
+async def test_create_ingestion_task_persists_standard_defaults(db_session_factory):
+    from app.services.ingestion_tasks import create_ingestion_task
+
+    async with db_session_factory() as session:
+        task_id = await create_ingestion_task(
+            session,
+            workspace_id=3,
+            knowledge_base_id=9,
+            user_id=5,
+            source_binding_id=7,
+            current_step="Preparing import",
+            total_items=2,
+        )
+
+    async with db_session_factory() as session:
+        task = (
+            (
+                await session.execute(
+                    select(IngestionTask).where(IngestionTask.task_id == task_id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+
+    assert task.workspace_id == 3
+    assert task.knowledge_base_id == 9
+    assert task.source_binding_id == 7
+    assert task.created_by == 5
+    assert task.status == "pending"
+    assert task.progress == 0
+    assert task.current_step == "Preparing import"
+    assert task.total_items == 2
+    assert task.processed_items == 0
+
+
+def test_build_status_payload_preserves_existing_response_keys():
+    from app.services.ingestion_tasks import build_status_payload
+
+    task = IngestionTask(
+        task_id="status-task",
+        workspace_id=3,
+        knowledge_base_id=9,
+        source_binding_id=None,
+        created_by=5,
+        status="running",
+        progress=42,
+        current_step="Indexing",
+        total_items=8,
+        processed_items=4,
+        error_message=None,
+    )
+
+    assert build_status_payload(task) == {
+        "task_id": "status-task",
+        "status": "running",
+        "progress": 42,
+        "current_step": "Indexing",
+        "total_videos": 8,
+        "processed_videos": 4,
+        "message": "",
+        "workspace_id": 3,
+        "knowledge_base_id": 9,
+    }
+
+
+@pytest.mark.asyncio
 async def test_mark_stale_active_tasks_as_interrupted(db_session_factory):
     from app.services.ingestion_tasks import mark_stale_active_tasks_interrupted
 

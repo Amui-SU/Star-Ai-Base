@@ -8,6 +8,7 @@
 @import "./styles/chat.css";
 @import "./styles/chat-controls.css";
 @import "./styles/import-organize.css";
+@import "./styles/demo.css";
 
 /* 閳光偓閳光偓 濞ｈ精澹婃稉濠氼暯閿涘牆顧侀梻?姒涙顓婚敍澶嗘敘閳光偓 Claude 妞嬪孩鐗?閳光偓閳光偓 */
 :root {
@@ -165,171 +166,6 @@ a {
   text-decoration: none;
 }
 
-/* 閳光偓閳光偓 App Shell 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 娑撹鍞寸€圭懓灏?閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Workspace 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Resizer 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Sidebar 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Panel 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Chat Embedded 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Scrollbar 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Sources Scroll 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Sources Panel 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Chat Scroll 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Chat Window 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Folder 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Video 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Progress 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Message 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Markdown 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Sources & Thinking 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Message Actions 閳光偓閳光偓 */
-
-.user-message-actions {
-  margin-top: 4px;
-  width: auto;
-  justify-content: flex-end;
-}
-
-/* 閳光偓閳光偓 Inline Edit 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Empty State 閳光偓閳光偓 */
-
-.empty-hero {
-  max-width: 560px;
-}
-
-.empty-hero-title {
-  color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(28px, 4.6vw, 44px);
-  font-weight: 500;
-  line-height: 1.08;
-  letter-spacing: -0.045em;
-}
-
-.empty-hero-copy {
-  max-width: 430px;
-  margin: 9px auto 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-/* 閳光偓閳光偓 Composer 閳光偓閳光偓 */
-
-.kb-subtle-stat {
-  display: block;
-  margin-left: 12px;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1;
-  opacity: 0.72;
-}
-
-/* 閳光偓閳光偓 Input 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Button 閳光偓閳光偓 */
-
-/* Local connection settings are isolated so public deployments can remove them. */
-
-.glass-action-btn {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--ink-soft);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(10px) saturate(120%);
-  box-shadow:
-    0 10px 22px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.glass-action-btn:hover {
-  transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.1);
-  border-color: var(--border-strong);
-  box-shadow:
-    0 14px 28px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.glass-action-btn:disabled {
-  opacity: 0.58;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-/* Send button states */
-
-/* 閳光偓閳光偓 Import 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Modal 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Organize 閳光偓閳光偓 */
-
-/* 閳光偓閳光偓 Demo 閳光偓閳光偓 */
-.demo-modal {
-  width: min(520px, 92vw);
-  padding: 24px;
-}
-
-.demo-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-}
-
-.demo-preview {
-  display: grid;
-  gap: 10px;
-}
-.demo-sources {
-  margin-top: 4px;
-}
-
-.demo-answer {
-  background: rgba(255, 255, 255, 0.92);
-  border-color: rgba(0, 0, 0, 0.12);
-  color: #111111;
-}
-
-.demo-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 6px;
-}
-
-/* 閳光偓閳光偓 Animations 閳光偓閳光偓 */
-@keyframes fadeUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* 閳光偓閳光偓 Responsive 閳光偓閳光偓 */
 @media (max-width: 1024px) {
   html,
   body {
@@ -339,39 +175,11 @@ a {
 }
 /* 閳光偓閳光偓 Mobile Workspace Polish 閳光偓閳光偓 */
 
-@media (max-width: 640px) {
-  .empty-hero-title {
-    font-size: clamp(24px, 9vw, 34px);
-  }
-
-  .empty-hero-copy {
-    font-size: 11px;
-  }
-}
-
 /* Mobile chat shell refinements */
 @media (max-width: 1024px) {
-  .empty-hero-title {
-    font-size: clamp(20px, 5.7vw, 27px);
-    line-height: 1.04;
-  }
-
-  .empty-hero-copy {
-    max-width: 18em;
-    margin-top: 7px;
-    font-size: 11px;
-    line-height: 1.58;
-  }
-
   nextjs-portal,
   [data-nextjs-dev-overlay],
   [data-nextjs-toast] {
     display: none !important;
-  }
-}
-
-@media (max-width: 640px) {
-  .empty-hero-title {
-    font-size: clamp(20px, 5.4vw, 24px);
   }
 }

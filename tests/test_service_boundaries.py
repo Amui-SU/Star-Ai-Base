@@ -114,3 +114,24 @@ def test_database_legacy_migration_entrypoint_has_no_nested_helpers():
     ]
 
     assert nested_helpers == []
+
+
+def test_ingestion_task_persistence_and_status_mapping_live_in_service():
+    project_root = Path(__file__).resolve().parents[1]
+    service_source = (project_root / "app/services/ingestion_tasks.py").read_text(
+        encoding="utf-8"
+    )
+    imports_source = (project_root / "app/routers/imports.py").read_text(
+        encoding="utf-8"
+    )
+    knowledge_bases_source = (
+        project_root / "app/routers/knowledge_bases.py"
+    ).read_text(encoding="utf-8")
+
+    assert "def build_status_payload" in service_source
+    assert "async def create_ingestion_task" in service_source
+    assert "from app.services.ingestion_tasks import" in imports_source
+    assert "from app.services.ingestion_tasks import" in knowledge_bases_source
+    assert "async def _create_import_task" not in imports_source
+    assert "return build_status_payload(task)" in knowledge_bases_source
+    assert '"processed_videos": task.processed_items' not in knowledge_bases_source

@@ -28,6 +28,7 @@ from app.models import ContentSource, SystemUser, VideoCache, VideoContent, Work
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
+from app.services.ingestion_tasks import create_ingestion_task
 from app.services.rag_runtime import get_rag_service
 from app.time_utils import utc_now
 
@@ -123,32 +124,6 @@ async def _get_owned_knowledge_base(
     return knowledge_base
 
 
-async def _create_import_task(
-    db: AsyncSession,
-    *,
-    workspace_id: int,
-    knowledge_base_id: int,
-    user_id: int,
-    current_step: str,
-) -> str:
-    task_id = str(uuid.uuid4())
-    task = IngestionTask(
-        task_id=task_id,
-        workspace_id=workspace_id,
-        knowledge_base_id=knowledge_base_id,
-        source_binding_id=None,
-        created_by=user_id,
-        status="pending",
-        progress=0,
-        current_step=current_step,
-        total_items=1,
-        processed_items=0,
-    )
-    db.add(task)
-    await db.commit()
-    return task_id
-
-
 @router.get("/methods", response_model=ImportMethodsResponse)
 async def list_import_methods() -> ImportMethodsResponse:
     return ImportMethodsResponse(
@@ -207,12 +182,13 @@ async def import_url(
         payload.knowledge_base_id,
         current_workspace.id,
     )
-    task_id = await _create_import_task(
+    task_id = await create_ingestion_task(
         db,
         workspace_id=current_workspace.id,
         knowledge_base_id=knowledge_base.id,
         user_id=current_user.id,
         current_step=f"准备导入 {bvid}",
+        total_items=1,
     )
 
     background_tasks.add_task(
@@ -262,12 +238,13 @@ async def import_local_video(
     finally:
         await file.close()
 
-    task_id = await _create_import_task(
+    task_id = await create_ingestion_task(
         db,
         workspace_id=current_workspace.id,
         knowledge_base_id=knowledge_base.id,
         user_id=current_user.id,
         current_step=f"准备导入 {video_title}",
+        total_items=1,
     )
 
     background_tasks.add_task(

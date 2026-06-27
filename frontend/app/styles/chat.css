@@ -417,6 +417,12 @@ html.light .web-search-status.failed {
   gap: 8px;
 }
 
+.user-message-actions {
+  margin-top: 4px;
+  width: auto;
+  justify-content: flex-end;
+}
+
 .message-action-btn {
   width: 26px;
   height: 26px;
@@ -540,6 +546,27 @@ html.light .web-search-status.failed {
   justify-content: center;
 }
 
+.empty-hero {
+  max-width: 560px;
+}
+
+.empty-hero-title {
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(28px, 4.6vw, 44px);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+.empty-hero-copy {
+  max-width: 430px;
+  margin: 9px auto 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
 .prompt-grid {
   display: grid;
   gap: 9px;
@@ -583,6 +610,14 @@ html.light .prompt-chip {
 @media (max-width: 640px) {
   .prompt-grid {
     display: none;
+  }
+
+  .empty-hero-title {
+    font-size: clamp(24px, 9vw, 34px);
+  }
+
+  .empty-hero-copy {
+    font-size: 11px;
   }
 }
 
@@ -630,6 +665,18 @@ html.light .prompt-chip {
     padding: 10px 10px 14px;
     margin: 0 auto;
   }
+
+  .empty-hero-title {
+    font-size: clamp(20px, 5.7vw, 27px);
+    line-height: 1.04;
+  }
+
+  .empty-hero-copy {
+    max-width: 18em;
+    margin-top: 7px;
+    font-size: 11px;
+    line-height: 1.58;
+  }
 }
 
 @media (max-width: 640px) {
@@ -639,6 +686,10 @@ html.light .prompt-chip {
 
   .empty-state {
     min-height: calc(100dvh - 176px);
+  }
+
+  .empty-hero-title {
+    font-size: clamp(20px, 5.4vw, 24px);
   }
 }
 
