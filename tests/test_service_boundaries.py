@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 
@@ -51,3 +52,24 @@ def test_system_auth_router_uses_logger_for_tracebacks():
 
     assert "traceback.print_exc" not in source
     assert "import traceback" not in source
+
+
+def test_database_legacy_migration_entrypoint_has_no_nested_helpers():
+    project_root = Path(__file__).resolve().parents[1]
+    source = (project_root / "app/database.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
+    target = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "_ensure_sqlite_legacy_columns"
+    )
+
+    nested_helpers = [
+        node.name
+        for node in ast.walk(target)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node is not target
+    ]
+
+    assert nested_helpers == []

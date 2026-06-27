@@ -22,3 +22,21 @@ def test_readme_references_existing_local_docs_and_scripts():
         "logs.bat",
     ]:
         assert stale_reference not in readme
+
+
+def test_readme_windows_bat_launchers_exist_and_delegate_to_dev_script():
+    project_root = Path(__file__).resolve().parents[1]
+    launcher_commands = {
+        "安装依赖.bat": "install",
+        "启动.bat": "start",
+        "停止.bat": "stop",
+        "状态.bat": "status",
+        "日志.bat": "logs",
+    }
+
+    for filename, command in launcher_commands.items():
+        launcher = project_root / filename
+        assert launcher.exists()
+        content = launcher.read_text(encoding="utf-8")
+        assert "scripts\\dev.ps1" in content
+        assert f"-Command {command}" in content
