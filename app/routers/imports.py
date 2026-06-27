@@ -23,12 +23,12 @@ from app.dependencies import (
     get_current_user,
     get_current_workspace,
 )
-from app.models import FavoriteFolder, FavoriteVideo, IngestionTask, KnowledgeBase
+from app.models import FavoriteFolder, FavoriteVideo, KnowledgeBase
 from app.models import ContentSource, SystemUser, VideoCache, VideoContent, Workspace
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
-from app.services.ingestion_tasks import create_ingestion_task
+from app.services.ingestion_tasks import create_ingestion_task, update_ingestion_task
 from app.services.rag_runtime import get_rag_service
 from app.time_utils import utc_now
 
@@ -267,18 +267,6 @@ async def import_local_video(
     )
 
 
-async def _update_import_task(task_id: str, **kwargs) -> None:
-    async with get_db_context() as session:
-        result = await session.execute(
-            select(IngestionTask).where(IngestionTask.task_id == task_id)
-        )
-        task = result.scalar_one_or_none()
-        if task:
-            for key, value in kwargs.items():
-                setattr(task, key, value)
-            await session.commit()
-
-
 def _delete_existing_import_vectors(
     rag,
     *,
@@ -408,7 +396,7 @@ async def _run_bilibili_video_import(
     fetcher = ContentFetcher(bili, asr)
     try:
         rag = get_rag_service()
-        await _update_import_task(
+        await update_ingestion_task(
             task_id,
             status="running",
             current_step="获取视频信息...",
@@ -418,7 +406,9 @@ async def _run_bilibili_video_import(
         title = info.get("title") or bvid
         cid = info.get("cid")
 
-        await _update_import_task(task_id, current_step="提取视频内容...", progress=36)
+        await update_ingestion_task(
+            task_id, current_step="提取视频内容...", progress=36
+        )
         content = await fetcher.fetch_content(bvid, cid=cid, title=title)
 
         await _store_imported_video_content(
@@ -432,7 +422,9 @@ async def _run_bilibili_video_import(
             pic_url=info.get("pic"),
         )
 
-        await _update_import_task(task_id, current_step="写入向量索引...", progress=76)
+        await update_ingestion_task(
+            task_id, current_step="写入向量索引...", progress=76
+        )
         _delete_existing_import_vectors(
             rag,
             workspace_id=workspace_id,
@@ -445,7 +437,7 @@ async def _run_bilibili_video_import(
             knowledge_base_id=knowledge_base_id,
             source_binding_id=None,
         )
-        await _update_import_task(
+        await update_ingestion_task(
             task_id,
             status="completed",
             progress=100,
@@ -454,7 +446,7 @@ async def _run_bilibili_video_import(
             error_message=None,
         )
     except Exception as exc:
-        await _update_import_task(
+        await update_ingestion_task(
             task_id,
             status="failed",
             current_step="导入失败",
@@ -475,7 +467,7 @@ async def _run_local_video_import(
     asr = ASRService()
     try:
         rag = get_rag_service()
-        await _update_import_task(
+        await update_ingestion_task(
             task_id,
             status="running",
             current_step="转写本地视频...",
@@ -499,7 +491,9 @@ async def _run_local_video_import(
             description=f"本地视频文件：{Path(file_path).name}",
         )
 
-        await _update_import_task(task_id, current_step="写入向量索引...", progress=76)
+        await update_ingestion_task(
+            task_id, current_step="写入向量索引...", progress=76
+        )
         _delete_existing_import_vectors(
             rag,
             workspace_id=workspace_id,
@@ -512,7 +506,7 @@ async def _run_local_video_import(
             knowledge_base_id=knowledge_base_id,
             source_binding_id=None,
         )
-        await _update_import_task(
+        await update_ingestion_task(
             task_id,
             status="completed",
             progress=100,
@@ -521,7 +515,7 @@ async def _run_local_video_import(
             error_message=None,
         )
     except Exception as exc:
-        await _update_import_task(
+        await update_ingestion_task(
             task_id,
             status="failed",
             current_step="导入失败",

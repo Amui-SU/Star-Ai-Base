@@ -130,8 +130,27 @@ def test_ingestion_task_persistence_and_status_mapping_live_in_service():
 
     assert "def build_status_payload" in service_source
     assert "async def create_ingestion_task" in service_source
+    assert "async def update_ingestion_task" in service_source
     assert "from app.services.ingestion_tasks import" in imports_source
     assert "from app.services.ingestion_tasks import" in knowledge_bases_source
     assert "async def _create_import_task" not in imports_source
+    assert "async def _update_import_task" not in imports_source
+    assert "async def _update_task" not in knowledge_bases_source
+    assert "update_ingestion_task(" in imports_source
+    assert "update_ingestion_task(" in knowledge_bases_source
     assert "return build_status_payload(task)" in knowledge_bases_source
     assert '"processed_videos": task.processed_items' not in knowledge_bases_source
+
+
+def test_scoped_folder_sync_tests_do_not_import_legacy_router():
+    project_root = Path(__file__).resolve().parents[1]
+
+    for relative_path in [
+        "tests/test_knowledge_base_scoping.py",
+        "tests/test_folder_ingestion.py",
+    ]:
+        test_file = project_root / relative_path
+        if not test_file.exists():
+            continue
+        source = test_file.read_text(encoding="utf-8")
+        assert "from app.routers.knowledge import _sync_folder" not in source

@@ -50,3 +50,31 @@ def test_production_docs_require_gateway_verification_code_rate_limit():
     assert "X-Forwarded-For" in combined
     assert "真实客户端 IP" in combined
     assert "per-IP" in combined
+
+
+def test_release_maintenance_docs_are_aligned_with_current_boundaries():
+    project_root = Path(__file__).resolve().parents[1]
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    apk_docs = (project_root / "frontend" / "APK-打包说明.md").read_text(
+        encoding="utf-8"
+    )
+    feature_outline = (project_root / "docs" / "功能大纲.md").read_text(
+        encoding="utf-8"
+    )
+    maintenance_plan = (project_root / "docs" / "大版本完善执行方案.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "少量共享 demo/local/glass 样式" not in maintenance_plan
+    assert (
+        "残余 demo、empty hero、glass action、user message action 与 `fadeUp` 已迁入"
+        in maintenance_plan
+    )
+    assert "不会自动恢复或重试" in maintenance_plan
+    assert "启动时标记为 `interrupted`" in maintenance_plan
+    assert "本地与局域网来源" in readme
+    assert "宽松配置" not in readme
+    assert "POST /system-auth/send-code" in apk_docs
+    assert "网关限流" in apk_docs or "反向代理限流" in apk_docs
+    assert "可信 `X-Forwarded-For`" in apk_docs
+    assert "legacy 兼容导出" in feature_outline

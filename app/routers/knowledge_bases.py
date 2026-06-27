@@ -41,7 +41,11 @@ from app.models import (
     Workspace,
 )
 from app.services.folder_ingestion import sync_folder as _sync_folder
-from app.services.ingestion_tasks import build_status_payload, create_ingestion_task
+from app.services.ingestion_tasks import (
+    build_status_payload,
+    create_ingestion_task,
+    update_ingestion_task,
+)
 from app.services.rag_runtime import get_rag_service
 from app.routers.chat import (
     LLMToolRunResult,
@@ -1213,19 +1217,10 @@ async def _run_scoped_build(
     """后台执行知识库构建任务，通过 IngestionTask 持久化状态。"""
     from app.database import get_db_context
 
-    async def _update_task(**kwargs):
-        async with get_db_context() as s:
-            result = await s.execute(
-                select(IngestionTask).where(IngestionTask.task_id == task_id)
-            )
-            t = result.scalar_one_or_none()
-            if t:
-                for k, v in kwargs.items():
-                    setattr(t, k, v)
-                await s.commit()
-
     try:
-        await _update_task(status="running", current_step="同步收藏夹...")
+        await update_ingestion_task(
+            task_id, status="running", current_step="同步收藏夹..."
+        )
 
         async with get_db_context() as db:
             full_folder_ids = _dedupe_ints(folder_ids)
@@ -1243,7 +1238,8 @@ async def _run_scoped_build(
 
             total_folders = len(steps) or 1
             for idx, (folder_id, folder_include_bvids) in enumerate(steps, start=1):
-                await _update_task(
+                await update_ingestion_task(
+                    task_id,
                     current_step=f"同步收藏夹 {folder_id} ({idx}/{total_folders})",
                     progress=int((idx - 1) / total_folders * 100),
                 )
@@ -1262,14 +1258,17 @@ async def _run_scoped_build(
                     source_binding_id=source_binding_id,
                 )
 
-        await _update_task(
+        await update_ingestion_task(
+            task_id,
             status="completed",
             progress=100,
             current_step="完成",
         )
     except Exception as e:
         logger.error(f"构建任务失败 [{task_id}]: {e}")
-        await _update_task(status="failed", error_message=str(e), current_step="失败")
+        await update_ingestion_task(
+            task_id, status="failed", error_message=str(e), current_step="失败"
+        )
     finally:
         await bili.close()
 

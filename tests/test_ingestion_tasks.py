@@ -74,6 +74,73 @@ def test_build_status_payload_preserves_existing_response_keys():
 
 
 @pytest.mark.asyncio
+async def test_update_ingestion_task_mutates_existing_task(
+    db_session_factory, monkeypatch
+):
+    import app.database as database
+    from app.services.ingestion_tasks import update_ingestion_task
+
+    monkeypatch.setattr(database, "async_session_factory", db_session_factory)
+
+    async with db_session_factory() as session:
+        session.add(
+            IngestionTask(
+                task_id="update-task",
+                workspace_id=3,
+                knowledge_base_id=9,
+                created_by=5,
+                status="pending",
+                progress=0,
+                current_step="Waiting",
+                total_items=2,
+                processed_items=0,
+            )
+        )
+        await session.commit()
+
+    updated = await update_ingestion_task(
+        "update-task",
+        status="running",
+        progress=45,
+        current_step="Indexing",
+        processed_items=1,
+        error_message=None,
+    )
+
+    async with db_session_factory() as session:
+        task = (
+            (
+                await session.execute(
+                    select(IngestionTask).where(IngestionTask.task_id == "update-task")
+                )
+            )
+            .scalars()
+            .one()
+        )
+
+    assert updated is True
+    assert task.status == "running"
+    assert task.progress == 45
+    assert task.current_step == "Indexing"
+    assert task.processed_items == 1
+    assert task.error_message is None
+
+
+@pytest.mark.asyncio
+async def test_update_ingestion_task_returns_false_for_missing_task(
+    db_session_factory, monkeypatch
+):
+    import app.database as database
+    from app.services.ingestion_tasks import update_ingestion_task
+
+    monkeypatch.setattr(database, "async_session_factory", db_session_factory)
+
+    updated = await update_ingestion_task("missing-task", status="running")
+
+    assert updated is False
+
+
+@pytest.mark.asyncio
 async def test_mark_stale_active_tasks_as_interrupted(db_session_factory):
     from app.services.ingestion_tasks import mark_stale_active_tasks_interrupted
 

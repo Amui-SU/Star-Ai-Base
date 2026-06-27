@@ -57,6 +57,23 @@ def build_status_payload(task: IngestionTask) -> dict:
     }
 
 
+async def update_ingestion_task(task_id: str, **fields) -> bool:
+    from app.database import get_db_context
+
+    async with get_db_context() as session:
+        result = await session.execute(
+            select(IngestionTask).where(IngestionTask.task_id == task_id)
+        )
+        task = result.scalar_one_or_none()
+        if task is None:
+            return False
+
+        for field, value in fields.items():
+            setattr(task, field, value)
+        await session.commit()
+        return True
+
+
 async def mark_stale_active_tasks_interrupted(
     session_factory: async_sessionmaker[AsyncSession],
     *,

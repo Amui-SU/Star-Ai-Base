@@ -117,4 +117,5 @@ npx cap open android
 - 本地局域网换了以后，只需要在手机端“连接设置”里更新后端地址
 - 线上 Web / APK 应指向同一个后端域名
 - 生产环境建议使用 HTTPS
+- 生产外发时，网关限流或反向代理限流必须覆盖 `POST /system-auth/send-code`，按真实客户端 IP 做 per-IP 限制，并向后端保留可信 `X-Forwarded-For`
 - 手机端本地静态 APK 使用 bearer token 登录态，Web 端继续兼容 Cookie 登录
