@@ -138,11 +138,11 @@ Expected: PASS.
 
 - Modify: `docs/大版本完善执行方案.md`
 
-- [ ] **Step 1: Update maintenance record**
+- [x] **Step 1: Update maintenance record**
 
 Record completed architecture-only changes under the 2026-06-27 execution log and explicitly note that learning review/import-source features remain deferred.
 
-- [ ] **Step 2: Run full verification before commit**
+- [x] **Step 2: Run full verification before commit**
 
 Run:
 
