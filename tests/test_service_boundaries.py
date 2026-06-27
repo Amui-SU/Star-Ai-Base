@@ -201,3 +201,26 @@ def test_knowledge_base_web_search_stream_tests_are_split_from_scoping_file():
     ]:
         assert test_name not in scoping_source
         assert test_name in streaming_source
+
+
+def test_knowledge_base_web_search_api_tests_are_split_from_scoping_file():
+    project_root = Path(__file__).resolve().parents[1]
+    scoping_source = (
+        project_root / "tests" / "test_knowledge_base_scoping.py"
+    ).read_text(encoding="utf-8")
+    api_test = project_root / "tests" / "test_knowledge_base_web_search_api.py"
+
+    assert api_test.exists()
+    api_source = api_test.read_text(encoding="utf-8")
+    for test_name in [
+        "test_scoped_chat_lets_llm_call_web_search_tool_when_enabled",
+        "test_scoped_chat_reports_socks_dependency_failure",
+        "test_scoped_chat_web_search_tool_chain_executes_model_requested_query",
+        "test_scoped_chat_web_search_tool_accepts_query_alias_arguments",
+        "test_scoped_chat_tool_chain_can_fetch_selected_web_page",
+        "test_scoped_chat_direct_fetch_tool_reports_page_source",
+        "test_scoped_chat_does_not_web_search_by_default",
+        "test_scoped_chat_forces_web_search_when_enabled_without_model_tool_call",
+    ]:
+        assert test_name not in scoping_source
+        assert test_name in api_source
