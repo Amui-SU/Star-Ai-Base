@@ -154,3 +154,24 @@ def test_scoped_folder_sync_tests_do_not_import_legacy_router():
             continue
         source = test_file.read_text(encoding="utf-8")
         assert "from app.routers.knowledge import _sync_folder" not in source
+
+
+def test_knowledge_base_web_search_helper_tests_are_split_from_scoping_file():
+    project_root = Path(__file__).resolve().parents[1]
+    scoping_source = (
+        project_root / "tests" / "test_knowledge_base_scoping.py"
+    ).read_text(encoding="utf-8")
+    web_search_test = project_root / "tests" / "test_knowledge_base_web_search.py"
+
+    assert web_search_test.exists()
+    web_search_source = web_search_test.read_text(encoding="utf-8")
+    for test_name in [
+        "test_web_search_context_is_marked_as_sandboxed_but_usable",
+        "test_knowledge_base_prompt_is_strict_when_web_search_disabled",
+        "test_knowledge_base_prompt_allows_general_knowledge_when_context_is_empty",
+        "test_web_search_query_generation_adds_compact_query",
+        "test_web_search_context_limits_results_used",
+        "test_fetch_web_page_tool_limits_fetch_calls",
+    ]:
+        assert test_name not in scoping_source
+        assert test_name in web_search_source
