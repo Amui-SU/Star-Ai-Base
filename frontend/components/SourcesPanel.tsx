@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { createPortal } from "react-dom";
 import {
   FavoriteFolder,
   Video,
@@ -19,6 +18,9 @@ import {
   isMissingDisplayText,
 } from "@/lib/displayNames";
 import OrganizePreviewModal from "@/components/OrganizePreviewModal";
+import VideoPlayerPortal, {
+  type PlayingVideo,
+} from "@/components/sources/VideoPlayerPortal";
 
 interface Props {
   sourceBindingId: number;
@@ -65,10 +67,7 @@ export default function SourcesPanel({
   const [organizePreview, setOrganizePreview] =
     useState<OrganizePreviewResponse | null>(null);
   const [organizeMessage, setOrganizeMessage] = useState<string | null>(null);
-  const [playingVideo, setPlayingVideo] = useState<{
-    bvid: string;
-    title: string;
-  } | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<PlayingVideo | null>(null);
   const targetKnowledgeBase = !isMissingDisplayText(knowledgeBaseName)
     ? `「${displayKnowledgeBaseName(knowledgeBaseName)}」`
     : "当前知识库";
@@ -823,40 +822,10 @@ export default function SourcesPanel({
         onApplied={refresh}
       />
 
-      {playingVideo &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div className="modal-backdrop" onClick={() => setPlayingVideo(null)}>
-            <div
-              className="modal-card video-player-modal"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="video-player-header">
-                <div
-                  className="video-player-title truncate"
-                  title={playingVideo.title}
-                >
-                  {playingVideo.title}
-                </div>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setPlayingVideo(null)}
-                  title="关闭"
-                >
-                  关闭
-                </button>
-              </div>
-              <iframe
-                className="video-player-frame"
-                src={`https://player.bilibili.com/player.html?bvid=${playingVideo.bvid}&page=1&high_quality=1&danmaku=0`}
-                title={playingVideo.title}
-                allow="autoplay; fullscreen; picture-in-picture"
-                allowFullScreen
-              />
-            </div>
-          </div>,
-          document.body,
-        )}
+      <VideoPlayerPortal
+        video={playingVideo}
+        onClose={() => setPlayingVideo(null)}
+      />
     </div>
   );
 }

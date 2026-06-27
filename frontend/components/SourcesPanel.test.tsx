@@ -221,4 +221,40 @@ describe("SourcesPanel", () => {
     });
     expect(screen.getByText(/请重新发起/)).toBeInTheDocument();
   });
+
+  it("opens the Bilibili player modal for a selected video", async () => {
+    const user = userEvent.setup();
+    vi.mocked(sourceBindingApi.getFavorites).mockResolvedValue([
+      {
+        media_id: 10,
+        title: "Folder A",
+        media_count: 1,
+        is_selected: true,
+      },
+    ]);
+    vi.mocked(sourceBindingApi.getAllFavoriteVideos).mockResolvedValue({
+      total: 1,
+      valid: 1,
+      videos: [{ bvid: "BV1PLAY", title: "Video one" }],
+    });
+    vi.mocked(knowledgeBaseApi.stats).mockResolvedValue({
+      knowledge_base_id: 1,
+      workspace_id: 1,
+      total_videos: 0,
+      folders: [],
+      scoped: true,
+    });
+
+    render(<SourcesPanel sourceBindingId={7} knowledgeBaseId={1} />);
+
+    await user.click(await screen.findByText("Folder A"));
+    await user.click(screen.getByRole("button", { name: "播放 Video one" }));
+
+    const iframe = document.querySelector(".video-player-frame");
+    expect(iframe).toHaveAttribute(
+      "src",
+      expect.stringContaining("bvid=BV1PLAY"),
+    );
+    expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
+  });
 });

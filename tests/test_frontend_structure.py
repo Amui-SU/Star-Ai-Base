@@ -65,3 +65,40 @@ def test_common_modals_use_shared_shell():
         source = (project_root / relative_path).read_text(encoding="utf-8")
         assert "@/components/ui/ModalShell" in source
         assert 'className="modal-backdrop' not in source
+
+
+def test_auth_demo_preview_is_extracted_from_auth_page():
+    project_root = Path(__file__).resolve().parents[1]
+    auth_page = (project_root / "frontend" / "components" / "AuthPage.tsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert (project_root / "frontend/components/auth/AuthDemoPreview.tsx").exists()
+    assert (project_root / "frontend/components/auth/useAuthDemoPreview.ts").exists()
+    assert "@/components/auth/AuthDemoPreview" in auth_page
+    assert "const demoQuestion" not in auth_page
+    assert "const demoAnswer" not in auth_page
+    assert "setDemoStep" not in auth_page
+
+
+def test_sources_video_player_portal_is_extracted():
+    project_root = Path(__file__).resolve().parents[1]
+    sources_panel = (
+        project_root / "frontend" / "components" / "SourcesPanel.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert (project_root / "frontend/components/sources/VideoPlayerPortal.tsx").exists()
+    assert "@/components/sources/VideoPlayerPortal" in sources_panel
+    assert "createPortal" not in sources_panel
+    assert "player.bilibili.com" not in sources_panel
+
+
+def test_workspace_state_is_extracted_from_home_page():
+    project_root = Path(__file__).resolve().parents[1]
+    page = (project_root / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+
+    assert (project_root / "frontend/app/useWorkspaceState.ts").exists()
+    assert "@/app/useWorkspaceState" in page
+    assert "const getInitialSidebarOpen" not in page
+    assert "const isMobileViewport" not in page
+    assert 'localStorage.getItem("sidebar_width")' not in page
