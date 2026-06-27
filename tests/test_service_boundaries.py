@@ -175,3 +175,29 @@ def test_knowledge_base_web_search_helper_tests_are_split_from_scoping_file():
     ]:
         assert test_name not in scoping_source
         assert test_name in web_search_source
+
+
+def test_knowledge_base_web_search_stream_tests_are_split_from_scoping_file():
+    project_root = Path(__file__).resolve().parents[1]
+    scoping_source = (
+        project_root / "tests" / "test_knowledge_base_scoping.py"
+    ).read_text(encoding="utf-8")
+    streaming_test = (
+        project_root / "tests" / "test_knowledge_base_web_search_streaming.py"
+    )
+
+    assert streaming_test.exists()
+    streaming_source = streaming_test.read_text(encoding="utf-8")
+    for test_name in [
+        "test_scoped_chat_stream_reports_web_search_no_results",
+        "test_scoped_chat_stream_reports_socks_dependency_failure",
+        "test_scoped_chat_stream_emits_web_search_progress_before_tool_setup",
+        "test_scoped_chat_stream_emits_web_search_heartbeat_while_preparing",
+        "test_web_search_heartbeat_generator_cancels_prepare_task_on_close",
+        "test_web_search_heartbeat_generator_times_out_tool_setup",
+        "test_web_search_tool_prep_timeout_allows_slow_model_tool_planning",
+        "test_scoped_chat_stream_adds_web_sources_from_initial_search",
+        "test_scoped_chat_stream_uses_final_stream_after_tool_decision",
+    ]:
+        assert test_name not in scoping_source
+        assert test_name in streaming_source
