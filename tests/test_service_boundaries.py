@@ -123,6 +123,73 @@ def test_chat_router_delegates_llm_tool_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_knowledge_base_router_delegates_web_search_helpers_to_service():
+    project_root = Path(__file__).resolve().parents[1]
+    service_path = project_root / "app/services/knowledge_web_search.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+    router_module = ast.parse(router_source)
+
+    declared_names = set()
+    for node in router_module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            declared_names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    declared_names.add(target.id)
+
+    expected_service_names = {
+        "MAX_WEB_CONTEXT_RESULTS",
+        "MAX_INITIAL_WEB_SEARCH_QUERIES",
+        "MAX_WEB_SEARCH_QUERY_CHARS",
+        "WEB_SEARCH_TOOL",
+        "FETCH_WEB_PAGE_TOOL",
+        "format_web_search_context",
+        "build_web_search_queries",
+        "source_from_web_result",
+        "append_web_result",
+        "web_search_failed_status_from_exception",
+        "status_from_web_search_state",
+        "append_web_search_context_message",
+        "append_web_search_no_results_message",
+        "remove_web_search_no_results_messages",
+    }
+    router_private_names = {
+        "MAX_WEB_CONTEXT_RESULTS",
+        "MAX_INITIAL_WEB_SEARCH_QUERIES",
+        "MAX_WEB_SEARCH_QUERY_CHARS",
+        "WEB_SEARCH_TOOL",
+        "FETCH_WEB_PAGE_TOOL",
+        "_format_web_search_context",
+        "_normalize_web_search_query",
+        "_compact_web_search_query",
+        "_append_unique_query",
+        "_build_web_search_queries",
+        "_source_from_web_result",
+        "_append_web_result",
+        "_web_search_status",
+        "_exception_summary",
+        "_web_search_failed_status_from_exception",
+        "_web_search_result_details",
+        "_web_search_diagnostic_message",
+        "_append_web_search_diagnostics",
+        "_status_from_web_search_state",
+        "_append_web_search_context_message",
+        "_append_web_search_no_results_message",
+        "_is_web_search_no_results_message",
+        "_remove_web_search_no_results_messages",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"{name} =" in service_source
+    assert "from app.services.knowledge_web_search import" in router_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = Path(__file__).resolve().parents[1]
     source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")
