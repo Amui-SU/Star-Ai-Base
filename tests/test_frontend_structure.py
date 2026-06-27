@@ -160,3 +160,85 @@ def test_global_styles_delegate_modal_shell_styles_to_feature_file():
     assert "\n.modal-card {" not in globals_css
     assert ".thinking-provider-modal" not in globals_css
     assert ".provider-config-body" not in globals_css
+
+
+def test_global_styles_delegate_workspace_styles_to_feature_file():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    workspace_css = project_root / "frontend" / "app" / "styles" / "workspace.css"
+
+    assert workspace_css.exists()
+    assert '@import "./styles/workspace.css";' in globals_css
+    for selector in [
+        "\n.app-shell {",
+        "\n.workspace-card {",
+        "\n.workspace-topbar {",
+        "\n.workspace-sidebar-toggle {",
+        "\n.sidebar-shell {",
+        "\n.chat-history-sidebar-panel {",
+        "\n.panel-chat-embedded {",
+    ]:
+        assert selector not in globals_css
+
+
+def test_global_styles_delegate_account_panel_styles_to_feature_file():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    account_css = project_root / "frontend" / "app" / "styles" / "account-panels.css"
+
+    assert account_css.exists()
+    assert '@import "./styles/account-panels.css";' in globals_css
+    for selector in [
+        "\n.user-menu {",
+        "\n.user-menu-popover {",
+        "\n.admin-users-panel {",
+        "\n.local-connection-qr-card {",
+        "\n.api-accounts-layout {",
+        "\n.api-account-row {",
+    ]:
+        assert selector not in globals_css
+
+
+def test_global_styles_delegate_sources_styles_to_feature_file():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    sources_css = project_root / "frontend" / "app" / "styles" / "sources.css"
+
+    assert sources_css.exists()
+    assert '@import "./styles/sources.css";' in globals_css
+    for selector in [
+        "\n.sources-scroll {",
+        "\n.sources-panel-head {",
+        "\n.sources-ingest-button {",
+        "\n.folder-card {",
+        "\n.video-card {",
+        "\n.video-player-modal {",
+    ]:
+        assert selector not in globals_css
+
+
+def test_global_styles_delegate_knowledge_sidebar_styles_to_feature_file():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    knowledge_css = (
+        project_root / "frontend" / "app" / "styles" / "knowledge-sidebar.css"
+    )
+
+    assert knowledge_css.exists()
+    assert '@import "./styles/knowledge-sidebar.css";' in globals_css
+    for selector in [
+        "\n.knowledge-panel {",
+        "\n.knowledge-select-trigger {",
+        "\n.knowledge-delete-card {",
+        "\n.knowledge-create-card {",
+        "\n.knowledge-active-hint {",
+    ]:
+        assert selector not in globals_css
