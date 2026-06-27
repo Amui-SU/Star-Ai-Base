@@ -224,3 +224,48 @@ def test_knowledge_base_web_search_api_tests_are_split_from_scoping_file():
     ]:
         assert test_name not in scoping_source
         assert test_name in api_source
+
+
+def test_knowledge_base_web_search_tool_run_tests_are_split_from_scoping_file():
+    project_root = Path(__file__).resolve().parents[1]
+    scoping_source = (
+        project_root / "tests" / "test_knowledge_base_scoping.py"
+    ).read_text(encoding="utf-8")
+    tool_run_test = (
+        project_root / "tests" / "test_knowledge_base_web_search_tool_run.py"
+    )
+
+    assert tool_run_test.exists()
+    tool_run_source = tool_run_test.read_text(encoding="utf-8")
+    for test_name in [
+        "test_initial_web_context_is_not_duplicated_after_tool_run",
+        "test_initial_web_search_no_results_is_visible_to_model",
+        "test_web_search_tool_run_uses_request_provider",
+        "test_web_search_tool_run_uses_tavily_api_key",
+        "test_initial_web_search_diagnostics_are_reported_when_search_fails",
+        "test_only_new_tool_results_are_appended_after_initial_web_context",
+        "test_tool_web_results_remove_initial_no_results_instruction",
+    ]:
+        assert test_name not in scoping_source
+        assert test_name in tool_run_source
+
+
+def test_knowledge_base_web_search_fallback_tests_are_split_from_scoping_file():
+    project_root = Path(__file__).resolve().parents[1]
+    scoping_source = (
+        project_root / "tests" / "test_knowledge_base_scoping.py"
+    ).read_text(encoding="utf-8")
+    fallback_test = (
+        project_root / "tests" / "test_knowledge_base_web_search_fallback.py"
+    )
+
+    assert fallback_test.exists()
+    fallback_source = fallback_test.read_text(encoding="utf-8")
+    for test_name in [
+        "test_scoped_chat_web_search_does_not_attach_db_fallback_sources",
+        "test_scoped_chat_does_not_use_db_fallback_when_vector_search_is_empty",
+        "test_scoped_chat_adds_initial_web_sources_to_first_answer_context",
+        "test_scoped_chat_can_use_web_search_when_knowledge_base_has_no_hits",
+    ]:
+        assert test_name not in scoping_source
+        assert test_name in fallback_source
