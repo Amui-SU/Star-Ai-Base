@@ -1,12 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
-const stylesheet = readFileSync(
-  resolve(process.cwd(), "app", "globals.css"),
-  "utf8",
-);
+import { readStylesheetWithLocalImports } from "./testStyles";
+
+const stylesheet = readStylesheetWithLocalImports();
 
 describe("source ingestion status theme", () => {
   it("uses existing blue semantic badges for dark-theme ingested states", () => {

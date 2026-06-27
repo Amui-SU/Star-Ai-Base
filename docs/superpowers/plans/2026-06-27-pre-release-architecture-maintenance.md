@@ -120,6 +120,8 @@ Add a test documenting the first CSS split target: auth styles, modal styles, an
 Move only one section per commit and keep `globals.css` importing the extracted file.
 
 Completed first section: auth page styles moved to `frontend/app/styles/auth.css`.
+Completed second section: shared modal shell and provider configuration modal styles
+moved to `frontend/app/styles/modals.css`.
 
 - [x] **Step 3: Verify layout tests and full build**
 

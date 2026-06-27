@@ -145,3 +145,18 @@ def test_global_styles_delegate_auth_styles_to_feature_file():
     assert '@import "./styles/auth.css";' in globals_css
     assert "html.auth-page-active" not in globals_css
     assert ".auth-page" not in globals_css
+
+
+def test_global_styles_delegate_modal_shell_styles_to_feature_file():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    modals_css = project_root / "frontend" / "app" / "styles" / "modals.css"
+
+    assert modals_css.exists()
+    assert '@import "./styles/modals.css";' in globals_css
+    assert "\n.modal-backdrop {" not in globals_css
+    assert "\n.modal-card {" not in globals_css
+    assert ".thinking-provider-modal" not in globals_css
+    assert ".provider-config-body" not in globals_css

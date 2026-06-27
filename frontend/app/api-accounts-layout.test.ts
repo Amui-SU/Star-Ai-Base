@@ -1,12 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
-const stylesheet = readFileSync(
-  resolve(process.cwd(), "app", "globals.css"),
-  "utf8",
-);
+import { readStylesheetWithLocalImports } from "./testStyles";
+
+const stylesheet = readStylesheetWithLocalImports();
 
 describe("AI service key modal layout", () => {
   it("keeps the desktop modal within the viewport and lets columns shrink", () => {
