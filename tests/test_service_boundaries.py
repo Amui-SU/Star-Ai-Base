@@ -79,6 +79,50 @@ def test_chat_router_delegates_configuration_boundaries_to_service():
     )
 
 
+def test_chat_router_delegates_llm_tool_helpers_to_service():
+    project_root = Path(__file__).resolve().parents[1]
+    service_path = project_root / "app/services/llm_tool_calls.py"
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    chat_module = ast.parse(chat_source)
+
+    declared_names = {
+        node.name
+        for node in chat_module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+
+    expected_service_names = {
+        "LLMToolRunResult",
+        "message_to_openai_dict",
+        "append_no_more_tool_calls_instruction",
+        "append_tool_call_results",
+        "parse_tool_arguments",
+        "extract_thinking_and_answer",
+        "extract_dsml_text_tool_calls",
+        "contains_dsml_tool_call_text",
+    }
+    router_private_names = {
+        "_message_to_openai_dict",
+        "_tool_call_to_dict",
+        "_tool_call_id",
+        "_tool_call_function",
+        "_extract_dsml_text_tool_calls",
+        "_contains_dsml_tool_call_text",
+        "_append_no_more_tool_calls_instruction",
+        "_normalize_tool_arguments",
+        "_parse_tool_arguments",
+        "_append_tool_call_results",
+        "_extract_thinking_and_answer",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"class {name}" in service_source
+    assert "from app.services.llm_tool_calls import" in chat_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = Path(__file__).resolve().parents[1]
     source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")

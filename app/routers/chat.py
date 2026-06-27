@@ -7,8 +7,7 @@ import asyncio
 import re
 import json
 import time
-from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Awaitable, Callable, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -52,6 +51,16 @@ from app.services.chat_config import (
     _web_search_config_response,
     _write_env_values,
 )
+from app.services.llm_tool_calls import (
+    LLMToolRunResult,
+    append_no_more_tool_calls_instruction as _append_no_more_tool_calls_instruction,
+    append_tool_call_results as _append_tool_call_results,
+    contains_dsml_tool_call_text as _contains_dsml_tool_call_text,
+    extract_dsml_text_tool_calls as _extract_dsml_text_tool_calls,
+    extract_thinking_and_answer as _extract_thinking_and_answer,
+    message_to_openai_dict as _message_to_openai_dict,
+    parse_tool_arguments as _parse_tool_arguments,
+)
 from app.services.rag_runtime import get_rag_service, reset_rag_service
 
 router = APIRouter(prefix="/chat", tags=["对话"])
@@ -70,13 +79,6 @@ async def _require_current_admin_user(
 
 
 THINKING_DELTA_MARKER = "[[THINKING_DELTA]]"
-
-
-@dataclass
-class LLMToolRunResult:
-    messages: list[dict]
-    answer: str | None = None
-    thinking: str = ""
 
 
 class LLMProviderUpdateRequest(BaseModel):
@@ -698,156 +700,6 @@ def _complete_llm_answer(
     return answer, thinking
 
 
-def _message_to_openai_dict(message: Any) -> dict:
-    if isinstance(message, dict):
-        raw = message
-    elif hasattr(message, "model_dump"):
-        raw = message.model_dump(exclude_none=True)
-    elif hasattr(message, "dict"):
-        raw = message.dict(exclude_none=True)
-    else:
-        raw = {"role": "assistant", "content": getattr(message, "content", "") or ""}
-        tool_calls = getattr(message, "tool_calls", None)
-        if tool_calls:
-            raw["tool_calls"] = [
-                _tool_call_to_dict(tool_call) for tool_call in tool_calls
-            ]
-
-    result = {
-        "role": raw.get("role") or "assistant",
-        "content": raw.get("content") or "",
-    }
-    if raw.get("tool_calls"):
-        result["tool_calls"] = raw["tool_calls"]
-    return result
-
-
-def _tool_call_to_dict(tool_call: Any) -> dict:
-    if isinstance(tool_call, dict):
-        return tool_call
-    function = getattr(tool_call, "function", None)
-    return {
-        "id": getattr(tool_call, "id", ""),
-        "type": getattr(tool_call, "type", "function"),
-        "function": {
-            "name": getattr(function, "name", ""),
-            "arguments": getattr(function, "arguments", "{}"),
-        },
-    }
-
-
-def _tool_call_id(tool_call: Any) -> str:
-    if isinstance(tool_call, dict):
-        return str(tool_call.get("id") or "")
-    return str(getattr(tool_call, "id", "") or "")
-
-
-def _tool_call_function(tool_call: Any) -> tuple[str, Any]:
-    if isinstance(tool_call, dict):
-        function = tool_call.get("function") or {}
-        return str(function.get("name") or ""), function.get("arguments") or "{}"
-    function = getattr(tool_call, "function", None)
-    return str(getattr(function, "name", "") or ""), (
-        getattr(function, "arguments", "{}") or "{}"
-    )
-
-
-def _extract_dsml_text_tool_calls(content: str) -> tuple[str, list[dict]]:
-    if "<｜｜DSML｜｜tool_calls>" not in content:
-        return content, []
-
-    tool_calls: list[dict] = []
-
-    def collect_tool_calls(match: re.Match) -> str:
-        block = match.group(1)
-        for invoke_index, invoke_match in enumerate(
-            re.finditer(
-                r'<｜｜DSML｜｜invoke\s+name="([^"]+)">(.*?)</｜｜DSML｜｜invoke>',
-                block,
-                flags=re.DOTALL,
-            ),
-            start=len(tool_calls) + 1,
-        ):
-            arguments = {
-                param_match.group(1): param_match.group(2).strip()
-                for param_match in re.finditer(
-                    r'<｜｜DSML｜｜parameter\s+name="([^"]+)"(?:\s+string="true")?>(.*?)</｜｜DSML｜｜parameter>',
-                    invoke_match.group(2),
-                    flags=re.DOTALL,
-                )
-            }
-            tool_calls.append(
-                {
-                    "id": f"dsml_call_{invoke_index}",
-                    "type": "function",
-                    "function": {
-                        "name": invoke_match.group(1).strip(),
-                        "arguments": json.dumps(arguments, ensure_ascii=False),
-                    },
-                }
-            )
-        return ""
-
-    visible_content = re.sub(
-        r"<｜｜DSML｜｜tool_calls>(.*?)</｜｜DSML｜｜tool_calls>",
-        collect_tool_calls,
-        content,
-        flags=re.DOTALL,
-    ).strip()
-    return visible_content, tool_calls
-
-
-def _contains_dsml_tool_call_text(content: str) -> bool:
-    return "<｜｜DSML｜｜tool_calls>" in (content or "")
-
-
-def _append_no_more_tool_calls_instruction(messages: list[dict]) -> list[dict]:
-    return [
-        *messages,
-        {
-            "role": "system",
-            "content": (
-                "工具调用阶段已经结束。不要再输出工具调用、DSML、XML 或 JSON 工具请求；"
-                "请直接基于已有知识库资料和工具返回结果，用 Markdown 回答用户问题。"
-            ),
-        },
-    ]
-
-
-def _normalize_tool_arguments(parsed: dict) -> dict:
-    normalized = dict(parsed)
-    if normalized.get("query"):
-        return normalized
-
-    for key in ("search_query", "keyword", "keywords", "q"):
-        value = normalized.get(key)
-        if isinstance(value, str) and value.strip():
-            normalized["query"] = value.strip()
-            normalized.pop(key, None)
-            return normalized
-
-    queries = normalized.get("queries")
-    if isinstance(queries, list):
-        query = " ".join(str(item).strip() for item in queries if str(item).strip())
-        if query:
-            normalized["query"] = query
-            normalized.pop("queries", None)
-    elif isinstance(queries, str) and queries.strip():
-        normalized["query"] = queries.strip()
-        normalized.pop("queries", None)
-    return normalized
-
-
-def _parse_tool_arguments(raw_arguments: Any) -> dict:
-    if isinstance(raw_arguments, dict):
-        return _normalize_tool_arguments(raw_arguments)
-    try:
-        parsed = json.loads(raw_arguments or "{}")
-    except (TypeError, json.JSONDecodeError):
-        return {}
-    return _normalize_tool_arguments(parsed) if isinstance(parsed, dict) else {}
-
-
 async def _complete_llm_answer_with_tools(
     messages: list[dict],
     *,
@@ -973,69 +825,6 @@ async def _prepare_llm_messages_with_tools(
         executed_tool_calls += executed_this_round
 
     return LLMToolRunResult(messages=working_messages)
-
-
-async def _append_tool_call_results(
-    working_messages: list[dict],
-    message: Any,
-    tool_calls: list[Any],
-    *,
-    tool_handlers: dict[str, Callable[[dict], Awaitable[dict]]],
-    remaining_tool_calls: int,
-) -> tuple[list[dict], int]:
-    executed_tool_calls = 0
-    working_messages.append(_message_to_openai_dict(message))
-    for tool_call in tool_calls:
-        call_id = _tool_call_id(tool_call)
-        name, raw_arguments = _tool_call_function(tool_call)
-        handler = tool_handlers.get(name)
-        if executed_tool_calls >= remaining_tool_calls:
-            executed_tool_calls += 1
-            content = {
-                "error": "tool_call_limit_exceeded",
-                "message": "联网搜索次数已达到上限",
-            }
-        elif handler is None:
-            executed_tool_calls += 1
-            content = {
-                "error": "unknown_tool",
-                "message": f"工具 {name or 'unknown'} 不可用",
-            }
-        else:
-            executed_tool_calls += 1
-            content = await handler(_parse_tool_arguments(raw_arguments))
-        working_messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": call_id,
-                "name": name,
-                "content": json.dumps(content, ensure_ascii=False),
-            }
-        )
-    return working_messages, executed_tool_calls
-
-
-def _extract_thinking_and_answer(
-    raw_answer: str, reasoning_content: Optional[str] = None
-) -> tuple[str, str]:
-    """提取思考内容与最终回答。优先使用原生 reasoning 字段。"""
-    thinking = (reasoning_content or "").strip()
-    answer = (raw_answer or "").strip()
-
-    if thinking:
-        return thinking, answer
-
-    # 兼容提示词回退：<thinking>...</thinking> 或 <think>...</think>
-    pattern = re.compile(
-        r"<(?:thinking|think)>(.*?)</(?:thinking|think)>", re.IGNORECASE | re.DOTALL
-    )
-    match = pattern.search(answer)
-    if not match:
-        return "", answer
-
-    extracted = (match.group(1) or "").strip()
-    cleaned = pattern.sub("", answer).strip()
-    return extracted, cleaned
 
 
 def _build_db_list_messages(context: str, question: str) -> list[dict]:
