@@ -132,3 +132,16 @@ def test_frontend_build_cleans_next_dev_type_cache():
     cleanup_source = cleanup_script.read_text(encoding="utf-8")
     assert ".next/dev/types" in cleanup_source
     assert "rmdirSync" in cleanup_source
+
+
+def test_global_styles_delegate_auth_styles_to_feature_file():
+    project_root = Path(__file__).resolve().parents[1]
+    globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    auth_css = project_root / "frontend" / "app" / "styles" / "auth.css"
+
+    assert auth_css.exists()
+    assert '@import "./styles/auth.css";' in globals_css
+    assert "html.auth-page-active" not in globals_css
+    assert ".auth-page" not in globals_css

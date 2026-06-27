@@ -111,15 +111,17 @@ Expected: PASS.
 - Modify later: `frontend/app/globals.css`
 - Verify: `frontend/app/api-accounts-layout.test.ts`, `frontend/app/mobile-chat-layout.test.ts`, `frontend/app/source-status-theme.test.ts`
 
-- [ ] **Step 1: Add a structure test for CSS ownership**
+- [x] **Step 1: Add a structure test for CSS ownership**
 
 Add a test documenting the first CSS split target: auth styles, modal styles, and source/sidebar styles should move under `frontend/app/styles/` before product features resume.
 
-- [ ] **Step 2: Move one CSS section at a time**
+- [x] **Step 2: Move one CSS section at a time**
 
 Move only one section per commit and keep `globals.css` importing the extracted file.
 
-- [ ] **Step 3: Verify layout tests and full build**
+Completed first section: auth page styles moved to `frontend/app/styles/auth.css`.
+
+- [x] **Step 3: Verify layout tests and full build**
 
 Run:
 

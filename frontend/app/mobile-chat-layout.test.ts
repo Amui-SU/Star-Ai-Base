@@ -7,6 +7,10 @@ const stylesheet = readFileSync(
   resolve(process.cwd(), "app", "globals.css"),
   "utf8",
 );
+const authStylesheet = readFileSync(
+  resolve(process.cwd(), "app", "styles", "auth.css"),
+  "utf8",
+);
 
 describe("mobile chat message layout", () => {
   it("uses the warm accent palette for light-theme user messages", () => {
@@ -107,7 +111,7 @@ describe("mobile chat message layout", () => {
     expect(stylesheet).toMatch(
       /\.local-connection-trigger-label\s*\{[^}]*display:\s*inline;[^}]*white-space:\s*nowrap;/s,
     );
-    expect(stylesheet).toMatch(
+    expect(authStylesheet).toMatch(
       /@media \(max-width: 640px\)\s*\{[\s\S]*\.auth-page \.local-connection-trigger\s*\{[^}]*min-width:\s*74px;[^}]*padding-inline:\s*10px;[^}]*color:\s*#faf9f5;/s,
     );
   });
