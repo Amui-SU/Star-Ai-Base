@@ -94,6 +94,19 @@ def test_sources_video_player_portal_is_extracted():
     assert "player.bilibili.com" not in sources_panel
 
 
+def test_sources_panel_pure_logic_is_extracted():
+    project_root = Path(__file__).resolve().parents[1]
+    sources_panel = (
+        project_root / "frontend" / "components" / "SourcesPanel.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert (project_root / "frontend/components/sources/sourcesPanelLogic.ts").exists()
+    assert "@/components/sources/sourcesPanelLogic" in sources_panel
+    assert "const formatTime" not in sources_panel
+    assert "const getFolderStatus" not in sources_panel
+    assert "const getButtonText" not in sources_panel
+
+
 def test_workspace_state_is_extracted_from_home_page():
     project_root = Path(__file__).resolve().parents[1]
     page = (project_root / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")

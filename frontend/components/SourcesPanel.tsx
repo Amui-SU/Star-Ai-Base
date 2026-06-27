@@ -21,6 +21,11 @@ import OrganizePreviewModal from "@/components/OrganizePreviewModal";
 import VideoPlayerPortal, {
   type PlayingVideo,
 } from "@/components/sources/VideoPlayerPortal";
+import {
+  formatFolderSyncTime,
+  getSourcesBuildButtonText,
+  getSourcesFolderStatus,
+} from "@/components/sources/sourcesPanelLogic";
 
 interface Props {
   sourceBindingId: number;
@@ -371,93 +376,6 @@ export default function SourcesPanel({
     }
   };
 
-  // 格式化时间
-  const formatTime = (value?: string) => {
-    if (!value) return null;
-    try {
-      let dateStr = value;
-      if (!value.includes("T") && !value.includes("Z")) {
-        dateStr = value.replace(" ", "T") + "Z";
-      }
-      const date = new Date(dateStr);
-      if (Number.isNaN(date.getTime())) return null;
-
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-      const hour = String(date.getHours()).padStart(2, "0");
-      const minute = String(date.getMinutes()).padStart(2, "0");
-      return `${month}/${day} ${hour}:${minute}`;
-    } catch {
-      return null;
-    }
-  };
-
-  // 获取收藏夹状态
-  const getFolderStatus = (mediaId: number, totalInBilibili: number) => {
-    const status = statusMap[mediaId];
-    const indexedCount = status?.indexed_count ?? 0;
-    const lastSync = status?.last_sync_at;
-    const folder = folders.find((f) => f.media_id === mediaId);
-    const countSource = folder?.count_source ?? "bili";
-    let totalCount = totalInBilibili;
-    if (countSource === "filtered") {
-      totalCount = folder?.media_count ?? totalInBilibili;
-    } else if (status?.media_count != null) {
-      totalCount = status.media_count;
-    }
-
-    // 未入库：从未同步过
-    if (!lastSync) {
-      return { label: "未入库", className: "empty", indexedCount };
-    }
-
-    // 已入库：有同步时间
-    if (indexedCount >= totalCount) {
-      return { label: "已入库", className: "ok", indexedCount, totalCount };
-    }
-
-    // 有更新：B站收藏夹比本地多
-    if (indexedCount < totalCount && indexedCount > 0) {
-      return {
-        label: "有更新",
-        className: "partial",
-        indexedCount,
-        totalCount,
-      };
-    }
-
-    // 已入库但视频数为0（可能视频都没有内容）
-    return { label: "已入库", className: "ok", indexedCount, totalCount };
-  };
-
-  // 计算按钮文字
-  const getButtonText = () => {
-    if (building) return progress?.current_step || "处理中...";
-    if (selected.size === 0 && selectedVideos.size === 0) {
-      return "选择收藏夹或视频";
-    }
-
-    if (selected.size === 0) {
-      return `入库 ${selectedVideos.size} 个视频到${targetKnowledgeBase}`;
-    }
-
-    if (selectedVideos.size > 0) {
-      return `入库 ${selected.size} 个收藏夹和 ${selectedVideos.size} 个视频到${targetKnowledgeBase}`;
-    }
-
-    // 检查选中的是否有未入库的
-    const hasUnindexed = Array.from(selected).some((id) => {
-      const folder = folders.find((f) => f.media_id === id);
-      if (!folder) return false;
-      return !statusMap[id]?.last_sync_at;
-    });
-
-    if (hasUnindexed) {
-      return `入库 ${selected.size} 个收藏夹到${targetKnowledgeBase}`;
-    }
-    return `更新 ${selected.size} 个收藏夹到${targetKnowledgeBase}`;
-  };
-
   const isEmptyState = !loading && folders.length === 0;
 
   return (
@@ -544,8 +462,13 @@ export default function SourcesPanel({
           ) : (
             <div className="sources-folder-list">
               {folders.map((f) => {
-                const status = getFolderStatus(f.media_id, f.media_count);
-                const lastSync = formatTime(
+                const status = getSourcesFolderStatus({
+                  folders,
+                  statusMap,
+                  mediaId: f.media_id,
+                  totalInBilibili: f.media_count,
+                });
+                const lastSync = formatFolderSyncTime(
                   statusMap[f.media_id]?.last_sync_at ?? undefined,
                 );
                 const folderTitle = displayFolderTitle(f.title);
@@ -798,7 +721,18 @@ export default function SourcesPanel({
               : "idle"
           }`}
         >
-          {knowledgeBaseId ? getButtonText() : "请先在侧栏创建知识库"}
+          {knowledgeBaseId
+            ? getSourcesBuildButtonText({
+                building,
+                progressStep: progress?.current_step,
+                selectedCount: selected.size,
+                selectedVideoCount: selectedVideos.size,
+                selectedFolderIds: Array.from(selected),
+                targetKnowledgeBase,
+                folders,
+                statusMap,
+              })
+            : "请先在侧栏创建知识库"}
         </button>
 
         {knowledgeBaseId ? (
