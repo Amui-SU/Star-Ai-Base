@@ -66,6 +66,30 @@ def test_chat_panel_history_tests_are_split_from_main_suite():
     assert "@/components/chat/chatPanelTestUtils" in history_source
 
 
+def test_chat_panel_streaming_tests_are_split_from_main_suite():
+    project_root = Path(__file__).resolve().parents[1]
+    main_test = project_root / "frontend" / "components" / "ChatPanel.test.tsx"
+    streaming_test = (
+        project_root / "frontend" / "components" / "ChatPanel.streaming.test.tsx"
+    )
+
+    moved_tests = [
+        "keeps a streaming response alive after the old fixed deadline when content arrived",
+        "uses instant autoscroll during streaming updates to avoid repeated smooth-scroll jank",
+        "does not force autoscroll while the user reads earlier content during streaming",
+        "does not call the non-stream fallback after idle timeout when partial content exists",
+    ]
+    main_source = main_test.read_text(encoding="utf-8")
+
+    assert streaming_test.exists()
+    streaming_source = streaming_test.read_text(encoding="utf-8")
+    assert "@/components/chat/chatPanelTestUtils" in streaming_source
+
+    for test_name in moved_tests:
+        assert test_name not in main_source
+        assert test_name in streaming_source
+
+
 def test_frontend_provider_presets_are_shared():
     project_root = Path(__file__).resolve().parents[1]
     providers_file = project_root / "frontend" / "lib" / "providers.ts"
