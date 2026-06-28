@@ -327,6 +327,47 @@ def test_knowledge_base_router_delegates_web_search_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_knowledge_base_router_delegates_presenter_helpers_to_service():
+    project_root = Path(__file__).resolve().parents[1]
+    service_path = project_root / "app/services/knowledge_base_presenters.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+    router_module = ast.parse(router_source)
+
+    declared_names = {
+        node.name
+        for node in router_module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+
+    expected_service_names = {
+        "supports_keyword_argument",
+        "response_from_knowledge_base",
+        "search_result_from_document",
+        "source_from_document",
+        "dedupe_ints",
+        "dedupe_strings",
+        "nullable_equal",
+    }
+    router_private_names = {
+        "_supports_keyword_argument",
+        "_response",
+        "_search_result",
+        "_source_from_document",
+        "_dedupe_ints",
+        "_dedupe_strings",
+        "_nullable_equal",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source
+    assert "from app.services.knowledge_base_presenters import" in router_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = Path(__file__).resolve().parents[1]
     source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")
