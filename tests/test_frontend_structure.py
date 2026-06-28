@@ -90,6 +90,36 @@ def test_chat_panel_streaming_tests_are_split_from_main_suite():
         assert test_name in streaming_source
 
 
+def test_chat_panel_web_search_tests_are_split_from_main_suite():
+    project_root = Path(__file__).resolve().parents[1]
+    main_test = project_root / "frontend" / "components" / "ChatPanel.test.tsx"
+    web_search_test = (
+        project_root / "frontend" / "components" / "ChatPanel.web-search.test.tsx"
+    )
+
+    moved_tests = [
+        "sends the web search flag when the picker toggle is enabled",
+        "resets the web search provider to auto when enabling search from the picker",
+        "opens Tavily config from web search provider choice and sends Tavily after saving",
+        "shows the web search notice only on the scope chip and then restores the scope text",
+        "labels knowledge and web sources in assistant references",
+        "shows web sources from the streaming metadata in assistant references",
+        "renders web search progress as a live status outside thinking text",
+        "clears previous references immediately when regenerating an answer",
+        "shows web search fallback status returned by the chat response",
+        "shows attempted queries when web search returns no results",
+    ]
+    main_source = main_test.read_text(encoding="utf-8")
+
+    assert web_search_test.exists()
+    web_search_source = web_search_test.read_text(encoding="utf-8")
+    assert "@/components/chat/chatPanelTestUtils" in web_search_source
+
+    for test_name in moved_tests:
+        assert test_name not in main_source
+        assert test_name in web_search_source
+
+
 def test_frontend_provider_presets_are_shared():
     project_root = Path(__file__).resolve().parents[1]
     providers_file = project_root / "frontend" / "lib" / "providers.ts"
