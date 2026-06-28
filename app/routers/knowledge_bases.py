@@ -46,13 +46,15 @@ from app.services.ingestion_tasks import (
     update_ingestion_task,
 )
 from app.services.rag_runtime import get_rag_service
+from app.services.chat_messages import (
+    apply_mode_instructions as _apply_mode_instructions,
+    enforce_markdown_output as _enforce_markdown_output,
+)
 from app.routers.chat import (
     LLMToolRunResult,
-    _apply_mode_instructions,
     _append_no_more_tool_calls_instruction,
     _complete_llm_answer,
     _encode_thinking_delta,
-    _enforce_markdown_output,
     _prepare_llm_messages_with_tools,
     _resolve_llm_config,
     _stream_llm_events,
