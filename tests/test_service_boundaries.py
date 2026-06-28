@@ -172,6 +172,49 @@ def test_chat_router_delegates_message_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_chat_router_delegates_question_routing_helpers_to_service():
+    project_root = Path(__file__).resolve().parents[1]
+    service_path = project_root / "app/services/chat_routing.py"
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    chat_module = ast.parse(chat_source)
+
+    declared_names = {
+        node.name
+        for node in chat_module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+
+    expected_service_names = {
+        "is_list_question",
+        "is_summary_question",
+        "is_general_question",
+        "is_collection_intent",
+        "is_overview_question",
+        "route_with_rules",
+        "route_with_llm",
+        "extract_keywords",
+        "filter_docs_by_keywords",
+    }
+    router_private_names = {
+        "_is_list_question",
+        "_is_summary_question",
+        "_is_general_question",
+        "_is_collection_intent",
+        "_is_overview_question",
+        "_route_with_rules",
+        "_route_with_llm",
+        "_extract_keywords",
+        "_filter_docs_by_keywords",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source
+    assert "from app.services.chat_routing import" in chat_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_knowledge_base_router_delegates_web_search_helpers_to_service():
     project_root = Path(__file__).resolve().parents[1]
     service_path = project_root / "app/services/knowledge_web_search.py"
