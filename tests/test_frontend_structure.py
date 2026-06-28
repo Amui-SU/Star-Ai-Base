@@ -102,12 +102,6 @@ def test_chat_panel_web_search_tests_are_split_from_main_suite():
         "resets the web search provider to auto when enabling search from the picker",
         "opens Tavily config from web search provider choice and sends Tavily after saving",
         "shows the web search notice only on the scope chip and then restores the scope text",
-        "labels knowledge and web sources in assistant references",
-        "shows web sources from the streaming metadata in assistant references",
-        "renders web search progress as a live status outside thinking text",
-        "clears previous references immediately when regenerating an answer",
-        "shows web search fallback status returned by the chat response",
-        "shows attempted queries when web search returns no results",
     ]
     main_source = main_test.read_text(encoding="utf-8")
 
@@ -118,6 +112,37 @@ def test_chat_panel_web_search_tests_are_split_from_main_suite():
     for test_name in moved_tests:
         assert test_name not in main_source
         assert test_name in web_search_source
+
+
+def test_chat_panel_web_search_result_tests_are_split_from_toggle_suite():
+    project_root = Path(__file__).resolve().parents[1]
+    web_search_test = (
+        project_root / "frontend" / "components" / "ChatPanel.web-search.test.tsx"
+    )
+    results_test = (
+        project_root
+        / "frontend"
+        / "components"
+        / "ChatPanel.web-search-results.test.tsx"
+    )
+
+    moved_tests = [
+        "labels knowledge and web sources in assistant references",
+        "shows web sources from the streaming metadata in assistant references",
+        "renders web search progress as a live status outside thinking text",
+        "clears previous references immediately when regenerating an answer",
+        "shows web search fallback status returned by the chat response",
+        "shows attempted queries when web search returns no results",
+    ]
+    web_search_source = web_search_test.read_text(encoding="utf-8")
+
+    assert results_test.exists()
+    results_source = results_test.read_text(encoding="utf-8")
+    assert "@/components/chat/chatPanelTestUtils" in results_source
+
+    for test_name in moved_tests:
+        assert test_name not in web_search_source
+        assert test_name in results_source
 
 
 def test_chat_panel_config_tests_are_split_from_main_suite():
