@@ -1,6 +1,5 @@
 import {
   act,
-  cleanup,
   fireEvent,
   render,
   screen,
@@ -10,7 +9,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ChatPanel from "@/components/ChatPanel";
-import { chatApi, chatHistoryApi, knowledgeBaseApi } from "@/lib/api";
+import {
+  chatApi,
+  chatHistoryApi,
+  cleanupChatPanelTest,
+  createDeferred,
+  knowledgeBaseApi,
+  mockChatPanelDependencies,
+} from "@/components/chat/chatPanelTestUtils";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -42,126 +48,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-function createDeferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
-}
-
-function mockChatPanelDependencies() {
-  window.HTMLElement.prototype.scrollIntoView = vi.fn();
-  vi.mocked(chatApi.getModelConfig).mockResolvedValue({
-    current_provider: "deepseek",
-    providers: [
-      {
-        provider: "deepseek",
-        label: "DeepSeek",
-        enabled: true,
-        model: "deepseek-v4-pro",
-        thinking_config: { thinking: { type: "enabled" } },
-        thinking_template: { thinking: { type: "enabled" } },
-      },
-    ],
-  });
-  vi.mocked(chatApi.health).mockResolvedValue({
-    status: "up",
-    message: "ok",
-    latency_ms: 10,
-    model: "deepseek-v4-pro",
-    provider: "deepseek",
-  });
-  vi.mocked(chatApi.getWebSearchConfig).mockResolvedValue({
-    provider: "auto",
-    tavily_configured: false,
-    fallback_html: true,
-    tavily_search_depth: "basic",
-  });
-  vi.mocked(chatApi.saveWebSearchConfig).mockResolvedValue({
-    provider: "tavily",
-    tavily_configured: true,
-    fallback_html: true,
-    tavily_search_depth: "basic",
-  });
-  vi.mocked(chatApi.setModelSource).mockResolvedValue({
-    current_provider: "deepseek",
-    current_api_source: "personal",
-    providers: [
-      {
-        provider: "deepseek",
-        label: "DeepSeek",
-        enabled: true,
-        official_enabled: true,
-        personal_enabled: true,
-        model: "deepseek-v4-pro",
-        thinking_config: { thinking: { type: "enabled" } },
-        thinking_template: { thinking: { type: "enabled" } },
-      },
-    ],
-  });
-  vi.mocked(knowledgeBaseApi.stats).mockResolvedValue({
-    knowledge_base_id: 1,
-    workspace_id: 1,
-    total_videos: 1,
-    folders: [],
-    scoped: true,
-  });
-  vi.mocked(knowledgeBaseApi.getScopeOptions).mockResolvedValue({
-    folders: [],
-  });
-  vi.mocked(knowledgeBaseApi.chatStreamUrl).mockReturnValue(
-    "http://localhost:8000/knowledge-bases/1/chat/stream",
-  );
-  vi.mocked(chatHistoryApi.list).mockResolvedValue({ items: [] });
-  vi.mocked(chatHistoryApi.create).mockImplementation(async (data) => ({
-    id: 101,
-    user_id: 1,
-    workspace_id: data.workspace_id ?? null,
-    knowledge_base_id: data.knowledge_base_id ?? null,
-    title: data.title || data.messages[0]?.content || "新对话",
-    scope: data.scope ?? null,
-    web_search: data.web_search,
-    web_search_provider: data.web_search_provider,
-    message_count: data.messages.length,
-    created_at: "2026-06-26T00:00:00Z",
-    updated_at: "2026-06-26T00:00:00Z",
-    messages: data.messages.map((message, index) => ({
-      id: index + 1,
-      sequence: index,
-      created_at: "2026-06-26T00:00:00Z",
-      ...message,
-    })),
-  }));
-  vi.mocked(chatHistoryApi.update).mockImplementation(async (id, data) => ({
-    id,
-    user_id: 1,
-    workspace_id: data.workspace_id ?? null,
-    knowledge_base_id: data.knowledge_base_id ?? null,
-    title: data.title || data.messages[0]?.content || "新对话",
-    scope: data.scope ?? null,
-    web_search: data.web_search,
-    web_search_provider: data.web_search_provider,
-    message_count: data.messages.length,
-    created_at: "2026-06-26T00:00:00Z",
-    updated_at: "2026-06-26T00:00:00Z",
-    messages: data.messages.map((message, index) => ({
-      id: index + 1,
-      sequence: index,
-      created_at: "2026-06-26T00:00:00Z",
-      ...message,
-    })),
-  }));
-}
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
-  vi.unstubAllGlobals();
-  vi.useRealTimers();
-});
+afterEach(cleanupChatPanelTest);
 
 describe("ChatPanel", () => {
   it("keeps send disabled when no knowledge base is selected", async () => {
@@ -175,66 +62,6 @@ describe("ChatPanel", () => {
     );
 
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
-  });
-
-  it("opens a requested conversation from the expanded history panel", async () => {
-    mockChatPanelDependencies();
-    vi.mocked(chatHistoryApi.get).mockResolvedValue({
-      id: 42,
-      user_id: 1,
-      workspace_id: 1,
-      knowledge_base_id: 1,
-      title: "RAG follow-up",
-      scope: { folder_ids: [10], bvids: ["BV1ABC"] },
-      web_search: true,
-      web_search_provider: "tavily",
-      message_count: 2,
-      created_at: "2026-06-26T00:00:00Z",
-      updated_at: "2026-06-26T01:00:00Z",
-      messages: [
-        {
-          id: 1,
-          role: "user",
-          content: "Explain RAG",
-          sequence: 0,
-          created_at: "2026-06-26T00:00:00Z",
-        },
-        {
-          id: 2,
-          role: "assistant",
-          content: "RAG combines retrieval and generation.",
-          thinking: "Need concise answer",
-          sources: [
-            {
-              type: "knowledge",
-              title: "RAG 入门",
-              url: "https://www.bilibili.com/video/BV1ABC",
-              bvid: "BV1ABC",
-            },
-          ],
-          web_search: { status: "success", message: "used web" },
-          sequence: 1,
-          created_at: "2026-06-26T00:00:01Z",
-        },
-      ],
-    });
-
-    render(
-      <ChatPanel
-        knowledgeBaseId={1}
-        knowledgeBaseName="Test KB"
-        conversationOpenRequest={{ id: 42, key: 1 }}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(chatHistoryApi.get).toHaveBeenCalledWith(42);
-    });
-    expect(screen.getByText("Explain RAG")).toBeVisible();
-    expect(
-      screen.getByText("RAG combines retrieval and generation."),
-    ).toBeVisible();
-    expect(screen.queryByRole("button", { name: "最近对话" })).toBeNull();
   });
 
   it("saves the completed streaming answer with scope and web search metadata", async () => {
@@ -305,61 +132,6 @@ describe("ChatPanel", () => {
         ],
       }),
     );
-  });
-
-  it("starts a new conversation from an expanded-page request without deleting saved history", async () => {
-    mockChatPanelDependencies();
-    vi.mocked(chatHistoryApi.get).mockResolvedValue({
-      id: 42,
-      user_id: 1,
-      workspace_id: 1,
-      knowledge_base_id: 1,
-      title: "Saved chat",
-      scope: null,
-      web_search: false,
-      web_search_provider: "auto",
-      message_count: 2,
-      created_at: "2026-06-26T00:00:00Z",
-      updated_at: "2026-06-26T01:00:00Z",
-      messages: [
-        {
-          id: 1,
-          role: "user",
-          content: "old question",
-          sequence: 0,
-          created_at: "2026-06-26T00:00:00Z",
-        },
-        {
-          id: 2,
-          role: "assistant",
-          content: "old answer",
-          sequence: 1,
-          created_at: "2026-06-26T00:00:01Z",
-        },
-      ],
-    });
-
-    const { rerender } = render(
-      <ChatPanel
-        knowledgeBaseId={1}
-        knowledgeBaseName="Test KB"
-        conversationOpenRequest={{ id: 42, key: 1 }}
-        newConversationRequestKey={0}
-      />,
-    );
-    expect(await screen.findByText("old answer")).toBeVisible();
-
-    rerender(
-      <ChatPanel
-        knowledgeBaseId={1}
-        knowledgeBaseName="Test KB"
-        conversationOpenRequest={{ id: 42, key: 1 }}
-        newConversationRequestKey={1}
-      />,
-    );
-
-    expect(screen.queryByText("old answer")).not.toBeInTheDocument();
-    expect(chatHistoryApi.delete).not.toHaveBeenCalled();
   });
 
   it("marks the AI disclaimer so mobile layout can hide it without changing desktop", async () => {

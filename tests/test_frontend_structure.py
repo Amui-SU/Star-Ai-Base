@@ -30,6 +30,42 @@ def test_chat_panel_uses_chat_subcomponents():
     assert "总结收藏夹里最有价值的内容" not in chat_panel
 
 
+def test_chat_panel_history_tests_are_split_from_main_suite():
+    project_root = Path(__file__).resolve().parents[1]
+    main_test = project_root / "frontend" / "components" / "ChatPanel.test.tsx"
+    history_test = (
+        project_root / "frontend" / "components" / "ChatPanel.history.test.tsx"
+    )
+    test_utils = (
+        project_root / "frontend" / "components" / "chat" / "chatPanelTestUtils.tsx"
+    )
+
+    main_source = main_test.read_text(encoding="utf-8")
+
+    assert history_test.exists()
+    assert test_utils.exists()
+    assert (
+        "opens a requested conversation from the expanded history panel"
+        not in main_source
+    )
+    assert (
+        "starts a new conversation from an expanded-page request without deleting saved history"
+        not in main_source
+    )
+
+    history_source = history_test.read_text(encoding="utf-8")
+    assert (
+        "opens a requested conversation from the expanded history panel"
+        in history_source
+    )
+    assert (
+        "starts a new conversation from an expanded-page request without deleting saved history"
+        in history_source
+    )
+    assert "@/components/chat/chatPanelTestUtils" in main_source
+    assert "@/components/chat/chatPanelTestUtils" in history_source
+
+
 def test_frontend_provider_presets_are_shared():
     project_root = Path(__file__).resolve().parents[1]
     providers_file = project_root / "frontend" / "lib" / "providers.ts"
