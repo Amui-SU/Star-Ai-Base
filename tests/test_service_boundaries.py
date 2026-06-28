@@ -215,6 +215,51 @@ def test_chat_router_delegates_question_routing_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_chat_router_delegates_completion_helpers_to_service():
+    project_root = Path(__file__).resolve().parents[1]
+    service_path = project_root / "app/services/chat_completion.py"
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    chat_module = ast.parse(chat_source)
+
+    declared_names = {
+        node.name
+        for node in chat_module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+
+    expected_service_names = {
+        "create_chat_completion_async",
+        "is_llm_connection_error",
+        "build_llm_unavailable_answer",
+        "build_thinking_completion_options",
+        "verify_provider_configuration",
+        "encode_thinking_delta",
+        "stream_llm_events",
+        "complete_llm_answer",
+        "complete_llm_answer_with_tools",
+        "prepare_llm_messages_with_tools",
+    }
+    router_private_names = {
+        "_create_chat_completion_async",
+        "_is_llm_connection_error",
+        "_build_llm_unavailable_answer",
+        "_build_thinking_completion_options",
+        "_verify_provider_configuration",
+        "_encode_thinking_delta",
+        "_stream_llm_events",
+        "_complete_llm_answer",
+        "_complete_llm_answer_with_tools",
+        "_prepare_llm_messages_with_tools",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"async def {name}" in service_source
+    assert "from app.services.chat_completion import" in chat_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_knowledge_base_router_delegates_web_search_helpers_to_service():
     project_root = Path(__file__).resolve().parents[1]
     service_path = project_root / "app/services/knowledge_web_search.py"

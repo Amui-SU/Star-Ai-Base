@@ -1,15 +1,14 @@
 """Chat routes for RAG question answering."""
 
-import asyncio
 import json
 import time
-from typing import Awaitable, Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from openai import OpenAI, APIConnectionError, APITimeoutError
+from openai import OpenAI
 from pydantic import BaseModel
 
 from app.database import get_db
@@ -49,9 +48,6 @@ from app.services.chat_config import (
 from app.services.llm_tool_calls import (
     LLMToolRunResult,
     append_no_more_tool_calls_instruction as _append_no_more_tool_calls_instruction,
-    append_tool_call_results as _append_tool_call_results,
-    contains_dsml_tool_call_text as _contains_dsml_tool_call_text,
-    extract_dsml_text_tool_calls as _extract_dsml_text_tool_calls,
     extract_thinking_and_answer as _extract_thinking_and_answer,
     message_to_openai_dict as _message_to_openai_dict,
     parse_tool_arguments as _parse_tool_arguments,
@@ -66,6 +62,18 @@ from app.services.chat_messages import (
     build_overview_messages as _build_overview_messages,
     build_rag_messages as _build_rag_messages,
     enforce_markdown_output as _enforce_markdown_output,
+)
+from app.services.chat_completion import (
+    build_llm_unavailable_answer,
+    build_thinking_completion_options,
+    complete_llm_answer,
+    complete_llm_answer_with_tools,
+    create_chat_completion_async,
+    encode_thinking_delta,
+    is_llm_connection_error,
+    prepare_llm_messages_with_tools,
+    stream_llm_events,
+    verify_provider_configuration,
 )
 from app.services.chat_routing import (
     extract_keywords as _extract_keywords,
@@ -483,27 +491,9 @@ def _get_llm_client(llm_config: Optional[Dict[str, str]] = None) -> OpenAI:
     )
 
 
-async def _create_chat_completion_async(client: OpenAI, **kwargs):
-    return await asyncio.to_thread(lambda: client.chat.completions.create(**kwargs))
-
-
-def _is_llm_connection_error(err: Exception) -> bool:
-    """判断是否为上游模型连接/超时问题"""
-    if isinstance(err, (APIConnectionError, APITimeoutError)):
-        return True
-    text = str(err).lower()
-    return "connection error" in text or "timed out" in text or "timeout" in text
-
-
-def _build_llm_unavailable_answer() -> str:
-    """模型不可用时的用户可读兜底回答"""
-    return (
-        "当前 AI 模型服务连接不稳定，暂时无法生成回答。\n\n"
-        "你可以先尝试：\n"
-        "1. 稍后重试提问；\n"
-        "2. 检查后端网络与模型服务配置（API Key / Base URL）；\n"
-        "3. 先在左侧完成收藏夹入库，稍后再问。"
-    )
+_create_chat_completion_async = create_chat_completion_async
+_is_llm_connection_error = is_llm_connection_error
+_build_llm_unavailable_answer = build_llm_unavailable_answer
 
 
 def _log_final_payload(route: str, messages: list[dict], sources: list[dict]) -> None:
@@ -513,206 +503,56 @@ def _log_final_payload(route: str, messages: list[dict], sources: list[dict]) ->
     logger.info(f"最终来源数量: {len(sources)}")
 
 
-def _build_thinking_completion_options(llm_config: dict) -> dict:
-    """把已保存的请求体 JSON 注入 OpenAI 兼容客户端。"""
-    thinking_config = llm_config.get("thinking_config") or {}
-    if not thinking_config:
-        return {}
-    return {"extra_body": thinking_config}
+_build_thinking_completion_options = build_thinking_completion_options
 
 
-def _verify_provider_configuration(llm_config: dict) -> int:
-    start = time.perf_counter()
-    client = _get_llm_client(llm_config)
-    try:
-        client.chat.completions.create(
-            model=llm_config["model"],
-            messages=[{"role": "user", "content": "请只回复 OK"}],
-            max_tokens=16,
-            stream=False,
-            **_build_thinking_completion_options(llm_config),
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"模型配置验证失败: {str(exc)}",
-        ) from exc
-    return int((time.perf_counter() - start) * 1000)
+_verify_provider_configuration = lambda llm_config: verify_provider_configuration(
+    llm_config,
+    get_llm_client=_get_llm_client,
+)
 
 
-def _encode_thinking_delta(content: str) -> str:
-    return f"{THINKING_DELTA_MARKER}{json.dumps(content, ensure_ascii=False)}\n"
+_encode_thinking_delta = lambda content: encode_thinking_delta(
+    content, THINKING_DELTA_MARKER
+)
 
 
-def _stream_llm_events(
-    messages: list[dict], llm_config: Optional[Dict[str, str]] = None
-):
-    """Yield native thinking and answer deltas from the configured model."""
-    cfg = llm_config or _resolve_llm_config()
-    client = _get_llm_client(cfg)
-    stream = client.chat.completions.create(
-        model=cfg["model"],
-        messages=messages,
-        temperature=0.5,
-        stream=True,
-        **_build_thinking_completion_options(cfg),
-    )
-    for chunk in stream:
-        if not chunk.choices:
-            continue
-        delta = chunk.choices[0].delta
-        reasoning_piece = getattr(delta, "reasoning_content", None)
-        if reasoning_piece:
-            yield "thinking", reasoning_piece
-        if delta and delta.content:
-            yield "answer", delta.content
+_stream_llm_events = lambda messages, llm_config=None: stream_llm_events(
+    messages,
+    llm_config,
+    resolve_llm_config=_resolve_llm_config,
+    get_llm_client=_get_llm_client,
+)
 
 
-def _complete_llm_answer(
-    messages: list[dict],
-    llm_config: Optional[Dict[str, str]] = None,
-) -> tuple[str, str]:
-    cfg = llm_config or _resolve_llm_config()
-    client = _get_llm_client(cfg)
-    response = client.chat.completions.create(
-        model=cfg["model"],
-        messages=messages,
-        temperature=0.5,
-        **_build_thinking_completion_options(cfg),
-    )
-    message = response.choices[0].message
-    thinking, answer = _extract_thinking_and_answer(
-        message.content or "",
-        getattr(message, "reasoning_content", None),
-    )
-    return answer, thinking
+_complete_llm_answer = lambda messages, llm_config=None: complete_llm_answer(
+    messages,
+    llm_config,
+    resolve_llm_config=_resolve_llm_config,
+    get_llm_client=_get_llm_client,
+)
 
 
-async def _complete_llm_answer_with_tools(
-    messages: list[dict],
-    *,
-    tools: list[dict],
-    tool_handlers: dict[str, Callable[[dict], Awaitable[dict]]],
-    max_tool_calls: int = 2,
-) -> tuple[str, str, list[dict]]:
-    tool_run = await _prepare_llm_messages_with_tools(
-        messages,
-        tools=tools,
-        tool_handlers=tool_handlers,
-        max_tool_calls=max_tool_calls,
-    )
-    if tool_run.answer is not None:
-        return tool_run.answer, tool_run.thinking, tool_run.messages
-
-    llm_config = _resolve_llm_config()
-    client = _get_llm_client(llm_config)
-    response = await _create_chat_completion_async(
-        client,
-        model=llm_config["model"],
-        messages=_append_no_more_tool_calls_instruction(tool_run.messages),
-        temperature=0.5,
-        **_build_thinking_completion_options(llm_config),
-    )
-    message = response.choices[0].message
-    thinking, answer = _extract_thinking_and_answer(
-        message.content or "",
-        getattr(message, "reasoning_content", None),
-    )
-    if _contains_dsml_tool_call_text(answer):
-        response = await _create_chat_completion_async(
-            client,
-            model=llm_config["model"],
-            messages=_append_no_more_tool_calls_instruction(
-                [
-                    *tool_run.messages,
-                    {
-                        "role": "assistant",
-                        "content": ("我刚刚仍输出了工具调用文本，这不是最终答案。"),
-                    },
-                ]
-            ),
-            temperature=0.5,
-            **_build_thinking_completion_options(llm_config),
-        )
-        message = response.choices[0].message
-        thinking, answer = _extract_thinking_and_answer(
-            message.content or "",
-            getattr(message, "reasoning_content", None),
-        )
-    return answer, thinking, tool_run.messages
+_complete_llm_answer_with_tools = lambda messages, *, tools, tool_handlers, max_tool_calls=2: complete_llm_answer_with_tools(
+    messages,
+    tools=tools,
+    tool_handlers=tool_handlers,
+    max_tool_calls=max_tool_calls,
+    resolve_llm_config=_resolve_llm_config,
+    get_llm_client=_get_llm_client,
+)
 
 
-async def _prepare_llm_messages_with_tools(
-    messages: list[dict],
-    *,
-    tools: list[dict],
-    tool_handlers: dict[str, Callable[[dict], Awaitable[dict]]],
-    max_tool_calls: int = 2,
-    after_tool_messages: Optional[Callable[[list[dict]], list[dict]]] = None,
-    llm_config: Optional[Dict[str, str]] = None,
-) -> LLMToolRunResult:
-    cfg = llm_config or _resolve_llm_config()
-    client = _get_llm_client(cfg)
-    working_messages = [*messages]
-    executed_tool_calls = 0
-
-    while executed_tool_calls < max_tool_calls:
-        # Keep tool planning fast; final answer generation still uses thinking config.
-        response = await _create_chat_completion_async(
-            client,
-            model=cfg["model"],
-            messages=working_messages,
-            temperature=0.5,
-            tools=tools,
-            tool_choice="auto",
-        )
-        message = response.choices[0].message
-        tool_calls = getattr(message, "tool_calls", None) or []
-        if not tool_calls:
-            content, text_tool_calls = _extract_dsml_text_tool_calls(
-                message.content or ""
-            )
-            if text_tool_calls:
-                message = {
-                    "role": "assistant",
-                    "content": content,
-                    "tool_calls": text_tool_calls,
-                }
-                tool_calls = text_tool_calls
-            else:
-                thinking, answer = _extract_thinking_and_answer(
-                    message.content or "",
-                    getattr(message, "reasoning_content", None),
-                )
-                return LLMToolRunResult(
-                    messages=working_messages,
-                    answer=answer,
-                    thinking=thinking,
-                )
-
-        if not tool_calls:
-            thinking, answer = _extract_thinking_and_answer(
-                message.content or "",
-                getattr(message, "reasoning_content", None),
-            )
-            return LLMToolRunResult(
-                messages=working_messages,
-                answer=answer,
-                thinking=thinking,
-            )
-
-        working_messages, executed_this_round = await _append_tool_call_results(
-            working_messages,
-            message,
-            tool_calls,
-            tool_handlers=tool_handlers,
-            remaining_tool_calls=max_tool_calls - executed_tool_calls,
-        )
-        if after_tool_messages is not None:
-            working_messages = after_tool_messages(working_messages)
-        executed_tool_calls += executed_this_round
-
-    return LLMToolRunResult(messages=working_messages)
+_prepare_llm_messages_with_tools = lambda messages, *, tools, tool_handlers, max_tool_calls=2, after_tool_messages=None, llm_config=None: prepare_llm_messages_with_tools(
+    messages,
+    tools=tools,
+    tool_handlers=tool_handlers,
+    max_tool_calls=max_tool_calls,
+    after_tool_messages=after_tool_messages,
+    llm_config=llm_config,
+    resolve_llm_config=_resolve_llm_config,
+    get_llm_client=_get_llm_client,
+)
 
 
 async def _is_related_to_collection(
