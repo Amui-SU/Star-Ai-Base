@@ -1,0 +1,133 @@
+.knowledge-create-card {
+  display: grid;
+  gap: 9px;
+  margin: 0 0 13px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.045),
+      rgba(255, 255, 255, 0.02)
+    ),
+    var(--paper-2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.knowledge-create-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 1px 1px 2px;
+}
+
+.knowledge-create-title {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.knowledge-create-copy {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.knowledge-create-input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  outline: none;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.knowledge-create-input::placeholder {
+  color: var(--muted);
+}
+
+.knowledge-create-input:focus {
+  border-color: rgba(217, 119, 87, 0.62);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.12);
+}
+
+.knowledge-create-submit {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--btn-light);
+  color: var(--btn-dark);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.knowledge-create-submit:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.knowledge-create-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+  transform: none;
+}
+
+html.light .knowledge-create-card {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.58),
+      rgba(255, 255, 255, 0.28)
+    ),
+    rgba(43, 36, 29, 0.035);
+}
+
+html.light .knowledge-create-input {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+html.light .knowledge-create-input:focus {
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.knowledge-active-hint {
+  margin-left: 15px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+html.light .knowledge-item {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.68),
+      rgba(255, 255, 255, 0.34)
+    ),
+    rgba(43, 36, 29, 0.035);
+  border-color: #cdbb9f;
+}
+
+html.light .knowledge-empty-card {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: #cdbb9f;
+}

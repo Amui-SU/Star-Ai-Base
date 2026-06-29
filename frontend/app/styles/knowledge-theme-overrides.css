@@ -1,0 +1,25 @@
+html.light .knowledge-select-trigger {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+html.light .knowledge-select-trigger:hover {
+  background: rgba(255, 255, 255, 0.78);
+}
+
+html.light .knowledge-select-popover {
+  background: rgba(250, 246, 239, 0.96);
+  box-shadow: 0 18px 42px rgba(55, 38, 22, 0.14);
+}
+
+html.light .knowledge-option-btn {
+  background: rgba(43, 36, 29, 0.03);
+}
+
+html.light .knowledge-option-row.active .knowledge-option-btn,
+html.light .knowledge-option-btn:hover {
+  background: rgba(43, 36, 29, 0.06);
+}
+
+html.light .knowledge-delete-card {
+  background: rgba(224, 96, 80, 0.07);
+}

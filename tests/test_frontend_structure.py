@@ -759,6 +759,47 @@ def test_global_styles_delegate_knowledge_sidebar_styles_to_feature_file():
         assert selector not in globals_css
 
 
+def test_knowledge_sidebar_styles_delegate_to_focused_files():
+    project_root = Path(__file__).resolve().parents[1]
+    styles_dir = project_root / "frontend" / "app" / "styles"
+    knowledge_css = (styles_dir / "knowledge-sidebar.css").read_text(encoding="utf-8")
+
+    expected_imports = [
+        "./knowledge-panel-shell.css",
+        "./knowledge-selector.css",
+        "./knowledge-delete.css",
+        "./knowledge-theme-overrides.css",
+        "./knowledge-create.css",
+        "./knowledge-responsive.css",
+    ]
+    expected_anchors = {
+        "knowledge-panel-shell.css": ".knowledge-panel {",
+        "knowledge-selector.css": ".knowledge-select {",
+        "knowledge-delete.css": ".knowledge-delete-icon {",
+        "knowledge-theme-overrides.css": "html.light .knowledge-select-trigger {",
+        "knowledge-create.css": ".knowledge-create-card {",
+        "knowledge-responsive.css": "@media (max-width: 640px)",
+    }
+
+    for imported_path in expected_imports:
+        imported_file = styles_dir / imported_path.removeprefix("./")
+        assert imported_file.exists()
+        assert expected_anchors[imported_file.name] in imported_file.read_text(
+            encoding="utf-8"
+        )
+        assert f'@import "{imported_path}";' in knowledge_css
+
+    for selector in [
+        "\n.knowledge-panel {",
+        "\n.knowledge-select {",
+        "\n.knowledge-delete-icon {",
+        "\nhtml.light .knowledge-select-trigger {",
+        "\n.knowledge-create-card {",
+        "\n@media (max-width: 640px)",
+    ]:
+        assert selector not in knowledge_css
+
+
 def test_global_styles_delegate_chat_styles_to_feature_file():
     project_root = Path(__file__).resolve().parents[1]
     globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(

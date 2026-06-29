@@ -1,0 +1,48 @@
+@media (max-width: 640px) {
+  .knowledge-create-card {
+    gap: 8px;
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .knowledge-create-copy {
+    font-size: 9px;
+  }
+
+  .knowledge-create-input,
+  .knowledge-create-submit {
+    min-height: 32px;
+  }
+}
+
+@media (max-width: 640px) {
+  .knowledge-panel {
+    padding: 12px 12px 10px;
+  }
+
+  .knowledge-select-popover {
+    width: min(100%, calc(100vw - 36px));
+    max-height: 48dvh;
+    overflow: auto;
+  }
+
+  .knowledge-delete-card {
+    gap: 9px;
+    padding: 11px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .knowledge-select-popover {
+    background: #262624;
+    backdrop-filter: none;
+  }
+
+  html.light .knowledge-select-popover {
+    background: #f8efe2;
+  }
+
+  .app-shell.sidebar-open .knowledge-panel-head {
+    padding-left: 46px;
+  }
+}
