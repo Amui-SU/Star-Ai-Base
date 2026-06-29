@@ -668,6 +668,45 @@ def test_global_styles_delegate_chat_control_styles_to_feature_file():
         assert selector not in globals_css
 
 
+def test_chat_control_styles_delegate_to_focused_files():
+    project_root = Path(__file__).resolve().parents[1]
+    styles_dir = project_root / "frontend" / "app" / "styles"
+    controls_css = (styles_dir / "chat-controls.css").read_text(encoding="utf-8")
+
+    expected_imports = [
+        "./chat-composer-controls.css",
+        "./chat-scope-picker.css",
+        "./chat-model-controls.css",
+        "./control-primitives.css",
+        "./chat-controls-responsive.css",
+    ]
+    expected_anchors = {
+        "chat-composer-controls.css": ".composer-shell {",
+        "chat-scope-picker.css": ".scope-picker {",
+        "chat-model-controls.css": ".model-status-card {",
+        "control-primitives.css": ".input {",
+        "chat-controls-responsive.css": "@media (max-width: 1024px)",
+    }
+
+    for imported_path in expected_imports:
+        imported_file = styles_dir / imported_path.removeprefix("./")
+        assert imported_file.exists()
+        assert expected_anchors[imported_file.name] in imported_file.read_text(
+            encoding="utf-8"
+        )
+        assert f'@import "{imported_path}";' in controls_css
+
+    for selector in [
+        "\n.composer-shell {",
+        "\n.scope-picker {",
+        "\n.model-status-card {",
+        "\n.input {",
+        "\n.btn {",
+        "\n@media (max-width: 1024px)",
+    ]:
+        assert selector not in controls_css
+
+
 def test_global_styles_delegate_import_organize_styles_to_feature_file():
     project_root = Path(__file__).resolve().parents[1]
     globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(

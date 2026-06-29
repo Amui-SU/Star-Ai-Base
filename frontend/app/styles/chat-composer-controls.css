@@ -1,0 +1,249 @@
+.composer-shell {
+  position: relative;
+  display: block;
+  border-radius: 18px;
+}
+
+.composer-mode-row {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+}
+
+.composer-secondary-row {
+  position: absolute;
+  left: 10px;
+  bottom: -32px;
+  display: flex;
+  justify-content: flex-start;
+  opacity: 0.72;
+}
+
+.kb-subtle-stat {
+  display: block;
+  margin-left: 12px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+.composer-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 600;
+  height: 28px;
+  padding: 0 8px 0 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 54px;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--border-strong);
+}
+
+.mode-chip.active {
+  background: rgba(217, 119, 87, 0.2);
+  border-color: rgba(217, 119, 87, 0.5);
+  color: var(--accent-strong);
+}
+
+.mode-chip-check {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  line-height: 1;
+  color: transparent;
+  background: transparent;
+}
+
+.mode-chip.active .mode-chip-check {
+  border-color: rgba(217, 119, 87, 0.6);
+  background: rgba(217, 119, 87, 0.18);
+  color: var(--accent-strong);
+}
+
+.composer-input {
+  min-height: 54px;
+  max-height: 180px;
+  padding: 17px 158px 13px 17px;
+  border-radius: 18px;
+  border-color: var(--border-strong);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 42%),
+    var(--input-bg);
+  line-height: 1.58;
+  resize: none;
+  overflow-y: hidden;
+  text-align: left;
+  vertical-align: top;
+}
+
+html.light .composer-input {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.7),
+      rgba(255, 255, 255, 0.36)
+    ),
+    var(--input-bg);
+}
+
+.composer-input::placeholder {
+  vertical-align: top;
+}
+
+.composer-input::-webkit-scrollbar {
+  width: 5px;
+}
+
+.composer-input::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.composer-input::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+
+.mode-chip-send {
+  min-width: 30px;
+  width: 30px;
+  height: 30px;
+  justify-content: center;
+  gap: 0;
+  border-radius: 999px;
+  padding: 0;
+  border-color: transparent;
+  background: var(--paper-3);
+  color: var(--muted-weak);
+  font-size: 0;
+  box-shadow: none;
+}
+
+.mode-chip-send.generating {
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.mode-chip.mode-chip-send.active {
+  border-color: transparent;
+  background: var(--btn-light);
+  color: var(--btn-dark);
+  box-shadow: none;
+}
+
+.mode-chip.mode-chip-send.active:hover {
+  border-color: transparent;
+  background: var(--btn-light);
+  filter: brightness(1.04);
+}
+
+html.light .mode-chip.mode-chip-send.active {
+  background: #2f7c78;
+  color: #fffaf2;
+  box-shadow: 0 8px 18px rgba(47, 124, 120, 0.22);
+}
+
+.mode-chip.mode-chip-send.disabled,
+.mode-chip.mode-chip-send.disabled:hover {
+  opacity: 1;
+  cursor: not-allowed;
+  border-color: transparent;
+  background: var(--paper-3);
+  color: var(--muted-weak);
+  filter: none;
+}
+
+.composer-send-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: var(--paper-3);
+  color: var(--muted-weak);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  gap: 0;
+  font-size: 0;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.composer-send-button.active,
+.composer-send-button.generating {
+  background: var(--btn-light);
+  color: var(--btn-dark);
+}
+
+.composer-send-button.active:hover {
+  transform: translateY(-1px);
+}
+
+html.light .composer-send-button.active,
+html.light .composer-send-button.generating,
+html.light .mode-chip.mode-chip-send.active {
+  background: #2f7c78;
+  color: #fffaf2;
+  box-shadow: 0 8px 18px rgba(47, 124, 120, 0.22);
+}
+
+html.light .composer-send-button.active:hover,
+html.light .mode-chip.mode-chip-send.active:hover {
+  background: #266b68;
+  filter: none;
+}
+
+.composer-send-button.disabled,
+.composer-send-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.send-arrow-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.send-stop-icon {
+  width: 20px;
+  height: 20px;
+}
