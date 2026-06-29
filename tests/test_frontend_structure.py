@@ -641,6 +641,56 @@ def test_global_styles_delegate_sources_styles_to_feature_file():
         assert selector not in globals_css
 
 
+def test_sources_styles_delegate_to_focused_files():
+    project_root = Path(__file__).resolve().parents[1]
+    styles_dir = project_root / "frontend" / "app" / "styles"
+    sources_css = (styles_dir / "sources.css").read_text(encoding="utf-8")
+
+    expected_imports = [
+        "./sources-panel-shell.css",
+        "./sources-empty-state.css",
+        "./sources-ingestion-controls.css",
+        "./sources-folder-list.css",
+        "./sources-video-cards.css",
+        "./sources-player-modal.css",
+        "./source-references.css",
+        "./sources-theme-overrides.css",
+        "./sources-responsive.css",
+    ]
+    expected_anchors = {
+        "sources-panel-shell.css": ".panel-sources .panel-body {",
+        "sources-empty-state.css": ".sources-empty-state {",
+        "sources-ingestion-controls.css": ".sources-ingest-button {",
+        "sources-folder-list.css": ".folder-card {",
+        "sources-video-cards.css": ".video-card {",
+        "sources-player-modal.css": ".video-player-modal {",
+        "source-references.css": ".source-details {",
+        "sources-theme-overrides.css": "html.light .folder-card.selected {",
+        "sources-responsive.css": "@media (max-width: 1024px)",
+    }
+
+    for imported_path in expected_imports:
+        imported_file = styles_dir / imported_path.removeprefix("./")
+        assert imported_file.exists()
+        assert expected_anchors[imported_file.name] in imported_file.read_text(
+            encoding="utf-8"
+        )
+        assert f'@import "{imported_path}";' in sources_css
+
+    for selector in [
+        "\n.panel-sources .panel-body {",
+        "\n.sources-empty-state {",
+        "\n.sources-ingest-button {",
+        "\n.folder-card {",
+        "\n.video-card {",
+        "\n.video-player-modal {",
+        "\n.source-details {",
+        "\nhtml.light .folder-card.selected {",
+        "\n@media (max-width: 1024px)",
+    ]:
+        assert selector not in sources_css
+
+
 def test_global_styles_delegate_knowledge_sidebar_styles_to_feature_file():
     project_root = Path(__file__).resolve().parents[1]
     globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(

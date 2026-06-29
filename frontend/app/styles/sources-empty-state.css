@@ -1,0 +1,108 @@
+.sources-empty-state {
+  min-height: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: clamp(18px, 9vh, 86px) 0 24px;
+}
+
+.sources-initial-empty {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(18px, 9vh, 86px) 16px 22px;
+}
+
+.sources-empty-card {
+  width: 100%;
+  max-width: 260px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 16% 0%,
+      rgba(217, 119, 87, 0.12),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.045),
+      rgba(255, 255, 255, 0.018)
+    ),
+    var(--paper-2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 16px 34px rgba(0, 0, 0, 0.16);
+  padding: 16px;
+  text-align: left;
+}
+
+.sources-empty-kicker {
+  color: var(--accent);
+  font-size: 9px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+}
+
+.sources-empty-title {
+  margin-top: 8px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.sources-empty-card p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.sources-empty-action {
+  margin-top: 14px;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(217, 119, 87, 0.34);
+  border-radius: 999px;
+  background: rgba(217, 119, 87, 0.1);
+  color: var(--accent-strong);
+  padding: 0 12px;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.sources-empty-action:hover {
+  transform: translateY(-1px);
+  border-color: rgba(217, 119, 87, 0.5);
+  background: rgba(217, 119, 87, 0.14);
+}
+
+html.light .sources-empty-card {
+  background:
+    radial-gradient(
+      circle at 16% 0%,
+      rgba(217, 119, 87, 0.13),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.72),
+      rgba(255, 255, 255, 0.36)
+    ),
+    rgba(43, 36, 29, 0.035);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    0 14px 30px rgba(55, 38, 22, 0.08);
+}
