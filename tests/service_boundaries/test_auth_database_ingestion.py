@@ -60,6 +60,46 @@ def test_system_auth_router_delegates_oauth_state_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_system_auth_router_delegates_email_code_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_codes.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    expected_service_names = {
+        "CODE_TTL_SECONDS",
+        "MAX_ATTEMPTS",
+        "IP_RATE_MAX",
+        "IP_RATE_WINDOW",
+        "ip_rate_limit",
+        "check_rate_limit",
+        "check_ip_rate_limit",
+        "hash_code",
+        "email_is_valid",
+        "password_exceeds_bcrypt_limit",
+    }
+    router_private_names = {
+        "_cleanup_rate_limits",
+        "_check_rate_limit",
+        "_check_ip_rate_limit",
+        "_hash_code",
+        "_password_exceeds_bcrypt_limit",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert (
+            f"def {name}" in service_source
+            or f"async def {name}" in service_source
+            or f"{name} =" in service_source
+        )
+    assert "from app.services.system_auth_codes import" in router_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_database_legacy_migration_entrypoint_has_no_nested_helpers():
     project_root = get_project_root()
     source = (project_root / "app/database.py").read_text(encoding="utf-8")

@@ -1,6 +1,4 @@
-import hashlib
 import secrets
-import time
 from datetime import timedelta
 
 import urllib.parse
@@ -30,12 +28,23 @@ from app.models import (
     SystemUser,
     SystemUserResponse,
     VerificationCode,
-    VerificationIpRateLimit,
     Workspace,
     WorkspaceMember,
     WorkspaceResponse,
 )
 from app.services.email import send_verification_email
+from app.services.system_auth_codes import (
+    CODE_TTL_SECONDS as _CODE_TTL_SECONDS,
+    IP_RATE_MAX as _IP_RATE_MAX,
+    IP_RATE_WINDOW as _IP_RATE_WINDOW,
+    MAX_ATTEMPTS as _MAX_ATTEMPTS,
+    check_ip_rate_limit as _check_ip_rate_limit,
+    check_rate_limit as _check_rate_limit,
+    email_is_valid,
+    hash_code as _hash_code,
+    ip_rate_limit as _ip_rate_limit,
+    password_exceeds_bcrypt_limit as _password_exceeds_bcrypt_limit,
+)
 from app.services.system_auth_oauth import (
     OAUTH_STATE_COOKIE_NAME,
     clear_oauth_state_cookie as _clear_oauth_state_cookie,
@@ -66,101 +75,9 @@ from app.time_utils import as_aware_utc, utc_now, utc_now_naive
 
 router = APIRouter(prefix="/system-auth", tags=["系统认证"])
 
-MAX_BCRYPT_PASSWORD_BYTES = 72
-_EMAIL_RE = __import__("re").compile(
-    r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-)
-_CODE_TTL_SECONDS = 300  # 5 分钟有效
-_MAX_ATTEMPTS = 5  # 验证码最多错误尝试次数
-
-# IP 级别频率限制（数据库为事实源；内存字典保留给旧测试/诊断兼容）
-_ip_rate_limit: dict[str, tuple[int, float]] = {}  # ip -> (count, window_start)
-_IP_RATE_MAX = 3  # 每窗口最多 3 次
-_IP_RATE_WINDOW = 60  # 窗口 60 秒
-
-
-def _cleanup_rate_limits():
-    now = time.time()
-    expired = [
-        ip for ip, (_, start) in _ip_rate_limit.items() if now - start > _IP_RATE_WINDOW
-    ]
-    for ip in expired:
-        del _ip_rate_limit[ip]
-
-
-def _check_rate_limit(client_ip: str) -> bool:
-    """检查 IP 频率限制，超限返回 False"""
-    _cleanup_rate_limits()
-    entry = _ip_rate_limit.get(client_ip)
-    now = time.time()
-    if entry is None:
-        _ip_rate_limit[client_ip] = (1, now)
-        return True
-    count, start = entry
-    if now - start > _IP_RATE_WINDOW:
-        _ip_rate_limit[client_ip] = (1, now)
-        return True
-    if count >= _IP_RATE_MAX:
-        return False
-    _ip_rate_limit[client_ip] = (count + 1, start)
-    return True
-
-
-async def _check_ip_rate_limit(db: AsyncSession, client_ip: str) -> bool:
-    """检查并持久化验证码 IP 限流窗口，避免多 worker 绕过。"""
-    now_naive = utc_now_naive()
-    window_expires_before = now_naive - timedelta(seconds=_IP_RATE_WINDOW)
-    await db.execute(
-        delete(VerificationIpRateLimit).where(
-            VerificationIpRateLimit.window_start < window_expires_before
-        )
-    )
-
-    result = await db.execute(
-        select(VerificationIpRateLimit).where(
-            VerificationIpRateLimit.ip_address == client_ip
-        )
-    )
-    entry = result.scalar_one_or_none()
-    if entry is None:
-        db.add(
-            VerificationIpRateLimit(
-                ip_address=client_ip,
-                count=1,
-                window_start=now_naive,
-                updated_at=now_naive,
-            )
-        )
-        await db.commit()
-        return True
-
-    if entry.window_start < window_expires_before:
-        entry.count = 1
-        entry.window_start = now_naive
-        entry.updated_at = now_naive
-        await db.commit()
-        return True
-
-    if entry.count >= _IP_RATE_MAX:
-        await db.commit()
-        return False
-
-    entry.count += 1
-    entry.updated_at = now_naive
-    await db.commit()
-    return True
-
-
-def _hash_code(code: str) -> str:
-    return hashlib.sha256(code.encode()).hexdigest()
-
 
 class SendCodeRequest(BaseModel):
     email: str
-
-
-def _password_exceeds_bcrypt_limit(password: str) -> bool:
-    return len(password.encode("utf-8")) > MAX_BCRYPT_PASSWORD_BYTES
 
 
 def _duplicate_email_exception() -> HTTPException:
@@ -309,7 +226,7 @@ async def send_verification_code(
 ):
     """发送邮箱验证码。DEBUG 模式下验证码直接返回，生产模式通过 SMTP 发送邮件。"""
     email = payload.email.strip().lower()
-    if not _EMAIL_RE.match(email):
+    if not email_is_valid(email):
         raise HTTPException(status_code=400, detail="邮箱格式不正确")
 
     # IP 频率限制
@@ -367,7 +284,7 @@ async def register(
     email = payload.email.strip().lower()
     display_name = payload.display_name.strip()
 
-    if not _EMAIL_RE.match(email):
+    if not email_is_valid(email):
         raise HTTPException(status_code=400, detail="邮箱格式不正确")
     if _password_exceeds_bcrypt_limit(payload.password):
         raise HTTPException(status_code=400, detail="密码长度不能超过 72 字节")
@@ -450,7 +367,7 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ) -> SystemAuthResponse:
     email = payload.email.strip().lower()
-    if not _EMAIL_RE.match(email):
+    if not email_is_valid(email):
         raise HTTPException(status_code=400, detail="邮箱格式不正确")
     result = await db.execute(select(SystemUser).where(SystemUser.email == email))
     user = result.scalar_one_or_none()
