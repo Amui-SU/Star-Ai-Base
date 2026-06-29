@@ -1,0 +1,59 @@
+.local-connection-qr-card {
+  width: min(360px, calc(100vw - 28px));
+  display: grid;
+  gap: 14px;
+  overflow: hidden;
+  padding: 22px;
+  scrollbar-width: none;
+}
+
+.local-connection-qr-card::-webkit-scrollbar {
+  display: none;
+}
+
+.local-connection-qr-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.local-connection-qr-head .modal-title {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.local-connection-qr-head .modal-subtitle {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.local-connection-qr-head .provider-config-close {
+  width: 36px;
+  height: 36px;
+  font-size: 20px;
+}
+
+.local-connection-qr-image {
+  width: min(232px, 68vw);
+  aspect-ratio: 1;
+  height: auto;
+  justify-self: center;
+  border-radius: 18px;
+  background: #fff;
+  padding: 12px;
+  object-fit: contain;
+}
+
+.local-connection-qr-address {
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-soft);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}

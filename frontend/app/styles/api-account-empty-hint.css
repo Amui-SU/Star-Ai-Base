@@ -1,0 +1,55 @@
+.api-account-empty-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(440px, 100%);
+  margin-top: -4px;
+  border: 1px solid rgba(217, 119, 87, 0.22);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background:
+    linear-gradient(180deg, rgba(217, 119, 87, 0.09), rgba(217, 119, 87, 0.04)),
+    rgba(255, 255, 255, 0.025);
+  color: var(--ink-soft);
+  text-align: left;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.1);
+}
+
+.api-account-empty-hint strong,
+.api-account-empty-hint span {
+  display: block;
+}
+
+.api-account-empty-hint strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.api-account-empty-hint span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.api-account-empty-hint button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  border: 1px solid rgba(217, 119, 87, 0.42);
+  border-radius: 9px;
+  padding: 0 12px;
+  background: rgba(217, 119, 87, 0.16);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .api-account-empty-hint {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

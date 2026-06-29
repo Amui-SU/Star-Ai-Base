@@ -621,6 +621,53 @@ def test_global_styles_delegate_account_panel_styles_to_feature_file():
         assert selector not in globals_css
 
 
+def test_account_panel_styles_delegate_to_focused_files():
+    project_root = Path(__file__).resolve().parents[1]
+    styles_dir = project_root / "frontend" / "app" / "styles"
+    account_css = (styles_dir / "account-panels.css").read_text(encoding="utf-8")
+
+    expected_imports = [
+        "./user-menu.css",
+        "./local-connection-qr.css",
+        "./admin-users-panel.css",
+        "./api-accounts-panel.css",
+        "./account-panels-theme-overrides.css",
+        "./api-account-empty-hint.css",
+        "./local-connection-settings.css",
+        "./account-panels-responsive.css",
+    ]
+    expected_anchors = {
+        "user-menu.css": ".user-menu {",
+        "local-connection-qr.css": ".local-connection-qr-card {",
+        "admin-users-panel.css": ".admin-users-panel {",
+        "api-accounts-panel.css": ".modal-card.api-accounts-panel {",
+        "api-account-empty-hint.css": ".api-account-empty-hint {",
+        "local-connection-settings.css": ".local-connection-trigger {",
+        "account-panels-theme-overrides.css": "html.light .user-menu-popover {",
+        "account-panels-responsive.css": "@media (max-width: 860px)",
+    }
+
+    for imported_path in expected_imports:
+        imported_file = styles_dir / imported_path.removeprefix("./")
+        assert imported_file.exists()
+        assert expected_anchors[imported_file.name] in imported_file.read_text(
+            encoding="utf-8"
+        )
+        assert f'@import "{imported_path}";' in account_css
+
+    for selector in [
+        "\n.user-menu {",
+        "\n.local-connection-qr-card {",
+        "\n.admin-users-panel {",
+        "\n.modal-card.api-accounts-panel {",
+        "\n.api-account-empty-hint {",
+        "\n.local-connection-trigger {",
+        "\nhtml.light .user-menu-popover {",
+        "\n@media (max-width: 860px)",
+    ]:
+        assert selector not in account_css
+
+
 def test_global_styles_delegate_sources_styles_to_feature_file():
     project_root = Path(__file__).resolve().parents[1]
     globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(

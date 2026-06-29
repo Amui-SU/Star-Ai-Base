@@ -1,0 +1,20 @@
+html.light .user-menu-popover {
+  background: rgba(250, 246, 239, 0.94);
+  box-shadow: 0 18px 42px rgba(55, 38, 22, 0.16);
+}
+
+html.light .user-menu-action {
+  background: rgba(43, 36, 29, 0.035);
+}
+
+html.light .user-menu-action:hover {
+  background: rgba(43, 36, 29, 0.06);
+}
+
+html.light .user-menu-logout {
+  background: rgba(224, 96, 80, 0.07);
+}
+
+html.light .user-menu-logout:hover {
+  background: rgba(224, 96, 80, 0.11);
+}

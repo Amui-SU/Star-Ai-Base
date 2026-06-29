@@ -1,0 +1,97 @@
+.local-connection-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  border: 1px solid rgba(250, 249, 245, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink-soft);
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.local-connection-trigger-label {
+  display: inline;
+  white-space: nowrap;
+}
+
+.local-connection-trigger:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--border-strong);
+}
+
+.modal-backdrop.local-connection-modal-backdrop {
+  z-index: 230;
+}
+
+.local-connection-modal {
+  width: min(420px, calc(100vw - 28px));
+  display: grid;
+  gap: 16px;
+}
+
+.local-connection-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.local-connection-field {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.local-connection-input {
+  height: 48px;
+}
+
+.local-connection-message {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-soft);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.local-connection-message-error {
+  border-color: rgba(224, 96, 80, 0.45);
+  background: rgba(224, 96, 80, 0.1);
+  color: var(--danger);
+}
+
+.local-connection-saved-notice {
+  position: fixed;
+  left: 50%;
+  bottom: max(24px, calc(env(safe-area-inset-bottom) + 18px));
+  z-index: 150;
+  transform: translateX(-50%);
+  border: 1px solid rgba(95, 163, 255, 0.3);
+  border-radius: 999px;
+  background: #262624;
+  color: #f5f3ee;
+  padding: 11px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
+  white-space: nowrap;
+}
+
+.local-connection-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
