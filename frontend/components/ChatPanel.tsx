@@ -7,18 +7,15 @@ import Composer from "@/components/chat/Composer";
 import MessageList from "@/components/chat/MessageList";
 import ModelConfigModal from "@/components/chat/ModelConfigModal";
 import WebSearchConfigModal from "@/components/chat/WebSearchConfigModal";
+import { useChatConversationHistory } from "@/components/chat/useChatConversationHistory";
 import { useChatModelSettings } from "@/components/chat/useChatModelSettings";
 import { useChatStreaming } from "@/components/chat/useChatStreaming";
 import { useChatWebSearchSettings } from "@/components/chat/useChatWebSearchSettings";
 import type { Message } from "@/components/chat/types";
 import {
-  chatHistoryApi,
   knowledgeBaseApi,
   KnowledgeStats,
   KnowledgeScopeOptions,
-  type ChatConversation,
-  type ChatConversationSaveRequest,
-  type ChatConversationScope,
 } from "@/lib/api";
 import {
   EMPTY_CHAT_SCOPE,
@@ -74,11 +71,6 @@ export default function ChatPanel({
   const [chatScope, setChatScope] =
     useState<ChatScopeSelection>(EMPTY_CHAT_SCOPE);
   const [scopeNotice, setScopeNotice] = useState("");
-  const [currentConversationId, setCurrentConversationId] = useState<
-    number | null
-  >(null);
-  const lastConversationRequestKeyRef = useRef<number | null>(null);
-  const lastNewConversationRequestKeyRef = useRef(newConversationRequestKey);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -86,6 +78,9 @@ export default function ChatPanel({
   const scrollFrameRef = useRef<number | null>(null);
   const shouldFollowChatScrollRef = useRef(true);
   const scopeNoticeTimerRef = useRef<number | null>(null);
+  const saveSettledMessagesRef = useRef<(messages: Message[]) => void>(
+    () => {},
+  );
 
   const showScopeNotice = useCallback((message: string, timeoutMs?: number) => {
     setScopeNotice(message);
@@ -166,62 +161,6 @@ export default function ChatPanel({
     onNotice: showScopeNotice,
   });
 
-  const scopeToHistoryScope = useCallback(
-    (scope: ChatScopeSelection): ChatConversationScope => ({
-      folder_ids: [...scope.folderIds],
-      bvids: [...scope.bvids],
-    }),
-    [],
-  );
-
-  const historyScopeToSelection = useCallback(
-    (scope?: ChatConversationScope | null): ChatScopeSelection => ({
-      folderIds: scope?.folder_ids ?? [],
-      bvids: scope?.bvids ?? [],
-    }),
-    [],
-  );
-
-  const persistConversation = useCallback(
-    async (settledMessages: Message[]) => {
-      if (settledMessages.length === 0) return;
-      const payload: ChatConversationSaveRequest = {
-        workspace_id: stats?.workspace_id ?? null,
-        knowledge_base_id: knowledgeBaseId ?? null,
-        scope: scopeToHistoryScope(chatScope),
-        web_search: webSearchEnabled,
-        web_search_provider: webSearchProvider,
-        messages: settledMessages.map((message) => ({
-          role: message.role,
-          content: message.content,
-          thinking: message.thinking,
-          sources: message.sources,
-          web_search: message.webSearch,
-        })),
-      };
-
-      try {
-        const saved = currentConversationId
-          ? await chatHistoryApi.update(currentConversationId, payload)
-          : await chatHistoryApi.create(payload);
-        setCurrentConversationId(saved.id);
-        onConversationSaved?.(saved.id);
-      } catch (err) {
-        setScopeNotice(err instanceof Error ? err.message : "保存历史失败");
-      }
-    },
-    [
-      chatScope,
-      currentConversationId,
-      knowledgeBaseId,
-      onConversationSaved,
-      scopeToHistoryScope,
-      stats?.workspace_id,
-      webSearchEnabled,
-      webSearchProvider,
-    ],
-  );
-
   const {
     messages,
     loading,
@@ -248,9 +187,37 @@ export default function ChatPanel({
     webSearchProvider,
     shouldFollowChatScrollRef,
     onMessagesSettled: (settledMessages) => {
-      void persistConversation(settledMessages);
+      saveSettledMessagesRef.current(settledMessages);
     },
   });
+
+  const { saveSettledMessages, resetConversationIdentity } =
+    useChatConversationHistory({
+      chatScope,
+      conversationOpenRequest,
+      knowledgeBaseId,
+      newConversationRequestKey,
+      onConversationSaved,
+      onInputReset: () => setInput(""),
+      onMessagesLoaded: setMessages,
+      onNotice: setScopeNotice,
+      onResetChat: resetChat,
+      onScopeChange: setChatScope,
+      onStopGenerating: stopGenerating,
+      onWebSearchEnabledChange: setWebSearchEnabled,
+      onWebSearchNoticeClear: clearWebSearchNotice,
+      onWebSearchProviderChange: setWebSearchProvider,
+      statsWorkspaceId: stats?.workspace_id ?? null,
+      webSearchEnabled,
+      webSearchProvider,
+      webSearchProviderFallback: webSearchConfig?.provider || "auto",
+    });
+
+  useEffect(() => {
+    saveSettledMessagesRef.current = (settledMessages: Message[]) => {
+      void saveSettledMessages(settledMessages);
+    };
+  }, [saveSettledMessages]);
 
   useEffect(() => {
     if (knowledgeBaseId) {
@@ -309,7 +276,7 @@ export default function ChatPanel({
     let cancelled = false;
     /* eslint-disable react-hooks/set-state-in-effect -- knowledge-base changes intentionally reset the chat context before loading scoped options. */
     resetChat();
-    setCurrentConversationId(null);
+    resetConversationIdentity();
     setChatScope(EMPTY_CHAT_SCOPE);
     setWebSearchEnabled(false);
     clearWebSearchNotice();
@@ -339,7 +306,13 @@ export default function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [clearWebSearchNotice, knowledgeBaseId, resetChat, setWebSearchEnabled]);
+  }, [
+    clearWebSearchNotice,
+    knowledgeBaseId,
+    resetChat,
+    resetConversationIdentity,
+    setWebSearchEnabled,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -353,7 +326,7 @@ export default function ChatPanel({
     if (scopeEquals(chatScope, next)) return;
     stopGenerating();
     setMessages([]);
-    setCurrentConversationId(null);
+    resetConversationIdentity();
     setChatScope(next);
     clearWebSearchNotice();
     setScopeNotice(`提问范围已更新：${scopeSummary(next)}`);
@@ -382,78 +355,6 @@ export default function ChatPanel({
     setInput(value);
     adjustComposerHeight(target);
   };
-
-  const handleOpenConversation = useCallback(
-    async (conversationId: number) => {
-      try {
-        const conversation: ChatConversation =
-          await chatHistoryApi.get(conversationId);
-        stopGenerating();
-        setMessages(
-          conversation.messages.map((message) => ({
-            id: `history-${message.id}`,
-            role: message.role,
-            content: message.content,
-            thinking: message.thinking,
-            sources: message.sources,
-            webSearch: message.web_search,
-          })),
-        );
-        setChatScope(historyScopeToSelection(conversation.scope));
-        setWebSearchEnabled(conversation.web_search);
-        setWebSearchProvider(conversation.web_search_provider || "auto");
-        setCurrentConversationId(conversation.id);
-        setInput("");
-      } catch (err) {
-        setScopeNotice(err instanceof Error ? err.message : "打开历史失败");
-      }
-    },
-    [
-      historyScopeToSelection,
-      setMessages,
-      setWebSearchEnabled,
-      setWebSearchProvider,
-      stopGenerating,
-    ],
-  );
-
-  const handleNewConversation = useCallback(() => {
-    stopGenerating();
-    resetChat();
-    setCurrentConversationId(null);
-    setChatScope(EMPTY_CHAT_SCOPE);
-    setWebSearchEnabled(false);
-    setWebSearchProvider(webSearchConfig?.provider || "auto");
-    clearWebSearchNotice();
-    setScopeNotice("");
-    setInput("");
-  }, [
-    clearWebSearchNotice,
-    resetChat,
-    setWebSearchEnabled,
-    setWebSearchProvider,
-    stopGenerating,
-    webSearchConfig?.provider,
-  ]);
-
-  useEffect(() => {
-    if (!conversationOpenRequest) return;
-    if (lastConversationRequestKeyRef.current === conversationOpenRequest.key) {
-      return;
-    }
-    lastConversationRequestKeyRef.current = conversationOpenRequest.key;
-    void handleOpenConversation(conversationOpenRequest.id);
-  }, [conversationOpenRequest, handleOpenConversation]);
-
-  useEffect(() => {
-    if (
-      lastNewConversationRequestKeyRef.current === newConversationRequestKey
-    ) {
-      return;
-    }
-    lastNewConversationRequestKeyRef.current = newConversationRequestKey;
-    handleNewConversation();
-  }, [handleNewConversation, newConversationRequestKey]);
 
   const isGenerating = loading || !!regeneratingMessageId;
   const canSend = Boolean(knowledgeBaseId) && !!input.trim() && !isGenerating;

@@ -74,6 +74,32 @@ def test_chat_panel_uses_web_search_settings_hook():
     assert "webSearchConfigError, setWebSearchConfigError" not in chat_panel
 
 
+def test_chat_panel_uses_conversation_history_hook():
+    project_root = Path(__file__).resolve().parents[1]
+    chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    hook_file = (
+        project_root
+        / "frontend"
+        / "components"
+        / "chat"
+        / "useChatConversationHistory.ts"
+    )
+
+    assert hook_file.exists()
+    assert "@/components/chat/useChatConversationHistory" in chat_panel
+    assert "chatHistoryApi" not in chat_panel
+    assert "currentConversationId, setCurrentConversationId" not in chat_panel
+    assert "lastConversationRequestKeyRef" not in chat_panel
+    assert "lastNewConversationRequestKeyRef" not in chat_panel
+    assert "scopeToHistoryScope" not in chat_panel
+    assert "historyScopeToSelection" not in chat_panel
+    assert "persistConversation" not in chat_panel
+    assert "handleOpenConversation" not in chat_panel
+    assert "handleNewConversation" not in chat_panel
+
+
 def test_chat_panel_history_tests_are_split_from_main_suite():
     project_root = Path(__file__).resolve().parents[1]
     main_test = project_root / "frontend" / "components" / "ChatPanel.test.tsx"
