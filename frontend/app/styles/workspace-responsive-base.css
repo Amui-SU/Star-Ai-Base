@@ -1,0 +1,175 @@
+@media (max-width: 1024px) {
+  .app-main {
+    padding: 10px;
+  }
+
+  .resizer {
+    display: none;
+  }
+
+  .app-shell {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .workspace-card {
+    min-height: calc(100vh - 20px);
+    border-radius: 24px;
+  }
+
+  .workspace-topbar {
+    height: 48px;
+    padding: 0 14px;
+  }
+
+  .workspace-brand {
+    font-size: 17px;
+  }
+
+  .workspace {
+    position: relative;
+  }
+
+  .sidebar-shell {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(86vw, 320px) !important;
+    height: 100%;
+    transform: translateX(-100%);
+    transition:
+      transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.2s ease;
+    box-shadow: 14px 0 35px rgba(0, 0, 0, 0.42);
+    pointer-events: none;
+  }
+
+  .sidebar-shell.open {
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .sidebar-shell.closed {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+
+  .workspace-sidebar-toggle {
+    top: 10px;
+    left: 14px !important;
+    z-index: 60;
+  }
+
+  .workspace-corner-tools {
+    position: absolute;
+    top: 11px;
+    left: 16px;
+    z-index: 60;
+  }
+
+  .panel-chat-embedded .panel-inner {
+    padding: 14px 16px 18px;
+  }
+
+  .chat-context-row {
+    padding-left: 34px;
+  }
+}
+@media (max-width: 640px) {
+  .workspace-top-actions {
+    gap: 7px;
+  }
+}
+@media (max-width: 1024px) {
+  .app-shell {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  .workspace-card {
+    min-height: calc(100dvh - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .workspace {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .sidebar-shell {
+    width: min(88vw, 340px) !important;
+    max-width: calc(100vw - 18px);
+    height: 100%;
+  }
+
+  .panel-chat-embedded {
+    min-width: 0;
+  }
+
+  .panel-chat-embedded .panel-inner {
+    padding: 12px 14px 18px;
+  }
+
+  .panel-chat-embedded .panel-body {
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+
+  .panel-chat-embedded .panel-footer {
+    padding-bottom: 18px;
+  }
+}
+@media (max-width: 640px) {
+  .app-main {
+    padding: 6px;
+  }
+
+  .workspace-card {
+    min-height: calc(100dvh - 12px);
+    max-height: calc(100dvh - 12px);
+    border-radius: 18px;
+  }
+
+  .workspace-topbar {
+    height: 44px;
+    padding: 0 10px 0 12px;
+  }
+
+  .workspace-brand {
+    gap: 6px;
+    font-size: 15px;
+  }
+
+  .workspace-icon-btn,
+  .workspace-sidebar-toggle {
+    width: 28px;
+    height: 28px;
+  }
+
+  .workspace-sidebar-toggle {
+    top: 7px;
+    left: 9px !important;
+  }
+
+  .panel-chat-embedded .panel-inner {
+    padding: 10px 10px 14px;
+  }
+
+  .chat-context-row {
+    min-height: 28px;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-left: 32px;
+  }
+
+  .chat-kb-context {
+    max-width: calc(100vw - 190px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .panel-chat-embedded .panel-footer {
+    padding-bottom: 14px;
+  }
+}

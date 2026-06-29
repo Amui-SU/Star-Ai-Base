@@ -560,6 +560,47 @@ def test_global_styles_delegate_workspace_styles_to_feature_file():
         assert selector not in globals_css
 
 
+def test_workspace_styles_delegate_to_focused_files():
+    project_root = Path(__file__).resolve().parents[1]
+    styles_dir = project_root / "frontend" / "app" / "styles"
+    workspace_css = (styles_dir / "workspace.css").read_text(encoding="utf-8")
+
+    expected_imports = [
+        "./workspace-shell.css",
+        "./workspace-sidebar.css",
+        "./workspace-history.css",
+        "./workspace-chat-embedded.css",
+        "./workspace-responsive-base.css",
+        "./workspace-mobile-fullscreen.css",
+    ]
+    expected_anchors = {
+        "workspace-shell.css": ".app-shell {",
+        "workspace-sidebar.css": ".sidebar-shell {",
+        "workspace-history.css": ".chat-history-sidebar-panel {",
+        "workspace-chat-embedded.css": ".panel-chat-embedded .chat-scroll {",
+        "workspace-responsive-base.css": "@media (max-width: 1024px)",
+        "workspace-mobile-fullscreen.css": ".app-shell.sidebar-open .workspace-topbar",
+    }
+
+    for imported_path in expected_imports:
+        imported_file = styles_dir / imported_path.removeprefix("./")
+        assert imported_file.exists()
+        assert expected_anchors[imported_file.name] in imported_file.read_text(
+            encoding="utf-8"
+        )
+        assert f'@import "{imported_path}";' in workspace_css
+
+    for selector in [
+        "\n.app-shell {",
+        "\n.sidebar-shell {",
+        "\n.chat-history-sidebar-panel {",
+        "\n.panel-chat-embedded .chat-scroll {",
+        "\n@media (max-width: 1024px)",
+        '\n@import "./workspace-responsive.css";',
+    ]:
+        assert selector not in workspace_css
+
+
 def test_global_styles_delegate_account_panel_styles_to_feature_file():
     project_root = Path(__file__).resolve().parents[1]
     globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
