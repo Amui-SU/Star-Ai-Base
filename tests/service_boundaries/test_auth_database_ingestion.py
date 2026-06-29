@@ -1,0 +1,121 @@
+import ast
+
+from tests.service_boundaries.helpers import declared_callable_names
+from tests.service_boundaries.helpers import get_project_root
+
+
+def test_system_auth_router_uses_logger_for_tracebacks():
+    project_root = get_project_root()
+    source = (project_root / "app/routers/system_auth.py").read_text(encoding="utf-8")
+
+    assert "traceback.print_exc" not in source
+    assert "import traceback" not in source
+
+
+def test_system_auth_router_delegates_oauth_state_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_oauth.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    expected_service_names = {
+        "OAUTH_STATE_COOKIE_NAME",
+        "frontend_origin_is_allowed",
+        "normalize_frontend_origin",
+        "frontend_url_from_request",
+        "frontend_url_from_state",
+        "oauth_signing_key",
+        "make_oauth_state",
+        "decode_oauth_state",
+        "verify_oauth_state",
+        "new_oauth_state_nonce",
+        "set_oauth_state_cookie",
+        "clear_oauth_state_cookie",
+        "oauth_state_nonce_is_valid",
+        "oauth_user_email",
+    }
+    router_private_names = {
+        "_frontend_origin_is_allowed",
+        "_normalize_frontend_origin",
+        "_frontend_url_from_request",
+        "_frontend_url_from_state",
+        "_oauth_signing_key",
+        "_make_oauth_state",
+        "_decode_oauth_state",
+        "_verify_oauth_state",
+        "_new_oauth_state_nonce",
+        "_set_oauth_state_cookie",
+        "_clear_oauth_state_cookie",
+        "_oauth_state_nonce_is_valid",
+        "_oauth_user_email",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"{name} =" in service_source
+    assert "from app.services.system_auth_oauth import" in router_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
+def test_database_legacy_migration_entrypoint_has_no_nested_helpers():
+    project_root = get_project_root()
+    source = (project_root / "app/database.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
+    target = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "_ensure_sqlite_legacy_columns"
+    )
+
+    nested_helpers = [
+        node.name
+        for node in ast.walk(target)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node is not target
+    ]
+
+    assert nested_helpers == []
+
+
+def test_ingestion_task_persistence_and_status_mapping_live_in_service():
+    project_root = get_project_root()
+    service_source = (project_root / "app/services/ingestion_tasks.py").read_text(
+        encoding="utf-8"
+    )
+    imports_source = (project_root / "app/routers/imports.py").read_text(
+        encoding="utf-8"
+    )
+    knowledge_bases_source = (
+        project_root / "app/routers/knowledge_bases.py"
+    ).read_text(encoding="utf-8")
+
+    assert "def build_status_payload" in service_source
+    assert "async def create_ingestion_task" in service_source
+    assert "async def update_ingestion_task" in service_source
+    assert "from app.services.ingestion_tasks import" in imports_source
+    assert "from app.services.ingestion_tasks import" in knowledge_bases_source
+    assert "async def _create_import_task" not in imports_source
+    assert "async def _update_import_task" not in imports_source
+    assert "async def _update_task" not in knowledge_bases_source
+    assert "update_ingestion_task(" in imports_source
+    assert "update_ingestion_task(" in knowledge_bases_source
+    assert "return build_status_payload(task)" in knowledge_bases_source
+    assert '"processed_videos": task.processed_items' not in knowledge_bases_source
+
+
+def test_scoped_folder_sync_tests_do_not_import_legacy_router():
+    project_root = get_project_root()
+
+    for relative_path in [
+        "tests/test_knowledge_base_scoping.py",
+        "tests/test_folder_ingestion.py",
+    ]:
+        test_file = project_root / relative_path
+        if not test_file.exists():
+            continue
+        source = test_file.read_text(encoding="utf-8")
+        assert "from app.routers.knowledge import _sync_folder" not in source
