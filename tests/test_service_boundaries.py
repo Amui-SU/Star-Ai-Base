@@ -467,6 +467,60 @@ def test_system_auth_router_uses_logger_for_tracebacks():
     assert "import traceback" not in source
 
 
+def test_system_auth_router_delegates_oauth_state_helpers_to_service():
+    project_root = Path(__file__).resolve().parents[1]
+    service_path = project_root / "app/services/system_auth_oauth.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+    router_module = ast.parse(router_source)
+
+    declared_names = {
+        node.name
+        for node in router_module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+
+    expected_service_names = {
+        "OAUTH_STATE_COOKIE_NAME",
+        "frontend_origin_is_allowed",
+        "normalize_frontend_origin",
+        "frontend_url_from_request",
+        "frontend_url_from_state",
+        "oauth_signing_key",
+        "make_oauth_state",
+        "decode_oauth_state",
+        "verify_oauth_state",
+        "new_oauth_state_nonce",
+        "set_oauth_state_cookie",
+        "clear_oauth_state_cookie",
+        "oauth_state_nonce_is_valid",
+        "oauth_user_email",
+    }
+    router_private_names = {
+        "_frontend_origin_is_allowed",
+        "_normalize_frontend_origin",
+        "_frontend_url_from_request",
+        "_frontend_url_from_state",
+        "_oauth_signing_key",
+        "_make_oauth_state",
+        "_decode_oauth_state",
+        "_verify_oauth_state",
+        "_new_oauth_state_nonce",
+        "_set_oauth_state_cookie",
+        "_clear_oauth_state_cookie",
+        "_oauth_state_nonce_is_valid",
+        "_oauth_user_email",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"{name} =" in service_source
+    assert "from app.services.system_auth_oauth import" in router_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_database_legacy_migration_entrypoint_has_no_nested_helpers():
     project_root = Path(__file__).resolve().parents[1]
     source = (project_root / "app/database.py").read_text(encoding="utf-8")

@@ -1,6 +1,4 @@
 import hashlib
-import ipaddress
-import os
 import secrets
 import time
 from datetime import timedelta
@@ -38,6 +36,22 @@ from app.models import (
     WorkspaceResponse,
 )
 from app.services.email import send_verification_email
+from app.services.system_auth_oauth import (
+    OAUTH_STATE_COOKIE_NAME,
+    clear_oauth_state_cookie as _clear_oauth_state_cookie,
+    decode_oauth_state as _decode_oauth_state,
+    frontend_origin_is_allowed as _frontend_origin_is_allowed,
+    frontend_url_from_request as _frontend_url_from_request,
+    frontend_url_from_state as _frontend_url_from_state,
+    make_oauth_state as _make_oauth_state,
+    new_oauth_state_nonce as _new_oauth_state_nonce,
+    normalize_frontend_origin as _normalize_frontend_origin,
+    oauth_signing_key as _oauth_signing_key,
+    oauth_state_nonce_is_valid as _oauth_state_nonce_is_valid,
+    oauth_user_email as _oauth_user_email,
+    set_oauth_state_cookie as _set_oauth_state_cookie,
+    verify_oauth_state as _verify_oauth_state,
+)
 from app.security import (
     SESSION_COOKIE_NAME,
     clear_session_cookie,
@@ -605,137 +619,6 @@ QQ_AUTH_URL = "https://graph.qq.com/oauth2.0/authorize"
 QQ_TOKEN_URL = "https://graph.qq.com/oauth2.0/token"
 QQ_ME_URL = "https://graph.qq.com/oauth2.0/me"
 QQ_USERINFO_URL = "https://graph.qq.com/user/get_user_info"
-_OAUTH_STATE_TTL = 600  # 10 分钟
-OAUTH_STATE_COOKIE_NAME = "oauth_state_nonce"
-
-
-def _frontend_origin_is_allowed(url: str) -> bool:
-    parsed = urllib.parse.urlparse((url or "").strip())
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or not parsed.hostname
-    ):
-        return False
-
-    host = parsed.hostname.lower()
-    if host == "localhost":
-        return True
-
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-
-    return ip.is_loopback or ip.is_private
-
-
-def _normalize_frontend_origin(url: str | None) -> str | None:
-    if not url:
-        return None
-
-    parsed = urllib.parse.urlparse(url.strip())
-    origin = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
-    if not _frontend_origin_is_allowed(origin):
-        return None
-    return origin
-
-
-def _frontend_url_from_request(request: Request) -> str:
-    for header in ("origin", "referer"):
-        origin = _normalize_frontend_origin(request.headers.get(header))
-        if origin:
-            return origin
-    return "http://localhost:3000"
-
-
-def _frontend_url_from_state(frontend_url: str | None) -> str:
-    return _normalize_frontend_origin(frontend_url) or "http://localhost:3000"
-
-
-def _oauth_signing_key() -> bytes:
-    import hashlib
-
-    configured_key = os.getenv("APP_ENCRYPTION_KEY", "").strip()
-    if configured_key:
-        material = configured_key
-    else:
-        secrets_material = [
-            settings.google_client_secret,
-            settings.wechat_client_secret,
-            settings.qq_client_secret,
-        ]
-        material = "|".join(item.strip() for item in secrets_material if item.strip())
-    if not material:
-        raise RuntimeError(
-            "OAuth state signing requires APP_ENCRYPTION_KEY or an OAuth client secret"
-        )
-    return hashlib.sha256(material.encode("utf-8")).digest()
-
-
-def _make_oauth_state(
-    frontend_url: str | None = None,
-    redirect_uri: str | None = None,
-    nonce: str | None = None,
-) -> str:
-    """Create a signed OAuth state with the frontend and callback origins."""
-    import base64
-    import hashlib
-    import hmac
-    import json
-
-    payload = {
-        "exp": int(time.time()) + _OAUTH_STATE_TTL,
-        "rnd": secrets.token_hex(8),
-    }
-    if nonce:
-        payload["nonce"] = nonce
-    safe_frontend_url = _frontend_url_from_state(frontend_url)
-    if safe_frontend_url:
-        payload["frontend_url"] = safe_frontend_url
-    if redirect_uri:
-        payload["redirect_uri"] = redirect_uri
-
-    payload_json = json.dumps(payload, separators=(",", ":"))
-    payload_b64 = base64.urlsafe_b64encode(payload_json.encode()).decode().rstrip("=")
-    sig = hmac.new(
-        _oauth_signing_key(), payload_b64.encode(), hashlib.sha256
-    ).hexdigest()[:16]
-    return f"{payload_b64}.{sig}"
-
-
-def _decode_oauth_state(state: str) -> dict | None:
-    """Validate and decode a signed OAuth state."""
-    import base64
-    import hashlib
-    import hmac
-    import json
-
-    try:
-        payload_b64, sig = state.rsplit(".", 1)
-        expected = hmac.new(
-            _oauth_signing_key(), payload_b64.encode(), hashlib.sha256
-        ).hexdigest()[:16]
-        if not hmac.compare_digest(sig, expected):
-            logger.warning("OAuth state signature mismatch")
-            return None
-
-        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
-        data = json.loads(base64.urlsafe_b64decode(padded.encode()))
-        if time.time() > int(data["exp"]):
-            logger.warning(
-                f"OAuth state expired: exp={data['exp']}, now={int(time.time())}"
-            )
-            return None
-        return data
-    except Exception as e:
-        logger.warning(f"OAuth state parse failed: {type(e).__name__}: {e}")
-        return None
-
-
-def _verify_oauth_state(state: str) -> bool:
-    """Validate OAuth state signature and expiry."""
-    return _decode_oauth_state(state) is not None
 
 
 def _oauth_network_error(provider: str, exc: httpx.HTTPError) -> HTTPException:
@@ -744,58 +627,6 @@ def _oauth_network_error(provider: str, exc: httpx.HTTPError) -> HTTPException:
         status_code=502,
         detail=f"Cannot connect to {provider} OAuth service",
     )
-
-
-def _new_oauth_state_nonce() -> str:
-    return secrets.token_urlsafe(24)
-
-
-def _set_oauth_state_cookie(response: Response, nonce: str) -> None:
-    secure = (
-        bool(settings.session_cookie_secure)
-        if settings.session_cookie_secure is not None
-        else not settings.debug
-    )
-    response.set_cookie(
-        key=OAUTH_STATE_COOKIE_NAME,
-        value=nonce,
-        httponly=True,
-        secure=secure,
-        samesite="lax",
-        max_age=_OAUTH_STATE_TTL,
-        path="/system-auth",
-    )
-
-
-def _clear_oauth_state_cookie(response: Response) -> None:
-    secure = (
-        bool(settings.session_cookie_secure)
-        if settings.session_cookie_secure is not None
-        else not settings.debug
-    )
-    response.delete_cookie(
-        key=OAUTH_STATE_COOKIE_NAME,
-        path="/system-auth",
-        secure=secure,
-        httponly=True,
-        samesite="lax",
-    )
-
-
-def _oauth_state_nonce_is_valid(request: Request, state_data: dict) -> bool:
-    nonce = str(state_data.get("nonce") or "")
-    cookie_nonce = request.cookies.get(OAUTH_STATE_COOKIE_NAME, "")
-    return bool(nonce) and secrets.compare_digest(nonce, cookie_nonce)
-
-
-def _oauth_user_email(provider: str, external_id: str, email: str | None = None) -> str:
-    normalized_email = (email or "").strip().lower()
-    if normalized_email:
-        return normalized_email
-    safe_id = "".join(ch if ch.isalnum() else "_" for ch in external_id.lower()).strip(
-        "_"
-    )
-    return f"{provider}_{safe_id or secrets.token_hex(8)}@oauth.local"
 
 
 async def _upsert_oauth_user(
