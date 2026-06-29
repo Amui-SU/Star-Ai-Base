@@ -635,9 +635,23 @@ def test_knowledge_base_web_search_api_tests_are_split_from_scoping_file():
         project_root / "tests" / "test_knowledge_base_scoping.py"
     ).read_text(encoding="utf-8")
     api_test = project_root / "tests" / "test_knowledge_base_web_search_api.py"
+    api_dir = project_root / "tests" / "knowledge_base_web_search_api"
 
     assert api_test.exists()
     api_source = api_test.read_text(encoding="utf-8")
+    assert (
+        "test_knowledge_base_web_search_api_tests_delegate_to_focused_files"
+        in api_source
+    )
+    assert len(api_source.splitlines()) <= 80
+    focused_source = "\n".join(
+        (api_dir / relative_path).read_text(encoding="utf-8")
+        for relative_path in [
+            "test_tool_chain.py",
+            "test_fetch_page.py",
+            "test_toggle_fallback.py",
+        ]
+    )
     for test_name in [
         "test_scoped_chat_lets_llm_call_web_search_tool_when_enabled",
         "test_scoped_chat_reports_socks_dependency_failure",
@@ -649,7 +663,7 @@ def test_knowledge_base_web_search_api_tests_are_split_from_scoping_file():
         "test_scoped_chat_forces_web_search_when_enabled_without_model_tool_call",
     ]:
         assert test_name not in scoping_source
-        assert test_name in api_source
+        assert test_name in focused_source
 
 
 def test_knowledge_base_web_search_tool_run_tests_are_split_from_scoping_file():
