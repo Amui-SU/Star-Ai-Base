@@ -1,30 +1,15 @@
-import {
-  clearLocalSessionToken,
-  getLocalApiBaseUrl,
-  getLocalAuthHeaders,
-  saveLocalSessionToken,
-} from "@/lib/localConnection";
-import { requestWithNativeFallback } from "@/lib/nativeHttp";
+import { getApiBaseUrl, request } from "./api/client";
 
-const resolveApiBaseUrl = () => {
-  const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
-  if (configuredApiUrl) return configuredApiUrl;
-  if (typeof window === "undefined") return "http://localhost:8000";
-
-  const localApiBaseUrl = getLocalApiBaseUrl();
-  if (localApiBaseUrl) return localApiBaseUrl;
-
-  const { protocol, hostname } = window.location;
-  if (protocol !== "http:" && protocol !== "https:") {
-    return "http://localhost:8000";
-  }
-  return `${protocol}//${hostname}:8000`;
-};
-
-export const API_BASE_URL = resolveApiBaseUrl();
-export const getApiBaseUrl = resolveApiBaseUrl;
-
-export type OAuthProvider = "google" | "wechat" | "qq";
+export { API_BASE_URL, getApiBaseUrl, request } from "./api/client";
+export { systemAuthApi } from "./api/systemAuth";
+export type {
+  AdminPasswordResetResponse,
+  AdminUser,
+  OAuthProvider,
+  SystemAuthResponse,
+  SystemUser,
+  Workspace,
+} from "./api/systemAuthTypes";
 
 export interface UserInfo {
   mid: number | string;
@@ -44,39 +29,6 @@ export interface LoginStatusResponse {
   message: string;
   user_info?: UserInfo;
   session_id?: string;
-}
-
-export interface SystemUser {
-  id: number;
-  email: string;
-  display_name: string;
-  avatar_url?: string;
-  status?: string;
-  is_admin?: boolean;
-}
-
-export interface AdminUser extends SystemUser {
-  status: "active" | "inactive" | string;
-  is_admin: boolean;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
-
-export interface AdminPasswordResetResponse {
-  user: AdminUser;
-  temporary_password: string;
-}
-
-export interface Workspace {
-  id: number;
-  name: string;
-  role: string;
-}
-
-export interface SystemAuthResponse {
-  user: SystemUser;
-  workspace: Workspace;
-  session_token?: string;
 }
 
 export interface SourceBinding {
@@ -422,168 +374,6 @@ export interface LocalLanAddressResponse {
   qr_image_url?: string | null;
   qr_data_url?: string | null;
 }
-
-type RequestOptions = RequestInit & {
-  query?: Record<string, string | number | boolean | undefined | null>;
-};
-
-function isFormDataBody(body: BodyInit | null | undefined): body is FormData {
-  return typeof FormData !== "undefined" && body instanceof FormData;
-}
-
-function withQuery(path: string, query?: RequestOptions["query"]): string {
-  if (!query) return path;
-  const params = new URLSearchParams();
-  Object.entries(query).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) {
-      params.set(key, String(value));
-    }
-  });
-  const queryString = params.toString();
-  return queryString ? `${path}?${queryString}` : path;
-}
-
-export async function request<T>(
-  path: string,
-  { query, headers, ...init }: RequestOptions = {},
-): Promise<T> {
-  let response: Response;
-  const apiBaseUrl = getApiBaseUrl();
-  const isFormData = isFormDataBody(init.body);
-  try {
-    response = await requestWithNativeFallback(
-      `${apiBaseUrl}${withQuery(path, query)}`,
-      {
-        credentials: "include",
-        ...init,
-        headers: {
-          ...(isFormData ? {} : { "Content-Type": "application/json" }),
-          ...getLocalAuthHeaders(),
-          ...headers,
-        },
-      },
-    );
-  } catch (error) {
-    throw new Error(
-      `无法连接到后端服务（${apiBaseUrl}）。请确认后端已启动，且接口地址可访问。`,
-      { cause: error },
-    );
-  }
-
-  if (!response.ok) {
-    let message = response.statusText || "Request failed";
-    try {
-      const body = await response.json();
-      if (typeof body.detail === "string") {
-        message = body.detail;
-      } else if (
-        body.detail &&
-        typeof body.detail === "object" &&
-        typeof body.detail.message === "string"
-      ) {
-        message = body.detail.message;
-      } else if (typeof body.message === "string") {
-        message = body.message;
-      }
-    } catch {
-      // Keep the HTTP status text when the response body is not JSON.
-    }
-    throw new Error(message);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return response.json() as Promise<T>;
-}
-
-export const systemAuthApi = {
-  getOAuthLoginUrl: (provider: OAuthProvider) => {
-    const frontendUrl =
-      typeof window === "undefined" ? "" : window.location.origin;
-    const params = new URLSearchParams();
-    if (frontendUrl) params.set("frontend_url", frontendUrl);
-    const query = params.toString();
-    return `${getApiBaseUrl()}/system-auth/${provider}/login${query ? `?${query}` : ""}`;
-  },
-
-  getGoogleLoginUrl: () => systemAuthApi.getOAuthLoginUrl("google"),
-
-  sendCode: (email: string) =>
-    request<{ message: string; code?: string }>("/system-auth/send-code", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    }),
-
-  register: async (data: {
-    email: string;
-    password: string;
-    display_name: string;
-    code: string;
-  }) => {
-    const response = await request<SystemAuthResponse>(
-      "/system-auth/register",
-      {
-        method: "POST",
-        body: JSON.stringify(data),
-      },
-    );
-    saveLocalSessionToken(response.session_token);
-    return response;
-  },
-
-  login: async (data: { email: string; password: string }) => {
-    const response = await request<SystemAuthResponse>("/system-auth/login", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-    saveLocalSessionToken(response.session_token);
-    return response;
-  },
-
-  logout: async () => {
-    try {
-      return await request<{ ok?: boolean; message?: string }>(
-        "/system-auth/logout",
-        {
-          method: "POST",
-        },
-      );
-    } finally {
-      clearLocalSessionToken();
-    }
-  },
-
-  me: () => request<SystemUser>("/system-auth/me"),
-
-  updateDisplayName: (display_name: string) =>
-    request<SystemUser>("/system-auth/me/display-name", {
-      method: "PUT",
-      body: JSON.stringify({ display_name }),
-    }),
-
-  adminListUsers: async () => {
-    const response = await request<{ users: AdminUser[] }>(
-      "/system-auth/admin/users",
-    );
-    return response.users;
-  },
-
-  adminUpdateUserStatus: (userId: number, status: "active" | "inactive") =>
-    request<AdminUser>(`/system-auth/admin/users/${userId}/status`, {
-      method: "PUT",
-      body: JSON.stringify({ status }),
-    }),
-
-  adminResetUserPassword: (userId: number) =>
-    request<AdminPasswordResetResponse>(
-      `/system-auth/admin/users/${userId}/reset-password`,
-      {
-        method: "POST",
-      },
-    ),
-};
 
 export const localConnectionApi = {
   lanAddress: () =>

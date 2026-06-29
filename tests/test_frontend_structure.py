@@ -188,6 +188,28 @@ def test_frontend_provider_presets_are_shared():
     assert "const providerLogoMap" not in chat_panel
 
 
+def test_frontend_api_delegates_client_and_system_auth_boundaries():
+    project_root = Path(__file__).resolve().parents[1]
+    api_file = project_root / "frontend" / "lib" / "api.ts"
+    api_source = api_file.read_text(encoding="utf-8")
+
+    for relative_path in [
+        "frontend/lib/api/client.ts",
+        "frontend/lib/api/systemAuth.ts",
+        "frontend/lib/api/systemAuthTypes.ts",
+    ]:
+        assert (project_root / relative_path).exists()
+
+    assert 'from "./api/client"' in api_source
+    assert 'from "./api/systemAuth"' in api_source
+    assert 'from "./api/systemAuthTypes"' in api_source
+    assert "function withQuery" not in api_source
+    assert "export async function request" not in api_source
+    assert "export const systemAuthApi" not in api_source
+    assert "clearLocalSessionToken" not in api_source
+    assert "saveLocalSessionToken" not in api_source
+
+
 def test_common_modals_use_shared_shell():
     project_root = Path(__file__).resolve().parents[1]
     modal_shell = project_root / "frontend" / "components" / "ui" / "ModalShell.tsx"
