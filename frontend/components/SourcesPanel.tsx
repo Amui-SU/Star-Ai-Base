@@ -1,26 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import {
-  FavoriteFolder,
-  Video,
-  sourceBindingApi,
-  knowledgeBaseApi,
-  BuildStatus,
-  FolderStatus,
-  OrganizePreviewResponse,
-  KnowledgeBaseBuildRequest,
-} from "@/lib/api";
+import { useState, useEffect } from "react";
 import {
   displayFolderTitle,
   displayKnowledgeBaseName,
-  displayVideoTitle,
   isMissingDisplayText,
 } from "@/lib/displayNames";
 import OrganizePreviewModal from "@/components/OrganizePreviewModal";
 import VideoPlayerPortal, {
   type PlayingVideo,
 } from "@/components/sources/VideoPlayerPortal";
+import { useSourcesKnowledgeBuild } from "@/components/sources/useSourcesKnowledgeBuild";
+import { useSourcesPanelActions } from "@/components/sources/useSourcesPanelActions";
+import { useSourcesPanelData } from "@/components/sources/useSourcesPanelData";
 import {
   formatFolderSyncTime,
   getSourcesBuildButtonText,
@@ -46,236 +38,78 @@ export default function SourcesPanel({
   onBuildDone,
   onBuildingChange,
 }: Props) {
-  const [folders, setFolders] = useState<
-    (FavoriteFolder & {
-      videos?: Video[];
-      expanded?: boolean;
-      loading?: boolean;
-      count_source?: "bili" | "filtered" | "db";
-    })[]
-  >([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [selectedVideos, setSelectedVideos] = useState<Set<string>>(new Set());
-  const [customVideoNames, setCustomVideoNames] = useState<
-    Record<string, string>
-  >({});
-  const [editingVideoId, setEditingVideoId] = useState<string | null>(null);
-  const [editingVideoName, setEditingVideoName] = useState("");
-  const [savingVideoId, setSavingVideoId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [building, setBuilding] = useState(false);
-  const [progress, setProgress] = useState<BuildStatus | null>(null);
-  const [statusMap, setStatusMap] = useState<Record<number, FolderStatus>>({});
-  const [message, setMessage] = useState<string | null>(null);
-  const [organizeOpen, setOrganizeOpen] = useState(false);
-  const [organizeLoading, setOrganizeLoading] = useState(false);
-  const [organizePreview, setOrganizePreview] =
-    useState<OrganizePreviewResponse | null>(null);
-  const [organizeMessage, setOrganizeMessage] = useState<string | null>(null);
   const [playingVideo, setPlayingVideo] = useState<PlayingVideo | null>(null);
   const targetKnowledgeBase = !isMissingDisplayText(knowledgeBaseName)
     ? `「${displayKnowledgeBaseName(knowledgeBaseName)}」`
     : "当前知识库";
 
-  // 加载收藏夹列表（从B站获取）
-  const loadFolders = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await sourceBindingApi.getFavorites(sourceBindingId);
-      setFolders(data.map((f) => ({ ...f, count_source: "bili" })));
-      setMessage(null);
-    } catch (err) {
-      setFolders([]);
-      setMessage(
-        err instanceof Error ? err.message : "加载收藏夹失败，请稍后重试",
-      );
-    }
-    setLoading(false);
-  }, [sourceBindingId]);
-
-  // 加载入库状态（从知识库 scoped API）
-  const loadStatuses = useCallback(async () => {
-    if (!knowledgeBaseId) return;
-    try {
-      const stats = await knowledgeBaseApi.stats(knowledgeBaseId);
-      const map: Record<number, FolderStatus> = {};
-      if (stats.folders) {
-        stats.folders.forEach(
-          (f: {
-            media_id: number;
-            indexed_count: number;
-            media_count: number;
-            last_sync_at: string | null;
-          }) => {
-            map[f.media_id] = {
-              media_id: f.media_id,
-              indexed_count: f.indexed_count,
-              media_count: f.media_count,
-              last_sync_at: f.last_sync_at,
-            };
-          },
-        );
-      }
-      setStatusMap(map);
-    } catch {
-      // 状态接口失败不影响主列表展示
-    }
-  }, [knowledgeBaseId]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      loadFolders().then(loadStatuses);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [loadFolders, loadStatuses]);
+  const {
+    folders,
+    loading,
+    loadStatuses,
+    message,
+    refreshSourcesData,
+    setFolders,
+    setMessage,
+    statusMap,
+  } = useSourcesPanelData({
+    sourceBindingId,
+    knowledgeBaseId,
+  });
+  const { building, progress, resetBuildProgress, startBuild } =
+    useSourcesKnowledgeBuild({
+      excludeBvids,
+      folders,
+      knowledgeBaseId,
+      onBuildDone,
+      onBuildingChange,
+      onLoadStatuses: loadStatuses,
+      onMessage: setMessage,
+      selected,
+      selectedVideos,
+      sourceBindingId,
+    });
+  const {
+    editingVideoId,
+    editingVideoName,
+    getOriginalVideoTitle,
+    getVideoTitle,
+    organizeLoading,
+    organizeMessage,
+    organizeOpen,
+    organizePreview,
+    openOrganizePreview,
+    saveVideoTitle,
+    savingVideoId,
+    setEditingVideoId,
+    setEditingVideoName,
+    setOrganizeMessage,
+    setOrganizeOpen,
+    startRenameVideo,
+    toggleExpand,
+  } = useSourcesPanelActions({
+    folders,
+    knowledgeBaseId,
+    onMessage: setMessage,
+    setFolders,
+    sourceBindingId,
+  });
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setSelected(new Set());
       setSelectedVideos(new Set());
-      setProgress(null);
+      resetBuildProgress();
       setMessage(null);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [sourceBindingId, knowledgeBaseId]);
-
-  useEffect(() => {
-    onBuildingChange?.(building);
-    return () => onBuildingChange?.(false);
-  }, [building, onBuildingChange]);
-
-  const getVideoTitle = (video: Video) =>
-    displayVideoTitle(
-      customVideoNames[video.bvid] ||
-        video.display_title ||
-        video.custom_title ||
-        video.title,
-    );
-
-  const getOriginalVideoTitle = (video: Video) =>
-    displayVideoTitle(video.original_title || video.title);
-
-  const startRenameVideo = (video: Video) => {
-    setEditingVideoId(video.bvid);
-    setEditingVideoName(getVideoTitle(video));
-  };
-
-  const applyVideoTitle = (
-    videos: Video[] | undefined,
-    bvid: string,
-    customTitle: string | null,
-  ) =>
-    videos?.map((video) =>
-      video.bvid === bvid
-        ? {
-            ...video,
-            custom_title: customTitle,
-            display_title: customTitle || getOriginalVideoTitle(video),
-            title: customTitle || getOriginalVideoTitle(video),
-          }
-        : video,
-    );
-
-  const saveVideoTitle = async (video: Video, title: string) => {
-    const originalTitle = getOriginalVideoTitle(video);
-    const trimmed = title.trim();
-    const customTitle = !trimmed || trimmed === originalTitle ? null : trimmed;
-    setSavingVideoId(video.bvid);
-    try {
-      const res = await sourceBindingApi.updateVideoTitle(sourceBindingId, {
-        bvid: video.bvid,
-        title: customTitle,
-        knowledge_base_id: knowledgeBaseId,
-      });
-      const nextCustomTitle = res.custom_title ?? null;
-      setCustomVideoNames((prev) => {
-        const next = { ...prev };
-        if (nextCustomTitle) {
-          next[video.bvid] = nextCustomTitle;
-        } else {
-          delete next[video.bvid];
-        }
-        return next;
-      });
-      setFolders((prev) =>
-        prev.map((folder) => ({
-          ...folder,
-          videos: applyVideoTitle(folder.videos, video.bvid, nextCustomTitle),
-        })),
-      );
-      setEditingVideoId(null);
-      setEditingVideoName("");
-      setMessage(nextCustomTitle ? "已保存自定义视频名" : "已恢复原始视频名");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "保存视频名称失败");
-    } finally {
-      setSavingVideoId(null);
-    }
-  };
+  }, [knowledgeBaseId, resetBuildProgress, setMessage, sourceBindingId]);
 
   // 刷新
   const refresh = async () => {
-    setMessage(null);
-    await loadFolders();
-    await loadStatuses();
-  };
-
-  const openOrganizePreview = async (folderId: number) => {
-    setOrganizeMessage(null);
-    setOrganizePreview(null);
-    setOrganizeOpen(true);
-    setOrganizeLoading(true);
-    try {
-      const res = await sourceBindingApi.organizePreview(
-        sourceBindingId,
-        folderId,
-      );
-      setOrganizePreview(res);
-    } catch {
-      setOrganizeMessage("预览失败，请稍后重试");
-    } finally {
-      setOrganizeLoading(false);
-    }
-  };
-
-  // 展开收藏夹查看视频
-  const toggleExpand = async (id: number) => {
-    setFolders((prev) =>
-      prev.map((f) => {
-        if (f.media_id !== id) return f;
-        if (f.expanded) return { ...f, expanded: false };
-        if (f.videos) return { ...f, expanded: true };
-        return { ...f, expanded: true, loading: true };
-      }),
-    );
-
-    const folder = folders.find((f) => f.media_id === id);
-    if (!folder?.videos) {
-      try {
-        const res = await sourceBindingApi.getAllFavoriteVideos(
-          sourceBindingId,
-          id,
-          knowledgeBaseId,
-        );
-        setFolders((prev) =>
-          prev.map((f) =>
-            f.media_id === id
-              ? {
-                  ...f,
-                  videos: res.videos,
-                  loading: false,
-                  media_count: res.total,
-                  count_source: "filtered",
-                }
-              : f,
-          ),
-        );
-      } catch {
-        setFolders((prev) =>
-          prev.map((f) => (f.media_id === id ? { ...f, loading: false } : f)),
-        );
-      }
-    }
+    await refreshSourcesData();
   };
 
   // 选择收藏夹
@@ -314,68 +148,6 @@ export default function SourcesPanel({
     });
   };
 
-  const getSelectedVideoFolderIds = () => {
-    const folderIds = new Set<number>();
-    folders.forEach((folder) => {
-      folder.videos?.forEach((video) => {
-        if (selectedVideos.has(video.bvid) && !selected.has(folder.media_id)) {
-          folderIds.add(folder.media_id);
-        }
-      });
-    });
-    return Array.from(folderIds);
-  };
-
-  // 构建/更新知识库（统一操作）
-  const buildKnowledge = async () => {
-    if (selected.size === 0 && selectedVideos.size === 0) return;
-    setBuilding(true);
-    setMessage(null);
-    setProgress(null);
-
-    try {
-      const selectedVideoBvids = Array.from(selectedVideos);
-      const videoFolderIds = getSelectedVideoFolderIds();
-      const res = await knowledgeBaseApi.build(knowledgeBaseId, {
-        source_binding_id: sourceBindingId,
-        folder_ids: Array.from(selected),
-        ...(selectedVideoBvids.length > 0
-          ? { video_folder_ids: videoFolderIds, bvids: selectedVideoBvids }
-          : {}),
-        ...(excludeBvids.length > 0 ? { exclude_bvids: excludeBvids } : {}),
-      } as KnowledgeBaseBuildRequest);
-
-      const poll = async () => {
-        const s = await knowledgeBaseApi.getBuildStatus(
-          knowledgeBaseId,
-          res.task_id,
-        );
-        setProgress(s);
-
-        if (s.status === "running" || s.status === "pending") {
-          setTimeout(poll, 1000);
-        } else {
-          setBuilding(false);
-          if (s.status === "completed") {
-            setMessage(s.message || "构建完成");
-            await loadStatuses();
-            onBuildDone?.();
-          } else if (s.status === "failed") {
-            setMessage(`构建失败: ${s.message}`);
-          } else if (s.status === "interrupted") {
-            setMessage(`构建已中断: ${s.message || "请重新发起"}`);
-          } else {
-            setMessage(s.message || `构建已停止: ${s.status}`);
-          }
-        }
-      };
-      poll();
-    } catch {
-      setBuilding(false);
-      setMessage("构建失败，请重试");
-    }
-  };
-
   const isEmptyState = !loading && folders.length === 0;
 
   return (
@@ -406,7 +178,7 @@ export default function SourcesPanel({
                   (f) => f.is_default || f.title === "默认收藏夹",
                 );
                 if (def) {
-                  openOrganizePreview(def.media_id);
+                  void openOrganizePreview(def.media_id);
                 } else {
                   setOrganizeMessage("未找到默认收藏夹");
                 }
@@ -709,7 +481,7 @@ export default function SourcesPanel({
 
         {/* 主按钮 */}
         <button
-          onClick={buildKnowledge}
+          onClick={startBuild}
           disabled={
             (selected.size === 0 && selectedVideos.size === 0) ||
             building ||

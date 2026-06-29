@@ -423,6 +423,67 @@ def test_sources_panel_pure_logic_is_extracted():
     assert "const getButtonText" not in sources_panel
 
 
+def test_sources_panel_data_loading_is_extracted():
+    project_root = Path(__file__).resolve().parents[1]
+    sources_panel = (
+        project_root / "frontend" / "components" / "SourcesPanel.tsx"
+    ).read_text(encoding="utf-8")
+    hook_file = (
+        project_root / "frontend" / "components" / "sources" / "useSourcesPanelData.ts"
+    )
+
+    assert hook_file.exists()
+    assert "@/components/sources/useSourcesPanelData" in sources_panel
+    assert "sourceBindingApi.getFavorites" not in sources_panel
+    assert "knowledgeBaseApi.stats" not in sources_panel
+    assert "const loadFolders" not in sources_panel
+    assert "const loadStatuses" not in sources_panel
+
+
+def test_sources_panel_knowledge_build_is_extracted():
+    project_root = Path(__file__).resolve().parents[1]
+    sources_panel = (
+        project_root / "frontend" / "components" / "SourcesPanel.tsx"
+    ).read_text(encoding="utf-8")
+    hook_file = (
+        project_root
+        / "frontend"
+        / "components"
+        / "sources"
+        / "useSourcesKnowledgeBuild.ts"
+    )
+
+    assert hook_file.exists()
+    assert "@/components/sources/useSourcesKnowledgeBuild" in sources_panel
+    assert "knowledgeBaseApi.build" not in sources_panel
+    assert "knowledgeBaseApi.getBuildStatus" not in sources_panel
+    assert "const buildKnowledge" not in sources_panel
+    assert "const getSelectedVideoFolderIds" not in sources_panel
+
+
+def test_sources_panel_actions_are_extracted():
+    project_root = Path(__file__).resolve().parents[1]
+    sources_panel = (
+        project_root / "frontend" / "components" / "SourcesPanel.tsx"
+    ).read_text(encoding="utf-8")
+    hook_file = (
+        project_root
+        / "frontend"
+        / "components"
+        / "sources"
+        / "useSourcesPanelActions.ts"
+    )
+
+    assert hook_file.exists()
+    assert "@/components/sources/useSourcesPanelActions" in sources_panel
+    assert "sourceBindingApi.updateVideoTitle" not in sources_panel
+    assert "sourceBindingApi.getAllFavoriteVideos" not in sources_panel
+    assert "sourceBindingApi.organizePreview" not in sources_panel
+    assert "const saveVideoTitle" not in sources_panel
+    assert "const openOrganizePreview" not in sources_panel
+    assert "const toggleExpand" not in sources_panel
+
+
 def test_workspace_state_is_extracted_from_home_page():
     project_root = Path(__file__).resolve().parents[1]
     page = (project_root / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
