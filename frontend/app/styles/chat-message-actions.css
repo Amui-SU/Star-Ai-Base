@@ -1,0 +1,123 @@
+.message-actions {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-message-actions {
+  margin-top: 4px;
+  width: auto;
+  justify-content: flex-end;
+}
+
+.message-action-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.message-action-btn:hover {
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.message-action-btn.active {
+  color: var(--accent-strong);
+  background: rgba(217, 119, 87, 0.15);
+}
+
+.message-action-btn.soft-active.active {
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.message-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.message-action-btn.spinning svg {
+  animation: spin 0.9s linear infinite;
+}
+
+.inline-edit-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(100%, 760px);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--paper-2);
+  padding: 14px 14px 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.inline-edit-input {
+  width: 100%;
+  border: none;
+  border-radius: 0;
+  padding: 2px 2px 0;
+  resize: none;
+  min-height: 68px;
+  max-height: 220px;
+  font-size: inherit;
+  line-height: 1.62;
+  color: var(--ink-soft);
+  background: transparent;
+  outline: none;
+}
+
+.inline-edit-input:focus {
+  box-shadow: none;
+}
+
+.inline-edit-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.inline-edit-btn {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  height: 38px;
+  padding: 0 18px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.inline-edit-btn.ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  border-color: var(--border);
+}
+
+.inline-edit-btn.ghost:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.inline-edit-btn.primary {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.inline-edit-btn.primary:hover {
+  background: var(--accent-strong);
+}
+
+.inline-edit-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

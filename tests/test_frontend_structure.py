@@ -783,6 +783,56 @@ def test_global_styles_delegate_chat_styles_to_feature_file():
         assert selector not in globals_css
 
 
+def test_chat_styles_delegate_to_focused_files():
+    project_root = Path(__file__).resolve().parents[1]
+    styles_dir = project_root / "frontend" / "app" / "styles"
+    chat_css = (styles_dir / "chat.css").read_text(encoding="utf-8")
+
+    expected_imports = [
+        "./chat-progress.css",
+        "./chat-messages.css",
+        "./chat-markdown.css",
+        "./chat-web-search.css",
+        "./chat-message-actions.css",
+        "./chat-empty-state.css",
+        "./chat-responsive.css",
+        "./chat-code-blocks.css",
+        "./chat-thinking.css",
+    ]
+    expected_anchors = {
+        "chat-progress.css": ".progress {",
+        "chat-messages.css": ".message {",
+        "chat-markdown.css": ".markdown {",
+        "chat-web-search.css": ".web-search-live-status {",
+        "chat-message-actions.css": ".message-actions {",
+        "chat-empty-state.css": ".empty-state {",
+        "chat-responsive.css": "@media (max-width: 1024px)",
+        "chat-code-blocks.css": ".code-block-wrap {",
+        "chat-thinking.css": ".thinking-process {",
+    }
+
+    for imported_path in expected_imports:
+        imported_file = styles_dir / imported_path.removeprefix("./")
+        assert imported_file.exists()
+        assert expected_anchors[imported_file.name] in imported_file.read_text(
+            encoding="utf-8"
+        )
+        assert f'@import "{imported_path}";' in chat_css
+
+    for selector in [
+        "\n.progress {",
+        "\n.message {",
+        "\n.markdown {",
+        "\n.web-search-live-status {",
+        "\n.message-actions {",
+        "\n.empty-state {",
+        "\n@media (max-width: 1024px)",
+        "\n.code-block-wrap {",
+        "\n.thinking-process {",
+    ]:
+        assert selector not in chat_css
+
+
 def test_global_styles_delegate_chat_control_styles_to_feature_file():
     project_root = Path(__file__).resolve().parents[1]
     globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(

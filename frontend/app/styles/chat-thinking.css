@@ -1,0 +1,93 @@
+.thinking-process {
+  margin: 8px 0 4px;
+}
+
+.thinking-process-trigger {
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, var(--ink-soft) 64%, transparent);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thinking-process.active .thinking-process-trigger {
+  color: color-mix(in srgb, var(--accent-strong) 76%, var(--ink-soft));
+  cursor: default;
+}
+
+.thinking-process-static {
+  cursor: default;
+}
+
+.thinking-process-chevron {
+  display: inline-flex;
+  transform: rotate(0deg);
+  transition: transform 0.18s ease;
+  color: var(--accent-strong);
+}
+
+.thinking-process-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.thinking-process-hint {
+  color: color-mix(in srgb, var(--muted) 70%, transparent);
+  font-size: 10px;
+}
+
+.thinking-process-content {
+  margin-top: 7px;
+  max-width: 68ch;
+  color: color-mix(in srgb, var(--ink-soft) 56%, transparent);
+  font-size: 12px;
+  line-height: 1.72;
+  white-space: pre-wrap;
+}
+
+.thinking-process-content.pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in srgb, var(--muted) 76%, transparent);
+}
+
+.thinking-process-pending-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.thinking-process-pending-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: thinkingDotPulse 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes thinkingDotPulse {
+  from {
+    opacity: 0.28;
+    transform: translateY(1px);
+  }
+
+  to {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
