@@ -1,0 +1,75 @@
+.import-modal-step {
+  width: min(540px, 92vw);
+  padding: 30px 34px 32px;
+}
+
+.import-modal-step .import-modal-head {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) 58px;
+  align-items: start;
+  gap: 10px;
+  margin-bottom: 24px;
+  position: relative;
+}
+
+.import-modal-step .import-modal-head > div {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.import-modal-step .import-back-btn {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  font-size: 10px;
+}
+
+.import-modal-step .modal-title {
+  font-size: 18px;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  text-align: center !important;
+}
+
+.import-modal-step .modal-subtitle {
+  width: max-content;
+  max-width: none;
+  margin: 7px auto 0;
+  font-size: 11px;
+  line-height: 1.45;
+  font-weight: 500;
+  text-align: center !important;
+  white-space: nowrap;
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.import-step-body {
+  display: grid;
+  gap: 16px;
+}
+
+.import-step-copy,
+.import-message {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.import-message {
+  min-height: 20px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}

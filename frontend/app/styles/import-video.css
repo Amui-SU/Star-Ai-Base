@@ -1,0 +1,125 @@
+.import-url-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 650;
+}
+
+.import-video-mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 4px;
+}
+
+.import-video-mode-tabs button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.import-video-mode-tabs button.active {
+  background: var(--btn-light);
+  color: #2b241d;
+}
+
+.import-url-input {
+  min-height: 118px;
+  padding: 15px 17px;
+  border-radius: 18px;
+  border-color: #484744;
+  background: #30302e;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.import-url-input::placeholder {
+  color: rgba(168, 164, 156, 0.58);
+}
+
+.import-local-video-input {
+  min-height: 44px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 16px;
+  background: #30302e;
+  color: var(--muted);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.import-local-video-input::file-selector-button {
+  min-height: 28px;
+  margin-right: 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--btn-light);
+  color: #2b241d;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.import-local-video-card {
+  min-height: 68px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 13px 15px;
+}
+
+.import-local-video-title {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-local-video-meta {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.import-actions .btn {
+  min-width: 82px;
+  min-height: 36px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.import-actions .btn-outline {
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.import-actions .btn-primary:disabled {
+  background: rgba(245, 243, 238, 0.72);
+  color: rgba(59, 57, 53, 0.72);
+  opacity: 1;
+}

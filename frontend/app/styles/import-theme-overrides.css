@@ -1,0 +1,28 @@
+html.light .import-back-btn {
+  background: rgba(43, 36, 29, 0.04);
+}
+
+html.light .import-back-btn:hover {
+  background: rgba(217, 139, 43, 0.1);
+  border-color: rgba(217, 139, 43, 0.22);
+}
+
+html.light .import-message,
+html.light .import-actions .btn-outline {
+  background: rgba(43, 36, 29, 0.035);
+}
+
+html.light .import-bound-card,
+html.light .import-qr-placeholder,
+html.light .import-url-input,
+html.light .import-local-video-input,
+html.light .import-local-video-card,
+html.light .import-video-mode-tabs {
+  background: rgba(43, 36, 29, 0.06);
+  border-color: rgba(43, 36, 29, 0.12);
+}
+
+html.light .import-actions .btn-primary:disabled {
+  background: rgba(43, 36, 29, 0.22);
+  color: rgba(43, 36, 29, 0.62);
+}
