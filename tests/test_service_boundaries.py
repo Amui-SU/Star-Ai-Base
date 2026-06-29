@@ -646,9 +646,19 @@ def test_knowledge_base_web_search_stream_tests_are_split_from_scoping_file():
     streaming_test = (
         project_root / "tests" / "test_knowledge_base_web_search_streaming.py"
     )
+    streaming_dir = project_root / "tests" / "knowledge_base_web_search_streaming"
+    streaming_files = [
+        streaming_dir / "test_stream_status.py",
+        streaming_dir / "test_stream_heartbeats.py",
+        streaming_dir / "test_stream_sources.py",
+    ]
 
     assert streaming_test.exists()
-    streaming_source = streaming_test.read_text(encoding="utf-8")
+    for streaming_file in streaming_files:
+        assert streaming_file.exists()
+    streaming_source = "\n".join(
+        streaming_file.read_text(encoding="utf-8") for streaming_file in streaming_files
+    )
     for test_name in [
         "test_scoped_chat_stream_reports_web_search_no_results",
         "test_scoped_chat_stream_reports_socks_dependency_failure",
