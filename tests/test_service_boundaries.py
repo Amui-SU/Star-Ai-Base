@@ -327,6 +327,58 @@ def test_knowledge_base_router_delegates_web_search_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_knowledge_base_router_delegates_web_search_orchestration_to_service():
+    project_root = Path(__file__).resolve().parents[1]
+    service_path = project_root / "app/services/knowledge_web_search_orchestration.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+    router_module = ast.parse(router_source)
+
+    declared_names = set()
+    for node in router_module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            declared_names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    declared_names.add(target.id)
+
+    expected_service_names = {
+        "MAX_FETCH_WEB_PAGE_CALLS",
+        "FETCH_WEB_PAGE_CONTEXT_CHARS",
+        "WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS",
+        "WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS",
+        "execute_web_search_tool",
+        "execute_fetch_web_page_tool",
+        "run_initial_web_search",
+        "prepare_web_search_tool_run",
+        "prepare_knowledge_base_web_search",
+        "prepare_knowledge_base_web_search_with_heartbeats",
+    }
+    router_private_names = {
+        "MAX_FETCH_WEB_PAGE_CALLS",
+        "FETCH_WEB_PAGE_CONTEXT_CHARS",
+        "WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS",
+        "WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS",
+        "_execute_web_search_tool",
+        "_execute_fetch_web_page_tool",
+        "_run_initial_web_search",
+        "_prepare_web_search_tool_run",
+        "_prepare_knowledge_base_web_search",
+        "_prepare_knowledge_base_web_search_with_heartbeats",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"{name} =" in service_source
+    assert (
+        "from app.services.knowledge_web_search_orchestration import" in router_source
+    )
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_knowledge_base_router_delegates_presenter_helpers_to_service():
     project_root = Path(__file__).resolve().parents[1]
     service_path = project_root / "app/services/knowledge_base_presenters.py"

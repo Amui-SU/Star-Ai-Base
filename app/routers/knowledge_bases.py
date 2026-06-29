@@ -1,5 +1,5 @@
-import asyncio
 import json
+import sys
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -63,7 +63,6 @@ from app.services.chat_messages import (
     enforce_markdown_output as _enforce_markdown_output,
 )
 from app.routers.chat import (
-    LLMToolRunResult,
     _append_no_more_tool_calls_instruction,
     _complete_llm_answer,
     _encode_thinking_delta,
@@ -101,6 +100,17 @@ from app.services.knowledge_web_search import (
     web_search_failed_status_from_exception as _web_search_failed_status_from_exception,
     web_search_status as _web_search_status,
 )
+from app.services.knowledge_web_search_orchestration import (
+    FETCH_WEB_PAGE_CONTEXT_CHARS as _FETCH_WEB_PAGE_CONTEXT_CHARS,
+    MAX_FETCH_WEB_PAGE_CALLS as _MAX_FETCH_WEB_PAGE_CALLS,
+    WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS as _WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS,
+    WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS as _WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS,
+    execute_fetch_web_page_tool as _execute_fetch_web_page_tool_impl,
+    execute_web_search_tool as _execute_web_search_tool_impl,
+    prepare_knowledge_base_web_search_with_heartbeats as _prepare_knowledge_base_web_search_with_heartbeats_impl,
+    prepare_web_search_tool_run as _prepare_web_search_tool_run_impl,
+    run_initial_web_search as _run_initial_web_search_impl,
+)
 from app.services.api_credentials import (
     record_usage_event,
     resolve_optional_user_api_credentials,
@@ -110,10 +120,6 @@ from app.services.web_search import fetch_web_page, search_web
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
 
-WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS = 2.5
-WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS = 60.0
-MAX_FETCH_WEB_PAGE_CALLS = 1
-FETCH_WEB_PAGE_CONTEXT_CHARS = 2000
 WEB_SEARCH_PROGRESS_MARKER = "[[WEB_SEARCH_PROGRESS]]"
 
 
@@ -174,202 +180,71 @@ _build_knowledge_base_messages = lambda question, documents, web_results=None, *
 )
 
 
-async def _execute_web_search_tool(
+def _knowledge_web_search_module():
+    return sys.modules[__name__]
+
+
+async def _legacy_execute_web_search_tool(
     arguments: dict,
     web_results: list[dict[str, str]],
     state: dict,
 ) -> dict:
-    state["attempted"] = True
-    query = _normalize_web_search_query(str(arguments.get("query") or "").strip())
-    if not query:
-        state.setdefault("errors", []).append(
-            {"source": "web_search", "message": "搜索关键词为空"}
-        )
-        return {
-            "source_type": "web_search",
-            "query": query,
-            "results": [],
-            "message": "搜索关键词为空",
-        }
-    search_queries = state.setdefault("queries", set())
-    query_key = query.casefold()
-    if query_key in search_queries:
-        return {
-            "source_type": "web_search",
-            "query": query,
-            "results": [],
-            "message": "Duplicate web search skipped.",
-        }
-    search_queries.add(query_key)
-    state.setdefault("query_log", []).append(query)
-    try:
-        diagnostics: list[dict] = []
-        supports_diagnostics = _supports_keyword_argument(search_web, "diagnostics")
-        supports_provider = _supports_keyword_argument(search_web, "provider")
-        supports_tavily_api_key = _supports_keyword_argument(
-            search_web,
-            "tavily_api_key",
-        )
-        search_kwargs = {}
-        if supports_diagnostics:
-            search_kwargs["diagnostics"] = diagnostics
-        if supports_provider:
-            search_kwargs["provider"] = state.get("provider")
-        if supports_tavily_api_key:
-            search_kwargs["tavily_api_key"] = state.get("tavily_api_key")
-        results = await search_web(query, **search_kwargs)
-    except Exception as exc:
-        state["failed"] = True
-        state.setdefault("errors", []).append(
-            {"source": "web_search", "query": query, "message": "联网搜索失败"}
-        )
-        logger.warning(f"联网搜索工具调用失败，将仅使用知识库回答: {exc}")
-        return {
-            "source_type": "web_search",
-            "query": query,
-            "results": [],
-            "error": "search_failed",
-            "message": "联网搜索失败",
-        }
-    if diagnostics and not results:
-        _append_web_search_diagnostics(state, query, diagnostics)
-    for result in results:
-        _append_web_result(web_results, result)
-    return {"source_type": "web_search", "query": query, "results": results}
+    return await _execute_web_search_tool_impl(
+        arguments,
+        web_results,
+        state,
+        search_web=getattr(_knowledge_web_search_module(), "search_web"),
+    )
 
 
-async def _execute_fetch_web_page_tool(
+async def _legacy_execute_fetch_web_page_tool(
     arguments: dict,
     web_results: list[dict[str, str]],
     state: dict,
 ) -> dict:
-    state["attempted"] = True
-    fetch_count = state.setdefault("fetch_count", 0)
-    if fetch_count >= MAX_FETCH_WEB_PAGE_CALLS:
-        state.setdefault("errors", []).append(
-            {"source": "web_page", "message": "网页读取次数已达到上限"}
-        )
-        return {
-            "source_type": "web_page",
-            "url": str(arguments.get("url") or "").strip(),
-            "title": "",
-            "content": "",
-            "error": "fetch_limit_exceeded",
-            "message": "网页读取次数已达到上限",
-        }
-    url = str(arguments.get("url") or "").strip()
-    if not url:
-        state.setdefault("errors", []).append(
-            {"source": "web_page", "message": "URL 为空"}
-        )
-        return {
-            "source_type": "web_page",
-            "url": url,
-            "title": "",
-            "content": "",
-            "message": "URL 为空",
-        }
-    state["fetch_count"] = fetch_count + 1
-    result = await fetch_web_page(url, max_chars=FETCH_WEB_PAGE_CONTEXT_CHARS)
-    if result.get("error"):
-        state["failed"] = True
-        state.setdefault("errors", []).append(
-            {
-                "source": "web_page",
-                "url": url,
-                "message": result.get("message")
-                or result.get("error")
-                or "网页读取失败",
-            }
-        )
-    else:
-        _append_web_result(
-            web_results,
-            {
-                "title": result.get("title") or url,
-                "url": result.get("url") or url,
-                "snippet": result.get("content") or "",
-            },
-        )
-    return {"source_type": "web_page", **result}
+    return await _execute_fetch_web_page_tool_impl(
+        arguments,
+        web_results,
+        state,
+        fetch_web_page=getattr(_knowledge_web_search_module(), "fetch_web_page"),
+    )
 
 
-async def _run_initial_web_search(
+async def _legacy_run_initial_web_search(
     question: str,
     web_results: list[dict[str, str]],
     state: dict,
 ) -> None:
-    for query in _build_web_search_queries(question):
-        before_count = len(web_results)
-        await _execute_web_search_tool({"query": query}, web_results, state)
-        if len(web_results) > before_count:
-            break
+    return await _run_initial_web_search_impl(
+        question,
+        web_results,
+        state,
+        search_web=getattr(_knowledge_web_search_module(), "search_web"),
+    )
 
 
-async def _prepare_web_search_tool_run(
+async def _legacy_prepare_web_search_tool_run(
     messages: list[dict],
     *,
     question: str,
     provider: str = "auto",
     tavily_api_key: str | None = None,
     llm_config: dict | None = None,
-) -> tuple[LLMToolRunResult, list[dict[str, str]], dict]:
-    web_results: list[dict[str, str]] = []
-    web_search_state = {
-        "attempted": False,
-        "failed": False,
-        "provider": provider,
-        "tavily_api_key": tavily_api_key,
-    }
-
-    await _run_initial_web_search(question, web_results, web_search_state)
-    initial_result_count = len(web_results)
-    context_appended_result_count = initial_result_count
-    if web_results:
-        prepared_messages = _append_web_search_context_message(messages, web_results)
-    else:
-        prepared_messages = _append_web_search_no_results_message(
-            messages,
-            web_search_state,
-        )
-
-    def after_tool_messages(next_messages: list[dict]) -> list[dict]:
-        nonlocal context_appended_result_count
-        if len(web_results) <= context_appended_result_count:
-            return next_messages
-
-        cleaned_messages = _remove_web_search_no_results_messages(next_messages)
-        new_results = web_results[context_appended_result_count:]
-        context_appended_result_count = len(web_results)
-        return _append_web_search_context_message(cleaned_messages, new_results)
-
-    tool_run = await _prepare_llm_messages_with_tools(
-        prepared_messages,
-        tools=[WEB_SEARCH_TOOL, FETCH_WEB_PAGE_TOOL],
-        tool_handlers={
-            "web_search": lambda arguments: _execute_web_search_tool(
-                arguments,
-                web_results,
-                web_search_state,
-            ),
-            "fetch_web_page": lambda arguments: _execute_fetch_web_page_tool(
-                arguments,
-                web_results,
-                web_search_state,
-            ),
-        },
-        max_tool_calls=3,
-        after_tool_messages=after_tool_messages,
+):
+    module = _knowledge_web_search_module()
+    return await _prepare_web_search_tool_run_impl(
+        messages,
+        question=question,
+        provider=provider,
+        tavily_api_key=tavily_api_key,
         llm_config=llm_config,
+        prepare_llm_messages_with_tools=getattr(
+            module,
+            "_prepare_llm_messages_with_tools",
+        ),
+        search_web=getattr(module, "search_web"),
+        fetch_web_page=getattr(module, "fetch_web_page"),
     )
-
-    if len(web_results) > context_appended_result_count:
-        tool_run.messages = _append_web_search_context_message(
-            tool_run.messages,
-            web_results[context_appended_result_count:],
-        )
-
-    return tool_run, web_results, web_search_state
 
 
 async def _complete_knowledge_base_answer(
@@ -391,7 +266,10 @@ async def _complete_knowledge_base_answer(
         answer, thinking = complete_llm_with_config(messages)
         return answer, thinking, [], None
 
-    tool_run, web_results, web_search_state = await _prepare_web_search_tool_run(
+    tool_run, web_results, web_search_state = await getattr(
+        _knowledge_web_search_module(),
+        "_prepare_web_search_tool_run",
+    )(
         messages,
         question=question,
         provider=web_search_provider,
@@ -415,15 +293,18 @@ async def _complete_knowledge_base_answer(
     )
 
 
-async def _prepare_knowledge_base_web_search(
+async def _legacy_prepare_knowledge_base_web_search(
     messages: list[dict],
     *,
     question: str,
     provider: str = "auto",
     tavily_api_key: str | None = None,
     llm_config: dict | None = None,
-) -> tuple[LLMToolRunResult, list[dict[str, str]], dict | None]:
-    tool_run, web_results, web_search_state = await _prepare_web_search_tool_run(
+) -> tuple:
+    tool_run, web_results, web_search_state = await getattr(
+        _knowledge_web_search_module(),
+        "_prepare_web_search_tool_run",
+    )(
         messages,
         question=question,
         provider=provider,
@@ -441,7 +322,7 @@ async def _prepare_knowledge_base_web_search(
     )
 
 
-async def _prepare_knowledge_base_web_search_with_heartbeats(
+def _legacy_prepare_knowledge_base_web_search_with_heartbeats(
     messages: list[dict],
     *,
     question: str,
@@ -449,61 +330,48 @@ async def _prepare_knowledge_base_web_search_with_heartbeats(
     tavily_api_key: str | None = None,
     llm_config: dict | None = None,
 ):
-    prepare_kwargs = {"question": question}
-    if _supports_keyword_argument(_prepare_knowledge_base_web_search, "provider"):
-        prepare_kwargs["provider"] = provider
-    if _supports_keyword_argument(_prepare_knowledge_base_web_search, "tavily_api_key"):
-        prepare_kwargs["tavily_api_key"] = tavily_api_key
-    if _supports_keyword_argument(_prepare_knowledge_base_web_search, "llm_config"):
-        prepare_kwargs["llm_config"] = llm_config
-    task = asyncio.create_task(
-        _prepare_knowledge_base_web_search(
-            messages,
-            **prepare_kwargs,
-        )
+    module = _knowledge_web_search_module()
+    return _prepare_knowledge_base_web_search_with_heartbeats_impl(
+        messages,
+        question=question,
+        provider=provider,
+        tavily_api_key=tavily_api_key,
+        llm_config=llm_config,
+        prepare_knowledge_base_web_search=getattr(
+            module,
+            "_prepare_knowledge_base_web_search",
+        ),
+        heartbeat_interval_seconds=getattr(
+            module,
+            "WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS",
+        ),
+        tool_prep_timeout_seconds=getattr(
+            module,
+            "WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS",
+        ),
     )
-    heartbeat_count = 0
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS
-    try:
-        while not task.done():
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                raise TimeoutError(
-                    f"web search tool chain timed out after "
-                    f"{WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS:g}s"
-                )
-            try:
-                result = await asyncio.wait_for(
-                    asyncio.shield(task),
-                    timeout=min(WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS, remaining),
-                )
-                yield ("result", result)
-                return
-            except TimeoutError:
-                if task.done():
-                    yield ("result", task.result())
-                    return
-                if deadline - loop.time() <= 0:
-                    raise TimeoutError(
-                        f"web search tool chain timed out after "
-                        f"{WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS:g}s"
-                    )
-                heartbeat_count += 1
-                yield (
-                    "heartbeat",
-                    f"联网搜索仍在进行，正在整理外部资料（{heartbeat_count}）。",
-                )
-        yield ("result", task.result())
-    except Exception:
-        if not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        raise
-    finally:
-        if not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+
+
+_WEB_SEARCH_ORCHESTRATION_COMPAT = {
+    "MAX_FETCH_WEB_PAGE_CALLS": _MAX_FETCH_WEB_PAGE_CALLS,
+    "FETCH_WEB_PAGE_CONTEXT_CHARS": _FETCH_WEB_PAGE_CONTEXT_CHARS,
+    "WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS": _WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS,
+    "WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS": _WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS,
+    "_execute_web_search_tool": _legacy_execute_web_search_tool,
+    "_execute_fetch_web_page_tool": _legacy_execute_fetch_web_page_tool,
+    "_run_initial_web_search": _legacy_run_initial_web_search,
+    "_prepare_web_search_tool_run": _legacy_prepare_web_search_tool_run,
+    "_prepare_knowledge_base_web_search": _legacy_prepare_knowledge_base_web_search,
+    "_prepare_knowledge_base_web_search_with_heartbeats": (
+        _legacy_prepare_knowledge_base_web_search_with_heartbeats
+    ),
+}
+
+
+def __getattr__(name: str):
+    if name in _WEB_SEARCH_ORCHESTRATION_COMPAT:
+        return _WEB_SEARCH_ORCHESTRATION_COMPAT[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 async def _resolve_web_search_api_key(
@@ -1086,7 +954,10 @@ async def stream_chat_with_knowledge_base(
                 async for (
                     event_type,
                     event_payload,
-                ) in _prepare_knowledge_base_web_search_with_heartbeats(
+                ) in getattr(
+                    _knowledge_web_search_module(),
+                    "_prepare_knowledge_base_web_search_with_heartbeats",
+                )(
                     messages,
                     question=question,
                     provider=payload.web_search_provider,
