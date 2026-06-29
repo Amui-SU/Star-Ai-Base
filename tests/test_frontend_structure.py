@@ -30,6 +30,50 @@ def test_chat_panel_uses_chat_subcomponents():
     assert "总结收藏夹里最有价值的内容" not in chat_panel
 
 
+def test_chat_panel_uses_model_settings_hook():
+    project_root = Path(__file__).resolve().parents[1]
+    chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    hook_file = (
+        project_root / "frontend" / "components" / "chat" / "useChatModelSettings.ts"
+    )
+
+    assert hook_file.exists()
+    assert "@/components/chat/useChatModelSettings" in chat_panel
+    assert "formatThinkingConfig" not in chat_panel
+    assert "inferThinkingMode" not in chat_panel
+    assert "parseThinkingConfig" not in chat_panel
+    assert "LLM_PROVIDER_PRESETS" not in chat_panel
+    assert "chatApi.getModelConfig" not in chat_panel
+    assert "chatApi.health" not in chat_panel
+    assert "chatApi.setModelProvider" not in chat_panel
+    assert "chatApi.saveModelProviderConfig" not in chat_panel
+
+
+def test_chat_panel_uses_web_search_settings_hook():
+    project_root = Path(__file__).resolve().parents[1]
+    chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    hook_file = (
+        project_root
+        / "frontend"
+        / "components"
+        / "chat"
+        / "useChatWebSearchSettings.ts"
+    )
+
+    assert hook_file.exists()
+    assert "@/components/chat/useChatWebSearchSettings" in chat_panel
+    assert "chatApi.getWebSearchConfig" not in chat_panel
+    assert "chatApi.saveWebSearchConfig" not in chat_panel
+    assert "webSearchConfigOpen, setWebSearchConfigOpen" not in chat_panel
+    assert "webSearchApiKey, setWebSearchApiKey" not in chat_panel
+    assert "webSearchConfigSaving, setWebSearchConfigSaving" not in chat_panel
+    assert "webSearchConfigError, setWebSearchConfigError" not in chat_panel
+
+
 def test_chat_panel_history_tests_are_split_from_main_suite():
     project_root = Path(__file__).resolve().parents[1]
     main_test = project_root / "frontend" / "components" / "ChatPanel.test.tsx"

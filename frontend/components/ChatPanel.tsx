@@ -7,20 +7,15 @@ import Composer from "@/components/chat/Composer";
 import MessageList from "@/components/chat/MessageList";
 import ModelConfigModal from "@/components/chat/ModelConfigModal";
 import WebSearchConfigModal from "@/components/chat/WebSearchConfigModal";
+import { useChatModelSettings } from "@/components/chat/useChatModelSettings";
 import { useChatStreaming } from "@/components/chat/useChatStreaming";
-import type { Message, ModelConfigProvider } from "@/components/chat/types";
+import { useChatWebSearchSettings } from "@/components/chat/useChatWebSearchSettings";
+import type { Message } from "@/components/chat/types";
 import {
-  chatApi,
   chatHistoryApi,
   knowledgeBaseApi,
   KnowledgeStats,
-  LLMHealthResponse,
-  LLMConfigResponse,
-  LLMProvider,
-  LLMApiSource,
   KnowledgeScopeOptions,
-  WebSearchConfigResponse,
-  WebSearchProvider,
   type ChatConversation,
   type ChatConversationSaveRequest,
   type ChatConversationScope,
@@ -32,13 +27,7 @@ import {
   scopeSummary,
 } from "@/lib/chatScope";
 import { displayKnowledgeBaseName } from "@/lib/displayNames";
-import { LLM_PROVIDER_PRESETS, providerLogoMap } from "@/lib/providers";
-import {
-  formatThinkingConfig,
-  inferThinkingMode,
-  parseThinkingConfig,
-  type ThinkingMode,
-} from "@/lib/thinkingConfig";
+import { providerLogoMap } from "@/lib/providers";
 
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 96;
 
@@ -84,32 +73,7 @@ export default function ChatPanel({
   });
   const [chatScope, setChatScope] =
     useState<ChatScopeSelection>(EMPTY_CHAT_SCOPE);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
-  const [webSearchProvider, setWebSearchProvider] =
-    useState<WebSearchProvider>("auto");
-  const [webSearchConfig, setWebSearchConfig] =
-    useState<WebSearchConfigResponse | null>(null);
-  const [webSearchConfigOpen, setWebSearchConfigOpen] = useState(false);
-  const [webSearchApiKey, setWebSearchApiKey] = useState("");
-  const [webSearchConfigSaving, setWebSearchConfigSaving] = useState(false);
-  const [webSearchConfigError, setWebSearchConfigError] = useState("");
   const [scopeNotice, setScopeNotice] = useState("");
-  const [webSearchNotice, setWebSearchNotice] = useState("");
-  const [llmHealth, setLlmHealth] = useState<LLMHealthResponse | null>(null);
-  const [llmChecking, setLlmChecking] = useState(false);
-  const [llmConfig, setLlmConfig] = useState<LLMConfigResponse | null>(null);
-  const [llmSwitching, setLlmSwitching] = useState(false);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [configProvider, setConfigProvider] =
-    useState<ModelConfigProvider | null>(null);
-  const [configApiKey, setConfigApiKey] = useState("");
-  const [configBaseUrl, setConfigBaseUrl] = useState("");
-  const [configModel, setConfigModel] = useState("");
-  const [configThinkingMode, setConfigThinkingMode] =
-    useState<ThinkingMode>("off");
-  const [configThinkingJson, setConfigThinkingJson] = useState("{}");
-  const [configSaving, setConfigSaving] = useState(false);
-  const [configError, setConfigError] = useState("");
   const [currentConversationId, setCurrentConversationId] = useState<
     number | null
   >(null);
@@ -122,6 +86,85 @@ export default function ChatPanel({
   const scrollFrameRef = useRef<number | null>(null);
   const shouldFollowChatScrollRef = useRef(true);
   const scopeNoticeTimerRef = useRef<number | null>(null);
+
+  const showScopeNotice = useCallback((message: string, timeoutMs?: number) => {
+    setScopeNotice(message);
+    if (scopeNoticeTimerRef.current) {
+      window.clearTimeout(scopeNoticeTimerRef.current);
+      scopeNoticeTimerRef.current = null;
+    }
+    if (timeoutMs !== undefined) {
+      scopeNoticeTimerRef.current = window.setTimeout(() => {
+        setScopeNotice("");
+        scopeNoticeTimerRef.current = null;
+      }, timeoutMs);
+    }
+  }, []);
+
+  const {
+    clearWebSearchNotice,
+    closeWebSearchConfig,
+    handleSaveWebSearchConfig,
+    handleWebSearchChange,
+    handleWebSearchProviderChange,
+    openWebSearchConfig,
+    setWebSearchEnabled,
+    setWebSearchProvider,
+    setWebSearchApiKey,
+    webSearchApiKey,
+    webSearchConfig,
+    webSearchConfigError,
+    webSearchConfigOpen,
+    webSearchConfigSaving,
+    webSearchEnabled,
+    webSearchNotice,
+    webSearchProvider,
+  } = useChatWebSearchSettings({
+    apiAccountsKey,
+    isAdmin,
+    onOpenApiAccounts,
+    onScopeNotice: setScopeNotice,
+  });
+
+  const {
+    activeProvider,
+    closeProviderConfig,
+    configApiKey,
+    configBaseUrl,
+    configError,
+    configModel,
+    configProvider,
+    configSaving,
+    configThinkingJson,
+    configThinkingMode,
+    currentApiSource,
+    currentProvider,
+    handleSaveProviderConfig,
+    handleSwitchModelSource,
+    handleSwitchProvider,
+    llmChecking,
+    llmConfig,
+    llmSwitching,
+    modelLatencyText,
+    modelMenuOpen,
+    modelReady,
+    modelStatusTitle,
+    openProviderConfig,
+    providersForMenu,
+    setConfigApiKey,
+    setConfigBaseUrl,
+    setConfigError,
+    setConfigModel,
+    setConfigThinkingJson,
+    setConfigThinkingMode,
+    setModelMenuOpen,
+    shouldShowAiKeyHint,
+    sourceOptions,
+  } = useChatModelSettings({
+    apiAccountsKey,
+    isAdmin,
+    onNotice: showScopeNotice,
+  });
 
   const scopeToHistoryScope = useCallback(
     (scope: ChatScopeSelection): ChatConversationScope => ({
@@ -208,140 +251,6 @@ export default function ChatPanel({
       void persistConversation(settledMessages);
     },
   });
-  const openProviderConfig = (provider: ModelConfigProvider) => {
-    if (!isAdmin) {
-      setScopeNotice("需要管理员配置模型");
-      return;
-    }
-    setConfigProvider(provider);
-    setConfigApiKey("");
-    setConfigBaseUrl(provider.base_url || "");
-    setConfigModel(provider.model || "");
-    const thinkingConfig = provider.thinking_config || {};
-    const thinkingTemplate = provider.thinking_template || {};
-    const mode = inferThinkingMode(thinkingConfig, thinkingTemplate);
-    setConfigThinkingMode(mode);
-    setConfigThinkingJson(
-      formatThinkingConfig(
-        mode === "standard" ? thinkingTemplate : thinkingConfig,
-      ),
-    );
-    setConfigError("");
-    setModelMenuOpen(false);
-  };
-
-  const closeProviderConfig = (force = false) => {
-    if (configSaving && !force) return;
-    setConfigProvider(null);
-    setConfigApiKey("");
-    setConfigBaseUrl("");
-    setConfigModel("");
-    setConfigThinkingMode("off");
-    setConfigThinkingJson("{}");
-    setConfigError("");
-  };
-
-  const handleSaveProviderConfig = async () => {
-    if (!configProvider || configSaving) return;
-    if (!configProvider.enabled && !configApiKey.trim()) {
-      setConfigError("请填写 API Key");
-      return;
-    }
-    let thinkingConfig: Record<string, unknown> | undefined;
-    if (configThinkingMode === "custom") {
-      try {
-        thinkingConfig = parseThinkingConfig(configThinkingJson);
-      } catch (err) {
-        setConfigError(err instanceof Error ? err.message : "思考配置无效");
-        return;
-      }
-    }
-    setConfigSaving(true);
-    setConfigError("");
-    try {
-      const saved = await chatApi.saveModelProviderConfig({
-        provider: configProvider.provider,
-        api_key: configApiKey.trim() || undefined,
-        base_url: configBaseUrl.trim() || undefined,
-        model: configModel.trim() || undefined,
-        thinking_mode: configThinkingMode,
-        thinking_config: thinkingConfig,
-      });
-      const [cfg, health] = await Promise.all([
-        chatApi.getModelConfig(),
-        chatApi.health(),
-      ]);
-      setLlmConfig(cfg);
-      setLlmHealth(health);
-      setScopeNotice(`模型与思考配置验证成功 · ${saved.latency_ms}ms`);
-      if (scopeNoticeTimerRef.current) {
-        window.clearTimeout(scopeNoticeTimerRef.current);
-      }
-      scopeNoticeTimerRef.current = window.setTimeout(() => {
-        setScopeNotice("");
-        scopeNoticeTimerRef.current = null;
-      }, 2600);
-      closeProviderConfig(true);
-    } catch (err) {
-      setConfigError(err instanceof Error ? err.message : "保存失败");
-    } finally {
-      setConfigSaving(false);
-    }
-  };
-
-  const openWebSearchConfig = () => {
-    if (onOpenApiAccounts) {
-      setWebSearchConfigError("");
-      setWebSearchNotice("请在 AI 服务密钥中添加 Tavily");
-      onOpenApiAccounts();
-      return;
-    }
-    if (!isAdmin) {
-      setWebSearchConfigError("");
-      setWebSearchNotice("Tavily 需要管理员配置");
-      return;
-    }
-    setWebSearchApiKey("");
-    setWebSearchConfigError("");
-    setWebSearchConfigOpen(true);
-  };
-
-  const closeWebSearchConfig = (force = false) => {
-    if (webSearchConfigSaving && !force) return;
-    setWebSearchConfigOpen(false);
-    setWebSearchApiKey("");
-    setWebSearchConfigError("");
-  };
-
-  const handleSaveWebSearchConfig = async () => {
-    if (webSearchConfigSaving) return;
-    const apiKey = webSearchApiKey.trim();
-    if (!webSearchConfig?.tavily_configured && !apiKey) {
-      setWebSearchConfigError("请填写 Tavily API Key");
-      return;
-    }
-    setWebSearchConfigSaving(true);
-    setWebSearchConfigError("");
-    try {
-      const cfg = await chatApi.saveWebSearchConfig({
-        provider: "tavily",
-        tavily_api_key: apiKey || undefined,
-        fallback_html: webSearchConfig?.fallback_html ?? true,
-        tavily_search_depth: webSearchConfig?.tavily_search_depth || "basic",
-      });
-      setWebSearchConfig(cfg);
-      setWebSearchProvider("tavily");
-      setWebSearchEnabled(true);
-      setWebSearchNotice("联网搜索已开启");
-      closeWebSearchConfig(true);
-    } catch (err) {
-      setWebSearchConfigError(
-        err instanceof Error ? err.message : "保存联网搜索配置失败",
-      );
-    } finally {
-      setWebSearchConfigSaving(false);
-    }
-  };
 
   useEffect(() => {
     if (knowledgeBaseId) {
@@ -354,89 +263,6 @@ export default function ChatPanel({
       setStats(null);
     }
   }, [statsKey, knowledgeBaseId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadConfig = async () => {
-      try {
-        const [cfg, webCfg] = await Promise.all([
-          chatApi.getModelConfig(),
-          chatApi.getWebSearchConfig(),
-        ]);
-        if (!cancelled) {
-          setLlmConfig(cfg);
-          setWebSearchConfig(webCfg);
-          setWebSearchProvider(webCfg.provider || "auto");
-        }
-      } catch {
-        // 忽略配置加载失败，不影响聊天主流程
-      }
-    };
-    const check = async () => {
-      setLlmChecking(true);
-      try {
-        const res = await chatApi.health();
-        if (!cancelled) setLlmHealth(res);
-      } catch {
-        if (!cancelled) {
-          setLlmHealth({
-            status: "down",
-            message: "健康检查失败",
-            model: "unknown",
-            provider: "unknown",
-          });
-        }
-      } finally {
-        if (!cancelled) setLlmChecking(false);
-      }
-    };
-
-    loadConfig();
-    check();
-    const timer = window.setInterval(check, 45000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [apiAccountsKey]);
-
-  const handleSwitchProvider = async (provider: LLMProvider) => {
-    if (llmSwitching) return;
-    setLlmSwitching(true);
-    try {
-      await chatApi.setModelProvider(provider);
-      const [cfg, health] = await Promise.all([
-        chatApi.getModelConfig(),
-        chatApi.health(),
-      ]);
-      setLlmConfig(cfg);
-      setLlmHealth(health);
-    } catch (err) {
-      setLlmHealth({
-        status: "down",
-        message: err instanceof Error ? err.message : "模型切换失败",
-        model: "unknown",
-        provider: "unknown",
-      });
-    } finally {
-      setLlmSwitching(false);
-    }
-  };
-
-  const handleSwitchModelSource = async (apiSource: LLMApiSource) => {
-    if (llmSwitching || llmConfig?.current_api_source === apiSource) return;
-    setLlmSwitching(true);
-    try {
-      const cfg = await chatApi.setModelSource(apiSource);
-      const health = await chatApi.health();
-      setLlmConfig(cfg);
-      setLlmHealth(health);
-    } catch (err) {
-      setScopeNotice(err instanceof Error ? err.message : "模型来源切换失败");
-    } finally {
-      setLlmSwitching(false);
-    }
-  };
 
   const handleChatScroll = (event: UIEvent<HTMLDivElement>) => {
     const shouldFollow = isNearScrollBottom(event.currentTarget);
@@ -477,7 +303,7 @@ export default function ChatPanel({
     };
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [modelMenuOpen]);
+  }, [modelMenuOpen, setModelMenuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -486,7 +312,7 @@ export default function ChatPanel({
     setCurrentConversationId(null);
     setChatScope(EMPTY_CHAT_SCOPE);
     setWebSearchEnabled(false);
-    setWebSearchNotice("");
+    clearWebSearchNotice();
     setScopeNotice("");
     /* eslint-enable react-hooks/set-state-in-effect */
     if (scopeNoticeTimerRef.current) {
@@ -513,7 +339,7 @@ export default function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [knowledgeBaseId, resetChat]);
+  }, [clearWebSearchNotice, knowledgeBaseId, resetChat, setWebSearchEnabled]);
 
   useEffect(() => {
     return () => {
@@ -529,7 +355,7 @@ export default function ChatPanel({
     setMessages([]);
     setCurrentConversationId(null);
     setChatScope(next);
-    setWebSearchNotice("");
+    clearWebSearchNotice();
     setScopeNotice(`提问范围已更新：${scopeSummary(next)}`);
     if (scopeNoticeTimerRef.current) {
       window.clearTimeout(scopeNoticeTimerRef.current);
@@ -538,41 +364,6 @@ export default function ChatPanel({
       setScopeNotice("");
       scopeNoticeTimerRef.current = null;
     }, 2200);
-  };
-
-  const handleWebSearchChange = (enabled: boolean) => {
-    const notice = enabled ? "联网搜索已开启" : "联网搜索已关闭";
-    setWebSearchEnabled(enabled);
-    if (enabled) {
-      setWebSearchProvider("auto");
-    }
-    setWebSearchNotice(notice);
-    setScopeNotice("");
-    if (scopeNoticeTimerRef.current) {
-      window.clearTimeout(scopeNoticeTimerRef.current);
-    }
-    scopeNoticeTimerRef.current = window.setTimeout(() => {
-      setWebSearchNotice("");
-      scopeNoticeTimerRef.current = null;
-    }, 2200);
-  };
-
-  const handleWebSearchProviderChange = (provider: WebSearchProvider) => {
-    if (
-      provider === "tavily" &&
-      !webSearchConfig?.tavily_configured &&
-      !isAdmin &&
-      !onOpenApiAccounts
-    ) {
-      setWebSearchNotice("Tavily 需要管理员配置");
-      return;
-    }
-    setWebSearchProvider(provider);
-    setWebSearchEnabled(true);
-    if (provider === "tavily" && !webSearchConfig?.tavily_configured) {
-      setWebSearchNotice("请先添加 Tavily 服务密钥");
-      openWebSearchConfig();
-    }
   };
 
   const adjustComposerHeight = (el?: HTMLTextAreaElement | null) => {
@@ -617,7 +408,13 @@ export default function ChatPanel({
         setScopeNotice(err instanceof Error ? err.message : "打开历史失败");
       }
     },
-    [historyScopeToSelection, setMessages, stopGenerating],
+    [
+      historyScopeToSelection,
+      setMessages,
+      setWebSearchEnabled,
+      setWebSearchProvider,
+      stopGenerating,
+    ],
   );
 
   const handleNewConversation = useCallback(() => {
@@ -627,10 +424,17 @@ export default function ChatPanel({
     setChatScope(EMPTY_CHAT_SCOPE);
     setWebSearchEnabled(false);
     setWebSearchProvider(webSearchConfig?.provider || "auto");
-    setWebSearchNotice("");
+    clearWebSearchNotice();
     setScopeNotice("");
     setInput("");
-  }, [resetChat, stopGenerating, webSearchConfig?.provider]);
+  }, [
+    clearWebSearchNotice,
+    resetChat,
+    setWebSearchEnabled,
+    setWebSearchProvider,
+    stopGenerating,
+    webSearchConfig?.provider,
+  ]);
 
   useEffect(() => {
     if (!conversationOpenRequest) return;
@@ -653,83 +457,6 @@ export default function ChatPanel({
 
   const isGenerating = loading || !!regeneratingMessageId;
   const canSend = Boolean(knowledgeBaseId) && !!input.trim() && !isGenerating;
-  const remoteProviders = llmConfig?.providers ?? [];
-  const currentApiSource: LLMApiSource =
-    llmConfig?.current_api_source === "personal" ? "personal" : "official";
-  const sourceAvailability = {
-    official: remoteProviders.some(
-      (provider) => provider.official_enabled ?? provider.enabled,
-    ),
-    personal: remoteProviders.some(
-      (provider) => provider.personal_enabled ?? provider.enabled,
-    ),
-  };
-  const hasEnabledCurrentSource = remoteProviders.some(
-    (provider) => provider.enabled,
-  );
-  const shouldShowAiKeyHint =
-    Boolean(llmConfig) &&
-    currentApiSource === "personal" &&
-    !hasEnabledCurrentSource;
-  const remoteProviderMap = new Map(
-    remoteProviders.map((p) => [p.provider, p]),
-  );
-  const sourceOptions: Array<{
-    value: LLMApiSource;
-    label: string;
-    hint: string;
-    enabled: boolean;
-  }> = [
-    {
-      value: "official",
-      label: "官方",
-      hint: "付费通道",
-      enabled: sourceAvailability.official,
-    },
-    {
-      value: "personal",
-      label: "个人",
-      hint: "自带 Key",
-      enabled: true,
-    },
-  ];
-  const providersForMenu = [
-    ...LLM_PROVIDER_PRESETS.map((base) => {
-      const remote = remoteProviderMap.get(base.provider);
-      return {
-        provider: base.provider,
-        label: remote?.label ?? base.label,
-        enabled: remote?.enabled ?? false,
-        official_enabled: remote?.official_enabled ?? false,
-        personal_enabled: remote?.personal_enabled ?? false,
-        model: remote?.model ?? base.model,
-        base_url: remote?.base_url,
-        thinking_config: remote?.thinking_config ?? {},
-        thinking_template: remote?.thinking_template ?? {},
-      };
-    }),
-    ...remoteProviders.filter(
-      (p) => !LLM_PROVIDER_PRESETS.some((b) => b.provider === p.provider),
-    ),
-  ];
-  const currentProvider =
-    llmConfig?.current_provider ?? providersForMenu[0]?.provider;
-  const activeProvider = providersForMenu.find(
-    (p) => p.provider === currentProvider,
-  );
-  const modelReady = llmHealth?.status === "ok" || llmHealth?.status === "up";
-  const modelStatusText = llmChecking
-    ? "检查中"
-    : modelReady
-      ? "模型就绪"
-      : "模型异常";
-  const modelLatencyText =
-    !llmChecking && llmHealth?.latency_ms != null
-      ? `${llmHealth.latency_ms}ms`
-      : "-- ms";
-  const modelStatusTitle = activeProvider
-    ? `${modelStatusText} · ${modelLatencyText} · ${activeProvider.label} · ${activeProvider.model}`
-    : `${modelStatusText} · ${modelLatencyText}`;
 
   useEffect(() => {
     adjustComposerHeight();
