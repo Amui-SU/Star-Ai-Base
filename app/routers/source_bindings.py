@@ -39,13 +39,14 @@ from app.services.source_binding_presenters import (
 from app.services.source_binding_titles import update_video_title_override
 from app.services.source_binding_services import (
     get_bilibili_service_for_binding as _get_bilibili_service_for_binding,
+    generate_bilibili_binding_qrcode as _generate_bilibili_binding_qrcode,
+    poll_bilibili_binding_qrcode as _poll_bilibili_binding_qrcode,
 )
 from app.services.source_binding_pending_states import (
     create_pending_state as _create_pending_state,
     delete_pending_state as _delete_pending_state,
     get_pending_state as _get_pending_state,
 )
-from app.time_utils import utc_now
 
 router = APIRouter(prefix="/source-bindings", tags=["source-bindings"])
 
@@ -96,35 +97,14 @@ async def generate_bilibili_binding_qrcode(
     current_user: SystemUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> QRCodeResponse:
-    bili = BilibiliService()
-    try:
-        result = await bili.generate_qrcode()
-    except Exception as e:
-        logger.warning(f"生成 B站绑定二维码失败: {e}")
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    finally:
-        await bili.close()
-
-    _set_session(
-        result["qrcode_key"],
-        {
-            "status": "waiting",
-            "purpose": "source_binding",
-            "user_id": current_user.id,
-        },
-        QRCODE_SESSION_TTL,
-    )
-    await _create_pending_state(
+    return await _generate_bilibili_binding_qrcode(
+        current_user,
         db,
-        state_key=result["qrcode_key"],
-        purpose="source_binding",
-        user_id=current_user.id,
-        ttl_seconds=QRCODE_SESSION_TTL,
-    )
-    return QRCodeResponse(
-        qrcode_key=result["qrcode_key"],
-        qrcode_url=result["qrcode_url"],
-        qrcode_image_base64=result["qrcode_image_base64"],
+        service_class=BilibiliService,
+        set_session=_set_session,
+        create_pending_state=_create_pending_state,
+        qrcode_session_ttl=QRCODE_SESSION_TTL,
+        warning_logger=logger.warning,
     )
 
 
@@ -135,89 +115,20 @@ async def poll_bilibili_binding_qrcode(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> LoginStatusResponse:
-    pending = _get_session(qrcode_key)
-    pending_is_valid = bool(
-        pending
-        and pending.get("purpose") == "source_binding"
-        and pending.get("user_id") == current_user.id
+    return await _poll_bilibili_binding_qrcode(
+        qrcode_key,
+        current_user,
+        current_workspace,
+        db,
+        service_class=BilibiliService,
+        service_from_cookies=bilibili_service_from_cookies,
+        get_session=_get_session,
+        login_sessions=login_sessions,
+        get_pending_state=_get_pending_state,
+        delete_pending_state=_delete_pending_state,
+        encrypt_payload=encrypt_text,
+        warning_logger=logger.warning,
     )
-    if not pending_is_valid:
-        pending_record = await _get_pending_state(
-            db,
-            state_key=qrcode_key,
-            purpose="source_binding",
-            user_id=current_user.id,
-        )
-        pending_is_valid = pending_record is not None
-    if not pending_is_valid:
-        raise HTTPException(status_code=404, detail="二维码不存在或已过期")
-
-    bili = BilibiliService()
-    try:
-        result = await bili.poll_qrcode_status(qrcode_key)
-    except Exception as e:
-        logger.warning(f"轮询 B站绑定二维码失败: {e}")
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    finally:
-        await bili.close()
-
-    response = LoginStatusResponse(
-        status=result["status"],
-        message=result["message"],
-    )
-    if result["status"] != "confirmed":
-        return response
-
-    cookies = result.get("cookies", {})
-    bili_auth = bilibili_service_from_cookies(cookies, BilibiliService)
-    try:
-        user_info = await bili_auth.get_user_info()
-    finally:
-        await bili_auth.close()
-
-    external_id = str(user_info.get("mid") or cookies.get("DedeUserID") or "")
-    if not external_id:
-        raise HTTPException(status_code=502, detail="B 站账号信息缺少用户 ID")
-
-    binding = SourceBinding(
-        user_id=current_user.id,
-        workspace_id=current_workspace.id,
-        source_type="bilibili",
-        external_account_id=external_id,
-        external_account_name=user_info.get("uname"),
-        external_avatar_url=user_info.get("face"),
-        status="active",
-        last_verified_at=utc_now(),
-    )
-    db.add(binding)
-    await db.flush()
-
-    credential_payload = {
-        "SESSDATA": cookies.get("SESSDATA"),
-        "bili_jct": cookies.get("bili_jct"),
-        "DedeUserID": cookies.get("DedeUserID"),
-    }
-    db.add(
-        SourceCredential(
-            user_id=current_user.id,
-            source_binding_id=binding.id,
-            encrypted_payload=encrypt_text(
-                json.dumps(credential_payload, ensure_ascii=False)
-            ),
-        )
-    )
-    await db.commit()
-
-    login_sessions.pop(qrcode_key, None)
-    await _delete_pending_state(db, qrcode_key)
-    response_mid = int(external_id) if external_id.isdigit() else external_id
-    response.user_info = {
-        "mid": response_mid,
-        "uname": binding.external_account_name,
-        "face": binding.external_avatar_url,
-    }
-    response.session_id = str(binding.id)
-    return response
 
 
 # ── 收藏夹接口（通过 source_binding_id 驱动）──

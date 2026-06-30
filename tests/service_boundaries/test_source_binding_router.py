@@ -97,3 +97,37 @@ def test_source_binding_router_delegates_authenticated_service_factory():
     assert "decrypt_text(credential.encrypted_payload)" not in router_source
     assert "bilibili_service_from_cookies(payload" not in router_source
     assert "_get_bilibili_service_for_binding" not in declared_names
+
+
+def test_source_binding_router_delegates_bilibili_qr_flow_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/source_binding_services.py"
+    router_source = (project_root / "app/routers/source_bindings.py").read_text(
+        encoding="utf-8"
+    )
+    service_source = service_path.read_text(encoding="utf-8")
+
+    generate_route_source = router_source[
+        router_source.index(
+            "async def generate_bilibili_binding_qrcode("
+        ) : router_source.index('@router.get("/bilibili/qrcode/poll')
+    ]
+    poll_route_source = router_source[
+        router_source.index(
+            "async def poll_bilibili_binding_qrcode("
+        ) : router_source.index("# ── 收藏夹接口")
+    ]
+
+    assert "async def generate_bilibili_binding_qrcode" in service_source
+    assert "async def poll_bilibili_binding_qrcode" in service_source
+    assert "_generate_bilibili_binding_qrcode(" in generate_route_source
+    assert "_poll_bilibili_binding_qrcode(" in poll_route_source
+
+    for route_source in (generate_route_source, poll_route_source):
+        assert "BilibiliService()" not in route_source
+        assert "_create_pending_state(" not in route_source
+        assert "_get_pending_state(" not in route_source
+        assert "SourceBinding(" not in route_source
+        assert "SourceCredential(" not in route_source
+        assert "encrypt_text(" not in route_source
+        assert "bilibili_service_from_cookies(" not in route_source
