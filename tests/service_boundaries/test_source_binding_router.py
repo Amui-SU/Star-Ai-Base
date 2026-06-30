@@ -32,3 +32,32 @@ def test_source_binding_router_delegates_presenter_and_title_helpers_to_service(
     assert "from app.services.source_binding_presenters import" in router_source
     assert "VideoTitleOverride.id.desc()" not in router_source
     assert declared_names.isdisjoint(router_private_names)
+
+
+def test_source_binding_router_delegates_pending_state_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/source_binding_pending_states.py"
+    router_source = (project_root / "app/routers/source_bindings.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    expected_service_names = {
+        "create_pending_state",
+        "get_pending_state",
+        "delete_pending_state",
+    }
+    router_private_names = {
+        "_create_pending_state",
+        "_get_pending_state",
+        "_delete_pending_state",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"async def {name}" in service_source
+    assert "from app.services.source_binding_pending_states import" in router_source
+    assert "OAuthPendingState.expires_at < now" not in router_source
+    assert "OAuthPendingState.state_key == state_key" not in router_source
+    assert declared_names.isdisjoint(router_private_names)
