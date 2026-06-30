@@ -305,6 +305,35 @@ def test_folder_ingestion_delegates_records_and_content_helpers_to_services():
     assert "def _video_content_from_cache" not in ingestion_source
 
 
+def test_rag_service_delegates_document_and_filter_helpers_to_services():
+    project_root = get_project_root()
+    documents_path = project_root / "app/services/rag_documents.py"
+    filters_path = project_root / "app/services/rag_filters.py"
+    rag_source = (project_root / "app/services/rag.py").read_text(encoding="utf-8")
+
+    assert documents_path.exists()
+    documents_source = documents_path.read_text(encoding="utf-8")
+    for name in {
+        "build_video_content_text",
+        "build_video_documents",
+    }:
+        assert f"def {name}" in documents_source
+
+    assert filters_path.exists()
+    filters_source = filters_path.read_text(encoding="utf-8")
+    for name in {
+        "knowledge_base_filter",
+        "video_in_knowledge_base_filter",
+    }:
+        assert f"def {name}" in filters_source
+
+    assert "from app.services.rag_documents import" in rag_source
+    assert "from app.services.rag_filters import" in rag_source
+    assert "Document(" not in rag_source
+    assert 'filters = [\n            {"workspace_id": workspace_id}' not in rag_source
+    assert '{"bvid": {"$in": normalized_bvids}}' not in rag_source
+
+
 def test_knowledge_base_router_delegates_build_request_preparation_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_base_build_requests.py"

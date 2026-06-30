@@ -1,4 +1,9 @@
 from app.models import ContentSource, VideoContent
+from app.services.rag_documents import build_video_content_text, build_video_documents
+from app.services.rag_filters import (
+    knowledge_base_filter,
+    video_in_knowledge_base_filter,
+)
 from app.services.rag import RAGService
 
 
@@ -13,6 +18,11 @@ class FakeVectorStore:
 
     def add_documents(self, documents):
         self.added_batches.append(list(documents))
+
+
+class SplittingTextSplitter:
+    def split_text(self, text: str):
+        return [text[:12], "   ", text[12:]]
 
 
 def _service_with_vectorstore(vectorstore):
@@ -54,6 +64,53 @@ def test_add_video_content_writes_scoped_metadata_without_none_values():
     }
 
 
+def test_rag_document_helpers_build_content_and_metadata():
+    video = VideoContent(
+        bvid="BVHELPER",
+        title="Helper Video",
+        content="Transcript content long enough for vector storage.",
+        source=ContentSource.SUBTITLE,
+        outline=[
+            {
+                "title": "Chapter",
+                "points": [
+                    {"content": "Point A"},
+                    {"content": ""},
+                    {"content": "Point B"},
+                ],
+            }
+        ],
+    )
+
+    text = build_video_content_text(video)
+    documents = build_video_documents(
+        video,
+        text_splitter=SplittingTextSplitter(),
+        workspace_id=9,
+        knowledge_base_id=15,
+        source_binding_id=22,
+    )
+
+    assert "Transcript content long enough" in text
+    assert "## 内容提纲" in text
+    assert "- Point A" in text
+    assert "- Point B" in text
+    assert [document.page_content for document in documents] == [
+        "Transcript c",
+        "ontent long enough for vector storage.\n\n\n## 内容提纲\n\n### Chapter\n- Point A\n- Point B",
+    ]
+    assert documents[0].metadata == {
+        "workspace_id": 9,
+        "knowledge_base_id": 15,
+        "source_binding_id": 22,
+        "bvid": "BVHELPER",
+        "title": "Helper Video",
+        "source": ContentSource.SUBTITLE.value,
+        "chunk_index": 0,
+        "url": "https://www.bilibili.com/video/BVHELPER",
+    }
+
+
 def test_add_video_content_skips_short_content_without_touching_vectorstore():
     vectorstore = FakeVectorStore()
     service = _service_with_vectorstore(vectorstore)
@@ -68,6 +125,34 @@ def test_add_video_content_skips_short_content_without_touching_vectorstore():
 
     assert count == 0
     assert vectorstore.added_batches == []
+
+
+def test_rag_filter_helpers_build_scoped_filters():
+    assert knowledge_base_filter(workspace_id=1, knowledge_base_id=2) == {
+        "$and": [{"workspace_id": 1}, {"knowledge_base_id": 2}]
+    }
+    assert knowledge_base_filter(
+        workspace_id=1,
+        knowledge_base_id=2,
+        bvids=["BV2", "BV1", "BV2"],
+    ) == {
+        "$and": [
+            {"workspace_id": 1},
+            {"knowledge_base_id": 2},
+            {"bvid": {"$in": ["BV1", "BV2"]}},
+        ]
+    }
+    assert video_in_knowledge_base_filter(
+        workspace_id=1,
+        knowledge_base_id=2,
+        bvid="BV1",
+    ) == {
+        "$and": [
+            {"workspace_id": 1},
+            {"knowledge_base_id": 2},
+            {"bvid": "BV1"},
+        ]
+    }
 
 
 def test_has_video_vectors_in_knowledge_base_returns_false_on_collection_error():

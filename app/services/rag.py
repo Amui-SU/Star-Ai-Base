@@ -16,6 +16,11 @@ from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from app.config import settings
 from app.models import VideoContent
+from app.services.rag_documents import build_video_content_text, build_video_documents
+from app.services.rag_filters import (
+    knowledge_base_filter,
+    video_in_knowledge_base_filter,
+)
 
 
 class RAGService:
@@ -151,69 +156,26 @@ class RAGService:
         Returns:
             添加的文档块数量
         """
-        # 构建完整内容（正文不带标题，避免标题相似度主导召回）
-        title = video.title or "未知标题"
-        content_parts: List[str] = []
-
-        if video.content and video.content.strip():
-            content_parts.append(video.content.strip())
-
-        # 如果有分段提纲，添加结构化信息
-        if video.outline:
-            outline_text = "\n## 内容提纲\n"
-            for item in video.outline:
-                item_title = item.get("title", "") or ""
-                outline_text += f"\n### {item_title}\n"
-                for point in item.get("points", []):
-                    point_content = point.get("content", "") or ""
-                    if point_content:
-                        outline_text += f"- {point_content}\n"
-            if outline_text.strip() != "## 内容提纲":
-                content_parts.append(outline_text)
-
-        full_content = "\n\n".join(content_parts).strip()
+        full_content = build_video_content_text(video)
 
         # 验证内容不为空
         if not full_content or len(full_content.strip()) < 10:
             logger.warning(f"[{video.bvid}] 内容太少，跳过")
             return 0
 
-        # 分块
-        chunks = self.text_splitter.split_text(full_content)
-
-        if not chunks:
-            logger.warning(f"[{video.bvid}] 没有生成文档块")
-            return 0
-
-        # 过滤空内容块
-        valid_chunks = [c for c in chunks if c and c.strip() and len(c.strip()) > 5]
-        if not valid_chunks:
-            logger.warning(f"[{video.bvid}] 没有有效的文档块")
-            return 0
-
         if workspace_id is None or knowledge_base_id is None:
             logger.warning(f"[{video.bvid}] 缺少多用户范围元数据，按旧模式写入")
 
-        # 创建文档
-        documents = []
-        for i, chunk in enumerate(valid_chunks):
-            metadata = {
-                "workspace_id": workspace_id,
-                "knowledge_base_id": knowledge_base_id,
-                "source_binding_id": source_binding_id,
-                "bvid": video.bvid,
-                "title": title,
-                "source": video.source.value,
-                "chunk_index": i,
-                "url": f"https://www.bilibili.com/video/{video.bvid}",
-            }
-            doc = Document(
-                page_content=chunk.strip(),  # 确保是干净的字符串
-                metadata={
-                    key: value for key, value in metadata.items() if value is not None
-                },
-            )
-            documents.append(doc)
+        documents = build_video_documents(
+            video,
+            text_splitter=self.text_splitter,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            source_binding_id=source_binding_id,
+        )
+        if not documents:
+            logger.warning(f"[{video.bvid}] 没有有效的文档块")
+            return 0
 
         # 添加到向量库
         try:
@@ -308,18 +270,14 @@ class RAGService:
         if not query or not query.strip():
             return []
 
-        filters = [
-            {"workspace_id": workspace_id},
-            {"knowledge_base_id": knowledge_base_id},
-        ]
-        normalized_bvids = sorted(set(bvids or []))
-        if normalized_bvids:
-            filters.append({"bvid": {"$in": normalized_bvids}})
-
         return self.vectorstore.similarity_search(
             query,
             k=k,
-            filter={"$and": filters},
+            filter=knowledge_base_filter(
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                bvids=bvids,
+            ),
         )
 
     async def _fallback_answer(self, question: str, reason: str = "") -> dict:
@@ -523,13 +481,11 @@ class RAGService:
         bvid: str,
     ):
         """Delete one video's vectors inside a single knowledge-base scope."""
-        where = {
-            "$and": [
-                {"workspace_id": workspace_id},
-                {"knowledge_base_id": knowledge_base_id},
-                {"bvid": bvid},
-            ]
-        }
+        where = video_in_knowledge_base_filter(
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            bvid=bvid,
+        )
         try:
             self.vectorstore._collection.delete(where=where)
             logger.info(f"已删除知识库 {knowledge_base_id} 内的视频 {bvid}")
@@ -545,13 +501,11 @@ class RAGService:
         bvid: str,
     ) -> bool:
         """Return whether one video already has vectors in the scoped collection."""
-        where = {
-            "$and": [
-                {"workspace_id": workspace_id},
-                {"knowledge_base_id": knowledge_base_id},
-                {"bvid": bvid},
-            ]
-        }
+        where = video_in_knowledge_base_filter(
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            bvid=bvid,
+        )
         try:
             result = self.vectorstore._collection.get(where=where, limit=1)
             return bool(result.get("ids"))
@@ -576,12 +530,10 @@ class RAGService:
             if workspace_id is None:
                 where = {"knowledge_base_id": knowledge_base_id}
             else:
-                where = {
-                    "$and": [
-                        {"workspace_id": workspace_id},
-                        {"knowledge_base_id": knowledge_base_id},
-                    ]
-                }
+                where = knowledge_base_filter(
+                    workspace_id=workspace_id,
+                    knowledge_base_id=knowledge_base_id,
+                )
             before = self.vectorstore._collection.count()
             self.vectorstore._collection.delete(where=where)
             after = self.vectorstore._collection.count()
