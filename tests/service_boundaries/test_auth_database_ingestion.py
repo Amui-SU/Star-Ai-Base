@@ -358,6 +358,9 @@ def test_ingestion_task_persistence_and_status_mapping_live_in_service():
     imports_source = (project_root / "app/routers/imports.py").read_text(
         encoding="utf-8"
     )
+    import_tasks_source = (project_root / "app/services/import_tasks.py").read_text(
+        encoding="utf-8"
+    )
     build_tasks_source = (
         project_root / "app/services/knowledge_base_build_tasks.py"
     ).read_text(encoding="utf-8")
@@ -376,12 +379,38 @@ def test_ingestion_task_persistence_and_status_mapping_live_in_service():
     assert "async def _create_import_task" not in imports_source
     assert "async def _update_import_task" not in imports_source
     assert "async def _update_task" not in knowledge_bases_source
-    assert "update_ingestion_task(" in imports_source
+    assert "update_ingestion_task" in import_tasks_source
     assert "create_ingestion_task(" in build_requests_source
     assert "create_ingestion_task(" not in knowledge_bases_source
     assert "update_task: TaskUpdater = update_ingestion_task" in build_tasks_source
-    assert "return build_status_payload(task)" in build_tasks_source
-    assert '"processed_videos": task.processed_items' not in knowledge_bases_source
+
+
+def test_import_router_delegates_import_task_runtime_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/import_tasks.py"
+    imports_source = (project_root / "app/routers/imports.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def run_bilibili_video_import" in service_source
+    assert "async def run_local_video_import" in service_source
+    assert "async def store_imported_video_content" in service_source
+    assert "def delete_existing_import_vectors" in service_source
+    assert "def cleanup_local_upload" in service_source
+    assert "from app.services.import_tasks import" in imports_source
+    assert "await run_bilibili_video_import(" in imports_source
+    assert "await run_local_video_import(" in imports_source
+    assert (
+        "_store_imported_video_content = store_imported_video_content" in imports_source
+    )
+    assert "select(VideoCache)" not in imports_source
+    assert "VideoCache(" not in imports_source
+    assert "FavoriteFolder(" not in imports_source
+    assert "FavoriteVideo(" not in imports_source
+    assert "VideoContent(" not in imports_source
+    assert "rag.add_video_content(" not in imports_source
 
 
 def test_scoped_folder_sync_tests_do_not_import_legacy_router():
