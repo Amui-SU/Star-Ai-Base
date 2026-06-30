@@ -18,15 +18,10 @@ from app.models import (
     SystemLoginRequest,
     SystemRegisterRequest,
     SystemSession,
-    SystemUser,
     SystemUserResponse,
-    Workspace,
-    WorkspaceMember,
-    WorkspaceResponse,
 )
 from app.services.system_auth_admin import (
     get_current_admin_user as _get_current_admin_user,
-    is_admin_user as _is_admin_user,
     list_admin_users as _list_admin_users,
     reset_admin_user_password as _reset_admin_user_password,
     update_admin_user_status as _update_admin_user_status,
@@ -38,11 +33,13 @@ from app.services.system_auth_codes import (
     MAX_ATTEMPTS as _MAX_ATTEMPTS,
     check_ip_rate_limit as _check_ip_rate_limit,
     check_rate_limit as _check_rate_limit,
-    email_is_valid,
     hash_code as _hash_code,
     ip_rate_limit as _ip_rate_limit,
     password_exceeds_bcrypt_limit as _password_exceeds_bcrypt_limit,
     send_verification_code as _send_verification_code,
+)
+from app.services.system_auth_login import (
+    login_system_user,
 )
 from app.services.system_auth_registration import (
     register_system_user,
@@ -79,15 +76,13 @@ from app.services.system_auth_oauth_providers import (
     fetch_wechat_oauth_user as _fetch_wechat_oauth_user,
 )
 from app.services.system_auth_sessions import (
-    create_system_session as _create_system_session,
     get_current_user as _get_current_user,
-    get_primary_workspace as _get_primary_workspace,
     session_token_from_request as _session_token_from_request,
 )
+from app.services.system_auth_responses import user_response as _user_response
 from app.security import (
     clear_session_cookie,
     hash_token,
-    verify_password,
 )
 from app.time_utils import utc_now_naive
 
@@ -96,31 +91,6 @@ router = APIRouter(prefix="/system-auth", tags=["系统认证"])
 
 class SendCodeRequest(BaseModel):
     email: str
-
-
-def _invalid_credentials_exception() -> HTTPException:
-    return HTTPException(status_code=401, detail="邮箱或密码错误")
-
-
-async def _user_response(db: AsyncSession, user: SystemUser) -> SystemUserResponse:
-    return SystemUserResponse(
-        id=user.id,
-        email=user.email,
-        display_name=user.display_name,
-        avatar_url=user.avatar_url,
-        status=user.status,
-        is_admin=await _is_admin_user(db, user),
-    )
-
-
-def _workspace_response(
-    workspace: Workspace, member: WorkspaceMember
-) -> WorkspaceResponse:
-    return WorkspaceResponse(
-        id=workspace.id,
-        name=workspace.name,
-        role=member.role,
-    )
 
 
 @router.post("/send-code")
@@ -154,29 +124,7 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> SystemAuthResponse:
-    email = payload.email.strip().lower()
-    if not email_is_valid(email):
-        raise HTTPException(status_code=400, detail="邮箱格式不正确")
-    result = await db.execute(select(SystemUser).where(SystemUser.email == email))
-    user = result.scalar_one_or_none()
-
-    if (
-        user is None
-        or user.status != "active"
-        or _password_exceeds_bcrypt_limit(payload.password)
-        or not verify_password(payload.password, user.password_hash)
-    ):
-        raise _invalid_credentials_exception()
-
-    workspace, member = await _get_primary_workspace(db, user.id)
-    token = await _create_system_session(db, user.id, response)
-    await db.commit()
-
-    return SystemAuthResponse(
-        user=await _user_response(db, user),
-        workspace=_workspace_response(workspace, member),
-        session_token=token,
-    )
+    return await login_system_user(db, payload=payload, response=response)
 
 
 @router.post("/logout")

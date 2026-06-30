@@ -218,6 +218,24 @@ def test_system_auth_router_delegates_registration_flow_to_service():
     assert "hash_password(" not in router_source
 
 
+def test_system_auth_router_delegates_login_flow_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_login.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def login_system_user" in service_source
+    assert "from app.services.system_auth_login import" in router_source
+    assert "login_system_user(" in router_source
+    assert "select(SystemUser).where(SystemUser.email" not in router_source
+    assert "verify_password(" not in router_source
+    assert "def _invalid_credentials_exception" not in router_source
+    assert "SystemAuthResponse(" not in router_source
+
+
 def test_system_auth_router_delegates_session_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/system_auth_sessions.py"

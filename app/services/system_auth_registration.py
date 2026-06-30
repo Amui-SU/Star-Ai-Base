@@ -11,47 +11,24 @@ from app.models import (
     SystemAuthResponse,
     SystemRegisterRequest,
     SystemUser,
-    SystemUserResponse,
     VerificationCode,
     Workspace,
     WorkspaceMember,
-    WorkspaceResponse,
 )
 from app.security import hash_password
-from app.services.system_auth_admin import is_admin_user
 from app.services.system_auth_codes import (
     MAX_ATTEMPTS,
     email_is_valid,
     hash_code,
     password_exceeds_bcrypt_limit,
 )
+from app.services.system_auth_responses import user_response, workspace_response
 from app.services.system_auth_sessions import create_system_session
 from app.time_utils import utc_now_naive
 
 
 def duplicate_email_exception() -> HTTPException:
     return HTTPException(status_code=400, detail="邮箱已注册")
-
-
-async def user_response(db: AsyncSession, user: SystemUser) -> SystemUserResponse:
-    return SystemUserResponse(
-        id=user.id,
-        email=user.email,
-        display_name=user.display_name,
-        avatar_url=user.avatar_url,
-        status=user.status,
-        is_admin=await is_admin_user(db, user),
-    )
-
-
-def workspace_response(
-    workspace: Workspace, member: WorkspaceMember
-) -> WorkspaceResponse:
-    return WorkspaceResponse(
-        id=workspace.id,
-        name=workspace.name,
-        role=member.role,
-    )
 
 
 async def register_system_user(
