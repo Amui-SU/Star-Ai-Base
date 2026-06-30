@@ -56,6 +56,9 @@ def test_chat_router_delegates_global_config_writes_to_service():
     service_source = (project_root / "app/services/chat_config.py").read_text(
         encoding="utf-8"
     )
+    web_search_service_source = (
+        project_root / "app/services/chat_web_search_config.py"
+    ).read_text(encoding="utf-8")
 
     web_search_route_source = chat_source[
         chat_source.index("async def save_web_search_config(") : chat_source.index(
@@ -73,7 +76,8 @@ def test_chat_router_delegates_global_config_writes_to_service():
         )
     ]
 
-    assert "def save_global_web_search_config" in service_source
+    assert "def save_global_web_search_config" in web_search_service_source
+    assert "save_global_web_search_config" in service_source
     assert "def save_global_llm_provider_config" in service_source
     assert "def set_global_llm_provider" in service_source
 
@@ -112,6 +116,31 @@ def test_chat_config_delegates_env_persistence_to_helper():
     assert "def _env_file_path" not in chat_config_source
     assert "def _read_env_values" not in chat_config_source
     assert "def _write_env_values" not in chat_config_source
+
+
+def test_chat_config_delegates_web_search_config_to_helper():
+    project_root = get_project_root()
+    chat_config_source = (project_root / "app/services/chat_config.py").read_text(
+        encoding="utf-8"
+    )
+    web_search_helper_path = project_root / "app/services/chat_web_search_config.py"
+
+    assert web_search_helper_path.exists()
+    web_search_helper_source = web_search_helper_path.read_text(encoding="utf-8")
+    assert "SUPPORTED_WEB_SEARCH_PROVIDERS = " in web_search_helper_source
+    assert "SUPPORTED_TAVILY_SEARCH_DEPTHS = " in web_search_helper_source
+    assert "def _normalize_web_search_provider" in web_search_helper_source
+    assert "def _normalize_tavily_search_depth" in web_search_helper_source
+    assert "def _web_search_config_response" in web_search_helper_source
+    assert "def save_global_web_search_config" in web_search_helper_source
+
+    assert "from app.services.chat_web_search_config import" in chat_config_source
+    assert "SUPPORTED_WEB_SEARCH_PROVIDERS = " not in chat_config_source
+    assert "SUPPORTED_TAVILY_SEARCH_DEPTHS = " not in chat_config_source
+    assert "def _normalize_web_search_provider" not in chat_config_source
+    assert "def _normalize_tavily_search_depth" not in chat_config_source
+    assert "def _web_search_config_response" not in chat_config_source
+    assert "def save_global_web_search_config" not in chat_config_source
 
 
 def test_chat_router_delegates_llm_tool_helpers_to_service():
