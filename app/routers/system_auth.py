@@ -1,11 +1,8 @@
 import secrets
 from datetime import timedelta
 
-import urllib.parse
-
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import select, delete
@@ -68,6 +65,24 @@ from app.services.system_auth_oauth import (
     set_oauth_state_cookie as _set_oauth_state_cookie,
     verify_oauth_state as _verify_oauth_state,
 )
+from app.services.system_auth_oauth_flow import (
+    GOOGLE_TOKEN_URL,
+    GOOGLE_USERINFO_URL,
+    QQ_ME_URL,
+    QQ_TOKEN_URL,
+    QQ_USERINFO_URL,
+    WECHAT_TOKEN_URL,
+    WECHAT_USERINFO_URL,
+    build_google_login_redirect as _build_google_login_redirect,
+    build_qq_login_redirect as _build_qq_login_redirect,
+    build_wechat_login_redirect as _build_wechat_login_redirect,
+    google_redirect_uri as _google_redirect_uri,
+    qq_redirect_uri as _qq_redirect_uri,
+    redirect_with_oauth_session as _redirect_with_oauth_session,
+    upsert_oauth_user as _upsert_oauth_user,
+    validate_oauth_callback_state as _validate_oauth_callback_state,
+    wechat_redirect_uri as _wechat_redirect_uri,
+)
 from app.services.system_auth_sessions import (
     create_system_session as _create_system_session,
     get_current_user as _get_current_user,
@@ -76,11 +91,8 @@ from app.services.system_auth_sessions import (
 )
 from app.security import (
     clear_session_cookie,
-    create_session_token,
     hash_password,
     hash_token,
-    session_expires_at,
-    set_session_cookie,
     verify_password,
 )
 from app.time_utils import utc_now_naive
@@ -390,19 +402,6 @@ async def email_config_status() -> dict[str, bool]:
     }
 
 
-GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
-GOOGLE_SCOPES = "openid email profile"
-WECHAT_AUTH_URL = "https://open.weixin.qq.com/connect/qrconnect"
-WECHAT_TOKEN_URL = "https://api.weixin.qq.com/sns/oauth2/access_token"
-WECHAT_USERINFO_URL = "https://api.weixin.qq.com/sns/userinfo"
-QQ_AUTH_URL = "https://graph.qq.com/oauth2.0/authorize"
-QQ_TOKEN_URL = "https://graph.qq.com/oauth2.0/token"
-QQ_ME_URL = "https://graph.qq.com/oauth2.0/me"
-QQ_USERINFO_URL = "https://graph.qq.com/user/get_user_info"
-
-
 def _oauth_network_error(provider: str, exc: httpx.HTTPError) -> HTTPException:
     logger.error(f"{provider} OAuth network request failed: {type(exc).__name__}")
     return HTTPException(
@@ -411,145 +410,14 @@ def _oauth_network_error(provider: str, exc: httpx.HTTPError) -> HTTPException:
     )
 
 
-async def _upsert_oauth_user(
-    db: AsyncSession,
-    provider: str,
-    external_id: str,
-    display_name: str,
-    avatar_url: str | None = None,
-    email: str | None = None,
-) -> SystemUser:
-    user_email = _oauth_user_email(provider, external_id, email)
-    result = await db.execute(select(SystemUser).where(SystemUser.email == user_email))
-    user = result.scalar_one_or_none()
-
-    if user is None:
-        name = (display_name or provider.title()).strip()[:100] or provider.title()
-        user = SystemUser(
-            email=user_email,
-            password_hash=hash_password(secrets.token_urlsafe(32)),
-            display_name=name,
-            avatar_url=avatar_url or None,
-            status="active",
-        )
-        db.add(user)
-        await db.flush()
-        workspace = Workspace(name=f"{name} 的个人空间", owner_user_id=user.id)
-        db.add(workspace)
-        await db.flush()
-        db.add(
-            WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role="owner")
-        )
-    else:
-        if display_name and user.display_name.startswith(provider.title()):
-            user.display_name = display_name[:100]
-        if avatar_url and not user.avatar_url:
-            user.avatar_url = avatar_url
-
-    return user
-
-
-async def _redirect_with_oauth_session(
-    db: AsyncSession, user: SystemUser, frontend_url: str | None
-) -> RedirectResponse:
-    token = create_session_token()
-    db.add(
-        SystemSession(
-            user_id=user.id,
-            session_token_hash=hash_token(token),
-            expires_at=session_expires_at().replace(tzinfo=None),
-        )
-    )
-    await db.commit()
-    redirect = RedirectResponse(_frontend_url_from_state(frontend_url))
-    set_session_cookie(redirect, token)
-    _clear_oauth_state_cookie(redirect)
-    return redirect
-
-
-def _google_redirect_uri() -> str:
-    configured = (settings.google_redirect_uri or "").strip()
-    return (
-        configured
-        or f"http://localhost:{settings.app_port}/system-auth/google/callback"
-    )
-
-
-def _wechat_redirect_uri() -> str:
-    return (settings.wechat_redirect_uri or "").strip()
-
-
-def _qq_redirect_uri() -> str:
-    return (settings.qq_redirect_uri or "").strip()
-
-
 @router.get("/wechat/login")
 async def wechat_login(request: Request, frontend_url: str = ""):
-    if (
-        not settings.wechat_client_id
-        or not settings.wechat_client_secret
-        or not _wechat_redirect_uri()
-    ):
-        raise HTTPException(status_code=501, detail="WeChat login is not configured")
-
-    redirect_uri = _wechat_redirect_uri()
-    nonce = _new_oauth_state_nonce()
-    state = _make_oauth_state(
-        _normalize_frontend_origin(frontend_url) or _frontend_url_from_request(request),
-        redirect_uri,
-        nonce=nonce,
-    )
-    params = {
-        "appid": settings.wechat_client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": "snsapi_login",
-        "state": state,
-    }
-    url = f"{WECHAT_AUTH_URL}?{urllib.parse.urlencode(params)}#wechat_redirect"
-    redirect = RedirectResponse(url)
-    _set_oauth_state_cookie(redirect, nonce)
-    return redirect
+    return _build_wechat_login_redirect(request, frontend_url)
 
 
 @router.get("/qq/login")
 async def qq_login(request: Request, frontend_url: str = ""):
-    if (
-        not settings.qq_client_id
-        or not settings.qq_client_secret
-        or not _qq_redirect_uri()
-    ):
-        raise HTTPException(status_code=501, detail="QQ login is not configured")
-
-    redirect_uri = _qq_redirect_uri()
-    nonce = _new_oauth_state_nonce()
-    state = _make_oauth_state(
-        _normalize_frontend_origin(frontend_url) or _frontend_url_from_request(request),
-        redirect_uri,
-        nonce=nonce,
-    )
-    params = {
-        "client_id": settings.qq_client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": "get_user_info",
-        "state": state,
-    }
-    url = f"{QQ_AUTH_URL}?{urllib.parse.urlencode(params)}"
-    redirect = RedirectResponse(url)
-    _set_oauth_state_cookie(redirect, nonce)
-    return redirect
-
-
-async def _validate_oauth_callback_state(request: Request, state: str) -> dict:
-    if not state:
-        raise HTTPException(status_code=400, detail="Missing OAuth state")
-    state_data = _decode_oauth_state(state)
-    if state_data is None or not _oauth_state_nonce_is_valid(request, state_data):
-        raise HTTPException(
-            status_code=400, detail="Invalid OAuth state, please sign in again"
-        )
-    return state_data
+    return _build_qq_login_redirect(request, frontend_url)
 
 
 @router.get("/wechat/callback")
@@ -703,29 +571,7 @@ async def qq_callback(
 @router.get("/google/login")
 async def google_login(request: Request, frontend_url: str = ""):
     """重定向到 Google OAuth 授权页面。"""
-    if not settings.google_client_id:
-        raise HTTPException(status_code=501, detail="Google 登录未配置")
-
-    redirect_uri = _google_redirect_uri()
-    nonce = _new_oauth_state_nonce()
-    state = _make_oauth_state(
-        _normalize_frontend_origin(frontend_url) or _frontend_url_from_request(request),
-        redirect_uri,
-        nonce=nonce,
-    )
-    params = {
-        "client_id": settings.google_client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": GOOGLE_SCOPES,
-        "access_type": "offline",
-        "prompt": "consent",
-        "state": state,
-    }
-    url = f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
-    redirect = RedirectResponse(url)
-    _set_oauth_state_cookie(redirect, nonce)
-    return redirect
+    return _build_google_login_redirect(request, frontend_url)
 
 
 @router.get("/google/callback")
@@ -811,47 +657,18 @@ async def google_callback(
         name = user_info.get("name") or email.split("@")[0]
         picture = user_info.get("picture") or ""
 
-        # 查找或创建系统用户
-        result = await db.execute(select(SystemUser).where(SystemUser.email == email))
-        user = result.scalar_one_or_none()
-
-        if user is None:
-            user = SystemUser(
-                email=email,
-                password_hash=hash_password(secrets.token_urlsafe(32)),
-                display_name=name,
-                avatar_url=picture or None,
-                status="active",
-            )
-            db.add(user)
-            await db.flush()
-            workspace = Workspace(name=f"{name} 的个人空间", owner_user_id=user.id)
-            db.add(workspace)
-            await db.flush()
-            db.add(
-                WorkspaceMember(
-                    workspace_id=workspace.id, user_id=user.id, role="owner"
-                )
-            )
-        elif picture and not user.avatar_url:
-            user.avatar_url = picture
-
-        # 创建会话并设置 Cookie
-        token = create_session_token()
-        db.add(
-            SystemSession(
-                user_id=user.id,
-                session_token_hash=hash_token(token),
-                expires_at=session_expires_at().replace(tzinfo=None),
-            )
+        user = await _upsert_oauth_user(
+            db,
+            "google",
+            email,
+            name,
+            picture or None,
+            email=email,
+            update_default_display_name=False,
         )
-        await db.commit()
-
-        frontend_url = _frontend_url_from_state(state_data.get("frontend_url"))
-        redirect = RedirectResponse(frontend_url)
-        set_session_cookie(redirect, token)
-        _clear_oauth_state_cookie(redirect)
-        return redirect
+        return await _redirect_with_oauth_session(
+            db, user, state_data.get("frontend_url")
+        )
     except HTTPException:
         raise
     except Exception as e:

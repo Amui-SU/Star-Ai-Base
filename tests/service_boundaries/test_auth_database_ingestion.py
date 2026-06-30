@@ -60,6 +60,53 @@ def test_system_auth_router_delegates_oauth_state_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_system_auth_router_delegates_oauth_flow_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_oauth_flow.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    expected_service_names = {
+        "GOOGLE_TOKEN_URL",
+        "GOOGLE_USERINFO_URL",
+        "WECHAT_TOKEN_URL",
+        "WECHAT_USERINFO_URL",
+        "QQ_TOKEN_URL",
+        "QQ_ME_URL",
+        "QQ_USERINFO_URL",
+        "build_google_login_redirect",
+        "build_wechat_login_redirect",
+        "build_qq_login_redirect",
+        "validate_oauth_callback_state",
+        "upsert_oauth_user",
+        "redirect_with_oauth_session",
+        "google_redirect_uri",
+        "wechat_redirect_uri",
+        "qq_redirect_uri",
+    }
+    router_private_names = {
+        "_upsert_oauth_user",
+        "_redirect_with_oauth_session",
+        "_google_redirect_uri",
+        "_wechat_redirect_uri",
+        "_qq_redirect_uri",
+        "_validate_oauth_callback_state",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert (
+            f"def {name}" in service_source
+            or f"async def {name}" in service_source
+            or f"{name} =" in service_source
+        )
+    assert "from app.services.system_auth_oauth_flow import" in router_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_system_auth_router_delegates_email_code_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/system_auth_codes.py"
