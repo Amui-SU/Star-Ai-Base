@@ -42,6 +42,7 @@ from app.services.knowledge_base_build_tasks import (
     run_scoped_build as _run_scoped_build,
 )
 from app.services.knowledge_base_chat import answer_knowledge_base_chat
+from app.services.knowledge_base_chat_stream import stream_knowledge_base_chat
 from app.services.knowledge_base_delete import delete_knowledge_base_records
 from app.services.knowledge_base_documents import (
     load_db_fallback_documents as _load_db_fallback_documents,
@@ -537,116 +538,39 @@ async def stream_chat_with_knowledge_base(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
-    question = payload.question.strip()
-    documents = await _load_scoped_chat_documents(
-        payload,
-        knowledge_base,
-        current_workspace,
+    stream = await stream_knowledge_base_chat(
         db,
-        allow_db_fallback=not payload.web_search,
+        payload=payload,
+        knowledge_base=knowledge_base,
+        user=current_user,
+        workspace=current_workspace,
+        load_documents=_load_scoped_chat_documents,
+        answer_from_documents=_answer_from_documents,
+        resolve_llm_credentials=resolve_user_llm_credentials,
+        global_config_resolver=_resolve_llm_config,
+        resolve_web_search_api_key=_resolve_web_search_api_key,
+        build_messages=_build_knowledge_base_messages,
+        prepare_web_search_with_heartbeats=getattr(
+            _knowledge_web_search_module(),
+            "_prepare_knowledge_base_web_search_with_heartbeats",
+        ),
+        append_no_more_tool_calls_instruction=(_append_no_more_tool_calls_instruction),
+        stream_llm_events=_stream_llm_events,
+        supports_keyword_argument=_supports_keyword_argument,
+        encode_web_search_progress=_encode_web_search_progress,
+        encode_thinking_delta=_encode_thinking_delta,
+        source_from_document=_source_from_document,
+        source_from_web_result=_source_from_web_result,
+        web_search_failed_status_from_exception=(
+            _web_search_failed_status_from_exception
+        ),
+        record_usage=record_usage_event,
+        warning_logger=logger.warning,
     )
-    credential = None
-    llm_config = None
-    if documents or payload.web_search:
-        credential = await resolve_user_llm_credentials(
-            db,
-            current_user,
-            global_config_resolver=_resolve_llm_config,
-        )
-        llm_config = credential.to_llm_config()
-    tavily_api_key = await _resolve_web_search_api_key(
-        db,
-        current_user,
-        enabled=payload.web_search,
-        provider=payload.web_search_provider,
+    return StreamingResponse(
+        stream,
+        media_type="text/plain; charset=utf-8",
     )
-
-    async def generate():
-        if not documents and not payload.web_search:
-            yield _answer_from_documents(question, documents).answer
-            yield "\n[[SOURCES_JSON]][]"
-            return
-
-        messages = _build_knowledge_base_messages(
-            question,
-            documents,
-            enable_web_search=payload.web_search,
-            thinking_config=llm_config["thinking_config"] if llm_config else None,
-        )
-        web_results: list[dict[str, str]] = []
-        web_search_status = None
-        prepared_messages = messages
-        thinking_parts: list[str] = []
-        if payload.web_search:
-            yield _encode_web_search_progress("正在联网搜索外部资料")
-            try:
-                async for (
-                    event_type,
-                    event_payload,
-                ) in getattr(
-                    _knowledge_web_search_module(),
-                    "_prepare_knowledge_base_web_search_with_heartbeats",
-                )(
-                    messages,
-                    question=question,
-                    provider=payload.web_search_provider,
-                    tavily_api_key=tavily_api_key,
-                    llm_config=llm_config,
-                ):
-                    if event_type == "heartbeat":
-                        yield _encode_web_search_progress(str(event_payload))
-                        continue
-                    tool_run, web_results, web_search_status = event_payload
-                prepared_messages = _append_no_more_tool_calls_instruction(
-                    tool_run.messages
-                )
-            except Exception as exc:
-                logger.warning(f"知识库联网工具链准备失败，将仅使用知识库回答: {exc!r}")
-                web_search_status = _web_search_failed_status_from_exception(exc)
-            finally:
-                yield _encode_web_search_progress("")
-        sources = [
-            *[_source_from_document(document) for document in documents],
-            *[_source_from_web_result(result) for result in web_results],
-        ]
-        answer_started = False
-        try:
-            stream_kwargs = {}
-            if _supports_keyword_argument(_stream_llm_events, "llm_config"):
-                stream_kwargs["llm_config"] = llm_config
-            for event_type, content in _stream_llm_events(
-                prepared_messages,
-                **stream_kwargs,
-            ):
-                if event_type == "thinking":
-                    thinking_parts.append(content)
-                    yield _encode_thinking_delta(content)
-                else:
-                    answer_started = True
-                    yield content
-        except Exception as exc:
-            logger.warning(f"知识库流式模型回答失败，回退到检索内容: {exc}")
-            if not answer_started:
-                yield _answer_from_documents(question, documents).answer
-        if thinking_parts:
-            yield "\n[[THINKING_JSON]]"
-            yield json.dumps("".join(thinking_parts), ensure_ascii=False)
-        if web_search_status:
-            yield "\n[[WEB_SEARCH_JSON]]"
-            yield json.dumps(web_search_status, ensure_ascii=False)
-        yield "\n[[SOURCES_JSON]]"
-        yield json.dumps(sources, ensure_ascii=False)
-        if credential is not None:
-            await record_usage_event(
-                db,
-                user=current_user,
-                credential=credential,
-                feature="chat",
-                status="success",
-            )
-            await db.commit()
-
-    return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
 
 
 @router.delete("/{knowledge_base_id}")
