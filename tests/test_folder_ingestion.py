@@ -13,6 +13,13 @@ from app.models import (
     VideoContent,
 )
 from app.services.folder_ingestion import _delete_video_vectors_for_scope, sync_folder
+from app.services.folder_ingestion_content import (
+    extract_video_info,
+    is_better_source,
+    should_refresh_cache,
+    video_content_from_cache,
+)
+from app.services.folder_ingestion_records import get_video_cache_for_scope
 
 
 def _unwrap_optional(annotation):
@@ -59,6 +66,69 @@ def test_delete_video_vectors_for_scope_uses_matching_rag_delete_method():
             "bvid": "BVSCOPED",
         }
     ]
+
+
+def test_folder_ingestion_content_helpers_select_cache_and_source_policy():
+    media = {
+        "bvid": "BVHELPER123",
+        "title": "Helper Video",
+        "ugc": {"first_cid": 456},
+    }
+    cache = VideoCache(
+        bvid="BVHELPER123",
+        title="Helper Video",
+        content="subtitle transcript " * 8,
+        content_source=ContentSource.SUBTITLE.value,
+        outline_json=[{"title": "Chapter"}],
+    )
+
+    assert extract_video_info(media) == ("BVHELPER123", "Helper Video", 456)
+    assert is_better_source(ContentSource.ASR.value, ContentSource.SUBTITLE.value)
+    assert not should_refresh_cache(cache)
+
+    content = video_content_from_cache(cache, "BVHELPER123", "Helper Video")
+
+    assert content is not None
+    assert content.bvid == "BVHELPER123"
+    assert content.source == ContentSource.SUBTITLE
+    assert content.outline == [{"title": "Chapter"}]
+
+
+@pytest.mark.asyncio
+async def test_folder_ingestion_record_helpers_respect_scope(
+    db_session_factory,
+):
+    async with db_session_factory() as session:
+        session.add(
+            VideoCache(
+                bvid="BVSCOPEHELPER",
+                title="Wrong scope",
+                workspace_id=1,
+                knowledge_base_id=2,
+                source_binding_id=None,
+            )
+        )
+        session.add(
+            VideoCache(
+                bvid="BVSCOPEHELPER",
+                title="Right scope",
+                workspace_id=7,
+                knowledge_base_id=11,
+                source_binding_id=13,
+            )
+        )
+        await session.commit()
+
+        cache = await get_video_cache_for_scope(
+            session,
+            "BVSCOPEHELPER",
+            workspace_id=7,
+            knowledge_base_id=11,
+            source_binding_id=13,
+        )
+
+    assert cache is not None
+    assert cache.title == "Right scope"
 
 
 @pytest.mark.asyncio

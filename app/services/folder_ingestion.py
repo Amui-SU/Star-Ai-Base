@@ -6,221 +6,25 @@ from loguru import logger
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import (
-    ContentSource,
-    FavoriteFolder,
-    FavoriteVideo,
-    VideoCache,
-    VideoContent,
-)
+from app.models import FavoriteVideo
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
+from app.services.folder_ingestion_content import (
+    extract_video_info as _extract_video_info,
+    is_better_source as _is_better_source,
+    should_refresh_cache as _should_refresh_cache,
+    video_content_from_cache as _video_content_from_cache,
+)
+from app.services.folder_ingestion_records import (
+    delete_video_vectors_for_scope as _delete_video_vectors_for_scope,
+    get_existing_folder_for_scope as _get_existing_folder_for_scope,
+    get_or_create_folder as _get_or_create_folder,
+    get_video_cache_for_scope as _get_video_cache_for_scope,
+    has_cache_scope as _has_cache_scope,
+    upsert_video_cache as _upsert_video_cache,
+)
 from app.services.rag import RAGService
 from app.time_utils import utc_now
-
-
-async def _get_or_create_folder(
-    db: AsyncSession,
-    session_id: str,
-    media_id: int,
-    title: Optional[str] = None,
-    media_count: Optional[int] = None,
-    workspace_id: Optional[int] = None,
-    knowledge_base_id: Optional[int] = None,
-    source_binding_id: Optional[int] = None,
-) -> FavoriteFolder:
-    """获取或创建收藏夹记录"""
-    stmt = select(FavoriteFolder).where(
-        FavoriteFolder.session_id == session_id,
-        FavoriteFolder.media_id == media_id,
-    )
-    if _has_cache_scope(workspace_id, knowledge_base_id):
-        stmt = (
-            stmt.where(FavoriteFolder.workspace_id == workspace_id)
-            .where(FavoriteFolder.knowledge_base_id == knowledge_base_id)
-            .where(
-                FavoriteFolder.source_binding_id.is_(None)
-                if source_binding_id is None
-                else FavoriteFolder.source_binding_id == source_binding_id
-            )
-        )
-    else:
-        stmt = stmt.where(FavoriteFolder.workspace_id.is_(None)).where(
-            FavoriteFolder.knowledge_base_id.is_(None)
-        )
-    result = await db.execute(stmt.order_by(FavoriteFolder.id.asc()).limit(1))
-    folder = result.scalar_one_or_none()
-
-    if folder is None:
-        folder = FavoriteFolder(
-            session_id=session_id,
-            media_id=media_id,
-            title=title or "",
-            media_count=media_count or 0,
-            is_selected=True,
-            workspace_id=workspace_id,
-            knowledge_base_id=knowledge_base_id,
-            source_binding_id=source_binding_id,
-        )
-        db.add(folder)
-        await db.flush()
-    else:
-        if title:
-            folder.title = title
-        if media_count is not None:
-            folder.media_count = media_count
-
-    return folder
-
-
-async def _get_existing_folder_for_scope(
-    db: AsyncSession,
-    session_id: str,
-    media_id: int,
-    workspace_id: Optional[int] = None,
-    knowledge_base_id: Optional[int] = None,
-    source_binding_id: Optional[int] = None,
-) -> Optional[FavoriteFolder]:
-    stmt = select(FavoriteFolder).where(
-        FavoriteFolder.session_id == session_id,
-        FavoriteFolder.media_id == media_id,
-    )
-    if _has_cache_scope(workspace_id, knowledge_base_id):
-        stmt = (
-            stmt.where(FavoriteFolder.workspace_id == workspace_id)
-            .where(FavoriteFolder.knowledge_base_id == knowledge_base_id)
-            .where(
-                FavoriteFolder.source_binding_id.is_(None)
-                if source_binding_id is None
-                else FavoriteFolder.source_binding_id == source_binding_id
-            )
-        )
-    else:
-        stmt = stmt.where(FavoriteFolder.workspace_id.is_(None)).where(
-            FavoriteFolder.knowledge_base_id.is_(None)
-        )
-    result = await db.execute(stmt.order_by(FavoriteFolder.id.asc()).limit(1))
-    return result.scalar_one_or_none()
-
-
-def _extract_video_info(media: dict) -> tuple[str, str, Optional[int]]:
-    """抽取视频关键信息"""
-    bvid = media.get("bvid") or media.get("bv_id")
-    title = media.get("title", bvid)
-    cid = None
-    ugc = media.get("ugc") or {}
-    if ugc.get("first_cid"):
-        cid = ugc.get("first_cid")
-    else:
-        cid = media.get("cid") or media.get("id")
-    return bvid, title, cid
-
-
-def _has_cache_scope(
-    workspace_id: Optional[int],
-    knowledge_base_id: Optional[int],
-) -> bool:
-    return workspace_id is not None and knowledge_base_id is not None
-
-
-async def _get_video_cache_for_scope(
-    db: AsyncSession,
-    bvid: str,
-    *,
-    workspace_id: Optional[int] = None,
-    knowledge_base_id: Optional[int] = None,
-    source_binding_id: Optional[int] = None,
-) -> Optional[VideoCache]:
-    stmt = select(VideoCache).where(VideoCache.bvid == bvid)
-    if _has_cache_scope(workspace_id, knowledge_base_id):
-        stmt = (
-            stmt.where(VideoCache.workspace_id == workspace_id)
-            .where(VideoCache.knowledge_base_id == knowledge_base_id)
-            .where(
-                VideoCache.source_binding_id.is_(None)
-                if source_binding_id is None
-                else VideoCache.source_binding_id == source_binding_id
-            )
-        )
-    else:
-        stmt = stmt.where(VideoCache.workspace_id.is_(None)).where(
-            VideoCache.knowledge_base_id.is_(None)
-        )
-    stmt = stmt.order_by(VideoCache.id.asc()).limit(1)
-    result = await db.execute(stmt)
-    return result.scalars().first()
-
-
-def _delete_video_vectors_for_scope(
-    rag: RAGService,
-    bvid: str,
-    *,
-    workspace_id: Optional[int] = None,
-    knowledge_base_id: Optional[int] = None,
-) -> None:
-    if _has_cache_scope(workspace_id, knowledge_base_id):
-        rag.delete_video_in_knowledge_base(
-            workspace_id=workspace_id,
-            knowledge_base_id=knowledge_base_id,
-            bvid=bvid,
-        )
-        return
-    rag.delete_video(bvid)
-
-
-async def _upsert_video_cache(
-    db: AsyncSession,
-    bvid: str,
-    meta: dict,
-    workspace_id: Optional[int] = None,
-    knowledge_base_id: Optional[int] = None,
-    source_binding_id: Optional[int] = None,
-) -> None:
-    """写入或更新视频缓存信息"""
-    cache = await _get_video_cache_for_scope(
-        db,
-        bvid,
-        workspace_id=workspace_id,
-        knowledge_base_id=knowledge_base_id,
-        source_binding_id=source_binding_id,
-    )
-
-    scoped_fields = {}
-    if workspace_id is not None:
-        scoped_fields["workspace_id"] = workspace_id
-    if knowledge_base_id is not None:
-        scoped_fields["knowledge_base_id"] = knowledge_base_id
-    if source_binding_id is not None:
-        scoped_fields["source_binding_id"] = source_binding_id
-
-    if cache is None:
-        cache = VideoCache(
-            bvid=bvid,
-            title=meta.get("title") or bvid,
-            description=meta.get("intro"),
-            owner_name=meta.get("owner_name"),
-            owner_mid=meta.get("owner_mid"),
-            duration=meta.get("duration"),
-            pic_url=meta.get("cover"),
-            is_processed=False,
-            **scoped_fields,
-        )
-        db.add(cache)
-        return
-
-    cache.title = meta.get("title") or cache.title
-    if meta.get("intro") is not None:
-        cache.description = meta.get("intro")
-    if meta.get("owner_name") is not None:
-        cache.owner_name = meta.get("owner_name")
-    if meta.get("owner_mid") is not None:
-        cache.owner_mid = meta.get("owner_mid")
-    if meta.get("duration") is not None:
-        cache.duration = meta.get("duration")
-    if meta.get("cover") is not None:
-        cache.pic_url = meta.get("cover")
-    for key, val in scoped_fields.items():
-        setattr(cache, key, val)
 
 
 async def sync_folder(
@@ -352,56 +156,6 @@ async def sync_folder(
             source_binding_id=source_binding_id,
         )
 
-    source_priority = {
-        ContentSource.BASIC_INFO.value: 1,
-        ContentSource.AI_SUMMARY.value: 2,
-        ContentSource.SUBTITLE.value: 3,
-        ContentSource.ASR.value: 4,
-    }
-
-    def _is_better_source(new_source: str, old_source: Optional[str]) -> bool:
-        return source_priority.get(new_source, 0) > source_priority.get(
-            old_source or "", 0
-        )
-
-    def _should_refresh_cache(cache: Optional[VideoCache]) -> bool:
-        if not cache:
-            return True
-        text = (cache.content or "").strip()
-        if len(text) < 50:
-            return True
-        if cache.content_source in (None, "", ContentSource.BASIC_INFO.value):
-            return True
-        return False
-
-    def _is_asr_cache_usable(cache: Optional[VideoCache]) -> bool:
-        if not cache:
-            return False
-        if cache.content_source != ContentSource.ASR.value:
-            return False
-        text = (cache.content or "").strip()
-        return len(text) >= 50
-
-    def _video_content_from_cache(
-        cache: Optional[VideoCache], bvid: str, title: str
-    ) -> Optional[VideoContent]:
-        if not cache:
-            return None
-        text = (cache.content or "").strip()
-        if len(text) < 10:
-            return None
-        try:
-            source = ContentSource(cache.content_source)
-        except Exception:
-            source = ContentSource.BASIC_INFO
-        return VideoContent(
-            bvid=bvid,
-            title=title,
-            content=text,
-            source=source,
-            outline=cache.outline_json,
-        )
-
     def _has_scoped_vectors(bvid: str) -> bool:
         if not _has_cache_scope(workspace_id, knowledge_base_id):
             return True
@@ -502,16 +256,6 @@ async def sync_folder(
                         content = cached_content
                         cache.is_processed = True
                         logger.info(f"[{bvid}] 使用缓存内容重建 scoped 向量")
-                    elif _is_asr_cache_usable(cache):
-                        content = VideoContent(
-                            bvid=bvid,
-                            title=meta["title"],
-                            content=(cache.content or "").strip(),
-                            source=ContentSource.ASR,
-                            outline=cache.outline_json,
-                        )
-                        cache.is_processed = True
-                        logger.info(f"[{bvid}] 使用缓存 ASR 内容重建向量")
                     else:
                         content = await content_fetcher.fetch_content(
                             bvid, cid=meta["cid"], title=meta["title"]
@@ -522,7 +266,7 @@ async def sync_folder(
                             cache.outline_json = content.outline
                             cache.is_processed = True
                             logger.info(
-                                f"[{bvid}] 已写入缓存: source={cache.content_source}"
+                                f"[{bvid}] wrote refreshed cache source={cache.content_source}"
                             )
                 try:
                     _delete_video_vectors_for_scope(

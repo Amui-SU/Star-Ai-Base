@@ -264,6 +264,47 @@ def test_knowledge_base_router_delegates_build_task_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_folder_ingestion_delegates_records_and_content_helpers_to_services():
+    project_root = get_project_root()
+    ingestion_path = project_root / "app/services/folder_ingestion.py"
+    records_path = project_root / "app/services/folder_ingestion_records.py"
+    content_path = project_root / "app/services/folder_ingestion_content.py"
+
+    ingestion_source = ingestion_path.read_text(encoding="utf-8")
+
+    assert records_path.exists()
+    records_source = records_path.read_text(encoding="utf-8")
+    for name in {
+        "has_cache_scope",
+        "get_or_create_folder",
+        "get_existing_folder_for_scope",
+        "get_video_cache_for_scope",
+        "delete_video_vectors_for_scope",
+        "upsert_video_cache",
+    }:
+        assert f"def {name}" in records_source or f"async def {name}" in records_source
+
+    assert content_path.exists()
+    content_source = content_path.read_text(encoding="utf-8")
+    for name in {
+        "extract_video_info",
+        "is_better_source",
+        "should_refresh_cache",
+        "is_asr_cache_usable",
+        "video_content_from_cache",
+    }:
+        assert f"def {name}" in content_source
+
+    assert "from app.services.folder_ingestion_records import" in ingestion_source
+    assert "from app.services.folder_ingestion_content import" in ingestion_source
+    assert "select(VideoCache)" not in ingestion_source
+    assert "VideoCache(" not in ingestion_source
+    assert "source_priority =" not in ingestion_source
+    assert "def _is_better_source" not in ingestion_source
+    assert "def _should_refresh_cache" not in ingestion_source
+    assert "def _video_content_from_cache" not in ingestion_source
+
+
 def test_knowledge_base_router_delegates_build_request_preparation_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_base_build_requests.py"
