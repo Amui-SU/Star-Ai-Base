@@ -14,9 +14,17 @@ def test_chat_router_delegates_configuration_boundaries_to_service():
     project_root = get_project_root()
     chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
     declared_names = declared_module_names(chat_source)
+    service_source = (project_root / "app/services/chat_config.py").read_text(
+        encoding="utf-8"
+    )
 
     assert (project_root / "app/services/chat_config.py").exists()
+    assert "async def llm_config_response" in service_source
+    assert "def current_user_llm_source" in service_source
     assert "from app.services.chat_config import" in chat_source
+    assert "UserApiAccount.user_id == current_user.id" not in chat_source
+    assert "account_by_provider" not in chat_source
+    assert "providers.append(" not in chat_source
     assert declared_names.isdisjoint(
         {
             "PROVIDER_META",
