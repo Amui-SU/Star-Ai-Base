@@ -228,6 +228,21 @@ def test_knowledge_base_router_delegates_build_task_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_knowledge_base_router_delegates_stats_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_stats.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def build_knowledge_base_stats" in service_source
+    assert "from app.services.knowledge_base_stats import" in router_source
+    assert "select(func.count(func.distinct(FavoriteVideo.bvid)))" not in router_source
+    assert "FavoriteFolder.last_sync_at.isnot(None)" not in router_source
+
+
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = get_project_root()
     source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")

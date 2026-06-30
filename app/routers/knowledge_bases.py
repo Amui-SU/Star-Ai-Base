@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -61,6 +61,7 @@ from app.services.knowledge_base_messages import (
     answer_from_documents,
     build_knowledge_base_messages,
 )
+from app.services.knowledge_base_stats import build_knowledge_base_stats
 from app.services.chat_messages import (
     apply_mode_instructions as _apply_mode_instructions,
     enforce_markdown_output as _enforce_markdown_output,
@@ -444,52 +445,7 @@ async def get_knowledge_base_stats(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """知识库统计信息（含文件夹入库状态）。"""
-    # 查询该知识库下的收藏夹状态
-    folder_rows = await db.execute(
-        select(
-            FavoriteFolder.id,
-            FavoriteFolder.media_id,
-            FavoriteFolder.last_sync_at,
-            FavoriteFolder.media_count,
-        )
-        .where(FavoriteFolder.knowledge_base_id == knowledge_base.id)
-        .where(FavoriteFolder.last_sync_at.isnot(None))
-        .order_by(FavoriteFolder.updated_at.desc())
-    )
-    folders_data = []
-    for row in folder_rows.all():
-        fid, media_id, last_sync, media_count = row
-        # 统计已入库视频数
-        count_result = await db.execute(
-            select(func.count(func.distinct(FavoriteVideo.bvid))).where(
-                FavoriteVideo.folder_id == fid
-            )
-        )
-        indexed = count_result.scalar() or 0
-        folders_data.append(
-            {
-                "media_id": media_id,
-                "indexed_count": indexed,
-                "media_count": media_count,
-                "last_sync_at": last_sync.isoformat() if last_sync else None,
-            }
-        )
-
-    # 总视频数
-    total_result = await db.execute(
-        select(func.count(func.distinct(FavoriteVideo.bvid))).where(
-            FavoriteVideo.knowledge_base_id == knowledge_base.id
-        )
-    )
-    total_videos = total_result.scalar() or 0
-
-    return {
-        "knowledge_base_id": knowledge_base.id,
-        "workspace_id": knowledge_base.workspace_id,
-        "total_videos": total_videos,
-        "folders": folders_data,
-        "scoped": True,
-    }
+    return await build_knowledge_base_stats(db, knowledge_base=knowledge_base)
 
 
 @router.get(
