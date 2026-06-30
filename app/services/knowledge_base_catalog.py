@@ -6,11 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     KnowledgeBase,
-    KnowledgeBaseCreateRequest,
-    KnowledgeBaseResponse,
     SystemUser,
     Workspace,
 )
+from app.schemas.knowledge_base import KnowledgeBaseCreateRequest, KnowledgeBaseResponse
 from app.services.knowledge_base_presenters import response_from_knowledge_base
 
 

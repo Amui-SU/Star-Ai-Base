@@ -11,12 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     KnowledgeBase,
-    KnowledgeBaseBuildRequest,
-    KnowledgeBaseBuildResponse,
     SourceBinding,
     SourceCredential,
     SystemUser,
     Workspace,
+)
+from app.schemas.knowledge_base import (
+    KnowledgeBaseBuildRequest,
+    KnowledgeBaseBuildResponse,
 )
 from app.security import decrypt_text
 from app.services.bilibili import bilibili_service_from_cookies

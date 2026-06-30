@@ -6,7 +6,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import KnowledgeBase, KnowledgeBaseChatRequest, SystemUser, Workspace
+from app.models import KnowledgeBase, SystemUser, Workspace
+from app.schemas.knowledge_base import KnowledgeBaseChatRequest
 
 
 async def stream_knowledge_base_chat(

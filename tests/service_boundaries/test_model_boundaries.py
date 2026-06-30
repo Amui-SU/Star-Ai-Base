@@ -41,3 +41,32 @@ def test_models_delegates_auth_and_api_account_schemas_to_schema_modules():
     assert "from app.schemas.auth import" in models_source
     assert "from app.schemas.api_accounts import" in models_source
     assert declared_names.isdisjoint(auth_schema_names | api_account_schema_names)
+
+
+def test_models_delegates_knowledge_base_schemas_to_schema_module():
+    project_root = get_project_root()
+    models_source = (project_root / "app/models.py").read_text(encoding="utf-8")
+    declared_names = declared_callable_names(models_source)
+
+    knowledge_schema_path = project_root / "app/schemas/knowledge_base.py"
+    knowledge_schema_names = {
+        "KnowledgeBaseCreateRequest",
+        "KnowledgeBaseResponse",
+        "KnowledgeBaseSearchRequest",
+        "KnowledgeBaseSearchResult",
+        "KnowledgeBaseSearchResponse",
+        "KnowledgeBaseChatRequest",
+        "KnowledgeScopeVideo",
+        "KnowledgeScopeFolder",
+        "KnowledgeScopeOptionsResponse",
+        "KnowledgeBaseBuildRequest",
+        "KnowledgeBaseBuildResponse",
+    }
+
+    assert knowledge_schema_path.exists()
+    knowledge_schema_source = knowledge_schema_path.read_text(encoding="utf-8")
+    for name in knowledge_schema_names:
+        assert f"class {name}" in knowledge_schema_source
+
+    assert "from app.schemas.knowledge_base import" in models_source
+    assert declared_names.isdisjoint(knowledge_schema_names)

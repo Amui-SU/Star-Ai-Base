@@ -2,9 +2,9 @@ from datetime import datetime
 
 import pytest
 from app.models import FavoriteVideo
-from app.models import KnowledgeScopeOptionsResponse
 from app.models import VideoCache
 from app.models import VideoTitleOverride
+from app.schemas.knowledge_base import KnowledgeScopeOptionsResponse
 from app.services.knowledge_scope import InvalidKnowledgeScope
 from app.services.knowledge_scope import list_scope_options
 from app.services.knowledge_scope import resolve_scope_bvids

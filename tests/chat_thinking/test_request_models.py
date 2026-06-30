@@ -1,4 +1,5 @@
-from app.models import ChatRequest, KnowledgeBaseChatRequest
+from app.models import ChatRequest
+from app.schemas.knowledge_base import KnowledgeBaseChatRequest
 
 
 def test_chat_request_models_no_longer_expose_request_mode_switches():

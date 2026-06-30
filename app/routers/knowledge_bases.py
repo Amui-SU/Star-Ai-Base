@@ -18,6 +18,10 @@ from app.dependencies import (
 from app.models import (
     ChatResponse,
     KnowledgeBase,
+    SystemUser,
+    Workspace,
+)
+from app.schemas.knowledge_base import (
     KnowledgeBaseBuildRequest,
     KnowledgeBaseBuildResponse,
     KnowledgeBaseChatRequest,
@@ -26,8 +30,6 @@ from app.models import (
     KnowledgeBaseSearchRequest,
     KnowledgeBaseSearchResponse,
     KnowledgeScopeOptionsResponse,
-    SystemUser,
-    Workspace,
 )
 from app.services.rag_runtime import get_rag_service
 from app.services.knowledge_base_catalog import (

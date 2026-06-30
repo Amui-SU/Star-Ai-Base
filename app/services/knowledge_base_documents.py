@@ -11,10 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     FavoriteVideo,
     KnowledgeBase,
-    KnowledgeBaseChatRequest,
     VideoCache,
     Workspace,
 )
+from app.schemas.knowledge_base import KnowledgeBaseChatRequest
 from app.services.knowledge_base_presenters import nullable_equal
 from app.services.knowledge_scope import InvalidKnowledgeScope, resolve_scope_bvids
 from app.services.rag_runtime import get_rag_service

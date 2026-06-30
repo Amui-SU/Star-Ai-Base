@@ -6,11 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     FavoriteFolder,
     FavoriteVideo,
+    VideoCache,
+    VideoTitleOverride,
+)
+from app.schemas.knowledge_base import (
     KnowledgeScopeFolder,
     KnowledgeScopeOptionsResponse,
     KnowledgeScopeVideo,
-    VideoCache,
-    VideoTitleOverride,
 )
 
 

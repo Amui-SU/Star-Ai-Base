@@ -4,7 +4,7 @@ import inspect
 
 from sqlalchemy import and_, or_
 
-from app.models import (
+from app.schemas.knowledge_base import (
     KnowledgeBaseResponse,
     KnowledgeBaseSearchResult,
 )

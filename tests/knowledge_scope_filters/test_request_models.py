@@ -1,5 +1,5 @@
-from app.models import KnowledgeBaseChatRequest
-from app.models import KnowledgeBaseSearchRequest
+from app.schemas.knowledge_base import KnowledgeBaseChatRequest
+from app.schemas.knowledge_base import KnowledgeBaseSearchRequest
 
 
 def test_scope_request_fields_are_optional_and_backward_compatible():

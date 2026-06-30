@@ -8,10 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     ChatResponse,
     KnowledgeBase,
-    KnowledgeBaseChatRequest,
     SystemUser,
     Workspace,
 )
+from app.schemas.knowledge_base import KnowledgeBaseChatRequest
 
 
 async def answer_knowledge_base_chat(

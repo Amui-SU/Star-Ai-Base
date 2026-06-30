@@ -5,11 +5,10 @@ from collections.abc import Awaitable, Callable
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import (
-    KnowledgeBase,
+from app.models import KnowledgeBase, Workspace
+from app.schemas.knowledge_base import (
     KnowledgeBaseSearchRequest,
     KnowledgeBaseSearchResponse,
-    Workspace,
 )
 from app.services.knowledge_base_documents import resolve_request_scope
 from app.services.knowledge_base_presenters import search_result_from_document
