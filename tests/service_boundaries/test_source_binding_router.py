@@ -61,3 +61,20 @@ def test_source_binding_router_delegates_pending_state_helpers_to_service():
     assert "OAuthPendingState.expires_at < now" not in router_source
     assert "OAuthPendingState.state_key == state_key" not in router_source
     assert declared_names.isdisjoint(router_private_names)
+
+
+def test_source_binding_router_delegates_title_updates_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/source_binding_titles.py"
+    router_source = (project_root / "app/routers/source_bindings.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def update_video_title_override" in service_source
+    assert "from app.services.source_binding_titles import" in router_source
+    assert "update_video_title_override(" in router_source
+    assert "select(FavoriteVideo.id)" not in router_source
+    assert "VideoTitleOverride(" not in router_source
+    assert "VideoTitleOverride.workspace_id" not in router_source

@@ -11,9 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, get_current_workspace
 from app.models import (
-    FavoriteFolder,
     FavoriteFolderInfo,
-    FavoriteVideo,
     LoginStatusResponse,
     QRCodeResponse,
     SourceBinding,
@@ -38,6 +36,7 @@ from app.services.source_binding_presenters import (
     source_binding_response as _response,
     video_with_display_title as _with_display_title,
 )
+from app.services.source_binding_titles import update_video_title_override
 from app.services.source_binding_pending_states import (
     create_pending_state as _create_pending_state,
     delete_pending_state as _delete_pending_state,
@@ -414,56 +413,15 @@ async def update_video_title_by_binding(
     bvid = _normalize_bvid(payload.bvid)
     custom_title = _normalize_custom_title(payload.title)
 
-    membership = await db.execute(
-        select(FavoriteVideo.id)
-        .join(FavoriteFolder, FavoriteFolder.id == FavoriteVideo.folder_id)
-        .where(FavoriteVideo.workspace_id == current_workspace.id)
-        .where(FavoriteVideo.knowledge_base_id == payload.knowledge_base_id)
-        .where(FavoriteVideo.source_binding_id == binding.id)
-        .where(FavoriteVideo.bvid == bvid)
-        .where(FavoriteFolder.knowledge_base_id == payload.knowledge_base_id)
+    return await update_video_title_override(
+        db,
+        workspace_id=current_workspace.id,
+        knowledge_base_id=payload.knowledge_base_id,
+        source_binding_id=binding.id,
+        user_id=current_user.id,
+        bvid=bvid,
+        custom_title=custom_title,
     )
-    if membership.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Video not found in knowledge base")
-
-    existing_result = await db.execute(
-        select(VideoTitleOverride)
-        .where(VideoTitleOverride.workspace_id == current_workspace.id)
-        .where(VideoTitleOverride.knowledge_base_id == payload.knowledge_base_id)
-        .where(VideoTitleOverride.source_binding_id == binding.id)
-        .where(VideoTitleOverride.bvid == bvid)
-    )
-    existing = existing_result.scalar_one_or_none()
-
-    if custom_title is None:
-        if existing is not None:
-            await db.delete(existing)
-            await db.commit()
-        return {
-            "ok": True,
-            "bvid": bvid,
-            "custom_title": None,
-        }
-
-    if existing is None:
-        existing = VideoTitleOverride(
-            workspace_id=current_workspace.id,
-            knowledge_base_id=payload.knowledge_base_id,
-            source_binding_id=binding.id,
-            bvid=bvid,
-            custom_title=custom_title,
-            created_by=current_user.id,
-        )
-        db.add(existing)
-    else:
-        existing.custom_title = custom_title
-    await db.commit()
-
-    return {
-        "ok": True,
-        "bvid": bvid,
-        "custom_title": custom_title,
-    }
 
 
 @router.get("/{binding_id}/favorites/organize-preview")
