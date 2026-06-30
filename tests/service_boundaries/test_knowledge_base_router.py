@@ -259,6 +259,25 @@ def test_knowledge_base_router_delegates_search_helpers_to_service():
     assert "KnowledgeBaseSearchResponse(" not in router_source
 
 
+def test_knowledge_base_router_delegates_record_deletion_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_delete.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def delete_knowledge_base_records" in service_source
+    assert "from app.services.knowledge_base_delete import" in router_source
+    assert "delete_knowledge_base_records(" in router_source
+    assert "VideoCache.__table__.delete" not in router_source
+    assert "FavoriteFolder.__table__.delete" not in router_source
+    assert "FavoriteVideo.__table__.delete" not in router_source
+    assert "IngestionTask.__table__.delete" not in router_source
+    assert "VideoTitleOverride.__table__.delete" not in router_source
+
+
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = get_project_root()
     source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")

@@ -1,6 +1,13 @@
 import pytest
+from sqlalchemy import select
 
-from app.models import FavoriteFolder, FavoriteVideo, VideoCache
+from app.models import (
+    FavoriteFolder,
+    FavoriteVideo,
+    IngestionTask,
+    VideoCache,
+    VideoTitleOverride,
+)
 
 
 @pytest.mark.asyncio
@@ -241,6 +248,138 @@ async def test_delete_knowledge_base_does_not_retry_without_workspace_on_runtime
     list_response = await client.get("/knowledge-bases")
     assert list_response.status_code == 200
     assert any(item["id"] == knowledge_base["id"] for item in list_response.json())
+
+
+@pytest.mark.asyncio
+async def test_delete_knowledge_base_removes_scoped_records_on_success(
+    client, db_session_factory, monkeypatch
+):
+    code_resp = await client.post(
+        "/system-auth/send-code", json={"email": "delete-success@example.com"}
+    )
+    assert code_resp.status_code == 200
+    code = code_resp.json()["code"]
+
+    register_response = await client.post(
+        "/system-auth/register",
+        json={
+            "email": "delete-success@example.com",
+            "password": "correct horse battery staple",
+            "display_name": "Delete Success User",
+            "code": code,
+        },
+    )
+    assert register_response.status_code == 200
+    auth = register_response.json()
+
+    create_response = await client.post(
+        "/knowledge-bases",
+        json={"name": "Delete Success Target"},
+    )
+    assert create_response.status_code == 200
+    knowledge_base = create_response.json()
+
+    async with db_session_factory() as session:
+        folder = FavoriteFolder(
+            session_id=f"delete-success-{knowledge_base['id']}",
+            workspace_id=knowledge_base["workspace_id"],
+            knowledge_base_id=knowledge_base["id"],
+            media_id=8801,
+            title="Delete folder",
+        )
+        session.add(folder)
+        await session.flush()
+        video = FavoriteVideo(
+            folder_id=folder.id,
+            bvid="BVDELETE1",
+            workspace_id=knowledge_base["workspace_id"],
+            knowledge_base_id=knowledge_base["id"],
+        )
+        session.add(video)
+        video_cache = VideoCache(
+            bvid="BVDELETE1",
+            title="Delete cache",
+            is_processed=True,
+            workspace_id=knowledge_base["workspace_id"],
+            knowledge_base_id=knowledge_base["id"],
+        )
+        session.add(video_cache)
+        session.add(
+            IngestionTask(
+                task_id="delete-success-task",
+                workspace_id=knowledge_base["workspace_id"],
+                knowledge_base_id=knowledge_base["id"],
+                source_binding_id=1,
+                created_by=auth["user"]["id"],
+                status="completed",
+            )
+        )
+        session.add(
+            VideoTitleOverride(
+                workspace_id=knowledge_base["workspace_id"],
+                knowledge_base_id=knowledge_base["id"],
+                source_binding_id=None,
+                bvid="BVDELETE1",
+                custom_title="Custom delete title",
+                created_by=auth["user"]["id"],
+            )
+        )
+        await session.commit()
+
+    class CleanRag:
+        def delete_by_knowledge_base(self, knowledge_base_id: int, workspace_id=None):
+            assert knowledge_base_id == knowledge_base["id"]
+            assert workspace_id == knowledge_base["workspace_id"]
+            return 3
+
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases.get_rag_service", lambda: CleanRag()
+    )
+
+    delete_response = await client.delete(f"/knowledge-bases/{knowledge_base['id']}")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["deleted_vectors"] == 3
+
+    async with db_session_factory() as session:
+        assert await session.get(FavoriteFolder, folder.id) is None
+        assert await session.get(FavoriteVideo, video.id) is None
+        assert await session.get(VideoCache, video_cache.id) is None
+        video_cache_rows = (
+            (
+                await session.execute(
+                    select(VideoCache).where(
+                        VideoCache.knowledge_base_id == knowledge_base["id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert video_cache_rows == []
+        task_rows = (
+            (
+                await session.execute(
+                    select(IngestionTask).where(
+                        IngestionTask.knowledge_base_id == knowledge_base["id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert task_rows == []
+        title_rows = (
+            (
+                await session.execute(
+                    select(VideoTitleOverride).where(
+                        VideoTitleOverride.knowledge_base_id == knowledge_base["id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert title_rows == []
 
 
 @pytest.mark.asyncio

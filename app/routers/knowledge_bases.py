@@ -17,9 +17,6 @@ from app.dependencies import (
 )
 from app.models import (
     ChatResponse,
-    FavoriteFolder,
-    FavoriteVideo,
-    IngestionTask,
     KnowledgeBase,
     KnowledgeBaseBuildRequest,
     KnowledgeBaseBuildResponse,
@@ -32,7 +29,6 @@ from app.models import (
     SourceBinding,
     SourceCredential,
     SystemUser,
-    VideoTitleOverride,
     Workspace,
 )
 from app.services.ingestion_tasks import (
@@ -43,6 +39,7 @@ from app.services.knowledge_base_build_tasks import (
     get_build_status_payload,
     run_scoped_build as _run_scoped_build,
 )
+from app.services.knowledge_base_delete import delete_knowledge_base_records
 from app.services.knowledge_base_documents import (
     load_db_fallback_documents as _load_db_fallback_documents,
     load_scoped_chat_documents as _load_scoped_chat_documents_impl,
@@ -816,26 +813,7 @@ async def delete_knowledge_base(
             },
         ) from exc
 
-    await db.execute(
-        IngestionTask.__table__.delete().where(IngestionTask.knowledge_base_id == kb_id)
-    )
-    await db.execute(
-        FavoriteFolder.__table__.delete().where(
-            FavoriteFolder.knowledge_base_id == kb_id
-        )
-    )
-    await db.execute(
-        FavoriteVideo.__table__.delete().where(FavoriteVideo.knowledge_base_id == kb_id)
-    )
-    await db.execute(
-        VideoCache.__table__.delete().where(VideoCache.knowledge_base_id == kb_id)
-    )
-    await db.execute(
-        VideoTitleOverride.__table__.delete().where(
-            VideoTitleOverride.knowledge_base_id == kb_id
-        )
-    )
-    await db.delete(knowledge_base)
+    await delete_knowledge_base_records(db, knowledge_base=knowledge_base)
     await db.commit()
 
     result: dict[str, object] = {"ok": True, "deleted_vectors": deleted_vectors}
