@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 
-from app.models import ChatResponse
+from app.schemas.chat import ChatResponse
 
 
 def answer_from_documents(

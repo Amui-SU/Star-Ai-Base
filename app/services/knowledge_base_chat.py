@@ -6,11 +6,11 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    ChatResponse,
     KnowledgeBase,
     SystemUser,
     Workspace,
 )
+from app.schemas.chat import ChatResponse
 from app.schemas.knowledge_base import KnowledgeBaseChatRequest
 
 

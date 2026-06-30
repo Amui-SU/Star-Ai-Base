@@ -13,11 +13,8 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import (
-    ChatRequest,
-    ChatResponse,
-    UserApiAccount,
-)
+from app.models import UserApiAccount
+from app.schemas.chat import ChatRequest, ChatResponse
 from app.config import settings
 from app.routers.system_auth import _get_current_admin_user
 from app.services.api_credentials import (

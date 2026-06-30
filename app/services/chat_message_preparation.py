@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChatRequest
+from app.schemas.chat import ChatRequest
 from app.services.chat_messages import (
     build_db_list_messages,
     build_db_summary_messages,

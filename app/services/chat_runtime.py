@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from app.models import ChatRequest, ChatResponse
+from app.schemas.chat import ChatRequest, ChatResponse
 
 
 async def answer_legacy_chat(

@@ -6,13 +6,15 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import (
     ChatConversation,
+    ChatMessage,
+    SystemUser,
+)
+from app.schemas.chat import (
     ChatConversationListResponse,
     ChatConversationResponse,
     ChatConversationSaveRequest,
     ChatConversationSummaryResponse,
     ChatHistoryMessageResponse,
-    ChatMessage,
-    SystemUser,
 )
 from app.time_utils import utc_now
 

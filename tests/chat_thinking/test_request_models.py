@@ -1,4 +1,4 @@
-from app.models import ChatRequest
+from app.schemas.chat import ChatRequest
 from app.schemas.knowledge_base import KnowledgeBaseChatRequest
 
 

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models import ChatRequest
+from app.schemas.chat import ChatRequest
 from app.services.chat_runtime import answer_legacy_chat, stream_legacy_chat
 
 

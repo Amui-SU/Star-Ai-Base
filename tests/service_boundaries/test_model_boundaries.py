@@ -107,3 +107,29 @@ def test_models_delegates_source_and_content_schemas_to_schema_modules():
     assert "from app.schemas.content import" in models_source
     assert "from app.schemas.source_bindings import" in models_source
     assert declared_names.isdisjoint(content_schema_names | source_binding_schema_names)
+
+
+def test_models_delegates_chat_schemas_to_schema_module():
+    project_root = get_project_root()
+    models_source = (project_root / "app/models.py").read_text(encoding="utf-8")
+    declared_names = declared_callable_names(models_source)
+
+    chat_schema_path = project_root / "app/schemas/chat.py"
+    chat_schema_names = {
+        "ChatRequest",
+        "ChatResponse",
+        "ChatHistoryMessageRequest",
+        "ChatConversationSaveRequest",
+        "ChatHistoryMessageResponse",
+        "ChatConversationSummaryResponse",
+        "ChatConversationResponse",
+        "ChatConversationListResponse",
+    }
+
+    assert chat_schema_path.exists()
+    chat_schema_source = chat_schema_path.read_text(encoding="utf-8")
+    for name in chat_schema_names:
+        assert f"class {name}" in chat_schema_source
+
+    assert "from app.schemas.chat import" in models_source
+    assert declared_names.isdisjoint(chat_schema_names)

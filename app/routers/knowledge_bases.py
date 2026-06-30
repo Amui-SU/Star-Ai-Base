@@ -16,11 +16,11 @@ from app.dependencies import (
     get_knowledge_base_for_user_readonly,
 )
 from app.models import (
-    ChatResponse,
     KnowledgeBase,
     SystemUser,
     Workspace,
 )
+from app.schemas.chat import ChatResponse
 from app.schemas.knowledge_base import (
     KnowledgeBaseBuildRequest,
     KnowledgeBaseBuildResponse,

@@ -1,6 +1,13 @@
 from app import models
 from app.schemas.api_accounts import ApiAccountCreateRequest, ApiAccountResponse
 from app.schemas.auth import SystemLoginRequest, SystemUserResponse
+from app.schemas.chat import (
+    ChatConversationListResponse,
+    ChatConversationSaveRequest,
+    ChatHistoryMessageRequest,
+    ChatRequest,
+    ChatResponse,
+)
 from app.schemas.content import ContentSource, FavoriteFolderInfo, VideoContent
 from app.schemas.knowledge_base import (
     KnowledgeBaseBuildRequest,
@@ -101,3 +108,24 @@ def test_source_binding_schemas_are_reexported_from_legacy_models_module():
 
     assert binding.external_account_name is None
     assert status.session_id is None
+
+
+def test_chat_schemas_are_reexported_from_legacy_models_module():
+    assert models.ChatRequest is ChatRequest
+    assert models.ChatResponse is ChatResponse
+    assert models.ChatHistoryMessageRequest is ChatHistoryMessageRequest
+    assert models.ChatConversationSaveRequest is ChatConversationSaveRequest
+    assert models.ChatConversationListResponse is ChatConversationListResponse
+
+    request = models.ChatRequest(question="hello")
+    response = models.ChatResponse(answer="hi", sources=[])
+    history = models.ChatHistoryMessageRequest(role="Assistant", content="hi")
+    conversation = models.ChatConversationSaveRequest(
+        messages=[history],
+        web_search_provider="TAVILY",
+    )
+
+    assert request.folder_ids is None
+    assert response.thinking is None
+    assert history.role == "assistant"
+    assert conversation.web_search_provider == "tavily"
