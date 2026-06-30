@@ -87,6 +87,7 @@ from app.services.chat_video_context import (
     is_related_to_collection as _is_related_to_collection,
 )
 from app.services.chat_message_preparation import prepare_chat_messages
+from app.services.chat_runtime import answer_legacy_chat, stream_legacy_chat
 from app.services.rag_runtime import get_rag_service, reset_rag_service
 
 router = APIRouter(prefix="/chat", tags=["对话"])
@@ -600,37 +601,20 @@ async def ask_question(
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
-        llm_config = _resolve_llm_config()
-        messages, sources, _ = await _prepare_messages(request, db)
-        messages = _enforce_markdown_output(messages)
-        messages = _apply_mode_instructions(
-            messages,
-            bool(llm_config["thinking_config"]),
+        return await answer_legacy_chat(
+            request,
+            db,
+            resolve_llm_config=_resolve_llm_config,
+            prepare_messages=_prepare_messages,
+            enforce_markdown_output=_enforce_markdown_output,
+            apply_mode_instructions=_apply_mode_instructions,
+            get_llm_client=_get_llm_client,
+            build_thinking_completion_options=_build_thinking_completion_options,
+            extract_thinking_and_answer=_extract_thinking_and_answer,
+            is_llm_connection_error=_is_llm_connection_error,
+            build_llm_unavailable_answer=_build_llm_unavailable_answer,
+            warning_logger=logger.warning,
         )
-        client = _get_llm_client(llm_config)
-        try:
-            response = client.chat.completions.create(
-                model=llm_config["model"],
-                messages=messages,
-                temperature=0.5,
-                **_build_thinking_completion_options(llm_config),
-            )
-            message = response.choices[0].message
-            raw_answer = message.content or ""
-            reasoning = getattr(message, "reasoning_content", None)
-            thinking, answer = _extract_thinking_and_answer(raw_answer, reasoning)
-            return ChatResponse(
-                answer=answer, sources=sources[:5], thinking=thinking or None
-            )
-        except Exception as e:
-            if _is_llm_connection_error(e):
-                logger.warning(f"模型连接异常，使用降级回答: {e}")
-                return ChatResponse(
-                    answer=_build_llm_unavailable_answer(),
-                    sources=sources[:5],
-                    thinking=None,
-                )
-            raise
     except HTTPException:
         raise
     except Exception as e:
@@ -648,34 +632,20 @@ async def ask_question_stream(
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
-        llm_config = _resolve_llm_config()
-        messages, sources, _ = await _prepare_messages(request, db)
-        messages = _enforce_markdown_output(messages)
-        messages = _apply_mode_instructions(
-            messages,
-            bool(llm_config["thinking_config"]),
+        stream = await stream_legacy_chat(
+            request,
+            db,
+            resolve_llm_config=_resolve_llm_config,
+            prepare_messages=_prepare_messages,
+            enforce_markdown_output=_enforce_markdown_output,
+            apply_mode_instructions=_apply_mode_instructions,
+            stream_llm_events=_stream_llm_events,
+            encode_thinking_delta=_encode_thinking_delta,
+            is_llm_connection_error=_is_llm_connection_error,
+            build_llm_unavailable_answer=_build_llm_unavailable_answer,
+            warning_logger=logger.warning,
         )
-
-        def generate():
-            thinking_parts: list[str] = []
-            try:
-                for event_type, content in _stream_llm_events(messages):
-                    if event_type == "thinking":
-                        thinking_parts.append(content)
-                        yield _encode_thinking_delta(content)
-                    else:
-                        yield content
-            except Exception as e:
-                if _is_llm_connection_error(e):
-                    logger.warning(f"流式模型连接异常，使用降级回答: {e}")
-                    yield _build_llm_unavailable_answer()
-                else:
-                    raise
-            if thinking_parts:
-                yield f"\n[[THINKING_JSON]]{json.dumps(''.join(thinking_parts), ensure_ascii=False)}"
-            yield f"\n[[SOURCES_JSON]]{json.dumps(sources, ensure_ascii=False)}"
-
-        return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
+        return StreamingResponse(stream, media_type="text/plain; charset=utf-8")
     except HTTPException:
         raise
     except Exception as e:
