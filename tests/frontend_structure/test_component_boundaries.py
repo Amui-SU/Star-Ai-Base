@@ -50,6 +50,24 @@ def test_chat_panel_uses_model_settings_hook():
     assert "chatApi.saveModelProviderConfig" not in chat_panel
 
 
+def test_chat_panel_model_status_menu_is_extracted():
+    project_root = get_project_root()
+    chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    status_component = (
+        project_root / "frontend" / "components" / "chat" / "ChatModelStatus.tsx"
+    )
+
+    assert status_component.exists()
+    assert "@/components/chat/ChatModelStatus" in chat_panel
+    assert 'from "next/image"' not in chat_panel
+    assert "@/lib/providers" not in chat_panel
+    assert "modelMenuRef" not in chat_panel
+    assert "model-provider-menu" not in chat_panel
+    assert "model-source-switch" not in chat_panel
+
+
 def test_chat_panel_uses_web_search_settings_hook():
     project_root = get_project_root()
     chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
@@ -245,12 +263,16 @@ def test_frontend_provider_presets_are_shared():
     chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
         encoding="utf-8"
     )
+    chat_model_status = (
+        project_root / "frontend" / "components" / "chat" / "ChatModelStatus.tsx"
+    ).read_text(encoding="utf-8")
     api_accounts_panel = (
         project_root / "frontend" / "components" / "ApiAccountsPanel.tsx"
     ).read_text(encoding="utf-8")
 
     assert providers_file.exists()
-    assert "@/lib/providers" in chat_panel
+    assert "@/components/chat/ChatModelStatus" in chat_panel
+    assert "@/lib/providers" in chat_model_status
     assert "@/lib/providers" in api_accounts_panel
     assert "const PROVIDERS" not in api_accounts_panel
     assert "const builtInProviders" not in chat_panel
