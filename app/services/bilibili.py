@@ -9,32 +9,18 @@ import asyncio
 import qrcode
 import io
 import base64
-import json
 from typing import Optional, Dict, Any, List, Mapping
 from loguru import logger
+from app.services.bilibili_cookies import (
+    bilibili_service_from_cookies as _bilibili_service_from_cookies,
+    normalize_bilibili_cookies,
+    service_kwargs_from_cookies,
+)
+from app.services.bilibili_responses import parse_bilibili_json_response
 from app.services.wbi import wbi_signer
 
 
-def _service_kwargs_from_cookies(cookies: Mapping[str, Any] | None) -> Dict[str, Any]:
-    cookies = cookies or {}
-    return {
-        "sessdata": cookies.get("SESSDATA") or cookies.get("sessdata"),
-        "bili_jct": cookies.get("bili_jct"),
-        "dedeuserid": (
-            cookies.get("DedeUserID")
-            or cookies.get("dedeuserid")
-            or cookies.get("Dedeuserid")
-        ),
-    }
-
-
-def normalize_bilibili_cookies(cookies: Mapping[str, Any] | None) -> Dict[str, Any]:
-    kwargs = _service_kwargs_from_cookies(cookies)
-    return {
-        "SESSDATA": kwargs["sessdata"],
-        "bili_jct": kwargs["bili_jct"],
-        "DedeUserID": kwargs["dedeuserid"],
-    }
+_service_kwargs_from_cookies = service_kwargs_from_cookies
 
 
 class BilibiliService:
@@ -76,7 +62,7 @@ class BilibiliService:
 
     @classmethod
     def from_cookies(cls, cookies: Mapping[str, Any] | None) -> "BilibiliService":
-        return cls(**_service_kwargs_from_cookies(cookies))
+        return cls(**service_kwargs_from_cookies(cookies))
 
     def _get_cookies(self) -> Dict[str, str]:
         """获取 Cookie"""
@@ -89,17 +75,7 @@ class BilibiliService:
             cookies["DedeUserID"] = self.dedeuserid
         return cookies
 
-    @staticmethod
-    def _parse_json_response(response: httpx.Response, action: str) -> Dict[str, Any]:
-        """稳健解析 B站响应，避免空响应/非 JSON 直接抛 ValueError。"""
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-            snippet = (response.text or "").strip()[:200]
-            raise Exception(
-                f"{action}失败: B站接口返回非JSON响应 "
-                f"(status={response.status_code}, body={snippet or 'EMPTY'})"
-            )
+    _parse_json_response = staticmethod(parse_bilibili_json_response)
 
     async def close(self):
         """关闭客户端"""
@@ -667,8 +643,11 @@ class BilibiliService:
             return False
 
 
-def bilibili_service_from_cookies(
+def _default_bilibili_service_from_cookies(
     cookies: Mapping[str, Any] | None,
     service_cls: type[BilibiliService] = BilibiliService,
 ) -> BilibiliService:
-    return service_cls(**_service_kwargs_from_cookies(cookies))
+    return _bilibili_service_from_cookies(cookies, service_cls)
+
+
+bilibili_service_from_cookies = _default_bilibili_service_from_cookies
