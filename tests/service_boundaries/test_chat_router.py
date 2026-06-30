@@ -197,3 +197,35 @@ def test_chat_router_delegates_completion_helpers_to_service():
         assert f"def {name}" in service_source or f"async def {name}" in service_source
     assert "from app.services.chat_completion import" in chat_source
     assert declared_names.isdisjoint(router_private_names)
+
+
+def test_chat_router_delegates_video_context_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/chat_video_context.py"
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    declared_names = declared_callable_names(chat_source)
+
+    expected_service_names = {
+        "is_related_to_collection",
+        "get_folder_ids_for_session",
+        "get_bvids_by_folder_ids",
+        "get_video_context",
+        "get_video_titles_context",
+    }
+    router_private_names = {
+        "_is_related_to_collection",
+        "_get_folder_ids_for_session",
+        "_get_bvids_by_folder_ids",
+        "_get_video_context",
+        "_get_video_titles_context",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"async def {name}" in service_source
+    assert "from app.services.chat_video_context import" in chat_source
+    assert "VideoCache.description.ilike" not in chat_source
+    assert "FavoriteFolder.updated_at.desc()" not in chat_source
+    assert "FavoriteVideo.folder_id == FavoriteFolder.id" not in chat_source
+    assert declared_names.isdisjoint(router_private_names)

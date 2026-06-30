@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from sqlalchemy import select, func, or_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from openai import OpenAI
 from pydantic import BaseModel
@@ -16,10 +16,7 @@ from app.dependencies import get_current_user
 from app.models import (
     ChatRequest,
     ChatResponse,
-    FavoriteFolder,
-    FavoriteVideo,
     UserApiAccount,
-    VideoCache,
 )
 from app.config import settings
 from app.routers.system_auth import _get_current_admin_user
@@ -76,12 +73,18 @@ from app.services.chat_completion import (
     verify_provider_configuration,
 )
 from app.services.chat_routing import (
-    extract_keywords as _extract_keywords,
     filter_docs_by_keywords as _filter_docs_by_keywords,
     is_collection_intent as _is_collection_intent,
     is_general_question as _is_general_question,
     route_with_llm as _route_with_llm,
     route_with_rules as _route_with_rules,
+)
+from app.services.chat_video_context import (
+    get_bvids_by_folder_ids as _get_bvids_by_folder_ids,
+    get_folder_ids_for_session as _get_folder_ids_for_session,
+    get_video_context as _get_video_context,
+    get_video_titles_context as _get_video_titles_context,
+    is_related_to_collection as _is_related_to_collection,
 )
 from app.services.rag_runtime import get_rag_service, reset_rag_service
 
@@ -553,187 +556,6 @@ _prepare_llm_messages_with_tools = lambda messages, *, tools, tool_handlers, max
     resolve_llm_config=_resolve_llm_config,
     get_llm_client=_get_llm_client,
 )
-
-
-async def _is_related_to_collection(
-    db: AsyncSession, folder_ids: List[int], question: str
-) -> bool:
-    """判断问题是否与收藏夹内容有关"""
-    if not folder_ids:
-        return False
-    keywords = _extract_keywords(question)
-    if not keywords:
-        return False
-    like_conds = []
-    for kw in keywords:
-        pattern = f"%{kw}%"
-        like_conds.append(VideoCache.title.ilike(pattern))
-        like_conds.append(VideoCache.description.ilike(pattern))
-        like_conds.append(VideoCache.content.ilike(pattern))
-    stmt = (
-        select(func.count())
-        .select_from(VideoCache)
-        .join(FavoriteVideo, FavoriteVideo.bvid == VideoCache.bvid)
-        .where(FavoriteVideo.folder_id.in_(folder_ids))
-        .where(or_(*like_conds))
-    )
-    count = await db.scalar(stmt)
-    return (count or 0) > 0
-
-
-async def _get_folder_ids_for_session(
-    db: AsyncSession, session_id: str, media_ids: Optional[List[int]]
-) -> List[int]:
-    """根据 session 和 media_id 获取内部 folder_id（支持跨 session 查找同用户数据）"""
-    from app.models import UserSession
-
-    # 1. 尝试获取当前 session 的 mid
-    mid_result = await db.execute(
-        select(UserSession.bili_mid).where(UserSession.session_id == session_id)
-    )
-    mid = mid_result.scalar()
-    target_session_ids = [session_id]
-    if mid:
-        # 查找该用户所有的 Session ID
-        sessions_result = await db.execute(
-            select(UserSession.session_id).where(UserSession.bili_mid == mid)
-        )
-        target_session_ids = [row[0] for row in sessions_result.fetchall()]
-    # 构建查询：按 media_id 去重，只保留最新的一条
-    stmt = (
-        select(FavoriteFolder.id, FavoriteFolder.media_id, FavoriteFolder.updated_at)
-        .where(FavoriteFolder.session_id.in_(target_session_ids))
-        .order_by(FavoriteFolder.updated_at.desc())
-    )
-    if media_ids:
-        stmt = stmt.where(FavoriteFolder.media_id.in_(media_ids))
-    rows = await db.execute(stmt)
-    dedup: dict[int, int] = {}
-    for folder_id, media_id, _updated_at in rows.fetchall():
-        if media_id not in dedup:
-            dedup[media_id] = folder_id
-    return list(dedup.values())
-
-
-async def _get_bvids_by_folder_ids(
-    db: AsyncSession, folder_ids: List[int]
-) -> List[str]:
-    """获取指定收藏夹的视频 BV 列表"""
-    if not folder_ids:
-        return []
-    rows = await db.execute(
-        select(FavoriteVideo.bvid).where(FavoriteVideo.folder_id.in_(folder_ids))
-    )
-    bvids = []
-    seen = set()
-    for (bvid,) in rows.fetchall():
-        if not bvid or bvid in seen:
-            continue
-        seen.add(bvid)
-        bvids.append(bvid)
-    return bvids
-
-
-async def _get_video_context(
-    db: AsyncSession,
-    folder_ids: List[int],
-    include_content: bool = False,
-    limit: Optional[int] = 50,
-) -> tuple[str, List[dict]]:
-    """获取视频上下文信息"""
-    if not folder_ids:
-        return "", []
-    # 查询视频信息
-    query = (
-        select(
-            FavoriteFolder.title.label("folder_title"),
-            VideoCache.bvid,
-            VideoCache.title,
-            VideoCache.description,
-            VideoCache.content if include_content else VideoCache.description,
-        )
-        .join(FavoriteVideo, FavoriteVideo.folder_id == FavoriteFolder.id)
-        .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid, isouter=True)
-        .where(FavoriteFolder.id.in_(folder_ids))
-    )
-    if limit is not None:
-        query = query.limit(limit)
-    result = await db.execute(query)
-    records = result.fetchall()
-    if not records:
-        return "", []
-    # 按收藏夹分组（对 bvid 去重，避免同一视频重复出现）
-    grouped = {}
-    sources = []
-    seen_bvids = set()
-    for folder_title, bvid, title, desc, content in records:
-        if not bvid or not title:
-            continue
-        if bvid in seen_bvids:
-            continue
-        folder_name = folder_title or "默认收藏夹"
-        if folder_name not in grouped:
-            grouped[folder_name] = []
-        video_info = f"- 《{title}》"
-        if include_content and content:
-            video_info += f"\n  摘要: {content}"
-        elif desc:
-            short_desc = desc[:100] + "..." if len(desc) > 100 else desc
-            video_info += f" ({short_desc})"
-        grouped[folder_name].append(video_info)
-        seen_bvids.add(bvid)
-        sources.append(
-            {
-                "bvid": bvid,
-                "title": title,
-                "url": f"https://www.bilibili.com/video/{bvid}",
-            }
-        )
-    # 构建上下文文本
-    context_parts = [
-        f"【{folder_name}】\n" + "\n".join(videos)
-        for folder_name, videos in grouped.items()
-    ]
-    context = "\n\n".join(context_parts)
-    return context, sources
-
-
-async def _get_video_titles_context(
-    db: AsyncSession, folder_ids: List[int], limit: int = 50
-) -> str:
-    """获取收藏夹名称与视频标题（用于引导问题）"""
-    if not folder_ids:
-        return ""
-    query = (
-        select(
-            FavoriteFolder.title.label("folder_title"),
-            VideoCache.bvid,
-            VideoCache.title,
-        )
-        .join(FavoriteVideo, FavoriteVideo.folder_id == FavoriteFolder.id)
-        .join(VideoCache, VideoCache.bvid == FavoriteVideo.bvid, isouter=True)
-        .where(FavoriteFolder.id.in_(folder_ids))
-        .limit(limit)
-    )
-    result = await db.execute(query)
-    records = result.fetchall()
-    if not records:
-        return ""
-    grouped = {}
-    seen_bvids = set()
-    for folder_title, bvid, title in records:
-        if not title or not bvid:
-            continue
-        if bvid in seen_bvids:
-            continue
-        seen_bvids.add(bvid)
-        folder_name = folder_title or "默认收藏夹"
-        grouped.setdefault(folder_name, []).append(f"- 《{title}》")
-    context_parts = [
-        f"【{folder_name}】\n" + "\n".join(videos)
-        for folder_name, videos in grouped.items()
-    ]
-    return "\n\n".join(context_parts)
 
 
 async def _prepare_messages(
