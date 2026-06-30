@@ -6,12 +6,11 @@ import pytest
 from sqlalchemy import select
 
 from app.models import (
-    ContentSource,
     FavoriteFolder,
     FavoriteVideo,
     VideoCache,
-    VideoContent,
 )
+from app.schemas.content import ContentSource, VideoContent
 from app.services.folder_ingestion import _delete_video_vectors_for_scope, sync_folder
 from app.services.folder_ingestion_content import (
     extract_video_info,

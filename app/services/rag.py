@@ -15,7 +15,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from app.config import settings
-from app.models import VideoContent
+from app.schemas.content import VideoContent
 from app.services.rag_documents import build_video_content_text, build_video_documents
 from app.services.rag_filters import (
     knowledge_base_filter,

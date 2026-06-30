@@ -11,7 +11,6 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
-from enum import Enum
 
 from app.schemas.api_accounts import (
     ApiAccountCreateRequest,
@@ -30,6 +29,12 @@ from app.schemas.auth import (
     SystemUserResponse,
     WorkspaceResponse,
 )
+from app.schemas.content import (
+    ContentSource,
+    FavoriteFolderInfo,
+    VideoContent,
+    VideoInfo,
+)
 from app.schemas.knowledge_base import (
     KnowledgeBaseBuildRequest,
     KnowledgeBaseBuildResponse,
@@ -42,6 +47,11 @@ from app.schemas.knowledge_base import (
     KnowledgeScopeFolder,
     KnowledgeScopeOptionsResponse,
     KnowledgeScopeVideo,
+)
+from app.schemas.source_bindings import (
+    LoginStatusResponse,
+    QRCodeResponse,
+    SourceBindingResponse,
 )
 from app.time_utils import utc_now
 
@@ -482,74 +492,6 @@ class ChatMessage(Base):
 
 
 # ==================== Pydantic 模型 (API 用) ====================
-
-
-class ContentSource(str, Enum):
-    """内容来源"""
-
-    AI_SUMMARY = "ai_summary"
-    SUBTITLE = "subtitle"
-    BASIC_INFO = "basic_info"
-    ASR = "asr"
-
-
-class SourceBindingResponse(BaseModel):
-    id: int
-    source_type: str
-    external_account_id: str
-    external_account_name: Optional[str] = None
-    external_avatar_url: Optional[str] = None
-    status: str
-
-
-class VideoInfo(BaseModel):
-    """视频信息"""
-
-    bvid: str
-    cid: Optional[int] = None
-    title: str
-    description: Optional[str] = None
-    owner_name: Optional[str] = None
-    owner_mid: Optional[int] = None
-    duration: Optional[int] = None
-    pic_url: Optional[str] = None
-
-
-class VideoContent(BaseModel):
-    """视频内容（含摘要）"""
-
-    bvid: str
-    title: str
-    content: str
-    source: ContentSource
-    outline: Optional[list] = None
-
-
-class QRCodeResponse(BaseModel):
-    """二维码响应"""
-
-    qrcode_key: str
-    qrcode_url: str
-    qrcode_image_base64: str
-
-
-class LoginStatusResponse(BaseModel):
-    """登录状态响应"""
-
-    status: str  # waiting / scanned / confirmed / expired
-    message: str
-    user_info: Optional[dict] = None
-    session_id: Optional[str] = None
-
-
-class FavoriteFolderInfo(BaseModel):
-    """收藏夹信息"""
-
-    media_id: int
-    title: str
-    media_count: int
-    is_selected: bool = True
-    is_default: Optional[bool] = None
 
 
 class ChatRequest(BaseModel):

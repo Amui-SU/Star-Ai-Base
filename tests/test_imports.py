@@ -4,12 +4,12 @@ import pytest
 from sqlalchemy import select
 
 from app.models import (
-    ContentSource,
     FavoriteFolder,
     FavoriteVideo,
     IngestionTask,
     VideoCache,
 )
+from app.schemas.content import ContentSource
 
 
 def test_import_vector_delete_failure_is_logged(monkeypatch):

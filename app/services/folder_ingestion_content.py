@@ -2,7 +2,8 @@
 
 from typing import Optional
 
-from app.models import ContentSource, VideoCache, VideoContent
+from app.models import VideoCache
+from app.schemas.content import ContentSource, VideoContent
 
 
 def extract_video_info(media: dict) -> tuple[str, str, Optional[int]]:

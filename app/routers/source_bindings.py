@@ -11,14 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, get_current_workspace
 from app.models import (
-    FavoriteFolderInfo,
-    LoginStatusResponse,
-    QRCodeResponse,
     SourceBinding,
-    SourceBindingResponse,
     SourceCredential,
     SystemUser,
     Workspace,
+)
+from app.schemas.content import FavoriteFolderInfo
+from app.schemas.source_bindings import (
+    LoginStatusResponse,
+    QRCodeResponse,
+    SourceBindingResponse,
 )
 from app.routers.auth import (
     login_sessions,

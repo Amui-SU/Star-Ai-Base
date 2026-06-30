@@ -4,7 +4,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import SourceBinding, SourceBindingResponse, VideoTitleOverride
+from app.models import SourceBinding, VideoTitleOverride
+from app.schemas.source_bindings import SourceBindingResponse
 
 
 def normalize_bvid(value: str) -> str:

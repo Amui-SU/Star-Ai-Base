@@ -9,12 +9,11 @@ from sqlalchemy import select
 
 from app.database import get_db_context
 from app.models import (
-    ContentSource,
     FavoriteFolder,
     FavoriteVideo,
     VideoCache,
-    VideoContent,
 )
+from app.schemas.content import ContentSource, VideoContent
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher

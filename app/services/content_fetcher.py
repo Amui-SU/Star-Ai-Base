@@ -14,7 +14,7 @@ import subprocess
 import time
 import httpx
 from loguru import logger
-from app.models import VideoContent, ContentSource
+from app.schemas.content import ContentSource, VideoContent
 from app.services.bilibili import BilibiliService
 from app.services.asr import ASRService
 from app.services.content_summary import (

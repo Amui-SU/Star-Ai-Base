@@ -14,10 +14,9 @@ from sqlalchemy import delete, select
 from app.database import get_db, get_db_context
 from app.models import (
     OAuthPendingState,
-    QRCodeResponse,
-    LoginStatusResponse,
     UserSession as UserSessionModel,
 )
+from app.schemas.source_bindings import LoginStatusResponse, QRCodeResponse
 from app.services.bilibili import (
     BilibiliService,
     bilibili_service_from_cookies,

@@ -10,13 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    LoginStatusResponse,
-    QRCodeResponse,
     SourceBinding,
     SourceCredential,
     SystemUser,
     Workspace,
 )
+from app.schemas.source_bindings import LoginStatusResponse, QRCodeResponse
 from app.security import decrypt_text, encrypt_text
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.time_utils import utc_now

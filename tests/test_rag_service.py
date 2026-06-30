@@ -1,4 +1,4 @@
-from app.models import ContentSource, VideoContent
+from app.schemas.content import ContentSource, VideoContent
 from app.services.rag_documents import build_video_content_text, build_video_documents
 from app.services.rag_filters import (
     knowledge_base_filter,

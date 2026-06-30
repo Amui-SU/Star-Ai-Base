@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain.schema import Document
 
-from app.models import VideoContent
+from app.schemas.content import VideoContent
 
 
 def build_video_content_text(video: VideoContent) -> str:

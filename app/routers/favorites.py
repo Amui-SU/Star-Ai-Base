@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 from typing import List, Optional
 from pydantic import BaseModel
-from app.models import FavoriteFolderInfo
+from app.schemas.content import FavoriteFolderInfo
 from app.services.favorite_folders import is_legacy_default_favorite_folder
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.routers.auth import get_session

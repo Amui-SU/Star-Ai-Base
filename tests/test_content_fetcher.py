@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import ContentSource
+from app.schemas.content import ContentSource
 from app.services.content_fetcher import ContentFetcher
 from app.services.content_summary import (
     format_ai_summary_content,
