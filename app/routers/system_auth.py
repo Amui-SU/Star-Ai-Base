@@ -1,11 +1,10 @@
 import secrets
-from datetime import timedelta
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
 from pydantic import BaseModel
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +28,6 @@ from app.models import (
     WorkspaceMember,
     WorkspaceResponse,
 )
-from app.services.email import send_verification_email
 from app.services.system_auth_admin import (
     get_current_admin_user as _get_current_admin_user,
     is_admin_user as _is_admin_user,
@@ -48,6 +46,7 @@ from app.services.system_auth_codes import (
     hash_code as _hash_code,
     ip_rate_limit as _ip_rate_limit,
     password_exceeds_bcrypt_limit as _password_exceeds_bcrypt_limit,
+    send_verification_code as _send_verification_code,
 )
 from app.services.system_auth_oauth import (
     OAUTH_STATE_COOKIE_NAME,
@@ -137,54 +136,13 @@ async def send_verification_code(
     db: AsyncSession = Depends(get_db),
 ):
     """发送邮箱验证码。DEBUG 模式下验证码直接返回，生产模式通过 SMTP 发送邮件。"""
-    email = payload.email.strip().lower()
-    if not email_is_valid(email):
-        raise HTTPException(status_code=400, detail="邮箱格式不正确")
-
-    # IP 频率限制
     client_ip = request.client.host if request.client else "unknown"
-    if not await _check_ip_rate_limit(db, client_ip):
-        raise HTTPException(status_code=429, detail="发送过于频繁，请稍后再试")
-
-    # 清理过期验证码
-    now_naive = utc_now_naive()
-    await db.execute(
-        delete(VerificationCode).where(VerificationCode.expires_at < now_naive)
+    return await _send_verification_code(
+        db,
+        email=payload.email,
+        client_ip=client_ip,
+        debug=bool(settings.debug),
     )
-
-    # 同邮箱是否已有有效验证码
-    existing = await db.execute(
-        select(VerificationCode).where(
-            VerificationCode.email == email,
-            VerificationCode.expires_at > now_naive,
-        )
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=429, detail="验证码已发送，请查收邮箱或等待过期后重试"
-        )
-
-    code = f"{secrets.randbelow(1000000):06d}"
-    expires_at = now_naive + timedelta(seconds=_CODE_TTL_SECONDS)
-
-    db.add(
-        VerificationCode(
-            email=email,
-            code_hash=_hash_code(code),
-            expires_at=expires_at,
-        )
-    )
-    await db.commit()
-
-    resp: dict = {"message": "验证码已发送"}
-    if settings.debug:
-        resp["code"] = code
-    else:
-        sent = await send_verification_email(email, code)
-        if not sent:
-            raise HTTPException(status_code=500, detail="验证码发送失败，请稍后重试")
-
-    return resp
 
 
 @router.post("/register", response_model=SystemAuthResponse)

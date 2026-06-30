@@ -182,6 +182,23 @@ def test_system_auth_router_delegates_email_code_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_system_auth_router_delegates_send_code_flow_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_codes.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def send_verification_code" in service_source
+    assert "send_verification_code as _send_verification_code" in router_source
+    assert "_send_verification_code(" in router_source
+    assert "delete(VerificationCode)" not in router_source
+    assert "secrets.randbelow" not in router_source
+    assert "send_verification_email(" not in router_source
+    assert "timedelta(seconds=_CODE_TTL_SECONDS)" not in router_source
+
+
 def test_system_auth_router_delegates_session_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/system_auth_sessions.py"
