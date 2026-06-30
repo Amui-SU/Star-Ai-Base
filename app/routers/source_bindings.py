@@ -22,7 +22,6 @@ from app.models import (
     SourceBindingResponse,
     SourceCredential,
     SystemUser,
-    VideoTitleOverride,
     Workspace,
 )
 from app.routers.auth import (
@@ -34,6 +33,13 @@ from app.routers.auth import (
 from app.security import decrypt_text, encrypt_text
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.services.favorite_folders import is_default_favorite_folder
+from app.services.source_binding_presenters import (
+    get_video_title_overrides as _get_video_title_overrides,
+    normalize_bvid as _normalize_bvid,
+    normalize_custom_title as _normalize_custom_title,
+    source_binding_response as _response,
+    video_with_display_title as _with_display_title,
+)
 from app.time_utils import utc_now, utc_now_naive
 
 router = APIRouter(prefix="/source-bindings", tags=["source-bindings"])
@@ -43,70 +49,6 @@ class VideoTitleUpdateRequest(BaseModel):
     bvid: str
     title: str | None = None
     knowledge_base_id: int
-
-
-def _normalize_bvid(value: str) -> str:
-    bvid = (value or "").strip()
-    if not bvid:
-        raise HTTPException(status_code=400, detail="bvid cannot be empty")
-    return bvid
-
-
-def _normalize_custom_title(value: str | None) -> str | None:
-    title = (value or "").strip()
-    if not title:
-        return None
-    if len(title) > 120:
-        raise HTTPException(status_code=400, detail="title cannot exceed 120 chars")
-    return title
-
-
-async def _get_video_title_overrides(
-    db: AsyncSession,
-    *,
-    workspace_id: int,
-    knowledge_base_id: int | None,
-    source_binding_id: int,
-    bvids: list[str],
-) -> dict[str, str]:
-    if not knowledge_base_id or not bvids:
-        return {}
-    result = await db.execute(
-        select(VideoTitleOverride)
-        .where(VideoTitleOverride.workspace_id == workspace_id)
-        .where(VideoTitleOverride.knowledge_base_id == knowledge_base_id)
-        .where(VideoTitleOverride.source_binding_id == source_binding_id)
-        .where(VideoTitleOverride.bvid.in_(bvids))
-        .order_by(VideoTitleOverride.id.desc())
-    )
-    overrides: dict[str, str] = {}
-    for item in result.scalars().all():
-        overrides.setdefault(item.bvid, item.custom_title)
-    return overrides
-
-
-def _with_display_title(video: dict, overrides: dict[str, str]) -> dict:
-    bvid = video.get("bvid") or ""
-    original_title = video.get("title") or bvid
-    custom_title = overrides.get(bvid)
-    return {
-        **video,
-        "title": custom_title or original_title,
-        "display_title": custom_title or original_title,
-        "original_title": original_title,
-        "custom_title": custom_title,
-    }
-
-
-def _response(binding: SourceBinding) -> SourceBindingResponse:
-    return SourceBindingResponse(
-        id=binding.id,
-        source_type=binding.source_type,
-        external_account_id=binding.external_account_id,
-        external_account_name=binding.external_account_name,
-        external_avatar_url=binding.external_avatar_url,
-        status=binding.status,
-    )
 
 
 async def _create_pending_state(
