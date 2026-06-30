@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from langchain.schema import Document
 from loguru import logger
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -34,7 +33,6 @@ from app.models import (
     SourceBinding,
     SourceCredential,
     SystemUser,
-    VideoCache,
     VideoTitleOverride,
     Workspace,
 )
@@ -45,10 +43,14 @@ from app.services.ingestion_tasks import (
     update_ingestion_task,
 )
 from app.services.rag_runtime import get_rag_service
+from app.services.knowledge_base_documents import (
+    load_db_fallback_documents as _load_db_fallback_documents,
+    load_scoped_chat_documents as _load_scoped_chat_documents_impl,
+    resolve_request_scope as _resolve_request_scope,
+)
 from app.services.knowledge_base_presenters import (
     dedupe_ints as _dedupe_ints,
     dedupe_strings as _dedupe_strings,
-    nullable_equal as _nullable_equal,
     response_from_knowledge_base as _response,
     search_result_from_document as _search_result,
     source_from_document as _source_from_document,
@@ -75,9 +77,7 @@ from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.services.content_fetcher import ContentFetcher
 from app.services.knowledge_scope import (
-    InvalidKnowledgeScope,
     list_scope_options,
-    resolve_scope_bvids,
 )
 from app.services.knowledge_web_search import (
     FETCH_WEB_PAGE_TOOL,
@@ -125,18 +125,6 @@ WEB_SEARCH_PROGRESS_MARKER = "[[WEB_SEARCH_PROGRESS]]"
 
 def _encode_web_search_progress(content: str) -> str:
     return f"{WEB_SEARCH_PROGRESS_MARKER}{json.dumps(content, ensure_ascii=False)}\n"
-
-
-def _video_cache_matches_favorite():
-    return and_(
-        FavoriteVideo.bvid == VideoCache.bvid,
-        _nullable_equal(FavoriteVideo.workspace_id, VideoCache.workspace_id),
-        _nullable_equal(
-            FavoriteVideo.knowledge_base_id,
-            VideoCache.knowledge_base_id,
-        ),
-        _nullable_equal(FavoriteVideo.source_binding_id, VideoCache.source_binding_id),
-    )
 
 
 class _NoopRAGService:
@@ -387,53 +375,6 @@ async def _resolve_web_search_api_key(
     return credential.api_key if credential else None
 
 
-async def _load_db_fallback_documents(
-    db: AsyncSession,
-    *,
-    knowledge_base_id: int,
-    bvids: list[str] | None,
-    k: int,
-) -> list:
-    stmt = (
-        select(
-            VideoCache.bvid,
-            VideoCache.title,
-            VideoCache.description,
-            VideoCache.content,
-        )
-        .join(FavoriteVideo, _video_cache_matches_favorite())
-        .where(FavoriteVideo.knowledge_base_id == knowledge_base_id)
-        .where(VideoCache.is_processed.is_(True))
-    )
-    if bvids is not None:
-        if not bvids:
-            return []
-        stmt = stmt.where(FavoriteVideo.bvid.in_(bvids))
-    stmt = stmt.limit(max(1, k))
-
-    rows = await db.execute(stmt)
-    documents = []
-    seen_bvids = set()
-    for bvid, title, description, content in rows.fetchall():
-        if not bvid or bvid in seen_bvids:
-            continue
-        text = (content or description or title or "").strip()
-        if not text:
-            continue
-        seen_bvids.add(bvid)
-        documents.append(
-            Document(
-                page_content=text,
-                metadata={
-                    "bvid": bvid,
-                    "title": title or bvid,
-                    "url": f"https://www.bilibili.com/video/{bvid}",
-                },
-            )
-        )
-    return documents
-
-
 async def _load_scoped_chat_documents(
     payload: KnowledgeBaseChatRequest,
     knowledge_base: KnowledgeBase,
@@ -442,60 +383,18 @@ async def _load_scoped_chat_documents(
     *,
     allow_db_fallback: bool = True,
 ) -> list:
-    question = payload.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Question cannot be empty")
-
-    bvids = await _resolve_request_scope(
+    module = sys.modules[__name__]
+    return await _load_scoped_chat_documents_impl(
+        payload,
+        knowledge_base,
+        current_workspace,
         db,
-        knowledge_base_id=knowledge_base.id,
-        folder_ids=payload.folder_ids,
-        bvids=payload.bvids,
+        allow_db_fallback=allow_db_fallback,
+        resolve_request_scope_func=getattr(module, "_resolve_request_scope"),
+        load_db_fallback_documents_func=getattr(module, "_load_db_fallback_documents"),
+        rag_service_factory=getattr(module, "get_rag_service"),
+        warning_logger=logger.warning,
     )
-    k = max(1, min(payload.k, 20))
-    try:
-        documents = get_rag_service().search_in_knowledge_base(
-            question,
-            workspace_id=current_workspace.id,
-            knowledge_base_id=knowledge_base.id,
-            k=k,
-            bvids=bvids,
-        )
-        if documents:
-            return documents
-        return []
-    except Exception as exc:
-        logger.warning(
-            f"知识库向量检索不可用 [{knowledge_base.id}]，回退到数据库内容: {exc}"
-        )
-
-    if not allow_db_fallback:
-        return []
-
-    return await _load_db_fallback_documents(
-        db,
-        knowledge_base_id=knowledge_base.id,
-        bvids=bvids,
-        k=k,
-    )
-
-
-async def _resolve_request_scope(
-    db: AsyncSession,
-    *,
-    knowledge_base_id: int,
-    folder_ids: list[int] | None,
-    bvids: list[str] | None,
-) -> list[str] | None:
-    try:
-        return await resolve_scope_bvids(
-            db,
-            knowledge_base_id=knowledge_base_id,
-            folder_media_ids=folder_ids,
-            requested_bvids=bvids,
-        )
-    except InvalidKnowledgeScope as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[KnowledgeBaseResponse])

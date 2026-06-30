@@ -164,6 +164,39 @@ def test_knowledge_base_router_delegates_message_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_knowledge_base_router_delegates_scoped_document_loading_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_documents.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    expected_service_names = {
+        "video_cache_matches_favorite",
+        "resolve_request_scope",
+        "load_db_fallback_documents",
+        "load_scoped_chat_documents",
+    }
+    router_private_names = {
+        "_video_cache_matches_favorite",
+        "_resolve_request_scope",
+        "_load_db_fallback_documents",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"async def {name}" in service_source
+    assert "from app.services.knowledge_base_documents import" in router_source
+    assert "async def _load_scoped_chat_documents" in router_source
+    assert "load_scoped_chat_documents(" in router_source
+    assert "get_rag_service().search_in_knowledge_base(" not in router_source
+    assert "VideoCache.description" not in router_source
+    assert "resolve_scope_bvids(" not in router_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = get_project_root()
     source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")
