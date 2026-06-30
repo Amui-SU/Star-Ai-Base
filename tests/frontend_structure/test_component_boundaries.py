@@ -291,6 +291,23 @@ def test_auth_demo_preview_is_extracted_from_auth_page():
     assert "setDemoStep" not in auth_page
 
 
+def test_auth_page_form_logic_is_extracted():
+    project_root = get_project_root()
+    auth_page = (project_root / "frontend" / "components" / "AuthPage.tsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert (project_root / "frontend/components/auth/useAuthForm.ts").exists()
+    assert (project_root / "frontend/components/auth/authPageLogic.ts").exists()
+    assert "@/components/auth/useAuthForm" in auth_page
+    assert "@/components/auth/authPageLogic" in auth_page
+    assert "const CODE_COUNTDOWN" not in auth_page
+    assert "const startCountdown" not in auth_page
+    assert "const handleSendCode" not in auth_page
+    assert "const handleRegister" not in auth_page
+    assert "const isLocalhost" not in auth_page
+
+
 def test_sources_video_player_portal_is_extracted():
     project_root = get_project_root()
     sources_panel = (

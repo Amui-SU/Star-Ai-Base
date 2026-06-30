@@ -1,41 +1,55 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect, useRef } from "react";
-import { systemAuthApi, SystemUser } from "@/lib/api";
+import { useEffect, useState } from "react";
+
+import { systemAuthApi, type SystemUser } from "@/lib/api";
 import LocalConnectionSettings from "@/components/LocalConnectionSettings";
 import AuthDemoPreview from "@/components/auth/AuthDemoPreview";
+import {
+  getOAuthUnavailableNotice,
+  isLocalhost,
+  type OAuthProvider,
+} from "@/components/auth/authPageLogic";
+import { useAuthForm } from "@/components/auth/useAuthForm";
 import { useForceDarkTheme } from "@/hooks/useTheme";
 
 interface Props {
   onAuthSuccess: (user: SystemUser) => void;
 }
 
-type Step = "email" | "login" | "register";
-const CODE_COUNTDOWN = 60;
-
-const isLocalhost = (host: string) =>
-  host === "localhost" || host === "127.0.0.1" || host === "[::1]";
-
 export default function AuthPage({ onAuthSuccess }: Props) {
-  const [step, setStep] = useState<Step>("email");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
-  const [sendingCode, setSendingCode] = useState(false);
-  const [codeCountdown, setCodeCountdown] = useState(0);
-  const [codeHint, setCodeHint] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const {
+    step,
+    setStep,
+    email,
+    setEmail,
+    password,
+    setPassword,
+    displayName,
+    setDisplayName,
+    confirmPassword,
+    setConfirmPassword,
+    verificationCode,
+    setVerificationCode,
+    sendingCode,
+    codeCountdown,
+    codeHint,
+    error,
+    setError,
+    submitting,
+    handleSendCode,
+    handleEmailContinue,
+    handleLogin,
+    handleRegister,
+    backToEmail,
+  } = useAuthForm({ onAuthSuccess });
   const [visible, setVisible] = useState(false);
   const [googleLoginSupported] = useState(() => {
     if (typeof window === "undefined") return false;
     return isLocalhost(window.location.hostname);
   });
   const [oauthNotice, setOauthNotice] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useForceDarkTheme();
 
@@ -43,100 +57,6 @@ export default function AuthPage({ onAuthSuccess }: Props) {
     const t = window.setTimeout(() => setVisible(true), 80);
     return () => clearTimeout(t);
   }, []);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, []);
-
-  const startCountdown = () => {
-    setCodeCountdown(CODE_COUNTDOWN);
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setCodeCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current!);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  const handleSendCode = async () => {
-    if (!email.trim()) return setError("请输入邮箱地址");
-    setError(null);
-    setSendingCode(true);
-    try {
-      const resp = await systemAuthApi.sendCode(email.trim());
-      startCountdown();
-      if (resp.code) setCodeHint(`验证码: ${resp.code}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "发送失败");
-    } finally {
-      setSendingCode(false);
-    }
-  };
-
-  // 第一步：输入邮箱 → 进入登录步骤
-  const handleEmailContinue = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) return setError("请输入邮箱地址");
-    setError(null);
-    setStep("login");
-  };
-
-  // 第二步：登录
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!password.trim()) return setError("请输入密码");
-    setError(null);
-    setSubmitting(true);
-    try {
-      const resp = await systemAuthApi.login({ email: email.trim(), password });
-      onAuthSuccess(resp.user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "登录失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // 第二步：注册
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!displayName.trim()) return setError("请填写显示名称");
-    if (!verificationCode.trim()) return setError("请输入验证码");
-    if (!password.trim()) return setError("请输入密码");
-    if (password !== confirmPassword) return setError("两次输入的密码不一致");
-    setError(null);
-    setSubmitting(true);
-    try {
-      const resp = await systemAuthApi.register({
-        email: email.trim(),
-        password,
-        display_name: displayName.trim(),
-        code: verificationCode.trim(),
-      });
-      onAuthSuccess(resp.user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "注册失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const backToEmail = () => {
-    setStep("email");
-    setPassword("");
-    setDisplayName("");
-    setConfirmPassword("");
-    setVerificationCode("");
-    setCodeHint(null);
-    setError(null);
-    setCodeCountdown(0);
-  };
 
   const inputStyle: React.CSSProperties = {
     width: "100%",
@@ -163,21 +83,19 @@ export default function AuthPage({ onAuthSuccess }: Props) {
     cursor: "pointer",
     transition: "all .2s",
   };
-  const oauthButtons = [
+  const oauthButtons: { provider: OAuthProvider; label: string }[] = [
     {
-      provider: "google" as const,
+      provider: "google",
       label: "Google",
     },
     {
-      provider: "wechat" as const,
+      provider: "wechat",
       label: "WeChat",
     },
-    { provider: "qq" as const, label: "QQ" },
+    { provider: "qq", label: "QQ" },
   ];
 
-  const renderOAuthIcon = (
-    provider: (typeof oauthButtons)[number]["provider"],
-  ) => {
+  const renderOAuthIcon = (provider: OAuthProvider) => {
     if (provider === "google") {
       return (
         <svg
@@ -245,21 +163,16 @@ export default function AuthPage({ onAuthSuccess }: Props) {
     );
   };
 
-  const isOAuthAvailable = (
-    provider: (typeof oauthButtons)[number]["provider"],
-  ) => provider === "google" && googleLoginSupported;
+  const isOAuthAvailable = (provider: OAuthProvider) =>
+    provider === "google" && googleLoginSupported;
 
   const handleOAuthClick = (
     event: React.MouseEvent<HTMLAnchorElement>,
-    provider: (typeof oauthButtons)[number]["provider"],
+    provider: OAuthProvider,
   ) => {
     if (isOAuthAvailable(provider)) return;
     event.preventDefault();
-    setOauthNotice(
-      provider === "google"
-        ? "Google login requires an HTTPS public callback. Use email login in local mobile preview."
-        : "WeChat and QQ login are not configured yet. Use email login for now.",
-    );
+    setOauthNotice(getOAuthUnavailableNotice(provider));
   };
 
   const oauthButtonStyle: React.CSSProperties = {
