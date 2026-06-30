@@ -66,22 +66,19 @@ from app.services.system_auth_oauth import (
     verify_oauth_state as _verify_oauth_state,
 )
 from app.services.system_auth_oauth_flow import (
-    GOOGLE_TOKEN_URL,
-    GOOGLE_USERINFO_URL,
-    QQ_ME_URL,
-    QQ_TOKEN_URL,
-    QQ_USERINFO_URL,
-    WECHAT_TOKEN_URL,
-    WECHAT_USERINFO_URL,
     build_google_login_redirect as _build_google_login_redirect,
     build_qq_login_redirect as _build_qq_login_redirect,
     build_wechat_login_redirect as _build_wechat_login_redirect,
-    google_redirect_uri as _google_redirect_uri,
     qq_redirect_uri as _qq_redirect_uri,
     redirect_with_oauth_session as _redirect_with_oauth_session,
     upsert_oauth_user as _upsert_oauth_user,
     validate_oauth_callback_state as _validate_oauth_callback_state,
     wechat_redirect_uri as _wechat_redirect_uri,
+)
+from app.services.system_auth_oauth_providers import (
+    fetch_google_oauth_user as _fetch_google_oauth_user,
+    fetch_qq_oauth_user as _fetch_qq_oauth_user,
+    fetch_wechat_oauth_user as _fetch_wechat_oauth_user,
 )
 from app.services.system_auth_sessions import (
     create_system_session as _create_system_session,
@@ -443,43 +440,16 @@ async def wechat_callback(
     state_data = await _validate_oauth_callback_state(request, state)
 
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, connect=15.0),
-            proxy=settings.http_proxy.strip() or None,
-        ) as client:
-            token_resp = await client.get(
-                WECHAT_TOKEN_URL,
-                params={
-                    "appid": settings.wechat_client_id,
-                    "secret": settings.wechat_client_secret,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                },
-            )
-            token_data = token_resp.json()
-            access_token = token_data.get("access_token")
-            openid = token_data.get("openid")
-            if token_resp.status_code != 200 or not access_token or not openid:
-                raise HTTPException(
-                    status_code=400, detail="WeChat token exchange failed"
-                )
-
-            user_resp = await client.get(
-                WECHAT_USERINFO_URL,
-                params={
-                    "access_token": access_token,
-                    "openid": openid,
-                    "lang": "zh_CN",
-                },
-            )
-            user_info = user_resp.json()
-            if user_resp.status_code != 200:
-                raise HTTPException(status_code=400, detail="WeChat user info failed")
+        oauth_user = await _fetch_wechat_oauth_user(
+            code, async_client_factory=httpx.AsyncClient
+        )
     except httpx.HTTPError as e:
         raise _oauth_network_error("WeChat", e) from e
     except HTTPException:
         raise
 
+    openid = oauth_user["openid"]
+    user_info = oauth_user["user_info"]
     external_id = user_info.get("openid") or openid
     user = await _upsert_oauth_user(
         db,
@@ -512,52 +482,18 @@ async def qq_callback(
     state_data = await _validate_oauth_callback_state(request, state)
 
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, connect=15.0),
-            proxy=settings.http_proxy.strip() or None,
-        ) as client:
-            token_resp = await client.get(
-                QQ_TOKEN_URL,
-                params={
-                    "grant_type": "authorization_code",
-                    "client_id": settings.qq_client_id,
-                    "client_secret": settings.qq_client_secret,
-                    "code": code,
-                    "redirect_uri": state_data.get("redirect_uri")
-                    or _qq_redirect_uri(),
-                    "fmt": "json",
-                },
-            )
-            token_data = token_resp.json()
-            access_token = token_data.get("access_token")
-            if token_resp.status_code != 200 or not access_token:
-                raise HTTPException(status_code=400, detail="QQ token exchange failed")
-
-            me_resp = await client.get(
-                QQ_ME_URL, params={"access_token": access_token, "fmt": "json"}
-            )
-            me_data = me_resp.json()
-            openid = me_data.get("openid")
-            if me_resp.status_code != 200 or not openid:
-                raise HTTPException(status_code=400, detail="QQ openid fetch failed")
-
-            user_resp = await client.get(
-                QQ_USERINFO_URL,
-                params={
-                    "access_token": access_token,
-                    "oauth_consumer_key": settings.qq_client_id,
-                    "openid": openid,
-                    "fmt": "json",
-                },
-            )
-            user_info = user_resp.json()
-            if user_resp.status_code != 200 or user_info.get("ret", 0) != 0:
-                raise HTTPException(status_code=400, detail="QQ user info failed")
+        oauth_user = await _fetch_qq_oauth_user(
+            code,
+            state_data,
+            async_client_factory=httpx.AsyncClient,
+        )
     except httpx.HTTPError as e:
         raise _oauth_network_error("QQ", e) from e
     except HTTPException:
         raise
 
+    openid = oauth_user["openid"]
+    user_info = oauth_user["user_info"]
     user = await _upsert_oauth_user(
         db,
         "qq",
@@ -592,49 +528,13 @@ async def google_callback(
 
     # 校验 state（自包含签名，无需服务端存储）
     state_data = await _validate_oauth_callback_state(request, state)
-    httpx_timeout = httpx.Timeout(30.0, connect=15.0)
-    proxy = settings.http_proxy.strip() or None
-
-    # 自动检测 Windows 系统代理（浏览器用的那个）
-    if not proxy:
-        try:
-            from urllib.request import getproxies
-
-            sys_proxy = getproxies().get("https") or getproxies().get("http") or ""
-            if sys_proxy and sys_proxy.startswith("http"):
-                proxy = sys_proxy
-        except Exception:
-            pass
 
     try:
-        async with httpx.AsyncClient(timeout=httpx_timeout, proxy=proxy) as client:
-            # 用 code 换 token
-            token_resp = await client.post(
-                GOOGLE_TOKEN_URL,
-                data={
-                    "client_id": settings.google_client_id,
-                    "client_secret": settings.google_client_secret,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": state_data.get("redirect_uri")
-                    or _google_redirect_uri(),
-                },
-            )
-            if token_resp.status_code != 200:
-                raise HTTPException(status_code=400, detail="Google 令牌交换失败")
-            token_data = token_resp.json()
-            access_token = token_data.get("access_token")
-            if not access_token:
-                raise HTTPException(status_code=400, detail="未能获取 Google 访问令牌")
-
-            # 获取用户信息
-            user_resp = await client.get(
-                GOOGLE_USERINFO_URL,
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            if user_resp.status_code != 200:
-                raise HTTPException(status_code=400, detail="获取 Google 用户信息失败")
-            user_info = user_resp.json()
+        user_info = await _fetch_google_oauth_user(
+            code,
+            state_data,
+            async_client_factory=httpx.AsyncClient,
+        )
     except httpx.HTTPError as e:
         raise _oauth_network_error("Google", e) from e
     except HTTPException:

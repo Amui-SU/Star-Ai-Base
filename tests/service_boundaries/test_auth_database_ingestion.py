@@ -107,6 +107,41 @@ def test_system_auth_router_delegates_oauth_flow_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_system_auth_router_delegates_oauth_provider_network_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_oauth_providers.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+
+    expected_service_names = {
+        "fetch_google_oauth_user",
+        "fetch_wechat_oauth_user",
+        "fetch_qq_oauth_user",
+        "oauth_system_proxy_url",
+    }
+    provider_url_names = {
+        "GOOGLE_TOKEN_URL",
+        "GOOGLE_USERINFO_URL",
+        "WECHAT_TOKEN_URL",
+        "WECHAT_USERINFO_URL",
+        "QQ_TOKEN_URL",
+        "QQ_ME_URL",
+        "QQ_USERINFO_URL",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"async def {name}" in service_source
+    assert "from app.services.system_auth_oauth_providers import" in router_source
+    assert "_fetch_google_oauth_user(" in router_source
+    assert "_fetch_wechat_oauth_user(" in router_source
+    assert "_fetch_qq_oauth_user(" in router_source
+    for name in provider_url_names:
+        assert name not in router_source
+
+
 def test_system_auth_router_delegates_email_code_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/system_auth_codes.py"
