@@ -2,7 +2,6 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -17,8 +16,12 @@ from app.models import (
     SystemDisplayNameUpdateRequest,
     SystemLoginRequest,
     SystemRegisterRequest,
-    SystemSession,
     SystemUserResponse,
+)
+from app.services.system_auth_account import (
+    current_system_user_response,
+    logout_system_user,
+    update_system_display_name,
 )
 from app.services.system_auth_admin import (
     get_current_admin_user as _get_current_admin_user,
@@ -75,16 +78,6 @@ from app.services.system_auth_oauth_providers import (
     fetch_qq_oauth_user as _fetch_qq_oauth_user,
     fetch_wechat_oauth_user as _fetch_wechat_oauth_user,
 )
-from app.services.system_auth_sessions import (
-    get_current_user as _get_current_user,
-    session_token_from_request as _session_token_from_request,
-)
-from app.services.system_auth_responses import user_response as _user_response
-from app.security import (
-    clear_session_cookie,
-    hash_token,
-)
-from app.time_utils import utc_now_naive
 
 router = APIRouter(prefix="/system-auth", tags=["系统认证"])
 
@@ -133,20 +126,7 @@ async def logout(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    token = _session_token_from_request(request)
-    if token:
-        result = await db.execute(
-            select(SystemSession).where(
-                SystemSession.session_token_hash == hash_token(token)
-            )
-        )
-        session = result.scalar_one_or_none()
-        if session is not None and session.revoked_at is None:
-            session.revoked_at = utc_now_naive()
-            await db.commit()
-
-    clear_session_cookie(response)
-    return {"message": "已退出登录"}
+    return await logout_system_user(db, request=request, response=response)
 
 
 @router.get("/me", response_model=SystemUserResponse)
@@ -154,8 +134,7 @@ async def me(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> SystemUserResponse:
-    user = await _get_current_user(request, db)
-    return await _user_response(db, user)
+    return await current_system_user_response(db, request=request)
 
 
 @router.put("/me/display-name", response_model=SystemUserResponse)
@@ -164,17 +143,7 @@ async def update_display_name(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> SystemUserResponse:
-    user = await _get_current_user(request, db)
-    display_name = payload.display_name.strip()
-    if not display_name:
-        raise HTTPException(status_code=400, detail="用户名不能为空")
-    if len(display_name) > 100:
-        raise HTTPException(status_code=400, detail="用户名不能超过 100 个字符")
-
-    user.display_name = display_name
-    await db.commit()
-    await db.refresh(user)
-    return await _user_response(db, user)
+    return await update_system_display_name(db, payload=payload, request=request)
 
 
 @router.get("/admin/users", response_model=AdminUserListResponse)

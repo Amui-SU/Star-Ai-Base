@@ -236,11 +236,41 @@ def test_system_auth_router_delegates_login_flow_to_service():
     assert "SystemAuthResponse(" not in router_source
 
 
+def test_system_auth_router_delegates_account_flows_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_account.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def logout_system_user" in service_source
+    assert "async def current_system_user_response" in service_source
+    assert "async def update_system_display_name" in service_source
+    assert "from app.services.system_auth_account import" in router_source
+    assert "logout_system_user(" in router_source
+    assert "current_system_user_response(" in router_source
+    assert "update_system_display_name(" in router_source
+    assert "select(SystemSession)" not in router_source
+    assert "hash_token(" not in router_source
+    assert "clear_session_cookie(" not in router_source
+    assert "session.revoked_at" not in router_source
+    assert "user.display_name =" not in router_source
+    assert "await db.refresh(user)" not in router_source
+
+
 def test_system_auth_router_delegates_session_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/system_auth_sessions.py"
+    account_service_path = project_root / "app/services/system_auth_account.py"
     router_source = (project_root / "app/routers/system_auth.py").read_text(
         encoding="utf-8"
+    )
+    account_service_source = (
+        account_service_path.read_text(encoding="utf-8")
+        if account_service_path.exists()
+        else ""
     )
     declared_names = declared_callable_names(router_source)
 
@@ -261,7 +291,9 @@ def test_system_auth_router_delegates_session_helpers_to_service():
     service_source = service_path.read_text(encoding="utf-8")
     for name in expected_service_names:
         assert f"def {name}" in service_source or f"async def {name}" in service_source
-    assert "from app.services.system_auth_sessions import" in router_source
+    assert "from app.services.system_auth_sessions import" in (
+        router_source + account_service_source
+    )
     assert declared_names.isdisjoint(router_private_names)
 
 
