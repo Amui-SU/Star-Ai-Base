@@ -36,13 +36,14 @@ from app.models import (
     VideoTitleOverride,
     Workspace,
 )
-from app.services.folder_ingestion import sync_folder as _sync_folder
 from app.services.ingestion_tasks import (
-    build_status_payload,
     create_ingestion_task,
-    update_ingestion_task,
 )
 from app.services.rag_runtime import get_rag_service
+from app.services.knowledge_base_build_tasks import (
+    get_build_status_payload,
+    run_scoped_build as _run_scoped_build,
+)
 from app.services.knowledge_base_documents import (
     load_db_fallback_documents as _load_db_fallback_documents,
     load_scoped_chat_documents as _load_scoped_chat_documents_impl,
@@ -583,78 +584,6 @@ async def build_knowledge_base(
     )
 
 
-async def _run_scoped_build(
-    task_id: str,
-    bili: BilibiliService,
-    rag,
-    content_fetcher: ContentFetcher,
-    folder_ids: list[int],
-    video_folder_ids: list[int] | None,
-    include_bvids: set[str] | None,
-    exclude_bvids: set[str],
-    workspace_id: int,
-    knowledge_base_id: int,
-    source_binding_id: int,
-):
-    """后台执行知识库构建任务，通过 IngestionTask 持久化状态。"""
-    from app.database import get_db_context
-
-    try:
-        await update_ingestion_task(
-            task_id, status="running", current_step="同步收藏夹..."
-        )
-
-        async with get_db_context() as db:
-            full_folder_ids = _dedupe_ints(folder_ids)
-            full_folder_set = set(full_folder_ids)
-            partial_folder_ids = [
-                folder_id
-                for folder_id in _dedupe_ints(video_folder_ids)
-                if folder_id not in full_folder_set
-            ]
-            steps = [(folder_id, None) for folder_id in full_folder_ids]
-            if include_bvids:
-                steps.extend(
-                    (folder_id, include_bvids) for folder_id in partial_folder_ids
-                )
-
-            total_folders = len(steps) or 1
-            for idx, (folder_id, folder_include_bvids) in enumerate(steps, start=1):
-                await update_ingestion_task(
-                    task_id,
-                    current_step=f"同步收藏夹 {folder_id} ({idx}/{total_folders})",
-                    progress=int((idx - 1) / total_folders * 100),
-                )
-
-                await _sync_folder(
-                    db=db,
-                    bili=bili,
-                    rag=rag,
-                    content_fetcher=content_fetcher,
-                    session_id="",
-                    folder_id=folder_id,
-                    exclude_bvids=exclude_bvids,
-                    include_bvids=folder_include_bvids,
-                    workspace_id=workspace_id,
-                    knowledge_base_id=knowledge_base_id,
-                    source_binding_id=source_binding_id,
-                )
-
-        await update_ingestion_task(
-            task_id,
-            status="completed",
-            progress=100,
-            current_step="完成",
-        )
-    except Exception as e:
-        logger.error(f"构建任务失败 [{task_id}]: {e}")
-        await update_ingestion_task(
-            task_id, status="failed", error_message=str(e), current_step="失败"
-        )
-    finally:
-        await bili.close()
-
-
 @router.get("/{knowledge_base_id}/build/status/{task_id}")
 async def get_build_status(
     task_id: str,
@@ -662,15 +591,11 @@ async def get_build_status(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """获取构建任务状态（按知识库校验）。"""
-    result = await db.execute(
-        select(IngestionTask).where(IngestionTask.task_id == task_id)
+    return await get_build_status_payload(
+        db,
+        task_id=task_id,
+        knowledge_base=knowledge_base,
     )
-    task = result.scalar_one_or_none()
-    if task is None:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    if task.knowledge_base_id != knowledge_base.id:
-        raise HTTPException(status_code=404, detail="任务不属于当前知识库")
-    return build_status_payload(task)
 
 
 @router.post("/{knowledge_base_id}/search", response_model=KnowledgeBaseSearchResponse)

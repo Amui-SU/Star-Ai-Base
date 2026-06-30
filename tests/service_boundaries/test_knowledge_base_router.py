@@ -197,6 +197,37 @@ def test_knowledge_base_router_delegates_scoped_document_loading_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_knowledge_base_router_delegates_build_task_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_build_tasks.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    expected_service_names = {
+        "run_scoped_build",
+        "get_build_status_payload",
+    }
+    router_private_names = {
+        "_run_scoped_build_impl",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"async def {name}" in service_source
+    assert "from app.services.knowledge_base_build_tasks import" in router_source
+    assert "async def _run_scoped_build(" not in router_source
+    assert "await _sync_folder(" not in router_source
+    assert 'current_step="同步收藏夹..."' not in router_source
+    assert (
+        "select(IngestionTask).where(IngestionTask.task_id == task_id)"
+        not in router_source
+    )
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = get_project_root()
     source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")
