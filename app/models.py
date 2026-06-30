@@ -13,6 +13,23 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
+from app.schemas.api_accounts import (
+    ApiAccountCreateRequest,
+    ApiAccountResponse,
+    ApiAccountUpdateRequest,
+)
+from app.schemas.auth import (
+    AdminPasswordResetResponse,
+    AdminUserListResponse,
+    AdminUserResponse,
+    AdminUserStatusUpdateRequest,
+    SystemAuthResponse,
+    SystemDisplayNameUpdateRequest,
+    SystemLoginRequest,
+    SystemRegisterRequest,
+    SystemUserResponse,
+    WorkspaceResponse,
+)
 from app.time_utils import utc_now
 
 
@@ -461,96 +478,6 @@ class ContentSource(str, Enum):
     SUBTITLE = "subtitle"
     BASIC_INFO = "basic_info"
     ASR = "asr"
-
-
-class SystemRegisterRequest(BaseModel):
-    email: str
-    password: str
-    display_name: str
-    code: str
-
-
-class SystemLoginRequest(BaseModel):
-    email: str
-    password: str
-
-
-class SystemDisplayNameUpdateRequest(BaseModel):
-    display_name: str
-
-
-class SystemUserResponse(BaseModel):
-    id: int
-    email: str
-    display_name: str
-    avatar_url: Optional[str] = None
-    status: str = "active"
-    is_admin: bool = False
-
-
-class AdminUserResponse(SystemUserResponse):
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-
-class AdminUserListResponse(BaseModel):
-    users: list[AdminUserResponse]
-
-
-class AdminUserStatusUpdateRequest(BaseModel):
-    status: str
-
-
-class AdminPasswordResetResponse(BaseModel):
-    user: AdminUserResponse
-    temporary_password: str
-
-
-class ApiAccountCreateRequest(BaseModel):
-    provider: str
-    display_name: Optional[str] = None
-    api_key: str
-    base_url: Optional[str] = None
-    model: Optional[str] = None
-    thinking_config: Optional[dict] = None
-    is_default: bool = False
-
-
-class ApiAccountUpdateRequest(BaseModel):
-    display_name: Optional[str] = None
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
-    model: Optional[str] = None
-    thinking_config: Optional[dict] = None
-    enabled: Optional[bool] = None
-    is_default: Optional[bool] = None
-
-
-class ApiAccountResponse(BaseModel):
-    id: int
-    provider: str
-    provider_label: str
-    display_name: str
-    base_url: str
-    model: str
-    thinking_config: dict = {}
-    enabled: bool
-    is_default: bool
-    configured: bool = True
-    last_validated_at: Optional[datetime] = None
-    last_error: Optional[str] = None
-
-
-class WorkspaceResponse(BaseModel):
-    id: int
-    name: str
-    role: str
-
-
-class SystemAuthResponse(BaseModel):
-    user: SystemUserResponse
-    workspace: WorkspaceResponse
-    session_token: Optional[str] = None
 
 
 class KnowledgeBaseCreateRequest(BaseModel):
