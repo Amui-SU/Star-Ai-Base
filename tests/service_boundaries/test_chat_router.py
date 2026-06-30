@@ -229,3 +229,17 @@ def test_chat_router_delegates_video_context_helpers_to_service():
     assert "FavoriteFolder.updated_at.desc()" not in chat_source
     assert "FavoriteVideo.folder_id == FavoriteFolder.id" not in chat_source
     assert declared_names.isdisjoint(router_private_names)
+
+
+def test_chat_router_delegates_message_preparation_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/chat_message_preparation.py"
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def prepare_chat_messages" in service_source
+    assert "from app.services.chat_message_preparation import" in chat_source
+    assert "rag.search(question, k=5" not in chat_source
+    assert "route, route_raw = _route_with_llm(" not in chat_source
+    assert "context_parts, sources, seen_bvids = [], [], set()" not in chat_source

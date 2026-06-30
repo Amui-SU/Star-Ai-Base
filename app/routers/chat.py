@@ -86,6 +86,7 @@ from app.services.chat_video_context import (
     get_video_titles_context as _get_video_titles_context,
     is_related_to_collection as _is_related_to_collection,
 )
+from app.services.chat_message_preparation import prepare_chat_messages
 from app.services.rag_runtime import get_rag_service, reset_rag_service
 
 router = APIRouter(prefix="/chat", tags=["对话"])
@@ -562,138 +563,30 @@ async def _prepare_messages(
     request: ChatRequest, db: AsyncSession
 ) -> tuple[list[dict], List[dict], str]:
     """准备 LLM 消息与来源信息"""
-    question = request.question.strip()
-    rag = get_rag_service()
-    folder_ids = []
-    if request.session_id:
-        folder_ids = await _get_folder_ids_for_session(
-            db, request.session_id, request.folder_ids
-        )
-        logger.info(f"Session: {request.session_id}, 关联 FolderIDs: {folder_ids}")
-    bvids = await _get_bvids_by_folder_ids(db, folder_ids) if folder_ids else []
-    has_data = len(bvids) > 0
-    is_collection_intent = _is_collection_intent(question)
-    is_general = _is_general_question(question)
-    if request.folder_ids:
-        is_collection_intent = True
-    # 1) LLM 路由优先，失败时降级规则路由
-    logger.info(
-        f"路由输入: question={question} folder_ids={folder_ids} has_data={has_data} is_collection_intent={is_collection_intent}"
-    )
-    route, route_raw = _route_with_llm(
-        question,
+    return await prepare_chat_messages(
+        request,
+        db,
+        get_folder_ids=_get_folder_ids_for_session,
+        get_bvids=_get_bvids_by_folder_ids,
+        check_related=_is_related_to_collection,
+        load_video_context=_get_video_context,
+        load_video_titles_context=_get_video_titles_context,
+        get_rag=get_rag_service,
+        collection_intent_detector=_is_collection_intent,
+        general_question_detector=_is_general_question,
+        llm_router=_route_with_llm,
+        rules_router=_route_with_rules,
+        doc_filter=_filter_docs_by_keywords,
+        build_fallback=_build_fallback_messages,
+        build_direct=_build_direct_messages,
+        build_direct_with_context=_build_direct_messages_with_context,
+        build_db_list=_build_db_list_messages,
+        build_db_summary=_build_db_summary_messages,
+        build_rag=_build_rag_messages,
         resolve_llm_config=_resolve_llm_config,
         get_llm_client=_get_llm_client,
+        log_info=logger.info,
         log_warning=logger.warning,
-    )
-    route_source = "LLM"
-    related: Optional[bool] = None
-    if not route:
-        related = await _is_related_to_collection(db, folder_ids, question)
-        route = _route_with_rules(question, is_collection_intent, related)
-        route_source = "RULE"
-    logger.info(f"路由策略: {route_source} => {route}")
-    # 纠偏
-    if is_general:
-        route = "direct"
-    # 2) 无数据时处理
-    if not has_data:
-        if is_collection_intent:
-            context, sources = await _get_video_context(
-                db, folder_ids, include_content=False, limit=50
-            )
-            if not context:
-                context = "（暂无已入库的视频信息，请提醒用户可能需要先进行入库操作）"
-            messages = _build_fallback_messages(context, question)
-            return messages, sources, question
-        messages = _build_direct_messages(question)
-        return messages, [], question
-    # 3) 直接回答
-    if route == "direct":
-        title_context = await _get_video_titles_context(db, folder_ids, limit=50)
-        messages = (
-            _build_direct_messages_with_context(title_context, question)
-            if title_context
-            else _build_direct_messages(question)
-        )
-        return messages, [], question
-    # 4) 列表类问题
-    if route == "db_list":
-        if related is None:
-            related = await _is_related_to_collection(db, folder_ids, question)
-        if not related and not is_collection_intent:
-            return _build_direct_messages(question), [], question
-        context, sources = await _get_video_context(
-            db, folder_ids, include_content=False, limit=50
-        )
-        if not context:
-            return (
-                _build_fallback_messages("（暂无信息，请入库）", question),
-                sources,
-                question,
-            )
-        return _build_db_list_messages(context, question), sources, question
-    # 5) 总结类问题
-    if route == "db_content":
-        if related is None:
-            related = await _is_related_to_collection(db, folder_ids, question)
-        if not related and not is_collection_intent:
-            return _build_direct_messages(question), [], question
-        context, sources = await _get_video_context(
-            db, folder_ids, include_content=True, limit=None
-        )
-        if not context:
-            return (
-                _build_fallback_messages("（暂无信息，请入库）", question),
-                sources,
-                question,
-            )
-        return _build_db_summary_messages(context, question), sources, question
-    # 6) 检查相关性
-    if related is None:
-        related = await _is_related_to_collection(db, folder_ids, question)
-    if not related and not is_collection_intent:
-        return _build_direct_messages(question), [], question
-    # 7) 向量检索
-    docs = []
-    try:
-        docs = rag.search(question, k=5, bvids=bvids if bvids else None)
-    except Exception as e:
-        logger.warning(f"向量检索失败: {e}")
-    if docs:
-        filtered_docs = _filter_docs_by_keywords(docs, question)
-        docs = filtered_docs if filtered_docs else docs
-        context_parts, sources, seen_bvids = [], [], set()
-        for doc in docs:
-            bvid, title, content = (
-                doc.metadata.get("bvid", ""),
-                doc.metadata.get("title", ""),
-                doc.page_content.strip(),
-            )
-            if content:
-                context_parts.append(f"【{title}】\n{content}")
-            if bvid and bvid not in seen_bvids:
-                seen_bvids.add(bvid)
-                sources.append(
-                    {
-                        "bvid": bvid,
-                        "title": title,
-                        "url": f"https://www.bilibili.com/video/{bvid}",
-                    }
-                )
-        return (
-            _build_rag_messages("\n\n---\n\n".join(context_parts), question),
-            sources,
-            question,
-        )
-    # 兜底
-    context, sources = await _get_video_context(
-        db, folder_ids, include_content=False, limit=50
-    )
-    return (
-        _build_fallback_messages(context or "（暂无入库信息）", question),
-        sources,
-        question,
     )
 
 
