@@ -249,6 +249,27 @@ def test_knowledge_base_router_delegates_build_task_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_knowledge_base_router_delegates_build_request_preparation_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_build_requests.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "class KnowledgeBaseBuildPlan" in service_source
+    assert "async def prepare_knowledge_base_build_request" in service_source
+    assert "from app.services.knowledge_base_build_requests import" in router_source
+    assert "prepare_knowledge_base_build_request(" in router_source
+    assert "db.get(SourceBinding" not in router_source
+    assert "select(SourceCredential)" not in router_source
+    assert "decrypt_text(" not in router_source
+    assert "create_ingestion_task(" not in router_source
+    assert "bilibili_service_from_cookies(" not in router_source
+    assert "KnowledgeBaseBuildResponse(" not in router_source
+
+
 def test_knowledge_base_router_delegates_stats_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_base_stats.py"

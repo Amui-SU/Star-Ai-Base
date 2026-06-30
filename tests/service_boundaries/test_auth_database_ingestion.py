@@ -361,6 +361,9 @@ def test_ingestion_task_persistence_and_status_mapping_live_in_service():
     build_tasks_source = (
         project_root / "app/services/knowledge_base_build_tasks.py"
     ).read_text(encoding="utf-8")
+    build_requests_source = (
+        project_root / "app/services/knowledge_base_build_requests.py"
+    ).read_text(encoding="utf-8")
     knowledge_bases_source = (
         project_root / "app/routers/knowledge_bases.py"
     ).read_text(encoding="utf-8")
@@ -369,11 +372,13 @@ def test_ingestion_task_persistence_and_status_mapping_live_in_service():
     assert "async def create_ingestion_task" in service_source
     assert "async def update_ingestion_task" in service_source
     assert "from app.services.ingestion_tasks import" in imports_source
-    assert "from app.services.ingestion_tasks import" in knowledge_bases_source
+    assert "from app.services.ingestion_tasks import" in build_requests_source
     assert "async def _create_import_task" not in imports_source
     assert "async def _update_import_task" not in imports_source
     assert "async def _update_task" not in knowledge_bases_source
     assert "update_ingestion_task(" in imports_source
+    assert "create_ingestion_task(" in build_requests_source
+    assert "create_ingestion_task(" not in knowledge_bases_source
     assert "update_task: TaskUpdater = update_ingestion_task" in build_tasks_source
     assert "return build_status_payload(task)" in build_tasks_source
     assert '"processed_videos": task.processed_items' not in knowledge_bases_source

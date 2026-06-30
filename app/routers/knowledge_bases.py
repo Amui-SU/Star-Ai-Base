@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from sqlalchemy import or_, select
+from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -26,18 +26,16 @@ from app.models import (
     KnowledgeBaseSearchRequest,
     KnowledgeBaseSearchResponse,
     KnowledgeScopeOptionsResponse,
-    SourceBinding,
-    SourceCredential,
     SystemUser,
     Workspace,
-)
-from app.services.ingestion_tasks import (
-    create_ingestion_task,
 )
 from app.services.rag_runtime import get_rag_service
 from app.services.knowledge_base_catalog import (
     create_workspace_knowledge_base,
     list_workspace_knowledge_bases,
+)
+from app.services.knowledge_base_build_requests import (
+    prepare_knowledge_base_build_request,
 )
 from app.services.knowledge_base_build_tasks import (
     get_build_status_payload,
@@ -50,8 +48,6 @@ from app.services.knowledge_base_documents import (
     resolve_request_scope as _resolve_request_scope,
 )
 from app.services.knowledge_base_presenters import (
-    dedupe_ints as _dedupe_ints,
-    dedupe_strings as _dedupe_strings,
     source_from_document as _source_from_document,
     supports_keyword_argument as _supports_keyword_argument,
 )
@@ -73,9 +69,8 @@ from app.routers.chat import (
     _resolve_llm_config,
     _stream_llm_events,
 )
-from app.security import decrypt_text
 from app.services.asr import ASRService
-from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
+from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
 from app.services.knowledge_scope import (
     list_scope_options,
@@ -451,75 +446,24 @@ async def build_knowledge_base(
     knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
     db: AsyncSession = Depends(get_db),
 ) -> KnowledgeBaseBuildResponse:
-    binding = await db.get(SourceBinding, payload.source_binding_id)
-    if (
-        binding is None
-        or binding.user_id != current_user.id
-        or binding.workspace_id != current_workspace.id
-        or binding.status != "active"
-    ):
-        raise HTTPException(status_code=404, detail="Source binding not found")
-
-    folder_ids = _dedupe_ints(payload.folder_ids)
-    video_folder_ids = _dedupe_ints(payload.video_folder_ids)
-    include_bvids = set(_dedupe_strings(payload.bvids))
-
-    if not folder_ids and not (video_folder_ids and include_bvids):
-        raise HTTPException(status_code=400, detail="folder_ids cannot be empty")
-
-    # 获取加密凭据
-    cred_result = await db.execute(
-        select(SourceCredential)
-        .where(SourceCredential.source_binding_id == binding.id)
-        .where(SourceCredential.revoked_at.is_(None))
-        .order_by(SourceCredential.id.desc())
-    )
-    credential = cred_result.scalars().first()
-    if credential is None:
-        raise HTTPException(status_code=400, detail="内容源凭据不存在或已失效")
-
-    try:
-        cred_payload = json.loads(decrypt_text(credential.encrypted_payload))
-    except Exception:
-        raise HTTPException(status_code=500, detail="凭据解密失败")
-
-    task_id = await create_ingestion_task(
+    plan = await prepare_knowledge_base_build_request(
         db,
-        workspace_id=current_workspace.id,
-        knowledge_base_id=knowledge_base.id,
-        source_binding_id=binding.id,
-        user_id=current_user.id,
-        current_step="初始化中...",
+        payload=payload,
+        user=current_user,
+        workspace=current_workspace,
+        knowledge_base=knowledge_base,
+        bilibili_service_class=BilibiliService,
+        asr_service_factory=ASRService,
+        content_fetcher_class=ContentFetcher,
+        rag_service_factory=_get_rag_service_for_build,
     )
-
-    bili = bilibili_service_from_cookies(cred_payload, BilibiliService)
-    asr_service = ASRService()
-    content_fetcher = ContentFetcher(bili, asr_service)
-    rag = _get_rag_service_for_build()
-    exclude_bvids = set(payload.exclude_bvids) if payload.exclude_bvids else set()
 
     background_tasks.add_task(
         _run_scoped_build,
-        task_id=task_id,
-        bili=bili,
-        rag=rag,
-        content_fetcher=content_fetcher,
-        folder_ids=folder_ids,
-        video_folder_ids=video_folder_ids,
-        include_bvids=include_bvids,
-        exclude_bvids=exclude_bvids,
-        workspace_id=current_workspace.id,
-        knowledge_base_id=knowledge_base.id,
-        source_binding_id=binding.id,
+        **plan.task_kwargs,
     )
 
-    return KnowledgeBaseBuildResponse(
-        task_id=task_id,
-        status="pending",
-        workspace_id=current_workspace.id,
-        knowledge_base_id=knowledge_base.id,
-        source_binding_id=binding.id,
-    )
+    return plan.response
 
 
 @router.get("/{knowledge_base_id}/build/status/{task_id}")
