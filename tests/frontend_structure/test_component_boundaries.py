@@ -308,6 +308,23 @@ def test_auth_page_form_logic_is_extracted():
     assert "const isLocalhost" not in auth_page
 
 
+def test_auth_page_presentation_components_are_extracted():
+    project_root = get_project_root()
+    auth_page = (project_root / "frontend" / "components" / "AuthPage.tsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert (project_root / "frontend/components/auth/AuthCard.tsx").exists()
+    assert (project_root / "frontend/components/auth/AuthOAuthButtons.tsx").exists()
+    assert "@/components/auth/AuthCard" in auth_page
+    assert "@/components/auth/AuthOAuthButtons" not in auth_page
+    assert "renderOAuthIcon" not in auth_page
+    assert "auth-oauth-grid" not in auth_page
+    assert "handleRegister" not in auth_page
+    assert "handleSendCode" not in auth_page
+    assert "auth-code-row" not in auth_page
+
+
 def test_sources_video_player_portal_is_extracted():
     project_root = get_project_root()
     sources_panel = (

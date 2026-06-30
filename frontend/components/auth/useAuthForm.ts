@@ -16,7 +16,7 @@ interface UseAuthFormOptions {
   onAuthSuccess: (user: SystemUser) => void;
 }
 
-interface UseAuthFormResult {
+export interface UseAuthFormResult {
   step: AuthStep;
   setStep: Dispatch<SetStateAction<AuthStep>>;
   email: string;
