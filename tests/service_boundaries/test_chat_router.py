@@ -92,6 +92,28 @@ def test_chat_router_delegates_global_config_writes_to_service():
     assert "_write_env_values(" not in provider_switch_route_source
 
 
+def test_chat_config_delegates_env_persistence_to_helper():
+    project_root = get_project_root()
+    chat_config_source = (project_root / "app/services/chat_config.py").read_text(
+        encoding="utf-8"
+    )
+    env_helper_path = project_root / "app/services/chat_config_env.py"
+
+    assert env_helper_path.exists()
+    env_helper_source = env_helper_path.read_text(encoding="utf-8")
+    assert "SETTINGS_FIELD_BY_ENV = {" in env_helper_source
+    assert "def _env_file_path" in env_helper_source
+    assert "def _read_env_values" in env_helper_source
+    assert "def _write_env_values" in env_helper_source
+    assert "def write_env_values_to_path" in env_helper_source
+
+    assert "from app.services.chat_config_env import" in chat_config_source
+    assert "SETTINGS_FIELD_BY_ENV = {" not in chat_config_source
+    assert "def _env_file_path" not in chat_config_source
+    assert "def _read_env_values" not in chat_config_source
+    assert "def _write_env_values" not in chat_config_source
+
+
 def test_chat_router_delegates_llm_tool_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/llm_tool_calls.py"
