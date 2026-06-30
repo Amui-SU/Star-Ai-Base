@@ -35,6 +35,10 @@ from app.services.ingestion_tasks import (
     create_ingestion_task,
 )
 from app.services.rag_runtime import get_rag_service
+from app.services.knowledge_base_catalog import (
+    create_workspace_knowledge_base,
+    list_workspace_knowledge_bases,
+)
 from app.services.knowledge_base_build_tasks import (
     get_build_status_payload,
     run_scoped_build as _run_scoped_build,
@@ -48,7 +52,6 @@ from app.services.knowledge_base_documents import (
 from app.services.knowledge_base_presenters import (
     dedupe_ints as _dedupe_ints,
     dedupe_strings as _dedupe_strings,
-    response_from_knowledge_base as _response,
     source_from_document as _source_from_document,
     supports_keyword_argument as _supports_keyword_argument,
 )
@@ -400,12 +403,7 @@ async def list_knowledge_bases(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> list[KnowledgeBaseResponse]:
-    result = await db.execute(
-        select(KnowledgeBase)
-        .where(KnowledgeBase.workspace_id == current_workspace.id)
-        .order_by(KnowledgeBase.id.asc())
-    )
-    return [_response(item) for item in result.scalars().all()]
+    return await list_workspace_knowledge_bases(db, workspace=current_workspace)
 
 
 @router.post("", response_model=KnowledgeBaseResponse)
@@ -415,24 +413,12 @@ async def create_knowledge_base(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> KnowledgeBaseResponse:
-    name = payload.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="知识库名称不能为空")
-
-    description = payload.description.strip() if payload.description else None
-    if description == "":
-        description = None
-
-    knowledge_base = KnowledgeBase(
-        workspace_id=current_workspace.id,
-        name=name,
-        description=description,
-        created_by=current_user.id,
+    return await create_workspace_knowledge_base(
+        db,
+        payload=payload,
+        user=current_user,
+        workspace=current_workspace,
     )
-    db.add(knowledge_base)
-    await db.commit()
-    await db.refresh(knowledge_base)
-    return _response(knowledge_base)
 
 
 @router.get("/{knowledge_base_id}/stats")

@@ -139,6 +139,27 @@ def test_knowledge_base_router_delegates_presenter_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_knowledge_base_router_delegates_catalog_commands_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_catalog.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def list_workspace_knowledge_bases" in service_source
+    assert "async def create_workspace_knowledge_base" in service_source
+    assert "from app.services.knowledge_base_catalog import" in router_source
+    assert "list_workspace_knowledge_bases(" in router_source
+    assert "create_workspace_knowledge_base(" in router_source
+    assert "select(KnowledgeBase)" not in router_source
+    assert "payload.name.strip()" not in router_source
+    assert "KnowledgeBase(" not in router_source
+    assert "db.add(knowledge_base)" not in router_source
+    assert "await db.refresh(knowledge_base)" not in router_source
+
+
 def test_knowledge_base_router_delegates_message_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_base_messages.py"
