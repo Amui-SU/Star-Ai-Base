@@ -26,7 +26,7 @@ from app.routers.auth import (
     _set_session,
     _get_session,
 )
-from app.security import decrypt_text, encrypt_text
+from app.security import encrypt_text
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.services.favorite_folders import is_default_favorite_folder
 from app.services.source_binding_presenters import (
@@ -37,6 +37,9 @@ from app.services.source_binding_presenters import (
     video_with_display_title as _with_display_title,
 )
 from app.services.source_binding_titles import update_video_title_override
+from app.services.source_binding_services import (
+    get_bilibili_service_for_binding as _get_bilibili_service_for_binding,
+)
 from app.services.source_binding_pending_states import (
     create_pending_state as _create_pending_state,
     delete_pending_state as _delete_pending_state,
@@ -218,42 +221,6 @@ async def poll_bilibili_binding_qrcode(
 
 
 # ── 收藏夹接口（通过 source_binding_id 驱动）──
-
-
-async def _get_bilibili_service_for_binding(
-    binding_id: int,
-    current_user: SystemUser,
-    current_workspace: Workspace,
-    db: AsyncSession,
-) -> BilibiliService:
-    """从绑定 ID 解析凭据，返回已认证的 BilibiliService 实例。"""
-    # 验证绑定归属
-    binding = await db.get(SourceBinding, binding_id)
-    if (
-        binding is None
-        or binding.user_id != current_user.id
-        or binding.workspace_id != current_workspace.id
-        or binding.status != "active"
-    ):
-        raise HTTPException(status_code=404, detail="内容源绑定不存在或已失效")
-
-    # 获取最新凭据
-    cred_result = await db.execute(
-        select(SourceCredential)
-        .where(SourceCredential.source_binding_id == binding_id)
-        .where(SourceCredential.revoked_at.is_(None))
-        .order_by(SourceCredential.id.desc())
-    )
-    credential = cred_result.scalars().first()
-    if credential is None:
-        raise HTTPException(status_code=400, detail="内容源凭据不存在或已失效")
-
-    try:
-        payload = json.loads(decrypt_text(credential.encrypted_payload))
-    except Exception:
-        raise HTTPException(status_code=500, detail="凭据解密失败")
-
-    return bilibili_service_from_cookies(payload, BilibiliService)
 
 
 @router.get("/{binding_id}/favorites", response_model=List[FavoriteFolderInfo])

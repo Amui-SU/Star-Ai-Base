@@ -78,3 +78,22 @@ def test_source_binding_router_delegates_title_updates_to_service():
     assert "select(FavoriteVideo.id)" not in router_source
     assert "VideoTitleOverride(" not in router_source
     assert "VideoTitleOverride.workspace_id" not in router_source
+
+
+def test_source_binding_router_delegates_authenticated_service_factory():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/source_binding_services.py"
+    router_source = (project_root / "app/routers/source_bindings.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def get_bilibili_service_for_binding" in service_source
+    assert "from app.services.source_binding_services import" in router_source
+    assert "_get_bilibili_service_for_binding" in router_source
+    assert "select(SourceCredential)" not in router_source
+    assert "decrypt_text(credential.encrypted_payload)" not in router_source
+    assert "bilibili_service_from_cookies(payload" not in router_source
+    assert "_get_bilibili_service_for_binding" not in declared_names
