@@ -100,6 +100,35 @@ def test_system_auth_router_delegates_email_code_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_system_auth_router_delegates_session_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_sessions.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    expected_service_names = {
+        "session_token_from_request",
+        "create_system_session",
+        "get_primary_workspace",
+        "get_current_user",
+    }
+    router_private_names = {
+        "_session_token_from_request",
+        "_create_system_session",
+        "_get_primary_workspace",
+        "_get_current_user",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"async def {name}" in service_source
+    assert "from app.services.system_auth_sessions import" in router_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_database_legacy_migration_entrypoint_has_no_nested_helpers():
     project_root = get_project_root()
     source = (project_root / "app/database.py").read_text(encoding="utf-8")
