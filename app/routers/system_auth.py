@@ -1,11 +1,8 @@
-import secrets
-
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -23,7 +20,6 @@ from app.models import (
     SystemSession,
     SystemUser,
     SystemUserResponse,
-    VerificationCode,
     Workspace,
     WorkspaceMember,
     WorkspaceResponse,
@@ -47,6 +43,9 @@ from app.services.system_auth_codes import (
     ip_rate_limit as _ip_rate_limit,
     password_exceeds_bcrypt_limit as _password_exceeds_bcrypt_limit,
     send_verification_code as _send_verification_code,
+)
+from app.services.system_auth_registration import (
+    register_system_user,
 )
 from app.services.system_auth_oauth import (
     OAUTH_STATE_COOKIE_NAME,
@@ -87,7 +86,6 @@ from app.services.system_auth_sessions import (
 )
 from app.security import (
     clear_session_cookie,
-    hash_password,
     hash_token,
     verify_password,
 )
@@ -98,10 +96,6 @@ router = APIRouter(prefix="/system-auth", tags=["系统认证"])
 
 class SendCodeRequest(BaseModel):
     email: str
-
-
-def _duplicate_email_exception() -> HTTPException:
-    return HTTPException(status_code=400, detail="邮箱已注册")
 
 
 def _invalid_credentials_exception() -> HTTPException:
@@ -151,83 +145,7 @@ async def register(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> SystemAuthResponse:
-    email = payload.email.strip().lower()
-    display_name = payload.display_name.strip()
-
-    if not email_is_valid(email):
-        raise HTTPException(status_code=400, detail="邮箱格式不正确")
-    if _password_exceeds_bcrypt_limit(payload.password):
-        raise HTTPException(status_code=400, detail="密码长度不能超过 72 字节")
-
-    # 校验验证码
-    now_naive = utc_now_naive()
-    code_result = await db.execute(
-        select(VerificationCode).where(
-            VerificationCode.email == email,
-            VerificationCode.expires_at > now_naive,
-        )
-    )
-    code_row = code_result.scalar_one_or_none()
-
-    if code_row is None:
-        raise HTTPException(status_code=400, detail="验证码未发送或已过期，请重新获取")
-
-    if code_row.attempts >= _MAX_ATTEMPTS:
-        await db.delete(code_row)
-        await db.commit()
-        raise HTTPException(status_code=400, detail="验证码尝试次数过多，请重新获取")
-
-    if not secrets.compare_digest(code_row.code_hash, _hash_code(payload.code.strip())):
-        code_row.attempts += 1
-        await db.commit()
-        remaining = _MAX_ATTEMPTS - code_row.attempts
-        raise HTTPException(
-            status_code=400, detail=f"验证码错误，还剩 {remaining} 次尝试"
-        )
-
-    await db.delete(code_row)  # 验证通过后删除
-    await db.commit()
-
-    existing_result = await db.execute(
-        select(SystemUser).where(SystemUser.email == email)
-    )
-    if existing_result.scalar_one_or_none() is not None:
-        raise _duplicate_email_exception()
-
-    try:
-        user = SystemUser(
-            email=email,
-            password_hash=hash_password(payload.password),
-            display_name=display_name,
-            status="active",
-        )
-        db.add(user)
-        await db.flush()
-
-        workspace = Workspace(
-            name=f"{display_name} 的个人空间",
-            owner_user_id=user.id,
-        )
-        db.add(workspace)
-        await db.flush()
-
-        member = WorkspaceMember(
-            workspace_id=workspace.id,
-            user_id=user.id,
-            role="owner",
-        )
-        db.add(member)
-        token = await _create_system_session(db, user.id, response)
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise _duplicate_email_exception() from None
-
-    return SystemAuthResponse(
-        user=await _user_response(db, user),
-        workspace=_workspace_response(workspace, member),
-        session_token=token,
-    )
+    return await register_system_user(db, payload=payload, response=response)
 
 
 @router.post("/login", response_model=SystemAuthResponse)

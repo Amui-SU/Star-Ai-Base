@@ -199,6 +199,25 @@ def test_system_auth_router_delegates_send_code_flow_to_service():
     assert "timedelta(seconds=_CODE_TTL_SECONDS)" not in router_source
 
 
+def test_system_auth_router_delegates_registration_flow_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_registration.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def register_system_user" in service_source
+    assert "from app.services.system_auth_registration import" in router_source
+    assert "register_system_user(" in router_source
+    assert "select(VerificationCode)" not in router_source
+    assert "SystemUser(" not in router_source
+    assert "Workspace(" not in router_source
+    assert "WorkspaceMember(" not in router_source
+    assert "hash_password(" not in router_source
+
+
 def test_system_auth_router_delegates_session_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/system_auth_sessions.py"
