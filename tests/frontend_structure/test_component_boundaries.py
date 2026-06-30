@@ -433,6 +433,23 @@ def test_sources_panel_actions_are_extracted():
     assert "const toggleExpand" not in sources_panel
 
 
+def test_sources_panel_folder_list_is_extracted():
+    project_root = get_project_root()
+    sources_panel = (
+        project_root / "frontend" / "components" / "SourcesPanel.tsx"
+    ).read_text(encoding="utf-8")
+    folder_list = (
+        project_root / "frontend" / "components" / "sources" / "SourcesFolderList.tsx"
+    )
+
+    assert folder_list.exists()
+    assert "@/components/sources/SourcesFolderList" in sources_panel
+    assert "folder-card" not in sources_panel
+    assert "folder-list-wrapper" not in sources_panel
+    assert "video-card" not in sources_panel
+    assert "video-title-input" not in sources_panel
+
+
 def test_workspace_state_is_extracted_from_home_page():
     project_root = get_project_root()
     page = (project_root / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")

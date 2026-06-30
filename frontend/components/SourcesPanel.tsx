@@ -2,22 +2,18 @@
 
 import { useState, useEffect } from "react";
 import {
-  displayFolderTitle,
   displayKnowledgeBaseName,
   isMissingDisplayText,
 } from "@/lib/displayNames";
 import OrganizePreviewModal from "@/components/OrganizePreviewModal";
+import SourcesFolderList from "@/components/sources/SourcesFolderList";
 import VideoPlayerPortal, {
   type PlayingVideo,
 } from "@/components/sources/VideoPlayerPortal";
 import { useSourcesKnowledgeBuild } from "@/components/sources/useSourcesKnowledgeBuild";
 import { useSourcesPanelActions } from "@/components/sources/useSourcesPanelActions";
 import { useSourcesPanelData } from "@/components/sources/useSourcesPanelData";
-import {
-  formatFolderSyncTime,
-  getSourcesBuildButtonText,
-  getSourcesFolderStatus,
-} from "@/components/sources/sourcesPanelLogic";
+import { getSourcesBuildButtonText } from "@/components/sources/sourcesPanelLogic";
 
 interface Props {
   sourceBindingId: number;
@@ -232,222 +228,30 @@ export default function SourcesPanel({
               </div>
             </div>
           ) : (
-            <div className="sources-folder-list">
-              {folders.map((f) => {
-                const status = getSourcesFolderStatus({
-                  folders,
-                  statusMap,
-                  mediaId: f.media_id,
-                  totalInBilibili: f.media_count,
-                });
-                const lastSync = formatFolderSyncTime(
-                  statusMap[f.media_id]?.last_sync_at ?? undefined,
-                );
-                const folderTitle = displayFolderTitle(f.title);
-
-                return (
-                  <div
-                    key={f.media_id}
-                    className={`folder-card ${selected.has(f.media_id) ? "selected" : ""}`}
-                  >
-                    <div
-                      className="folder-head"
-                      onClick={() => toggleExpand(f.media_id)}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected.has(f.media_id)}
-                        onChange={() => toggleSelect(f.media_id)}
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label={`选择收藏夹 ${folderTitle}`}
-                        className="folder-checkbox"
-                      />
-                      <div className="folder-meta">
-                        <div className="folder-title" title={folderTitle}>
-                          {folderTitle}
-                        </div>
-                        <div className="folder-count">
-                          {status.indexedCount}/
-                          {status.totalCount ?? f.media_count} 个视频
-                          {lastSync && ` · ${lastSync}`}
-                        </div>
-                      </div>
-                      <span className={`status-pill ${status.className}`}>
-                        {status.label}
-                      </span>
-                      <div className="folder-toggle">
-                        <svg
-                          className={`w-4 h-4 transition-transform ${f.expanded ? "rotate-90" : ""}`}
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M9 5l7 7-7 7"
-                          />
-                        </svg>
-                      </div>
-                    </div>
-
-                    <div
-                      className={`folder-list-wrapper ${f.expanded ? "expanded" : ""}`}
-                    >
-                      <div className="folder-list">
-                        {f.loading ? (
-                          <div className="text-xs text-(--muted)">
-                            加载中...
-                          </div>
-                        ) : f.videos?.length === 0 ? (
-                          <div className="text-xs text-(--muted)">暂无视频</div>
-                        ) : (
-                          f.videos?.map((v) => {
-                            const displayTitle = getVideoTitle(v);
-                            const originalTitle = getOriginalVideoTitle(v);
-                            const isEditing = editingVideoId === v.bvid;
-                            const isSaving = savingVideoId === v.bvid;
-
-                            return (
-                              <div key={v.bvid} className="video-card">
-                                <input
-                                  type="checkbox"
-                                  className="video-checkbox"
-                                  checked={
-                                    selected.has(f.media_id) ||
-                                    selectedVideos.has(v.bvid)
-                                  }
-                                  onChange={() =>
-                                    toggleVideoSelect(f.media_id, v.bvid)
-                                  }
-                                  onClick={(event) => event.stopPropagation()}
-                                  aria-label={`选择视频 ${displayTitle}`}
-                                />
-                                <button
-                                  type="button"
-                                  className="video-play-btn"
-                                  onClick={() =>
-                                    setPlayingVideo({
-                                      bvid: v.bvid,
-                                      title: displayTitle,
-                                    })
-                                  }
-                                  title="在线播放"
-                                  aria-label={`播放 ${displayTitle}`}
-                                >
-                                  ▶
-                                </button>
-                                <div className="video-card-body">
-                                  {isEditing ? (
-                                    <input
-                                      className="video-title-input"
-                                      value={editingVideoName}
-                                      onChange={(event) =>
-                                        setEditingVideoName(event.target.value)
-                                      }
-                                      autoFocus
-                                      onKeyDown={(event) => {
-                                        if (event.key === "Enter") {
-                                          void saveVideoTitle(
-                                            v,
-                                            editingVideoName,
-                                          );
-                                        }
-                                        if (event.key === "Escape") {
-                                          setEditingVideoId(null);
-                                          setEditingVideoName("");
-                                        }
-                                      }}
-                                    />
-                                  ) : (
-                                    <a
-                                      href={`https://www.bilibili.com/video/${v.bvid}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="video-card-title truncate"
-                                      aria-label={displayTitle}
-                                    >
-                                      {displayTitle}
-                                    </a>
-                                  )}
-                                  <div className="video-card-meta">
-                                    <span title={originalTitle}>
-                                      {originalTitle}
-                                    </span>
-                                    {v.custom_title &&
-                                      v.custom_title !== originalTitle && (
-                                        <span className="video-card-badge">
-                                          自定义
-                                        </span>
-                                      )}
-                                  </div>
-                                </div>
-                                <div className="video-card-actions">
-                                  {isEditing ? (
-                                    <>
-                                      <button
-                                        type="button"
-                                        className="video-card-action primary"
-                                        onClick={() =>
-                                          void saveVideoTitle(
-                                            v,
-                                            editingVideoName,
-                                          )
-                                        }
-                                        disabled={isSaving}
-                                      >
-                                        {isSaving ? "保存中" : "保存"}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="video-card-action"
-                                        onClick={() => {
-                                          setEditingVideoId(null);
-                                          setEditingVideoName("");
-                                        }}
-                                        disabled={isSaving}
-                                      >
-                                        取消
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <button
-                                        type="button"
-                                        className="video-card-action"
-                                        onClick={() => startRenameVideo(v)}
-                                      >
-                                        重命名
-                                      </button>
-                                      {(v.custom_title ||
-                                        getVideoTitle(v) !== originalTitle) && (
-                                        <button
-                                          type="button"
-                                          className="video-card-action"
-                                          onClick={() =>
-                                            void saveVideoTitle(
-                                              v,
-                                              originalTitle,
-                                            )
-                                          }
-                                        >
-                                          恢复
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <SourcesFolderList
+              editingVideoId={editingVideoId}
+              editingVideoName={editingVideoName}
+              folders={folders}
+              savingVideoId={savingVideoId}
+              selected={selected}
+              selectedVideos={selectedVideos}
+              statusMap={statusMap}
+              getOriginalVideoTitle={getOriginalVideoTitle}
+              getVideoTitle={getVideoTitle}
+              onCancelVideoEdit={() => {
+                setEditingVideoId(null);
+                setEditingVideoName("");
+              }}
+              onPlayVideo={setPlayingVideo}
+              onRenameVideo={startRenameVideo}
+              onSaveVideoTitle={(video, title) =>
+                void saveVideoTitle(video, title)
+              }
+              onToggleFolder={toggleExpand}
+              onToggleFolderSelect={toggleSelect}
+              onToggleVideoSelect={toggleVideoSelect}
+              onVideoNameChange={setEditingVideoName}
+            />
           )}
         </div>
       </div>
