@@ -33,6 +33,13 @@ from app.models import (
     WorkspaceResponse,
 )
 from app.services.email import send_verification_email
+from app.services.system_auth_admin import (
+    get_current_admin_user as _get_current_admin_user,
+    is_admin_user as _is_admin_user,
+    list_admin_users as _list_admin_users,
+    reset_admin_user_password as _reset_admin_user_password,
+    update_admin_user_status as _update_admin_user_status,
+)
 from app.services.system_auth_codes import (
     CODE_TTL_SECONDS as _CODE_TTL_SECONDS,
     IP_RATE_MAX as _IP_RATE_MAX,
@@ -93,24 +100,6 @@ def _invalid_credentials_exception() -> HTTPException:
     return HTTPException(status_code=401, detail="邮箱或密码错误")
 
 
-def _configured_admin_emails() -> set[str]:
-    return {
-        email.strip().lower()
-        for email in settings.admin_emails.split(",")
-        if email.strip()
-    }
-
-
-async def _is_admin_user(db: AsyncSession, user: SystemUser) -> bool:
-    configured = _configured_admin_emails()
-    if configured:
-        return user.email.lower() in configured
-
-    result = await db.execute(select(SystemUser.id).order_by(SystemUser.id).limit(1))
-    first_user_id = result.scalar_one_or_none()
-    return first_user_id == user.id
-
-
 async def _user_response(db: AsyncSession, user: SystemUser) -> SystemUserResponse:
     return SystemUserResponse(
         id=user.id,
@@ -122,19 +111,6 @@ async def _user_response(db: AsyncSession, user: SystemUser) -> SystemUserRespon
     )
 
 
-async def _admin_user_response(db: AsyncSession, user: SystemUser) -> AdminUserResponse:
-    return AdminUserResponse(
-        id=user.id,
-        email=user.email,
-        display_name=user.display_name,
-        avatar_url=user.avatar_url,
-        status=user.status,
-        is_admin=await _is_admin_user(db, user),
-        created_at=user.created_at,
-        updated_at=user.updated_at,
-    )
-
-
 def _workspace_response(
     workspace: Workspace, member: WorkspaceMember
 ) -> WorkspaceResponse:
@@ -143,13 +119,6 @@ def _workspace_response(
         name=workspace.name,
         role=member.role,
     )
-
-
-async def _get_current_admin_user(request: Request, db: AsyncSession) -> SystemUser:
-    user = await _get_current_user(request, db)
-    if not await _is_admin_user(db, user):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    return user
 
 
 @router.post("/send-code")
@@ -381,12 +350,7 @@ async def admin_list_users(
     db: AsyncSession = Depends(get_db),
 ) -> AdminUserListResponse:
     await _get_current_admin_user(request, db)
-
-    result = await db.execute(select(SystemUser).order_by(SystemUser.id))
-    users = result.scalars().all()
-    return AdminUserListResponse(
-        users=[await _admin_user_response(db, user) for user in users]
-    )
+    return await _list_admin_users(db)
 
 
 @router.put("/admin/users/{user_id}/status", response_model=AdminUserResponse)
@@ -397,23 +361,7 @@ async def admin_update_user_status(
     db: AsyncSession = Depends(get_db),
 ) -> AdminUserResponse:
     admin = await _get_current_admin_user(request, db)
-    next_status = payload.status.strip().lower()
-    if next_status not in {"active", "inactive"}:
-        raise HTTPException(status_code=400, detail="用户状态只能是 active 或 inactive")
-    if admin.id == user_id and next_status != "active":
-        raise HTTPException(status_code=400, detail="不能禁用当前管理员账号")
-
-    result = await db.execute(select(SystemUser).where(SystemUser.id == user_id))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    user.status = next_status
-    if next_status == "inactive":
-        await db.execute(delete(SystemSession).where(SystemSession.user_id == user_id))
-    await db.commit()
-    await db.refresh(user)
-    return await _admin_user_response(db, user)
+    return await _update_admin_user_status(db, admin, user_id, payload.status)
 
 
 @router.post(
@@ -426,24 +374,7 @@ async def admin_reset_user_password(
     db: AsyncSession = Depends(get_db),
 ) -> AdminPasswordResetResponse:
     admin = await _get_current_admin_user(request, db)
-    if admin.id == user_id:
-        raise HTTPException(status_code=400, detail="不能重置当前管理员账号密码")
-
-    result = await db.execute(select(SystemUser).where(SystemUser.id == user_id))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    temporary_password = secrets.token_urlsafe(18)
-    user.password_hash = hash_password(temporary_password)
-    user.status = "active"
-    await db.execute(delete(SystemSession).where(SystemSession.user_id == user_id))
-    await db.commit()
-    await db.refresh(user)
-    return AdminPasswordResetResponse(
-        user=await _admin_user_response(db, user),
-        temporary_password=temporary_password,
-    )
+    return await _reset_admin_user_password(db, admin, user_id)
 
 
 # ── Google OAuth ──────────────────────────────────────────────

@@ -129,6 +129,38 @@ def test_system_auth_router_delegates_session_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_system_auth_router_delegates_admin_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/system_auth_admin.py"
+    router_source = (project_root / "app/routers/system_auth.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    expected_service_names = {
+        "configured_admin_emails",
+        "is_admin_user",
+        "admin_user_response",
+        "get_current_admin_user",
+        "list_admin_users",
+        "update_admin_user_status",
+        "reset_admin_user_password",
+    }
+    router_private_names = {
+        "_configured_admin_emails",
+        "_is_admin_user",
+        "_admin_user_response",
+        "_get_current_admin_user",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"async def {name}" in service_source
+    assert "from app.services.system_auth_admin import" in router_source
+    assert declared_names.isdisjoint(router_private_names)
+
+
 def test_database_legacy_migration_entrypoint_has_no_nested_helpers():
     project_root = get_project_root()
     source = (project_root / "app/database.py").read_text(encoding="utf-8")
