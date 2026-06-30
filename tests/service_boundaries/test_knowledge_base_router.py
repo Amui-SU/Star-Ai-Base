@@ -1,6 +1,21 @@
+import ast
+
 from tests.service_boundaries.helpers import declared_callable_names
 from tests.service_boundaries.helpers import declared_module_names
 from tests.service_boundaries.helpers import get_project_root
+
+
+def function_source(source: str, name: str) -> str:
+    module = ast.parse(source)
+    for node in module.body:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ):
+            segment = ast.get_source_segment(source, node)
+            assert segment is not None
+            return segment
+    raise AssertionError(f"{name} not found")
 
 
 def test_knowledge_base_router_delegates_web_search_helpers_to_service():
@@ -299,6 +314,26 @@ def test_knowledge_base_router_delegates_search_helpers_to_service():
     assert 'detail="Search query cannot be empty"' not in router_source
     assert "rag.search_in_knowledge_base(" not in router_source
     assert "KnowledgeBaseSearchResponse(" not in router_source
+
+
+def test_knowledge_base_router_delegates_non_streaming_chat_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_chat.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+    chat_route_source = function_source(router_source, "chat_with_knowledge_base")
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def answer_knowledge_base_chat" in service_source
+    assert "from app.services.knowledge_base_chat import" in router_source
+    assert "answer_knowledge_base_chat(" in chat_route_source
+    assert "_load_scoped_chat_documents(" not in chat_route_source
+    assert "resolve_user_llm_credentials(" not in chat_route_source
+    assert "_complete_knowledge_base_answer(" not in chat_route_source
+    assert "record_usage_event(" not in chat_route_source
+    assert "ChatResponse(" not in chat_route_source
 
 
 def test_knowledge_base_router_delegates_record_deletion_to_service():

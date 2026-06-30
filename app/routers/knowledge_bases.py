@@ -41,6 +41,7 @@ from app.services.knowledge_base_build_tasks import (
     get_build_status_payload,
     run_scoped_build as _run_scoped_build,
 )
+from app.services.knowledge_base_chat import answer_knowledge_base_chat
 from app.services.knowledge_base_delete import delete_knowledge_base_records
 from app.services.knowledge_base_documents import (
     load_db_fallback_documents as _load_db_fallback_documents,
@@ -504,90 +505,27 @@ async def chat_with_knowledge_base(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
-    question = payload.question.strip()
-    documents = await _load_scoped_chat_documents(
-        payload,
-        knowledge_base,
-        current_workspace,
+    return await answer_knowledge_base_chat(
         db,
-        allow_db_fallback=not payload.web_search,
-    )
-    if not documents and not payload.web_search:
-        response = _answer_from_documents(question, documents)
-        return response
-
-    credential = await resolve_user_llm_credentials(
-        db,
-        current_user,
-        global_config_resolver=_resolve_llm_config,
-    )
-    llm_config = credential.to_llm_config()
-    tavily_api_key = await _resolve_web_search_api_key(
-        db,
-        current_user,
-        enabled=payload.web_search,
-        provider=payload.web_search_provider,
-    )
-
-    messages = _build_knowledge_base_messages(
-        question,
-        documents,
-        enable_web_search=payload.web_search,
-        thinking_config=llm_config["thinking_config"],
-    )
-    try:
-        complete_kwargs = {
-            "question": question,
-            "enable_web_search": payload.web_search,
-        }
-        if _supports_keyword_argument(
-            _complete_knowledge_base_answer,
-            "web_search_provider",
-        ):
-            complete_kwargs["web_search_provider"] = payload.web_search_provider
-        if _supports_keyword_argument(
-            _complete_knowledge_base_answer, "tavily_api_key"
-        ):
-            complete_kwargs["tavily_api_key"] = tavily_api_key
-        if _supports_keyword_argument(_complete_knowledge_base_answer, "llm_config"):
-            complete_kwargs["llm_config"] = llm_config
-        answer, thinking, web_results, web_search_status = (
-            await _complete_knowledge_base_answer(
-                messages,
-                **complete_kwargs,
-            )
-        )
-    except Exception as exc:
-        await record_usage_event(
-            db,
-            user=current_user,
-            credential=credential,
-            feature="chat",
-            status="failed",
-            error_code=exc.__class__.__name__,
-        )
-        await db.commit()
-        logger.warning(f"知识库模型回答失败，回退到检索内容: {exc}")
-        response = _answer_from_documents(question, documents)
-        if payload.web_search:
-            response.web_search = _web_search_failed_status_from_exception(exc)
-        return response
-    await record_usage_event(
-        db,
+        payload=payload,
+        knowledge_base=knowledge_base,
         user=current_user,
-        credential=credential,
-        feature="chat",
-        status="success",
-    )
-    await db.commit()
-    return ChatResponse(
-        answer=answer,
-        thinking=thinking or None,
-        sources=[
-            *[_source_from_document(document) for document in documents],
-            *[_source_from_web_result(result) for result in web_results],
-        ],
-        web_search=web_search_status,
+        workspace=current_workspace,
+        load_documents=_load_scoped_chat_documents,
+        answer_from_documents=_answer_from_documents,
+        resolve_llm_credentials=resolve_user_llm_credentials,
+        global_config_resolver=_resolve_llm_config,
+        resolve_web_search_api_key=_resolve_web_search_api_key,
+        build_messages=_build_knowledge_base_messages,
+        complete_answer=_complete_knowledge_base_answer,
+        supports_keyword_argument=_supports_keyword_argument,
+        record_usage=record_usage_event,
+        source_from_document=_source_from_document,
+        source_from_web_result=_source_from_web_result,
+        web_search_failed_status_from_exception=(
+            _web_search_failed_status_from_exception
+        ),
+        warning_logger=logger.warning,
     )
 
 
