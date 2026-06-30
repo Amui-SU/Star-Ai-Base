@@ -413,6 +413,23 @@ def test_import_router_delegates_import_task_runtime_to_service():
     assert "rag.add_video_content(" not in imports_source
 
 
+def test_content_fetcher_delegates_ai_summary_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/content_summary.py"
+    fetcher_source = (project_root / "app/services/content_fetcher.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "def parse_ai_summary_result" in service_source
+    assert "def format_ai_summary_content" in service_source
+    assert "from app.services.content_summary import" in fetcher_source
+    assert 'model_result.get("outline"' not in fetcher_source
+    assert 'for item in summary["outline"]' not in fetcher_source
+    assert 'for point in item.get("part_outline"' not in fetcher_source
+
+
 def test_scoped_folder_sync_tests_do_not_import_legacy_router():
     project_root = get_project_root()
 

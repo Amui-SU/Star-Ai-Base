@@ -17,6 +17,10 @@ from loguru import logger
 from app.models import VideoContent, ContentSource
 from app.services.bilibili import BilibiliService
 from app.services.asr import ASRService
+from app.services.content_summary import (
+    format_ai_summary_content,
+    parse_ai_summary_result,
+)
 
 
 class ContentFetcher:
@@ -74,29 +78,11 @@ class ContentFetcher:
             up_mid = owner.get("mid") or (video_info or {}).get("owner_mid")
             summary = await self._try_ai_summary(bvid, cid, up_mid=up_mid)
             if summary:
-                parts = [f"AI 摘要：{summary['summary']}"]
-                if summary.get("outline"):
-                    outline_lines = []
-                    for item in summary["outline"]:
-                        title_text = item.get("title") or "未命名片段"
-                        timestamp = item.get("timestamp")
-                        prefix = (
-                            f"- {title_text} ({timestamp}s)"
-                            if timestamp
-                            else f"- {title_text}"
-                        )
-                        outline_lines.append(prefix)
-                        for point in item.get("points") or []:
-                            point_text = point.get("content")
-                            if point_text:
-                                outline_lines.append(f"  - {point_text}")
-                    if outline_lines:
-                        parts.append("分段提纲：\n" + "\n".join(outline_lines))
                 logger.info(f"[{bvid}] 使用 AI 摘要")
                 return VideoContent(
                     bvid=bvid,
                     title=title,
-                    content="\n\n".join(parts),
+                    content=format_ai_summary_content(summary),
                     source=ContentSource.AI_SUMMARY,
                     outline=summary.get("outline"),
                 )
@@ -386,37 +372,14 @@ class ContentFetcher:
             if not result:
                 return None
 
-            # 检查是否有有效摘要
-            inner_code = result.get("code", -1)
-            if inner_code != 0:
-                logger.debug(f"[{bvid}] AI 摘要不可用: code={inner_code}")
+            summary = parse_ai_summary_result(result)
+            if summary is None and result.get("code", -1) != 0:
+                logger.debug(f"[{bvid}] AI 摘要不可用: code={result.get('code', -1)}")
                 return None
-
-            model_result = result.get("model_result", {})
-            summary = model_result.get("summary", "")
-
-            if not summary:
+            if summary is None:
                 logger.debug(f"[{bvid}] AI 摘要为空")
                 return None
-
-            # 解析分段提纲
-            outline = []
-            for item in model_result.get("outline", []):
-                outline_item = {
-                    "title": item.get("title", ""),
-                    "timestamp": item.get("timestamp", 0),
-                    "points": [],
-                }
-                for point in item.get("part_outline", []):
-                    outline_item["points"].append(
-                        {
-                            "content": point.get("content", ""),
-                            "timestamp": point.get("timestamp", 0),
-                        }
-                    )
-                outline.append(outline_item)
-
-            return {"summary": summary, "outline": outline}
+            return summary
 
         except Exception as e:
             logger.warning(f"[{bvid}] 获取 AI 摘要失败: {e}")

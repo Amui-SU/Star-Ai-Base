@@ -2,6 +2,10 @@ import pytest
 
 from app.models import ContentSource
 from app.services.content_fetcher import ContentFetcher
+from app.services.content_summary import (
+    format_ai_summary_content,
+    parse_ai_summary_result,
+)
 
 
 class FakeASR:
@@ -54,6 +58,50 @@ class FakeBilibili:
 
     async def download_audio_to_file(self, audio_url, file_path):
         return False
+
+
+def test_content_summary_helpers_parse_and_format_ai_summary_payload():
+    result = {
+        "code": 0,
+        "model_result": {
+            "summary": "Summary text",
+            "outline": [
+                {
+                    "title": "Part one",
+                    "timestamp": 12,
+                    "part_outline": [
+                        {"content": "Point A", "timestamp": 18},
+                        {"content": "", "timestamp": 19},
+                    ],
+                }
+            ],
+        },
+    }
+
+    summary = parse_ai_summary_result(result)
+
+    assert summary == {
+        "summary": "Summary text",
+        "outline": [
+            {
+                "title": "Part one",
+                "timestamp": 12,
+                "points": [
+                    {"content": "Point A", "timestamp": 18},
+                    {"content": "", "timestamp": 19},
+                ],
+            }
+        ],
+    }
+    assert format_ai_summary_content(summary) == (
+        "AI 摘要：Summary text\n\n" "分段提纲：\n" "- Part one (12s)\n" "  - Point A"
+    )
+
+
+def test_content_summary_helpers_reject_unavailable_or_empty_summary():
+    assert parse_ai_summary_result(None) is None
+    assert parse_ai_summary_result({"code": -404}) is None
+    assert parse_ai_summary_result({"code": 0, "model_result": {"summary": ""}}) is None
 
 
 @pytest.mark.asyncio
