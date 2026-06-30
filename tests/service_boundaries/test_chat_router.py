@@ -50,6 +50,48 @@ def test_chat_router_delegates_configuration_boundaries_to_service():
     )
 
 
+def test_chat_router_delegates_global_config_writes_to_service():
+    project_root = get_project_root()
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    service_source = (project_root / "app/services/chat_config.py").read_text(
+        encoding="utf-8"
+    )
+
+    web_search_route_source = chat_source[
+        chat_source.index("async def save_web_search_config(") : chat_source.index(
+            "_llm_config_response = llm_config_response"
+        )
+    ]
+    provider_config_route_source = chat_source[
+        chat_source.index("async def save_llm_provider_config(") : chat_source.index(
+            '@router.post("/llm/config")'
+        )
+    ]
+    provider_switch_route_source = chat_source[
+        chat_source.index("async def set_llm_config(") : chat_source.index(
+            '@router.get("/health/llm")'
+        )
+    ]
+
+    assert "def save_global_web_search_config" in service_source
+    assert "def save_global_llm_provider_config" in service_source
+    assert "def set_global_llm_provider" in service_source
+
+    assert "save_global_web_search_config(" in web_search_route_source
+    assert "_write_env_values(" not in web_search_route_source
+    assert "settings.web_search_provider =" not in web_search_route_source
+    assert "updates = {" not in web_search_route_source
+
+    assert "save_global_llm_provider_config(" in provider_config_route_source
+    assert "_write_env_values(" not in provider_config_route_source
+    assert "_verify_provider_configuration(" not in provider_config_route_source
+    assert "json.dumps(" not in provider_config_route_source
+    assert "reset_rag_service()" not in provider_config_route_source
+
+    assert "set_global_llm_provider(" in provider_switch_route_source
+    assert "_write_env_values(" not in provider_switch_route_source
+
+
 def test_chat_router_delegates_llm_tool_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/llm_tool_calls.py"

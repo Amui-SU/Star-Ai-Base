@@ -1,6 +1,5 @@
 """Chat routes for RAG question answering."""
 
-import json
 import time
 from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
@@ -22,19 +21,19 @@ from app.services.api_credentials import (
     resolve_user_llm_credentials,
 )
 from app.services.chat_config import (
-    PROVIDER_ENV_FIELDS,
     PROVIDER_META,
     _current_default_llm_provider,
     _get_provider_thinking_config,
     _get_provider_thinking_template,
-    _normalize_provider,
-    _normalize_tavily_search_depth,
     _normalize_web_search_provider,
     _parse_thinking_config,
     _resolve_llm_config,
     _web_search_config_response,
     _write_env_values,
     llm_config_response,
+    save_global_llm_provider_config,
+    save_global_web_search_config,
+    set_global_llm_provider,
 )
 from app.services.llm_tool_calls import (
     LLMToolRunResult,
@@ -159,29 +158,13 @@ async def save_web_search_config(
     _current_admin=Depends(_require_current_admin_user),
 ):
     """Persist web search configuration to .env.local without echoing secrets."""
-    provider = _normalize_web_search_provider(body.provider)
-    search_depth = _normalize_tavily_search_depth(body.tavily_search_depth)
-    tavily_api_key = (body.tavily_api_key or "").strip()
-    existing_tavily_key = settings.tavily_api_key.strip()
-    if provider == "tavily" and not (tavily_api_key or existing_tavily_key):
-        raise HTTPException(status_code=400, detail="Tavily API Key cannot be empty")
-
-    updates = {
-        "WEB_SEARCH_PROVIDER": provider,
-        "WEB_SEARCH_FALLBACK_HTML": "true" if body.fallback_html else "false",
-        "TAVILY_SEARCH_DEPTH": search_depth,
-    }
-    if tavily_api_key:
-        updates["TAVILY_API_KEY"] = tavily_api_key
-
-    _write_env_values(updates)
-    settings.web_search_provider = provider
-    settings.web_search_fallback_html = body.fallback_html
-    settings.tavily_search_depth = search_depth
-    if tavily_api_key:
-        settings.tavily_api_key = tavily_api_key
-
-    return _web_search_config_response(provider)
+    return save_global_web_search_config(
+        provider=body.provider,
+        tavily_api_key=body.tavily_api_key,
+        fallback_html=body.fallback_html,
+        tavily_search_depth=body.tavily_search_depth,
+        env_writer=_write_env_values,
+    )
 
 
 _llm_config_response = llm_config_response
@@ -215,76 +198,22 @@ async def save_llm_provider_config(
     _current_admin=Depends(_require_current_admin_user),
 ):
     """验证并保存模型提供方配置到 .env.local。"""
-    provider = _normalize_provider(body.provider)
-    env_fields = PROVIDER_ENV_FIELDS.get(provider)
-    if not env_fields:
-        raise HTTPException(status_code=400, detail=f"不支持的模型提供方: {provider}")
-
-    current = _resolve_llm_config(provider)
-    api_key = (body.api_key or "").strip() or current["api_key"]
-    if not api_key:
-        raise HTTPException(status_code=400, detail="API Key 不能为空")
-
-    thinking_mode = body.thinking_mode.strip().lower()
-    if thinking_mode not in {"off", "standard", "custom"}:
-        raise HTTPException(status_code=400, detail="不支持的思考配置模式")
-    if thinking_mode == "off":
-        thinking_config = {}
-    elif thinking_mode == "standard":
-        thinking_config = _get_provider_thinking_template(provider)
-        if not thinking_config:
-            raise HTTPException(
-                status_code=400,
-                detail="该提供商没有通用标准模板，请使用自定义 JSON",
-            )
-    else:
-        thinking_config = _parse_thinking_config(body.thinking_config)
-        if not thinking_config:
-            raise HTTPException(status_code=400, detail="自定义思考配置不能为空")
-
-    base_url = (body.base_url or "").strip() or current["base_url"]
-    model = (body.model or "").strip() or current["model"]
-    pending_config = {
-        "provider": provider,
-        "provider_label": current["provider_label"],
-        "api_key": api_key,
-        "base_url": base_url,
-        "model": model,
-        "thinking_config": thinking_config,
-    }
-    latency_ms = _verify_provider_configuration(pending_config)
-
-    updates = {
-        "LLM_PROVIDER": provider,
-        env_fields["api_key"]: api_key,
-        env_fields["base_url"]: base_url,
-        env_fields["model"]: model,
-        env_fields["thinking_config"]: json.dumps(
-            thinking_config,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ),
-    }
-
-    _write_env_values(updates)
-
-    try:
-        reset_rag_service()
-    except Exception as e:
-        logger.warning(f"重置 RAG 服务失败，将在下次重启后生效: {e}")
-
-    llm_config = _resolve_llm_config(provider)
-    logger.info(f"已保存 LLM 配置: {provider} / model={llm_config['model']}")
-    return {
-        "ok": True,
-        "current_provider": provider,
-        "model": llm_config["model"],
-        "provider_label": llm_config["provider_label"],
-        "thinking_config": llm_config["thinking_config"],
-        "thinking_template": _get_provider_thinking_template(provider),
-        "verified": True,
-        "latency_ms": latency_ms,
-    }
+    return save_global_llm_provider_config(
+        provider=body.provider,
+        api_key=body.api_key,
+        base_url=body.base_url,
+        model=body.model,
+        thinking_mode=body.thinking_mode,
+        thinking_config=body.thinking_config,
+        verifier=_verify_provider_configuration,
+        resolve_llm_config=_resolve_llm_config,
+        get_provider_thinking_template=_get_provider_thinking_template,
+        parse_thinking_config=_parse_thinking_config,
+        env_writer=_write_env_values,
+        reset_rag=reset_rag_service,
+        warning_logger=logger.warning,
+        info_logger=logger.info,
+    )
 
 
 @router.post("/llm/config")
@@ -293,22 +222,12 @@ async def set_llm_config(
     _current_admin=Depends(_require_current_admin_user),
 ):
     """切换当前问答模型提供方"""
-    llm_config = _resolve_llm_config(body.provider)
-    if not llm_config["api_key"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{llm_config['provider_label']} API Key 未配置，请先在 .env.local 中配置后重启后端。",
-        )
-    _write_env_values({"LLM_PROVIDER": llm_config["provider"]})
-    logger.info(
-        f"已切换 LLM 提供方: {llm_config['provider']} / model={llm_config['model']}"
+    return set_global_llm_provider(
+        body.provider,
+        env_writer=_write_env_values,
+        resolve_llm_config=_resolve_llm_config,
+        info_logger=logger.info,
     )
-    return {
-        "ok": True,
-        "current_provider": llm_config["provider"],
-        "model": llm_config["model"],
-        "provider_label": llm_config["provider_label"],
-    }
 
 
 @router.get("/health/llm")
