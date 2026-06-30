@@ -28,7 +28,6 @@ from app.models import (
     KnowledgeBaseResponse,
     KnowledgeBaseSearchRequest,
     KnowledgeBaseSearchResponse,
-    KnowledgeBaseSearchResult,
     KnowledgeScopeOptionsResponse,
     SourceBinding,
     SourceCredential,
@@ -53,7 +52,6 @@ from app.services.knowledge_base_presenters import (
     dedupe_ints as _dedupe_ints,
     dedupe_strings as _dedupe_strings,
     response_from_knowledge_base as _response,
-    search_result_from_document as _search_result,
     source_from_document as _source_from_document,
     supports_keyword_argument as _supports_keyword_argument,
 )
@@ -62,6 +60,7 @@ from app.services.knowledge_base_messages import (
     build_knowledge_base_messages,
 )
 from app.services.knowledge_base_stats import build_knowledge_base_stats
+from app.services.knowledge_base_search import search_knowledge_base_documents
 from app.services.chat_messages import (
     apply_mode_instructions as _apply_mode_instructions,
     enforce_markdown_output as _enforce_markdown_output,
@@ -561,27 +560,12 @@ async def search_knowledge_base(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> KnowledgeBaseSearchResponse:
-    query = payload.query.strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="Search query cannot be empty")
-
-    bvids = await _resolve_request_scope(
+    return await search_knowledge_base_documents(
         db,
-        knowledge_base_id=knowledge_base.id,
-        folder_ids=payload.folder_ids,
-        bvids=payload.bvids,
-    )
-    k = max(1, min(payload.k, 20))
-    rag = get_rag_service()
-    documents = rag.search_in_knowledge_base(
-        query,
-        workspace_id=current_workspace.id,
-        knowledge_base_id=knowledge_base.id,
-        k=k,
-        bvids=bvids,
-    )
-    return KnowledgeBaseSearchResponse(
-        results=[_search_result(document) for document in documents]
+        payload=payload,
+        knowledge_base=knowledge_base,
+        workspace=current_workspace,
+        rag_service_factory=get_rag_service,
     )
 
 

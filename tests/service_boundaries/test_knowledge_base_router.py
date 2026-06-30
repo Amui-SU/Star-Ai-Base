@@ -243,6 +243,22 @@ def test_knowledge_base_router_delegates_stats_helpers_to_service():
     assert "FavoriteFolder.last_sync_at.isnot(None)" not in router_source
 
 
+def test_knowledge_base_router_delegates_search_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_search.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def search_knowledge_base_documents" in service_source
+    assert "from app.services.knowledge_base_search import" in router_source
+    assert 'detail="Search query cannot be empty"' not in router_source
+    assert "rag.search_in_knowledge_base(" not in router_source
+    assert "KnowledgeBaseSearchResponse(" not in router_source
+
+
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = get_project_root()
     source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")
