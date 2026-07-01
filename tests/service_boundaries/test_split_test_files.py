@@ -243,6 +243,45 @@ def test_knowledge_base_scope_build_tests_are_split_by_domain():
         assert len(mixed_source.splitlines()) <= 80
 
 
+def test_knowledge_scope_tests_are_split_by_domain():
+    project_root = get_project_root()
+    tests_dir = project_root / "tests"
+    mixed_test = tests_dir / "test_knowledge_scope.py"
+    mixed_source = mixed_test.read_text(encoding="utf-8") if mixed_test.exists() else ""
+    focused_dir = tests_dir / "knowledge_scope"
+
+    focused_files = {
+        "test_catalog.py": [
+            "test_protected_knowledge_base_list_requires_login",
+            "test_user_can_create_and_list_own_knowledge_base",
+        ],
+        "test_rag_filters.py": [
+            "test_scoped_rag_search_requires_workspace_and_knowledge_base_filter",
+            "test_scoped_rag_search_adds_normalized_bvid_filter",
+            "test_scoped_rag_search_keeps_legacy_filter_for_empty_scope",
+        ],
+        "test_delete_cleanup.py": [
+            "test_delete_knowledge_base_keeps_record_when_vector_cleanup_fails",
+            "test_delete_knowledge_base_does_not_retry_without_workspace_on_runtime_type_error",
+            "test_delete_knowledge_base_removes_scoped_records_on_success",
+        ],
+        "test_db_fallback.py": [
+            "test_chat_falls_back_to_database_content_when_vector_retrieval_fails",
+        ],
+    }
+
+    for file_name, test_names in focused_files.items():
+        focused_path = focused_dir / file_name
+        assert focused_path.exists()
+        focused_source = focused_path.read_text(encoding="utf-8")
+        for test_name in test_names:
+            assert test_name not in mixed_source
+            assert test_name in focused_source
+
+    if mixed_test.exists():
+        assert len(mixed_source.splitlines()) <= 80
+
+
 def test_web_search_tavily_tests_are_split_by_domain():
     project_root = get_project_root()
     tests_dir = project_root / "tests"
