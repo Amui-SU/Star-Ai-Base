@@ -7,8 +7,6 @@ ASR 服务 - 使用 DashScope 录音文件识别
 import asyncio
 import json
 import os
-import shutil
-import subprocess
 import time
 from http import HTTPStatus
 from typing import Optional, Any
@@ -22,6 +20,11 @@ from dashscope.utils.oss_utils import OssUtils
 from loguru import logger
 
 from app.config import settings
+from app.services.asr_audio import (
+    prepare_recognition_input,
+    transcode_audio_to_pcm,
+    transcode_audio_to_wav,
+)
 
 
 class ASRService:
@@ -55,85 +58,20 @@ class ASRService:
 
     def _transcode_audio_to_pcm(self, file_path: str) -> Optional[str]:
         """转码为 16k s16le PCM，适配 Recognition"""
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            logger.info("未检测到 ffmpeg，无法转码为 PCM")
-            return None
-        base, _ext = os.path.splitext(file_path)
-        pcm_path = base + ".pcm"
-        cmd = [
-            ffmpeg,
-            "-y",
-            "-i",
-            file_path,
-            "-f",
-            "s16le",
-            "-acodec",
-            "pcm_s16le",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            pcm_path,
-        ]
-        try:
-            result = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            if result.returncode != 0:
-                err = (result.stderr or "").strip()
-                logger.warning(f"转码 PCM 失败: {err[:200]}")
-                return None
-            return pcm_path
-        except Exception as e:
-            logger.warning(f"转码 PCM 异常: {e}")
-            return None
+        return transcode_audio_to_pcm(file_path)
 
     def _transcode_audio_to_wav(self, file_path: str) -> Optional[str]:
         """转码为 16k 单声道 WAV"""
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            logger.info("未检测到 ffmpeg，无法转码为 WAV")
-            return None
-        base, _ext = os.path.splitext(file_path)
-        wav_path = base + ".wav"
-        cmd = [
-            ffmpeg,
-            "-y",
-            "-i",
-            file_path,
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-vn",
-            wav_path,
-        ]
-        try:
-            result = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            if result.returncode != 0:
-                err = (result.stderr or "").strip()
-                logger.warning(f"转码 WAV 失败: {err[:200]}")
-                return None
-            return wav_path
-        except Exception as e:
-            logger.warning(f"转码 WAV 异常: {e}")
-            return None
+        return transcode_audio_to_wav(file_path)
 
     def _prepare_recognition_input(self, file_path: str) -> Optional[str]:
         """按输入格式准备 Recognition 文件"""
-        fmt = (self.input_format or "pcm").lower()
-        if fmt == "wav":
-            return self._transcode_audio_to_wav(file_path)
-        return self._transcode_audio_to_pcm(file_path)
+        return prepare_recognition_input(
+            file_path,
+            input_format=self.input_format,
+            transcode_wav=self._transcode_audio_to_wav,
+            transcode_pcm=self._transcode_audio_to_pcm,
+        )
 
     def _recognize_local_file(self, file_path: str) -> Optional[str]:
         """使用 Recognition 直传本地音频"""
