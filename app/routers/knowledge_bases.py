@@ -111,6 +111,9 @@ from app.services.knowledge_web_search import (
 from app.services.knowledge_base_web_search_compat import (
     build_web_search_orchestration_compat,
 )
+from app.services.knowledge_base_web_search_api_key import (
+    resolve_web_search_api_key as resolve_knowledge_base_web_search_api_key,
+)
 from app.services.api_credentials import (
     record_usage_event,
     resolve_optional_user_api_credentials,
@@ -250,10 +253,13 @@ async def _resolve_web_search_api_key(
     enabled: bool,
     provider: str,
 ) -> str | None:
-    if not enabled or provider == "html":
-        return None
-    credential = await resolve_optional_user_api_credentials(db, user, "tavily")
-    return credential.api_key if credential else None
+    return await resolve_knowledge_base_web_search_api_key(
+        db,
+        user,
+        enabled=enabled,
+        provider=provider,
+        resolve_optional_user_api_credentials=resolve_optional_user_api_credentials,
+    )
 
 
 async def _load_scoped_chat_documents(

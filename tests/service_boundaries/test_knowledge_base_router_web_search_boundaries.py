@@ -155,3 +155,25 @@ def test_knowledge_base_router_delegates_answer_completion_adapter_to_service():
     assert "def complete_llm_with_config" not in router_source
     assert "tool_run.answer is not None" not in router_source
     assert "_prepare_web_search_tool_run" not in declared_names
+
+
+def test_knowledge_base_router_delegates_web_search_api_key_resolution_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_web_search_api_key.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+
+    route_helper_source = router_source[
+        router_source.index(
+            "async def _resolve_web_search_api_key("
+        ) : router_source.index("async def _load_scoped_chat_documents(")
+    ]
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "async def resolve_web_search_api_key" in service_source
+    assert "from app.services.knowledge_base_web_search_api_key import" in router_source
+    assert "resolve_web_search_api_key(" in route_helper_source
+    assert "resolve_optional_user_api_credentials(" not in route_helper_source
+    assert 'provider == "html"' not in route_helper_source
