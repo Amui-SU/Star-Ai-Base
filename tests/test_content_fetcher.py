@@ -1,6 +1,11 @@
 import pytest
 
 from app.schemas.content import ContentSource
+from app.services.content_asr import (
+    probe_audio_url,
+    try_asr_with_local_audio,
+    try_bilibili_asr,
+)
 from app.services.content_fetcher import ContentFetcher
 from app.services.content_subtitles import (
     extract_subtitle_url,
@@ -21,10 +26,12 @@ class FakeASR:
 
     async def transcribe_url(self, audio_url):
         self.calls += 1
+        self.last_url = audio_url
         return self.text
 
     async def transcribe_local_file(self, file_path):
         self.calls += 1
+        self.last_file_path = file_path
         return self.text
 
 
@@ -36,12 +43,15 @@ class FakeBilibili:
         summary=None,
         subtitle_text=None,
         audio_url=None,
+        download_audio_ok=False,
     ):
         self.video_info = video_info or {}
         self.summary = summary
         self.subtitle_text = subtitle_text
         self.audio_url = audio_url
+        self.download_audio_ok = download_audio_ok
         self.video_info_calls = 0
+        self.downloaded_audio_path = None
 
     def _get_cookies(self):
         return {"SESSDATA": "test"}
@@ -63,7 +73,8 @@ class FakeBilibili:
         return self.audio_url
 
     async def download_audio_to_file(self, audio_url, file_path):
-        return False
+        self.downloaded_audio_path = file_path
+        return self.download_audio_ok
 
 
 def test_content_summary_helpers_parse_and_format_ai_summary_payload():
@@ -166,6 +177,97 @@ async def test_try_bilibili_subtitle_falls_back_to_view_subtitles():
     )
 
     assert text == subtitle
+
+
+@pytest.mark.asyncio
+async def test_try_bilibili_asr_uses_transcription_when_audio_url_is_reachable():
+    text = "这是 ASR 转写内容。" * 20
+    bili = FakeBilibili(audio_url="https://example.test/audio.m4s")
+    asr = FakeASR(text=text)
+
+    result = await try_bilibili_asr(
+        bili,
+        asr,
+        "BV1ASR",
+        456,
+        probe_audio=lambda _bvid, _audio_url: 200,
+    )
+
+    assert result == text
+    assert asr.calls == 1
+    assert asr.last_url == "https://example.test/audio.m4s"
+    assert bili.downloaded_audio_path is None
+
+
+@pytest.mark.asyncio
+async def test_try_bilibili_asr_uses_local_audio_when_remote_url_is_unreachable():
+    text = "这是本地 Recognition 转写内容。" * 20
+    bili = FakeBilibili(
+        audio_url="https://example.test/audio.m4s",
+        download_audio_ok=True,
+    )
+    asr = FakeASR(text=text)
+
+    result = await try_bilibili_asr(
+        bili,
+        asr,
+        "BV1LOCAL",
+        456,
+        probe_audio=lambda _bvid, _audio_url: 403,
+        tmp_dir="data/test_asr_tmp",
+        time_provider=lambda: 123456,
+        path_exists=lambda _path: False,
+        get_file_size=lambda _path: 2048,
+        remove_file=lambda _path: None,
+    )
+
+    assert result == text
+    assert asr.calls == 1
+    assert asr.last_file_path.endswith("BV1LOCAL_456_123456.m4s")
+    assert bili.downloaded_audio_path == asr.last_file_path
+
+
+@pytest.mark.asyncio
+async def test_try_bilibili_asr_rejects_short_transcripts():
+    bili = FakeBilibili(audio_url="https://example.test/audio.m4s")
+    asr = FakeASR(text="太短")
+
+    result = await try_bilibili_asr(
+        bili,
+        asr,
+        "BV1SHORT",
+        456,
+        probe_audio=lambda _bvid, _audio_url: 200,
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_try_asr_with_local_audio_skips_tiny_downloaded_file():
+    bili = FakeBilibili(
+        audio_url="https://example.test/audio.m4s",
+        download_audio_ok=True,
+    )
+    asr = FakeASR(text="不会被调用")
+    removed = []
+
+    result = await try_asr_with_local_audio(
+        bili,
+        asr,
+        "BV1TINY",
+        456,
+        "https://example.test/audio.m4s",
+        tmp_dir="data/test_asr_tmp",
+        time_provider=lambda: 123456,
+        path_exists=lambda _path: True,
+        get_file_size=lambda _path: 512,
+        remove_file=removed.append,
+    )
+
+    assert result is None
+    assert asr.calls == 0
+    assert removed == [bili.downloaded_audio_path]
 
 
 @pytest.mark.asyncio

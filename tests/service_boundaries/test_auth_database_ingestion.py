@@ -506,6 +506,31 @@ def test_content_fetcher_delegates_subtitle_helpers_to_service():
     assert "get_player_info(" not in fetcher_source
 
 
+def test_content_fetcher_delegates_asr_audio_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/content_asr.py"
+    fetcher_source = (project_root / "app/services/content_fetcher.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in {
+        "probe_audio_url",
+        "try_asr_with_local_audio",
+        "try_bilibili_asr",
+    }:
+        assert f"async def {name}" in service_source
+
+    assert "from app.services.content_asr import" in fetcher_source
+    assert "httpx.AsyncClient" not in fetcher_source
+    assert "download_audio_to_file(" not in fetcher_source
+    assert "transcribe_url(" not in fetcher_source
+    assert "transcribe_local_file(" not in fetcher_source
+    assert "def _probe_audio_url(" not in fetcher_source
+    assert "def _try_asr_with_local_audio(" not in fetcher_source
+
+
 def test_bilibili_service_delegates_cookie_and_response_helpers():
     project_root = get_project_root()
     cookie_service_path = project_root / "app/services/bilibili_cookies.py"
