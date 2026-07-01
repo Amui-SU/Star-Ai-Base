@@ -3,16 +3,11 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from loguru import logger
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, get_current_workspace
-from app.models import (
-    SourceBinding,
-    SystemUser,
-    Workspace,
-)
+from app.models import SystemUser, Workspace
 from app.schemas.content import FavoriteFolderInfo
 from app.schemas.source_bindings import (
     LoginStatusResponse,
@@ -36,9 +31,12 @@ from app.services.source_binding_presenters import (
 )
 from app.services.source_binding_titles import update_video_title_override
 from app.services.source_binding_services import (
+    ensure_active_source_binding,
     get_bilibili_service_for_binding as _get_bilibili_service_for_binding,
     generate_bilibili_binding_qrcode as _generate_bilibili_binding_qrcode,
+    list_source_bindings,
     poll_bilibili_binding_qrcode as _poll_bilibili_binding_qrcode,
+    revoke_source_binding,
 )
 from app.services.source_binding_favorites import (
     clean_invalid_bilibili_favorite_resources,
@@ -69,13 +67,8 @@ async def list_bindings(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> list[SourceBindingResponse]:
-    result = await db.execute(
-        select(SourceBinding)
-        .where(SourceBinding.user_id == current_user.id)
-        .where(SourceBinding.workspace_id == current_workspace.id)
-        .order_by(SourceBinding.id.desc())
-    )
-    return [_response(binding) for binding in result.scalars().all()]
+    bindings = await list_source_bindings(current_user, current_workspace, db)
+    return [_response(binding) for binding in bindings]
 
 
 @router.delete("/{binding_id}")
@@ -85,17 +78,7 @@ async def revoke_binding(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
-    binding = await db.get(SourceBinding, binding_id)
-    if (
-        binding is None
-        or binding.user_id != current_user.id
-        or binding.workspace_id != current_workspace.id
-    ):
-        raise HTTPException(status_code=404, detail="内容源绑定不存在")
-
-    binding.status = "revoked"
-    await db.commit()
-    return {"ok": True}
+    return await revoke_source_binding(binding_id, current_user, current_workspace, db)
 
 
 @router.get("/bilibili/qrcode", response_model=QRCodeResponse)
@@ -215,14 +198,12 @@ async def update_video_title_by_binding(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    binding = await db.get(SourceBinding, binding_id)
-    if (
-        binding is None
-        or binding.user_id != current_user.id
-        or binding.workspace_id != current_workspace.id
-        or binding.status != "active"
-    ):
-        raise HTTPException(status_code=404, detail="Source binding not found")
+    binding = await ensure_active_source_binding(
+        binding_id,
+        current_user,
+        current_workspace,
+        db,
+    )
 
     bvid = _normalize_bvid(payload.bvid)
     custom_title = _normalize_custom_title(payload.title)

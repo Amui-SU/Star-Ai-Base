@@ -21,6 +21,77 @@ from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.time_utils import utc_now
 
 
+async def list_source_bindings(
+    current_user: SystemUser,
+    current_workspace: Workspace,
+    db: AsyncSession,
+) -> list[SourceBinding]:
+    """List source bindings owned by the current user and workspace."""
+    result = await db.execute(
+        select(SourceBinding)
+        .where(SourceBinding.user_id == current_user.id)
+        .where(SourceBinding.workspace_id == current_workspace.id)
+        .order_by(SourceBinding.id.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def _get_owned_source_binding(
+    binding_id: int,
+    current_user: SystemUser,
+    current_workspace: Workspace,
+    db: AsyncSession,
+    *,
+    detail: str,
+) -> SourceBinding:
+    binding = await db.get(SourceBinding, binding_id)
+    if (
+        binding is None
+        or binding.user_id != current_user.id
+        or binding.workspace_id != current_workspace.id
+    ):
+        raise HTTPException(status_code=404, detail=detail)
+    return binding
+
+
+async def revoke_source_binding(
+    binding_id: int,
+    current_user: SystemUser,
+    current_workspace: Workspace,
+    db: AsyncSession,
+) -> dict[str, bool]:
+    """Revoke a source binding owned by the current user and workspace."""
+    binding = await _get_owned_source_binding(
+        binding_id,
+        current_user,
+        current_workspace,
+        db,
+        detail="内容源绑定不存在",
+    )
+    binding.status = "revoked"
+    await db.commit()
+    return {"ok": True}
+
+
+async def ensure_active_source_binding(
+    binding_id: int,
+    current_user: SystemUser,
+    current_workspace: Workspace,
+    db: AsyncSession,
+) -> SourceBinding:
+    """Return an active binding owned by the current user and workspace."""
+    binding = await _get_owned_source_binding(
+        binding_id,
+        current_user,
+        current_workspace,
+        db,
+        detail="Source binding not found",
+    )
+    if binding.status != "active":
+        raise HTTPException(status_code=404, detail="Source binding not found")
+    return binding
+
+
 async def get_bilibili_service_for_binding(
     binding_id: int,
     current_user: SystemUser,
@@ -34,14 +105,12 @@ async def get_bilibili_service_for_binding(
     decrypt_payload: Callable[[str], str] = decrypt_text,
 ) -> BilibiliService:
     """Resolve a source binding into an authenticated Bilibili service."""
-    binding = await db.get(SourceBinding, binding_id)
-    if (
-        binding is None
-        or binding.user_id != current_user.id
-        or binding.workspace_id != current_workspace.id
-        or binding.status != "active"
-    ):
-        raise HTTPException(status_code=404, detail="内容源绑定不存在或已失效")
+    await ensure_active_source_binding(
+        binding_id,
+        current_user,
+        current_workspace,
+        db,
+    )
 
     cred_result = await db.execute(
         select(SourceCredential)

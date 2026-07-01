@@ -165,3 +165,30 @@ def test_source_binding_router_delegates_favorite_flows_to_service():
     assert "clean_favorite_resources(" not in router_source
     assert "is_default_favorite_folder(" not in router_source
     assert declared_names.isdisjoint(expected_service_names)
+
+
+def test_source_binding_router_delegates_binding_catalog_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/source_binding_services.py"
+    router_source = (project_root / "app/routers/source_bindings.py").read_text(
+        encoding="utf-8"
+    )
+    service_source = service_path.read_text(encoding="utf-8")
+
+    expected_service_names = {
+        "list_source_bindings",
+        "revoke_source_binding",
+        "ensure_active_source_binding",
+    }
+
+    for name in expected_service_names:
+        assert f"async def {name}" in service_source
+
+    assert "list_source_bindings(" in router_source
+    assert "revoke_source_binding(" in router_source
+    assert "ensure_active_source_binding(" in router_source
+    assert "select(SourceBinding)" not in router_source
+    assert "db.get(SourceBinding" not in router_source
+    assert "binding.user_id != current_user.id" not in router_source
+    assert "binding.workspace_id != current_workspace.id" not in router_source
+    assert 'binding.status != "active"' not in router_source
