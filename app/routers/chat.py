@@ -66,6 +66,12 @@ from app.services.chat_completion import (
     stream_llm_events,
     verify_provider_configuration,
 )
+from app.services.chat_llm_runtime import (
+    build_complete_llm_answer_adapter,
+    build_complete_llm_answer_with_tools_adapter,
+    build_prepare_llm_messages_with_tools_adapter,
+    build_stream_llm_events_adapter,
+)
 from app.services.chat_routing import (
     filter_docs_by_keywords as _filter_docs_by_keywords,
     is_collection_intent as _is_collection_intent,
@@ -274,41 +280,31 @@ _encode_thinking_delta = lambda content: encode_thinking_delta(
 )
 
 
-_stream_llm_events = lambda messages, llm_config=None: stream_llm_events(
-    messages,
-    llm_config,
-    resolve_llm_config=_resolve_llm_config,
-    get_llm_client=_get_llm_client,
+_stream_llm_events = build_stream_llm_events_adapter(
+    stream_llm_events=stream_llm_events,
+    resolve_llm_config=lambda: _resolve_llm_config(),
+    get_llm_client=lambda config: _get_llm_client(config),
 )
 
 
-_complete_llm_answer = lambda messages, llm_config=None: complete_llm_answer(
-    messages,
-    llm_config,
-    resolve_llm_config=_resolve_llm_config,
-    get_llm_client=_get_llm_client,
+_complete_llm_answer = build_complete_llm_answer_adapter(
+    complete_llm_answer=complete_llm_answer,
+    resolve_llm_config=lambda: _resolve_llm_config(),
+    get_llm_client=lambda config: _get_llm_client(config),
 )
 
 
-_complete_llm_answer_with_tools = lambda messages, *, tools, tool_handlers, max_tool_calls=2: complete_llm_answer_with_tools(
-    messages,
-    tools=tools,
-    tool_handlers=tool_handlers,
-    max_tool_calls=max_tool_calls,
-    resolve_llm_config=_resolve_llm_config,
-    get_llm_client=_get_llm_client,
+_complete_llm_answer_with_tools = build_complete_llm_answer_with_tools_adapter(
+    complete_llm_answer_with_tools=complete_llm_answer_with_tools,
+    resolve_llm_config=lambda: _resolve_llm_config(),
+    get_llm_client=lambda config: _get_llm_client(config),
 )
 
 
-_prepare_llm_messages_with_tools = lambda messages, *, tools, tool_handlers, max_tool_calls=2, after_tool_messages=None, llm_config=None: prepare_llm_messages_with_tools(
-    messages,
-    tools=tools,
-    tool_handlers=tool_handlers,
-    max_tool_calls=max_tool_calls,
-    after_tool_messages=after_tool_messages,
-    llm_config=llm_config,
-    resolve_llm_config=_resolve_llm_config,
-    get_llm_client=_get_llm_client,
+_prepare_llm_messages_with_tools = build_prepare_llm_messages_with_tools_adapter(
+    prepare_llm_messages_with_tools=prepare_llm_messages_with_tools,
+    resolve_llm_config=lambda: _resolve_llm_config(),
+    get_llm_client=lambda config: _get_llm_client(config),
 )
 
 

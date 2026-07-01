@@ -159,6 +159,37 @@ def test_chat_router_delegates_completion_helpers_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_chat_router_uses_services_for_llm_runtime_adapters():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/chat_llm_runtime.py"
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    declared_names = declared_callable_names(chat_source)
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in {
+        "build_stream_llm_events_adapter",
+        "build_complete_llm_answer_adapter",
+        "build_complete_llm_answer_with_tools_adapter",
+        "build_prepare_llm_messages_with_tools_adapter",
+    }:
+        assert f"def {name}" in service_source
+    assert "from app.services.chat_llm_runtime import" in chat_source
+    assert "stream_llm_events(" not in chat_source
+    assert "complete_llm_answer(" not in chat_source
+    assert "complete_llm_answer_with_tools(" not in chat_source
+    assert "prepare_llm_messages_with_tools(" not in chat_source
+    assert declared_names.isdisjoint(
+        {
+            "_stream_llm_events",
+            "_complete_llm_answer",
+            "_complete_llm_answer_with_tools",
+            "_prepare_llm_messages_with_tools",
+        }
+    )
+    assert "_get_llm_client" in chat_source
+
+
 def test_chat_router_delegates_llm_client_factory_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/llm_client.py"
