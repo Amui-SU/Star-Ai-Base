@@ -76,7 +76,8 @@ def test_knowledge_base_web_search_api_tests_are_split_from_scoping_file():
     focused_source = "\n".join(
         (api_dir / relative_path).read_text(encoding="utf-8")
         for relative_path in [
-            "test_tool_chain.py",
+            "test_tool_chain_adapter_status.py",
+            "test_tool_chain_model_queries.py",
             "test_fetch_page.py",
             "test_toggle_fallback.py",
         ]
@@ -93,6 +94,35 @@ def test_knowledge_base_web_search_api_tests_are_split_from_scoping_file():
     ]:
         assert test_name not in scoping_source
         assert test_name in focused_source
+
+
+def test_knowledge_base_web_search_api_tool_chain_tests_are_split_by_domain():
+    project_root = get_project_root()
+    api_dir = project_root / "tests" / "knowledge_base_web_search_api"
+    mixed_test = api_dir / "test_tool_chain.py"
+    mixed_source = mixed_test.read_text(encoding="utf-8") if mixed_test.exists() else ""
+
+    focused_files = {
+        "test_tool_chain_adapter_status.py": [
+            "test_scoped_chat_lets_llm_call_web_search_tool_when_enabled",
+            "test_scoped_chat_reports_socks_dependency_failure",
+        ],
+        "test_tool_chain_model_queries.py": [
+            "test_scoped_chat_web_search_tool_chain_executes_model_requested_query",
+            "test_scoped_chat_web_search_tool_accepts_query_alias_arguments",
+        ],
+    }
+
+    for file_name, test_names in focused_files.items():
+        focused_path = api_dir / file_name
+        assert focused_path.exists()
+        focused_source = focused_path.read_text(encoding="utf-8")
+        for test_name in test_names:
+            assert test_name not in mixed_source
+            assert test_name in focused_source
+
+    if mixed_test.exists():
+        assert len(mixed_source.splitlines()) <= 80
 
 
 def test_knowledge_base_web_search_tool_run_tests_are_split_from_scoping_file():
