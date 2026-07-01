@@ -420,6 +420,15 @@ def test_chat_router_delegates_llm_client_factory_to_service():
     )
 
 
+def test_chat_router_uses_admin_service_instead_of_system_auth_router():
+    project_root = get_project_root()
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+
+    assert "from app.routers.system_auth import" not in chat_source
+    assert "from app.services.system_auth_admin import" in chat_source
+    assert "get_current_admin_user as _get_current_admin_user" in chat_source
+
+
 def test_chat_router_delegates_legacy_ask_runtime_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/chat_runtime.py"

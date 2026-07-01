@@ -14,7 +14,9 @@ from app.dependencies import get_current_user
 from app.models import UserApiAccount
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.config import settings
-from app.routers.system_auth import _get_current_admin_user
+from app.services.system_auth_admin import (
+    get_current_admin_user as _get_current_admin_user,
+)
 from app.services.api_credentials import (
     normalize_llm_api_source,
     resolve_user_llm_credentials,
