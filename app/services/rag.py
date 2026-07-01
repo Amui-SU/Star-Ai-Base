@@ -16,10 +16,17 @@ from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from app.config import settings
 from app.schemas.content import VideoContent
+from app.services.rag_collection_ops import (
+    clear_collection as clear_collection_vectors,
+    collection_stats,
+    delete_knowledge_base_vectors,
+    delete_video_vectors,
+    delete_video_vectors_in_knowledge_base,
+    has_video_vectors_in_knowledge_base as has_scoped_video_vectors,
+)
 from app.services.rag_documents import build_video_content_text, build_video_documents
 from app.services.rag_filters import (
     knowledge_base_filter,
-    video_in_knowledge_base_filter,
 )
 
 
@@ -427,34 +434,15 @@ class RAGService:
         Returns:
             统计信息字典
         """
-        try:
-            collection = self.vectorstore._collection
-            count = collection.count()
-
-            # 获取唯一视频数
-            result = collection.get(include=["metadatas"])
-            bvids = set()
-            for meta in result.get("metadatas", []):
-                if meta and "bvid" in meta:
-                    bvids.add(meta["bvid"])
-
-            return {
-                "total_chunks": count,
-                "total_videos": len(bvids),
-                "collection_name": self.collection_name,
-            }
-        except Exception as e:
-            logger.error(f"获取统计信息失败: {e}")
-            return {
-                "total_chunks": 0,
-                "total_videos": 0,
-                "collection_name": self.collection_name,
-            }
+        return collection_stats(
+            self.vectorstore._collection,
+            collection_name=self.collection_name,
+        )
 
     def clear_collection(self):
         """清空向量库"""
         try:
-            self.vectorstore._collection.delete(where={})
+            clear_collection_vectors(self.vectorstore._collection)
             logger.info(f"已清空向量库: {self.collection_name}")
         except Exception as e:
             logger.error(f"清空向量库失败: {e}")
@@ -468,7 +456,7 @@ class RAGService:
             bvid: 视频 BV 号
         """
         try:
-            self.vectorstore._collection.delete(where={"bvid": bvid})
+            delete_video_vectors(self.vectorstore._collection, bvid=bvid)
             logger.info(f"已删除视频: {bvid}")
         except Exception as e:
             logger.error(f"删除视频失败 [{bvid}]: {e}")
@@ -481,13 +469,13 @@ class RAGService:
         bvid: str,
     ):
         """Delete one video's vectors inside a single knowledge-base scope."""
-        where = video_in_knowledge_base_filter(
-            workspace_id=workspace_id,
-            knowledge_base_id=knowledge_base_id,
-            bvid=bvid,
-        )
         try:
-            self.vectorstore._collection.delete(where=where)
+            delete_video_vectors_in_knowledge_base(
+                self.vectorstore._collection,
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                bvid=bvid,
+            )
             logger.info(f"已删除知识库 {knowledge_base_id} 内的视频 {bvid}")
         except Exception as e:
             logger.error(f"删除 scoped 视频失败 [{knowledge_base_id}/{bvid}]: {e}")
@@ -501,14 +489,13 @@ class RAGService:
         bvid: str,
     ) -> bool:
         """Return whether one video already has vectors in the scoped collection."""
-        where = video_in_knowledge_base_filter(
-            workspace_id=workspace_id,
-            knowledge_base_id=knowledge_base_id,
-            bvid=bvid,
-        )
         try:
-            result = self.vectorstore._collection.get(where=where, limit=1)
-            return bool(result.get("ids"))
+            return has_scoped_video_vectors(
+                self.vectorstore._collection,
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                bvid=bvid,
+            )
         except Exception as e:
             logger.warning(
                 f"检查 scoped 视频向量失败 [{knowledge_base_id}/{bvid}]: {e}"
@@ -527,17 +514,11 @@ class RAGService:
             knowledge_base_id: 知识库 ID
         """
         try:
-            if workspace_id is None:
-                where = {"knowledge_base_id": knowledge_base_id}
-            else:
-                where = knowledge_base_filter(
-                    workspace_id=workspace_id,
-                    knowledge_base_id=knowledge_base_id,
-                )
-            before = self.vectorstore._collection.count()
-            self.vectorstore._collection.delete(where=where)
-            after = self.vectorstore._collection.count()
-            deleted = before - after
+            deleted = delete_knowledge_base_vectors(
+                self.vectorstore._collection,
+                knowledge_base_id=knowledge_base_id,
+                workspace_id=workspace_id,
+            )
             logger.info(f"已删除知识库 {knowledge_base_id} 的 {deleted} 个向量文档")
             return deleted
         except Exception as e:

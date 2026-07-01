@@ -341,6 +341,7 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     project_root = get_project_root()
     documents_path = project_root / "app/services/rag_documents.py"
     filters_path = project_root / "app/services/rag_filters.py"
+    collection_ops_path = project_root / "app/services/rag_collection_ops.py"
     rag_source = (project_root / "app/services/rag.py").read_text(encoding="utf-8")
 
     assert documents_path.exists()
@@ -361,7 +362,22 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
 
     assert "from app.services.rag_documents import" in rag_source
     assert "from app.services.rag_filters import" in rag_source
+    assert collection_ops_path.exists()
+    collection_ops_source = collection_ops_path.read_text(encoding="utf-8")
+    for name in {
+        "collection_stats",
+        "clear_collection",
+        "delete_video_vectors",
+        "delete_video_vectors_in_knowledge_base",
+        "has_video_vectors_in_knowledge_base",
+        "delete_knowledge_base_vectors",
+    }:
+        assert f"def {name}" in collection_ops_source
+    assert "from app.services.rag_collection_ops import" in rag_source
     assert "Document(" not in rag_source
+    assert "self.vectorstore._collection.delete(" not in rag_source
+    assert "self.vectorstore._collection.get(" not in rag_source
+    assert "self.vectorstore._collection.count(" not in rag_source
     assert 'filters = [\n            {"workspace_id": workspace_id}' not in rag_source
     assert '{"bvid": {"$in": normalized_bvids}}' not in rag_source
 
