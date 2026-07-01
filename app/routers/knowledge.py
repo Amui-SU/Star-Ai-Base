@@ -24,7 +24,7 @@ from app.services.content_fetcher import ContentFetcher
 from app.services.asr import ASRService
 from app.services.folder_ingestion import sync_folder as _sync_folder
 from app.services.rag_runtime import get_rag_service
-from app.routers.auth import get_session
+from app.services.legacy_bilibili_sessions import get_session
 
 router = APIRouter(prefix="/knowledge", tags=["知识库"])
 LEGACY_SCOPED_API_DETAIL = "旧全局接口已禁用，请使用 /knowledge-bases/* 范围化 API。"

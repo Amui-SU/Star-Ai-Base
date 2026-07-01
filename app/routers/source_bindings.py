@@ -22,7 +22,7 @@ from app.schemas.source_bindings import (
     QRCodeResponse,
     SourceBindingResponse,
 )
-from app.routers.auth import (
+from app.services.legacy_bilibili_sessions import (
     login_sessions,
     QRCODE_SESSION_TTL,
     _set_session,

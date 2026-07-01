@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from app.schemas.content import FavoriteFolderInfo
 from app.services.favorite_folders import is_legacy_default_favorite_folder
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
-from app.routers.auth import get_session
+from app.services.legacy_bilibili_sessions import get_session
 
 router = APIRouter(prefix="/favorites", tags=["收藏夹"])
 

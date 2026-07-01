@@ -4,14 +4,13 @@ Bilibili RAG 知识库系统
 认证路由 - 处理 B站登录
 """
 
-import time
 from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Depends
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
-from app.database import get_db, get_db_context
+from app.database import get_db
 from app.models import (
     OAuthPendingState,
     UserSession as UserSessionModel,
@@ -22,74 +21,20 @@ from app.services.bilibili import (
     bilibili_service_from_cookies,
     normalize_bilibili_cookies,
 )
-from app.security import decrypt_text, encrypt_text
+from app.services.legacy_bilibili_sessions import (
+    QRCODE_SESSION_TTL,
+    _encrypt_session_cookie,
+    _get_session,
+    _set_session,
+    get_session,
+    login_sessions,
+)
 from app.time_utils import utc_now_naive
 import uuid
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
-# 旧登录热缓存；二维码 pending state 以数据库为准。
-login_sessions: dict = {}
-
-# 会话过期时间（秒）
-QRCODE_SESSION_TTL = 300  # 二维码 5 分钟过期
-LOGIN_SESSION_TTL = 14 * 86400  # 登录会话 14 天过期
-ENCRYPTED_COOKIE_PREFIX = "fernet:"
 LEGACY_QRCODE_PENDING_PURPOSE = "legacy_auth_qrcode"
-
-
-def _encrypt_session_cookie(value: str | None) -> str | None:
-    if value in (None, ""):
-        return value
-    return f"{ENCRYPTED_COOKIE_PREFIX}{encrypt_text(value)}"
-
-
-def _decrypt_session_cookie(value: str | None) -> str | None:
-    if value in (None, ""):
-        return value
-    if not value.startswith(ENCRYPTED_COOKIE_PREFIX):
-        return value
-    return decrypt_text(value.removeprefix(ENCRYPTED_COOKIE_PREFIX))
-
-
-def _cookies_from_db_session(db_session: UserSessionModel) -> dict:
-    return {
-        "SESSDATA": _decrypt_session_cookie(db_session.sessdata),
-        "bili_jct": _decrypt_session_cookie(db_session.bili_jct),
-        "DedeUserID": db_session.dedeuserid,
-    }
-
-
-def _cleanup_expired_sessions():
-    """清理过期会话（在每次访问时触发）"""
-    now = time.time()
-    expired_keys = [
-        key
-        for key, val in login_sessions.items()
-        if now - val.get("_created_at", 0) > val.get("_ttl", QRCODE_SESSION_TTL)
-    ]
-    for key in expired_keys:
-        login_sessions.pop(key, None)
-
-
-def _set_session(key: str, value: dict, ttl: int = LOGIN_SESSION_TTL):
-    """写入会话并附加创建时间和 TTL"""
-    value["_created_at"] = time.time()
-    value["_ttl"] = ttl
-    login_sessions[key] = value
-
-
-def _get_session(key: str) -> dict | None:
-    """读取会话（自动清理过期）"""
-    _cleanup_expired_sessions()
-    session = login_sessions.get(key)
-    if session is None:
-        return None
-    now = time.time()
-    if now - session.get("_created_at", 0) > session.get("_ttl", LOGIN_SESSION_TTL):
-        login_sessions.pop(key, None)
-        return None
-    return session
 
 
 async def _create_legacy_qrcode_pending_state(
@@ -291,26 +236,9 @@ async def get_session_info(session_id: str):
     """
     获取会话信息
     """
-    session = _get_session(session_id)
+    session = await get_session(session_id)
     if not session:
-        async with get_db_context() as db:
-            result = await db.execute(
-                select(UserSessionModel).where(
-                    UserSessionModel.session_id == session_id
-                )
-            )
-            db_session = result.scalar_one_or_none()
-        if not db_session or not db_session.is_valid:
-            raise HTTPException(status_code=404, detail="会话不存在或已过期")
-        session = {
-            "cookies": _cookies_from_db_session(db_session),
-            "user_info": {
-                "mid": db_session.bili_mid,
-                "uname": db_session.bili_uname,
-                "face": db_session.bili_face,
-            },
-        }
-        _set_session(session_id, session)
+        raise HTTPException(status_code=404, detail="会话不存在或已过期")
 
     return {"valid": True, "user_info": session.get("user_info")}
 
@@ -329,32 +257,3 @@ async def logout(session_id: str, db: AsyncSession = Depends(get_db)):
         db_session.is_valid = False
         await db.commit()
     return {"message": "已退出登录"}
-
-
-async def get_session(session_id: str) -> dict:
-    """
-    获取会话信息（内部使用）
-    """
-    session = _get_session(session_id)
-    if session:
-        return session
-
-    async with get_db_context() as db:
-        result = await db.execute(
-            select(UserSessionModel).where(UserSessionModel.session_id == session_id)
-        )
-        db_session = result.scalar_one_or_none()
-        if not db_session or not db_session.is_valid:
-            return None
-        session = {
-            "cookies": _cookies_from_db_session(db_session),
-            "user_info": {
-                "mid": db_session.bili_mid,
-                "uname": db_session.bili_uname,
-                "face": db_session.bili_face,
-            },
-        }
-
-    if session:
-        _set_session(session_id, session)
-    return session
