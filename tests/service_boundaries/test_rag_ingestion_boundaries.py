@@ -47,6 +47,7 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     documents_path = project_root / "app/services/rag_documents.py"
     filters_path = project_root / "app/services/rag_filters.py"
     collection_ops_path = project_root / "app/services/rag_collection_ops.py"
+    runtime_path = project_root / "app/services/rag_runtime_components.py"
     qa_path = project_root / "app/services/rag_qa.py"
     rag_source = (project_root / "app/services/rag.py").read_text(encoding="utf-8")
 
@@ -68,6 +69,19 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
 
     assert "from app.services.rag_documents import" in rag_source
     assert "from app.services.rag_filters import" in rag_source
+    assert runtime_path.exists()
+    runtime_source = runtime_path.read_text(encoding="utf-8")
+    for name in {
+        "build_embeddings",
+        "build_vectorstore",
+        "build_llm",
+        "build_text_splitter",
+        "build_qa_prompt",
+        "build_fallback_prompt",
+        "build_summary_prompt",
+    }:
+        assert f"def {name}" in runtime_source
+    assert "from app.services.rag_runtime_components import" in rag_source
     assert collection_ops_path.exists()
     collection_ops_source = collection_ops_path.read_text(encoding="utf-8")
     for name in {
@@ -90,6 +104,10 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     }:
         assert f"def {name}" in qa_source or f"async def {name}" in qa_source
     assert "from app.services.rag_qa import" in rag_source
+    assert "from langchain_openai import OpenAIEmbeddings, ChatOpenAI" not in rag_source
+    assert "from langchain_chroma import Chroma" not in rag_source
+    assert "RecursiveCharacterTextSplitter" not in rag_source
+    assert "ChatPromptTemplate.from_messages" not in rag_source
     assert "Document(" not in rag_source
     assert "context_parts = []" not in rag_source
     assert "seen_bvids = set()" not in rag_source
