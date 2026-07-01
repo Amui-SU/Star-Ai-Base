@@ -79,6 +79,9 @@ def test_knowledge_base_router_delegates_web_search_helpers_to_service():
 def test_knowledge_base_router_delegates_web_search_orchestration_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_web_search_orchestration.py"
+    compat_service_path = (
+        project_root / "app/services/knowledge_base_web_search_compat.py"
+    )
     router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
         encoding="utf-8"
     )
@@ -113,9 +116,24 @@ def test_knowledge_base_router_delegates_web_search_orchestration_to_service():
     service_source = service_path.read_text(encoding="utf-8")
     for name in expected_service_names:
         assert f"def {name}" in service_source or f"{name} =" in service_source
-    assert (
-        "from app.services.knowledge_web_search_orchestration import" in router_source
-    )
+    assert compat_service_path.exists()
+    compat_service_source = compat_service_path.read_text(encoding="utf-8")
+    for name in {
+        "build_web_search_orchestration_compat",
+        "legacy_execute_web_search_tool",
+        "legacy_execute_fetch_web_page_tool",
+        "legacy_run_initial_web_search",
+        "legacy_prepare_web_search_tool_run",
+        "legacy_prepare_knowledge_base_web_search",
+        "legacy_prepare_knowledge_base_web_search_with_heartbeats",
+    }:
+        assert f"def {name}" in compat_service_source
+    assert "from app.services.knowledge_base_web_search_compat import" in router_source
+    assert "def _legacy_execute_web_search_tool" not in router_source
+    assert "def _legacy_execute_fetch_web_page_tool" not in router_source
+    assert "def _legacy_run_initial_web_search" not in router_source
+    assert "def _legacy_prepare_web_search_tool_run" not in router_source
+    assert "def _legacy_prepare_knowledge_base_web_search" not in router_source
     assert declared_names.isdisjoint(router_private_names)
 
 

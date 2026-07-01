@@ -105,16 +105,8 @@ from app.services.knowledge_web_search import (
     web_search_failed_status_from_exception as _web_search_failed_status_from_exception,
     web_search_status as _web_search_status,
 )
-from app.services.knowledge_web_search_orchestration import (
-    FETCH_WEB_PAGE_CONTEXT_CHARS as _FETCH_WEB_PAGE_CONTEXT_CHARS,
-    MAX_FETCH_WEB_PAGE_CALLS as _MAX_FETCH_WEB_PAGE_CALLS,
-    WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS as _WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS,
-    WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS as _WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS,
-    execute_fetch_web_page_tool as _execute_fetch_web_page_tool_impl,
-    execute_web_search_tool as _execute_web_search_tool_impl,
-    prepare_knowledge_base_web_search_with_heartbeats as _prepare_knowledge_base_web_search_with_heartbeats_impl,
-    prepare_web_search_tool_run as _prepare_web_search_tool_run_impl,
-    run_initial_web_search as _run_initial_web_search_impl,
+from app.services.knowledge_base_web_search_compat import (
+    build_web_search_orchestration_compat,
 )
 from app.services.api_credentials import (
     record_usage_event,
@@ -223,69 +215,6 @@ def _knowledge_web_search_module():
     return sys.modules[__name__]
 
 
-async def _legacy_execute_web_search_tool(
-    arguments: dict,
-    web_results: list[dict[str, str]],
-    state: dict,
-) -> dict:
-    return await _execute_web_search_tool_impl(
-        arguments,
-        web_results,
-        state,
-        search_web=getattr(_knowledge_web_search_module(), "search_web"),
-    )
-
-
-async def _legacy_execute_fetch_web_page_tool(
-    arguments: dict,
-    web_results: list[dict[str, str]],
-    state: dict,
-) -> dict:
-    return await _execute_fetch_web_page_tool_impl(
-        arguments,
-        web_results,
-        state,
-        fetch_web_page=getattr(_knowledge_web_search_module(), "fetch_web_page"),
-    )
-
-
-async def _legacy_run_initial_web_search(
-    question: str,
-    web_results: list[dict[str, str]],
-    state: dict,
-) -> None:
-    return await _run_initial_web_search_impl(
-        question,
-        web_results,
-        state,
-        search_web=getattr(_knowledge_web_search_module(), "search_web"),
-    )
-
-
-async def _legacy_prepare_web_search_tool_run(
-    messages: list[dict],
-    *,
-    question: str,
-    provider: str = "auto",
-    tavily_api_key: str | None = None,
-    llm_config: dict | None = None,
-):
-    module = _knowledge_web_search_module()
-    return await _prepare_web_search_tool_run_impl(
-        messages,
-        question=question,
-        provider=provider,
-        tavily_api_key=tavily_api_key,
-        llm_config=llm_config,
-        prepare_llm_messages_with_tools=getattr(
-            module,
-            "_prepare_llm_messages_with_tools",
-        ),
-        search_web=getattr(module, "search_web"),
-        fetch_web_page=getattr(module, "fetch_web_page"),
-    )
-
-
 async def _complete_knowledge_base_answer(
     messages: list[dict],
     *,
@@ -332,79 +261,9 @@ async def _complete_knowledge_base_answer(
     )
 
 
-async def _legacy_prepare_knowledge_base_web_search(
-    messages: list[dict],
-    *,
-    question: str,
-    provider: str = "auto",
-    tavily_api_key: str | None = None,
-    llm_config: dict | None = None,
-) -> tuple:
-    tool_run, web_results, web_search_state = await getattr(
-        _knowledge_web_search_module(),
-        "_prepare_web_search_tool_run",
-    )(
-        messages,
-        question=question,
-        provider=provider,
-        tavily_api_key=tavily_api_key,
-        llm_config=llm_config,
-    )
-
-    return (
-        tool_run,
-        web_results,
-        _status_from_web_search_state(
-            web_results,
-            web_search_state,
-        ),
-    )
-
-
-def _legacy_prepare_knowledge_base_web_search_with_heartbeats(
-    messages: list[dict],
-    *,
-    question: str,
-    provider: str = "auto",
-    tavily_api_key: str | None = None,
-    llm_config: dict | None = None,
-):
-    module = _knowledge_web_search_module()
-    return _prepare_knowledge_base_web_search_with_heartbeats_impl(
-        messages,
-        question=question,
-        provider=provider,
-        tavily_api_key=tavily_api_key,
-        llm_config=llm_config,
-        prepare_knowledge_base_web_search=getattr(
-            module,
-            "_prepare_knowledge_base_web_search",
-        ),
-        heartbeat_interval_seconds=getattr(
-            module,
-            "WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS",
-        ),
-        tool_prep_timeout_seconds=getattr(
-            module,
-            "WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS",
-        ),
-    )
-
-
-_WEB_SEARCH_ORCHESTRATION_COMPAT = {
-    "MAX_FETCH_WEB_PAGE_CALLS": _MAX_FETCH_WEB_PAGE_CALLS,
-    "FETCH_WEB_PAGE_CONTEXT_CHARS": _FETCH_WEB_PAGE_CONTEXT_CHARS,
-    "WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS": _WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS,
-    "WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS": _WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS,
-    "_execute_web_search_tool": _legacy_execute_web_search_tool,
-    "_execute_fetch_web_page_tool": _legacy_execute_fetch_web_page_tool,
-    "_run_initial_web_search": _legacy_run_initial_web_search,
-    "_prepare_web_search_tool_run": _legacy_prepare_web_search_tool_run,
-    "_prepare_knowledge_base_web_search": _legacy_prepare_knowledge_base_web_search,
-    "_prepare_knowledge_base_web_search_with_heartbeats": (
-        _legacy_prepare_knowledge_base_web_search_with_heartbeats
-    ),
-}
+_WEB_SEARCH_ORCHESTRATION_COMPAT = build_web_search_orchestration_compat(
+    _knowledge_web_search_module()
+)
 
 
 def __getattr__(name: str):
