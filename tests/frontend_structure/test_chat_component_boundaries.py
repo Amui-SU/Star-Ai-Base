@@ -202,6 +202,27 @@ def test_chat_streaming_uses_state_helpers():
     assert "prev.map((message)" not in hook_source
 
 
+def test_message_list_uses_focused_subcomponents():
+    project_root = get_project_root()
+    message_list = (
+        project_root / "frontend" / "components" / "chat" / "MessageList.tsx"
+    ).read_text(encoding="utf-8")
+
+    for relative_path in [
+        "frontend/components/chat/MessageSources.tsx",
+        "frontend/components/chat/MessageActions.tsx",
+    ]:
+        assert (project_root / relative_path).exists()
+
+    assert "@/components/chat/MessageSources" in message_list
+    assert "@/components/chat/MessageActions" in message_list
+    assert "function CopyIcon" not in message_list
+    assert "source-details" not in message_list
+    assert "web-search-error-list" not in message_list
+    assert 'aria-label="回答操作"' not in message_list
+    assert 'aria-label="问题操作"' not in message_list
+
+
 def test_chat_panel_history_tests_are_split_from_main_suite():
     project_root = get_project_root()
     main_test = project_root / "frontend" / "components" / "ChatPanel.test.tsx"
