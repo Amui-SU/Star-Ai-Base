@@ -38,6 +38,7 @@ from app.services.knowledge_base_catalog import (
 from app.services.knowledge_base_build_requests import (
     prepare_knowledge_base_build_request,
 )
+from app.services.knowledge_base_build_runtime import resolve_build_rag_service
 from app.services.knowledge_base_build_tasks import (
     get_build_status_payload,
     run_scoped_build as _run_scoped_build,
@@ -152,25 +153,11 @@ _prepare_llm_messages_with_tools = build_prepare_llm_messages_with_tools_adapter
 )
 
 
-class _NoopRAGService:
-    def delete_video(self, *_args, **_kwargs):
-        return None
-
-    def delete_video_in_knowledge_base(self, *_args, **_kwargs):
-        return None
-
-    def add_video_content(self, *_args, **_kwargs):
-        return 0
-
-
 def _get_rag_service_for_build():
-    try:
-        return get_rag_service()
-    except Exception as exc:
-        logger.warning(
-            f"知识库向量服务不可用，入库将仅写入数据库内容并跳过向量化: {exc}"
-        )
-        return _NoopRAGService()
+    return resolve_build_rag_service(
+        rag_service_factory=lambda: get_rag_service(),
+        warning_logger=logger.warning,
+    )
 
 
 _answer_from_documents = lambda question, documents: answer_from_documents(

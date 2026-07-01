@@ -1,4 +1,5 @@
 from tests.service_boundaries.helpers import declared_callable_names
+from tests.service_boundaries.helpers import function_source
 from tests.service_boundaries.helpers import get_project_root
 
 
@@ -166,6 +167,29 @@ def test_knowledge_base_router_delegates_build_request_preparation_to_service():
     assert "create_ingestion_task(" not in router_source
     assert "bilibili_service_from_cookies(" not in router_source
     assert "KnowledgeBaseBuildResponse(" not in router_source
+
+
+def test_knowledge_base_router_delegates_build_runtime_fallback_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_build_runtime.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+    build_factory_source = function_source(router_source, "_get_rag_service_for_build")
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "class NoopBuildRAGService" in service_source
+    assert "def resolve_build_rag_service" in service_source
+    assert "from app.services.knowledge_base_build_runtime import" in router_source
+    assert "resolve_build_rag_service(" in build_factory_source
+    assert "rag_service_factory=lambda: get_rag_service()" in build_factory_source
+    assert "_NoopRAGService" not in router_source
+    assert "try:" not in build_factory_source
+    assert "except Exception" not in build_factory_source
+    assert "logger.warning(" not in build_factory_source
+    assert "_NoopRAGService" not in declared_names
 
 
 def test_knowledge_base_router_delegates_stats_helpers_to_service():
