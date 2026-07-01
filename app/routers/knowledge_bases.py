@@ -2,7 +2,7 @@ import json
 import sys
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy import or_
@@ -45,7 +45,9 @@ from app.services.knowledge_base_build_tasks import (
 )
 from app.services.knowledge_base_chat import answer_knowledge_base_chat
 from app.services.knowledge_base_chat_stream import stream_knowledge_base_chat
-from app.services.knowledge_base_delete import delete_knowledge_base_records
+from app.services.knowledge_base_delete import (
+    delete_knowledge_base as delete_knowledge_base_service,
+)
 from app.services.knowledge_base_documents import (
     load_db_fallback_documents as _load_db_fallback_documents,
     load_scoped_chat_documents as _load_scoped_chat_documents_impl,
@@ -631,33 +633,12 @@ async def delete_knowledge_base(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """删除知识库及其相关数据。"""
-    kb_id = knowledge_base.id
-
-    deleted_vectors = 0
-    try:
-        rag = get_rag_service()
-        if _supports_keyword_argument(rag.delete_by_knowledge_base, "workspace_id"):
-            deleted_vectors = rag.delete_by_knowledge_base(
-                kb_id,
-                workspace_id=current_workspace.id,
-            )
-        else:
-            deleted_vectors = rag.delete_by_knowledge_base(kb_id)
-        logger.info(
-            f"已删除知识库 {kb_id}（{knowledge_base.name}）的 {deleted_vectors} 个向量"
-        )
-    except Exception as exc:
-        logger.warning(f"删除知识库向量失败 [{kb_id}]: {exc}")
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "vector_cleanup_failed",
-                "message": f"向量清理失败，知识库未删除，请稍后重试或检查向量服务：{exc}",
-            },
-        ) from exc
-
-    await delete_knowledge_base_records(db, knowledge_base=knowledge_base)
-    await db.commit()
-
-    result: dict[str, object] = {"ok": True, "deleted_vectors": deleted_vectors}
-    return result
+    return await delete_knowledge_base_service(
+        db,
+        knowledge_base=knowledge_base,
+        workspace=current_workspace,
+        rag_service_factory=get_rag_service,
+        supports_keyword_argument_func=_supports_keyword_argument,
+        info_logger=logger.info,
+        warning_logger=logger.warning,
+    )
