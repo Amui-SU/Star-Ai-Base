@@ -1,13 +1,12 @@
 """Chat routes for RAG question answering."""
 
 import time
-from typing import Dict, List, Optional
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from openai import OpenAI
 from pydantic import BaseModel
 
 from app.database import get_db
@@ -81,6 +80,7 @@ from app.services.chat_video_context import (
 )
 from app.services.chat_message_preparation import prepare_chat_messages
 from app.services.chat_runtime import answer_legacy_chat, stream_legacy_chat
+from app.services.llm_client import get_llm_client as _get_llm_client
 from app.services.rag_runtime import get_rag_service, reset_rag_service
 
 router = APIRouter(prefix="/chat", tags=["对话"])
@@ -283,19 +283,6 @@ async def llm_health_check(
             "model": llm_config["model"],
             "provider": llm_config["provider"],
         }
-
-
-def _get_llm_client(llm_config: Optional[Dict[str, str]] = None) -> OpenAI:
-    """获取 LLM 客户端"""
-    cfg = llm_config or _resolve_llm_config()
-    if not cfg["api_key"]:
-        raise HTTPException(status_code=400, detail="未配置 LLM API Key")
-    return OpenAI(
-        api_key=cfg["api_key"],
-        base_url=cfg["base_url"],
-        timeout=30.0,
-        max_retries=2,
-    )
 
 
 _create_chat_completion_async = create_chat_completion_async

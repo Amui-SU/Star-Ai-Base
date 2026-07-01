@@ -401,6 +401,25 @@ def test_chat_router_delegates_message_preparation_to_service():
     assert "context_parts, sources, seen_bvids = [], [], set()" not in chat_source
 
 
+def test_chat_router_delegates_llm_client_factory_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/llm_client.py"
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    declared_names = declared_callable_names(chat_source)
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "def get_llm_client" in service_source
+    assert "from app.services.llm_client import" in chat_source
+    assert "from openai import OpenAI" not in chat_source
+    assert "OpenAI(" not in chat_source
+    assert "_get_llm_client" not in declared_names
+    assert (
+        "get_llm_client as _get_llm_client" in chat_source
+        or "_get_llm_client = get_llm_client" in chat_source
+    )
+
+
 def test_chat_router_delegates_legacy_ask_runtime_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/chat_runtime.py"
