@@ -117,6 +117,29 @@ def test_chat_panel_uses_conversation_history_hook():
     assert "handleNewConversation" not in chat_panel
 
 
+def test_chat_panel_uses_knowledge_context_hook():
+    project_root = get_project_root()
+    chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    hook_file = (
+        project_root / "frontend" / "components" / "chat" / "useChatKnowledgeContext.ts"
+    )
+
+    assert hook_file.exists()
+    hook_source = hook_file.read_text(encoding="utf-8")
+    assert "export function useChatKnowledgeContext" in hook_source
+    assert "@/components/chat/useChatKnowledgeContext" in chat_panel
+    assert "knowledgeBaseApi.stats" not in chat_panel
+    assert "knowledgeBaseApi.getScopeOptions" not in chat_panel
+    assert "stats, setStats" not in chat_panel
+    assert "scopeOptions, setScopeOptions" not in chat_panel
+    assert "chatScope, setChatScope" not in chat_panel
+    assert "useState<KnowledgeStats" not in chat_panel
+    assert "useState<KnowledgeScopeOptions" not in chat_panel
+    assert "useState<ChatScopeSelection" not in chat_panel
+
+
 def test_chat_panel_history_tests_are_split_from_main_suite():
     project_root = get_project_root()
     main_test = project_root / "frontend" / "components" / "ChatPanel.test.tsx"

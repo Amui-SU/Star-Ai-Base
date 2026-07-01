@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, type UIEvent } from "react";
+import { useState, useRef, useEffect, type UIEvent } from "react";
 import ChatEmptyState from "@/components/chat/ChatEmptyState";
 import ChatModelStatus from "@/components/chat/ChatModelStatus";
 import Composer from "@/components/chat/Composer";
@@ -8,21 +8,14 @@ import MessageList from "@/components/chat/MessageList";
 import ModelConfigModal from "@/components/chat/ModelConfigModal";
 import WebSearchConfigModal from "@/components/chat/WebSearchConfigModal";
 import { useChatConversationHistory } from "@/components/chat/useChatConversationHistory";
+import {
+  useChatKnowledgeContext,
+  type ChatKnowledgeContextActions,
+} from "@/components/chat/useChatKnowledgeContext";
 import { useChatModelSettings } from "@/components/chat/useChatModelSettings";
 import { useChatStreaming } from "@/components/chat/useChatStreaming";
 import { useChatWebSearchSettings } from "@/components/chat/useChatWebSearchSettings";
 import type { Message } from "@/components/chat/types";
-import {
-  knowledgeBaseApi,
-  KnowledgeStats,
-  KnowledgeScopeOptions,
-} from "@/lib/api";
-import {
-  EMPTY_CHAT_SCOPE,
-  type ChatScopeSelection,
-  scopeEquals,
-  scopeSummary,
-} from "@/lib/chatScope";
 import { displayKnowledgeBaseName } from "@/lib/displayNames";
 
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 96;
@@ -63,36 +56,37 @@ export default function ChatPanel({
     ? displayKnowledgeBaseName(knowledgeBaseName)
     : "选择知识库";
   const [input, setInput] = useState("");
-  const [stats, setStats] = useState<KnowledgeStats | null>(null);
-  const [scopeOptions, setScopeOptions] = useState<KnowledgeScopeOptions>({
-    folders: [],
-  });
-  const [chatScope, setChatScope] =
-    useState<ChatScopeSelection>(EMPTY_CHAT_SCOPE);
-  const [scopeNotice, setScopeNotice] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const shouldFollowChatScrollRef = useRef(true);
-  const scopeNoticeTimerRef = useRef<number | null>(null);
+  const knowledgeContextActionsRef = useRef<ChatKnowledgeContextActions>({
+    onMessagesClear: () => {},
+    onResetConversationIdentity: () => {},
+    onResetChat: () => {},
+    onStopGenerating: () => {},
+    onWebSearchEnabledChange: () => {},
+    onWebSearchNoticeClear: () => {},
+  });
   const saveSettledMessagesRef = useRef<(messages: Message[]) => void>(
     () => {},
   );
 
-  const showScopeNotice = useCallback((message: string, timeoutMs?: number) => {
-    setScopeNotice(message);
-    if (scopeNoticeTimerRef.current) {
-      window.clearTimeout(scopeNoticeTimerRef.current);
-      scopeNoticeTimerRef.current = null;
-    }
-    if (timeoutMs !== undefined) {
-      scopeNoticeTimerRef.current = window.setTimeout(() => {
-        setScopeNotice("");
-        scopeNoticeTimerRef.current = null;
-      }, timeoutMs);
-    }
-  }, []);
+  const {
+    chatScope,
+    handleScopeChange,
+    scopeNotice,
+    scopeOptions,
+    setChatScope,
+    setScopeNotice,
+    showScopeNotice,
+    stats,
+  } = useChatKnowledgeContext({
+    actionsRef: knowledgeContextActionsRef,
+    knowledgeBaseId,
+    statsKey,
+  });
 
   const {
     clearWebSearchNotice,
@@ -212,22 +206,28 @@ export default function ChatPanel({
     });
 
   useEffect(() => {
+    knowledgeContextActionsRef.current = {
+      onMessagesClear: () => setMessages([]),
+      onResetConversationIdentity: resetConversationIdentity,
+      onResetChat: resetChat,
+      onStopGenerating: stopGenerating,
+      onWebSearchEnabledChange: setWebSearchEnabled,
+      onWebSearchNoticeClear: clearWebSearchNotice,
+    };
+  }, [
+    clearWebSearchNotice,
+    resetChat,
+    resetConversationIdentity,
+    setMessages,
+    setWebSearchEnabled,
+    stopGenerating,
+  ]);
+
+  useEffect(() => {
     saveSettledMessagesRef.current = (settledMessages: Message[]) => {
       void saveSettledMessages(settledMessages);
     };
   }, [saveSettledMessages]);
-
-  useEffect(() => {
-    if (knowledgeBaseId) {
-      knowledgeBaseApi
-        .stats(knowledgeBaseId)
-        .then(setStats)
-        .catch(() => {});
-    } else {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- switching to no knowledge base must clear stale stats immediately.
-      setStats(null);
-    }
-  }, [statsKey, knowledgeBaseId]);
 
   const handleChatScroll = (event: UIEvent<HTMLDivElement>) => {
     const shouldFollow = isNearScrollBottom(event.currentTarget);
@@ -257,73 +257,6 @@ export default function ChatPanel({
       }
     };
   }, [messages]);
-
-  useEffect(() => {
-    let cancelled = false;
-    /* eslint-disable react-hooks/set-state-in-effect -- knowledge-base changes intentionally reset the chat context before loading scoped options. */
-    resetChat();
-    resetConversationIdentity();
-    setChatScope(EMPTY_CHAT_SCOPE);
-    setWebSearchEnabled(false);
-    clearWebSearchNotice();
-    setScopeNotice("");
-    /* eslint-enable react-hooks/set-state-in-effect */
-    if (scopeNoticeTimerRef.current) {
-      window.clearTimeout(scopeNoticeTimerRef.current);
-      scopeNoticeTimerRef.current = null;
-    }
-
-    if (!knowledgeBaseId) {
-      setScopeOptions({ folders: [] });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    knowledgeBaseApi
-      .getScopeOptions(knowledgeBaseId)
-      .then((options) => {
-        if (!cancelled) setScopeOptions(options);
-      })
-      .catch(() => {
-        if (!cancelled) setScopeOptions({ folders: [] });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    clearWebSearchNotice,
-    knowledgeBaseId,
-    resetChat,
-    resetConversationIdentity,
-    setWebSearchEnabled,
-  ]);
-
-  useEffect(() => {
-    return () => {
-      if (scopeNoticeTimerRef.current) {
-        window.clearTimeout(scopeNoticeTimerRef.current);
-      }
-    };
-  }, []);
-
-  const handleScopeChange = (next: ChatScopeSelection) => {
-    if (scopeEquals(chatScope, next)) return;
-    stopGenerating();
-    setMessages([]);
-    resetConversationIdentity();
-    setChatScope(next);
-    clearWebSearchNotice();
-    setScopeNotice(`提问范围已更新：${scopeSummary(next)}`);
-    if (scopeNoticeTimerRef.current) {
-      window.clearTimeout(scopeNoticeTimerRef.current);
-    }
-    scopeNoticeTimerRef.current = window.setTimeout(() => {
-      setScopeNotice("");
-      scopeNoticeTimerRef.current = null;
-    }, 2200);
-  };
 
   const adjustComposerHeight = (el?: HTMLTextAreaElement | null) => {
     const textarea = el || inputRef.current;
