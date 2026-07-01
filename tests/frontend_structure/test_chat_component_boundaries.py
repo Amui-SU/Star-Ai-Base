@@ -264,6 +264,12 @@ def test_chat_panel_web_search_result_tests_are_split_from_toggle_suite():
         / "components"
         / "ChatPanel.web-search-results.test.tsx"
     )
+    focused_dir = project_root / "frontend" / "components" / "chat" / "__tests__"
+    focused_files = [
+        focused_dir / "ChatPanel.web-search-sources.test.tsx",
+        focused_dir / "ChatPanel.web-search-progress.test.tsx",
+        focused_dir / "ChatPanel.web-search-status.test.tsx",
+    ]
 
     moved_tests = [
         "labels knowledge and web sources in assistant references",
@@ -276,12 +282,16 @@ def test_chat_panel_web_search_result_tests_are_split_from_toggle_suite():
     web_search_source = web_search_test.read_text(encoding="utf-8")
 
     assert results_test.exists()
-    results_source = results_test.read_text(encoding="utf-8")
-    assert "@/components/chat/chatPanelTestUtils" in results_source
+    for focused_file in focused_files:
+        assert focused_file.exists()
+    focused_source = "\n".join(
+        focused_file.read_text(encoding="utf-8") for focused_file in focused_files
+    )
+    assert "@/components/chat/chatPanelTestUtils" in focused_source
 
     for test_name in moved_tests:
         assert test_name not in web_search_source
-        assert test_name in results_source
+        assert test_name in focused_source
 
 
 def test_chat_panel_config_tests_are_split_from_main_suite():
