@@ -133,3 +133,35 @@ def test_models_delegates_chat_schemas_to_schema_module():
 
     assert "from app.schemas.chat import" in models_source
     assert declared_names.isdisjoint(chat_schema_names)
+
+
+def test_models_delegates_content_ingestion_orm_models_to_focused_module():
+    project_root = get_project_root()
+    models_source = (project_root / "app/models.py").read_text(encoding="utf-8")
+    declared_names = declared_callable_names(models_source)
+
+    base_model_path = project_root / "app/models_base.py"
+    content_model_path = project_root / "app/models_content.py"
+    content_model_names = {
+        "VideoCache",
+        "FavoriteFolder",
+        "FavoriteVideo",
+        "VideoTitleOverride",
+        "IngestionTask",
+    }
+
+    assert base_model_path.exists()
+    base_model_source = base_model_path.read_text(encoding="utf-8")
+    assert "Base = declarative_base()" in base_model_source
+    assert "def _utc_now" in base_model_source
+
+    assert content_model_path.exists()
+    content_model_source = content_model_path.read_text(encoding="utf-8")
+    assert "from app.models_base import Base" in content_model_source
+    assert "from app.models_base import _utc_now" in content_model_source
+    for name in content_model_names:
+        assert f"class {name}(Base)" in content_model_source
+
+    assert "from app.models_base import" in models_source
+    assert "from app.models_content import" in models_source
+    assert declared_names.isdisjoint(content_model_names)
