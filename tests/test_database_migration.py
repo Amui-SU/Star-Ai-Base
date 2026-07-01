@@ -5,6 +5,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 @pytest.mark.asyncio
 async def test_init_db_adds_knowledge_scope_columns_to_legacy_tables(test_db_url):
     from app.database import _ensure_sqlite_legacy_columns
+    from app.services.sqlite_legacy_schema import ensure_sqlite_legacy_columns
+
+    assert _ensure_sqlite_legacy_columns is ensure_sqlite_legacy_columns
 
     engine = create_async_engine(test_db_url, echo=False, future=True)
     async with engine.begin() as conn:
