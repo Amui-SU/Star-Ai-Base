@@ -77,3 +77,31 @@ def test_bilibili_service_delegates_favorite_helpers_to_service():
     assert "/x/v3/fav/resource/clean" not in bilibili_source
     assert '",".join(resources)' not in bilibili_source
     assert "while True" not in bilibili_source
+
+
+def test_bilibili_service_delegates_video_api_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/bilibili_video.py"
+    bilibili_source = (project_root / "app/services/bilibili.py").read_text(
+        encoding="utf-8"
+    )
+
+    expected_service_names = {
+        "get_bilibili_video_info",
+        "get_bilibili_video_summary",
+        "get_bilibili_player_info",
+        "get_bilibili_audio_url",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"async def {name}" in service_source
+    assert "from app.services.bilibili_video import" in bilibili_source
+    assert '/x/web-interface/view"' not in bilibili_source
+    assert "/x/web-interface/view/conclusion/get" not in bilibili_source
+    assert "/x/player/wbi/v2" not in bilibili_source
+    assert "/x/player/v2" not in bilibili_source
+    assert "/x/player/wbi/playurl" not in bilibili_source
+    assert "/x/player/playurl" not in bilibili_source
+    assert "wbi_signer.sign(" not in bilibili_source

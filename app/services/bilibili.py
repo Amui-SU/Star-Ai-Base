@@ -10,7 +10,6 @@ import qrcode
 import io
 import base64
 from typing import Optional, Dict, Any, List, Mapping
-from loguru import logger
 from app.services.bilibili_cookies import (
     bilibili_service_from_cookies as _bilibili_service_from_cookies,
     normalize_bilibili_cookies,
@@ -26,10 +25,15 @@ from app.services.bilibili_favorites import (
 from app.services.bilibili_media import (
     download_bilibili_audio_to_file,
     normalize_bilibili_media_url,
-    select_audio_url_from_playurl_payload,
     subtitle_text_from_payload,
 )
 from app.services.bilibili_responses import parse_bilibili_json_response
+from app.services.bilibili_video import (
+    get_bilibili_audio_url,
+    get_bilibili_player_info,
+    get_bilibili_video_info,
+    get_bilibili_video_summary,
+)
 from app.services.wbi import wbi_signer
 
 
@@ -343,18 +347,12 @@ class BilibiliService:
         Returns:
             视频信息字典
         """
-        url = f"{self.BASE_URL}/x/web-interface/view"
-        params = {"bvid": bvid}
-
-        response = await self.client.get(
-            url, params=params, cookies=self._get_cookies()
+        return await get_bilibili_video_info(
+            client=self.client,
+            base_url=self.BASE_URL,
+            cookies=self._get_cookies(),
+            bvid=bvid,
         )
-        data = response.json()
-
-        if data["code"] != 0:
-            raise Exception(f"获取视频信息失败: {data['message']}")
-
-        return data["data"]
 
     async def get_video_summary(
         self, bvid: str, cid: int, up_mid: int = None
@@ -370,30 +368,15 @@ class BilibiliService:
         Returns:
             AI 摘要信息
         """
-        url = f"{self.BASE_URL}/x/web-interface/view/conclusion/get"
-
-        params = {
-            "bvid": bvid,
-            "cid": cid,
-        }
-        if up_mid:
-            params["up_mid"] = up_mid
-
-        # 需要 Wbi 签名
-        signed_params = await wbi_signer.sign(params, cookies=self._get_cookies())
-
-        response = await self.client.get(
-            url, params=signed_params, cookies=self._get_cookies()
+        return await get_bilibili_video_summary(
+            client=self.client,
+            base_url=self.BASE_URL,
+            cookies=self._get_cookies(),
+            bvid=bvid,
+            cid=cid,
+            up_mid=up_mid,
+            wbi_signer=wbi_signer,
         )
-        data = response.json()
-
-        if data["code"] != 0:
-            logger.warning(
-                f"获取视频摘要失败 [{bvid}]: {data.get('message', 'unknown error')}"
-            )
-            return None
-
-        return data["data"]
 
     async def get_player_info(
         self, bvid: str, cid: int, aid: int = None
@@ -409,45 +392,15 @@ class BilibiliService:
         Returns:
             播放器信息
         """
-        params = {
-            "bvid": bvid,
-            "cid": cid,
-        }
-        if aid:
-            params["aid"] = aid
-
-        # 优先使用 WBI 版本，提高字幕获取成功率
-        try:
-            cookies = self._get_cookies()
-            cookies_for_sign = cookies if cookies else None
-            signed_params = await wbi_signer.sign(params, cookies=cookies_for_sign)
-            wbi_url = f"{self.BASE_URL}/x/player/wbi/v2"
-            response = await self.client.get(
-                wbi_url, params=signed_params, cookies=cookies
-            )
-            data = response.json()
-            if data.get("code") == 0:
-                return data.get("data")
-            logger.warning(
-                f"WBI 播放器信息失败 [{bvid}]: {data.get('message', 'unknown error')}"
-            )
-        except Exception as e:
-            logger.warning(f"WBI 播放器信息异常 [{bvid}]: {e}")
-
-        # 回退到普通接口
-        url = f"{self.BASE_URL}/x/player/v2"
-        response = await self.client.get(
-            url, params=params, cookies=self._get_cookies()
+        return await get_bilibili_player_info(
+            client=self.client,
+            base_url=self.BASE_URL,
+            cookies=self._get_cookies(),
+            bvid=bvid,
+            cid=cid,
+            aid=aid,
+            wbi_signer=wbi_signer,
         )
-        data = response.json()
-
-        if data["code"] != 0:
-            logger.warning(
-                f"获取播放器信息失败 [{bvid}]: {data.get('message', 'unknown error')}"
-            )
-            return None
-
-        return data["data"]
 
     async def get_audio_url(self, bvid: str, cid: int) -> Optional[str]:
         """
@@ -460,45 +413,14 @@ class BilibiliService:
         Returns:
             音频 URL（可能为空）
         """
-        params = {
-            "bvid": bvid,
-            "cid": cid,
-            "fnval": 16,
-            "fnver": 0,
-            "fourk": 1,
-        }
-
-        cookies = self._get_cookies()
-        cookies_for_sign = cookies if cookies else None
-
-        # 优先使用 WBI 接口
-        try:
-            signed_params = await wbi_signer.sign(params, cookies=cookies_for_sign)
-            url = f"{self.BASE_URL}/x/player/wbi/playurl"
-            response = await self.client.get(url, params=signed_params, cookies=cookies)
-            data = response.json()
-        except Exception as e:
-            logger.warning(f"获取音频信息失败(WBI) [{bvid}]: {e}")
-            data = None
-
-        # 回退到普通接口
-        if not data or data.get("code") != 0:
-            try:
-                url = f"{self.BASE_URL}/x/player/playurl"
-                response = await self.client.get(url, params=params, cookies=cookies)
-                data = response.json()
-            except Exception as e:
-                logger.warning(f"获取音频信息失败 [{bvid}]: {e}")
-                return None
-
-        if data.get("code") != 0:
-            logger.warning(
-                f"获取音频信息失败 [{bvid}]: {data.get('message', 'unknown error')}"
-            )
-            return None
-
-        payload = data.get("data") or {}
-        return select_audio_url_from_playurl_payload(payload)
+        return await get_bilibili_audio_url(
+            client=self.client,
+            base_url=self.BASE_URL,
+            cookies=self._get_cookies(),
+            bvid=bvid,
+            cid=cid,
+            wbi_signer=wbi_signer,
+        )
 
     async def download_subtitle(self, subtitle_url: str) -> str:
         """
