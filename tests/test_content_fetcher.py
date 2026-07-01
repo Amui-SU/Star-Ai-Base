@@ -2,6 +2,12 @@ import pytest
 
 from app.schemas.content import ContentSource
 from app.services.content_fetcher import ContentFetcher
+from app.services.content_subtitles import (
+    extract_subtitle_url,
+    extract_subtitles,
+    pick_preferred_subtitle,
+    try_bilibili_subtitle,
+)
 from app.services.content_summary import (
     format_ai_summary_content,
     parse_ai_summary_result,
@@ -102,6 +108,64 @@ def test_content_summary_helpers_reject_unavailable_or_empty_summary():
     assert parse_ai_summary_result(None) is None
     assert parse_ai_summary_result({"code": -404}) is None
     assert parse_ai_summary_result({"code": 0, "model_result": {"summary": ""}}) is None
+
+
+def test_content_subtitle_helpers_prefer_manual_chinese_subtitle():
+    subtitles = [
+        {"lan": "en-US", "ai_status": 0, "url": "https://example.test/en.json"},
+        {
+            "lan": "zh-CN",
+            "ai_status": 1,
+            "url": "https://example.test/auto-zh.json",
+        },
+        {
+            "lan": "zh-Hans",
+            "ai_status": 0,
+            "subtitle_url": "https://example.test/manual-zh.json",
+        },
+    ]
+
+    selected = pick_preferred_subtitle(subtitles)
+
+    assert selected == subtitles[2]
+    assert extract_subtitle_url(selected) == "https://example.test/manual-zh.json"
+
+
+def test_content_subtitle_helpers_extract_player_and_view_lists():
+    player_data = {"subtitle": {"subtitles": [{"lan": "zh-CN"}]}}
+    view_data = {"subtitle": {"list": [{"lan": "zh-Hans"}]}}
+
+    assert extract_subtitles(player_data) == [{"lan": "zh-CN"}]
+    assert extract_subtitles(view_data) == [{"lan": "zh-Hans"}]
+
+
+@pytest.mark.asyncio
+async def test_try_bilibili_subtitle_falls_back_to_view_subtitles():
+    subtitle = "这是 view 字幕兜底内容。" * 20
+    bili = FakeBilibili(
+        video_info={
+            "aid": 123,
+            "subtitle": {
+                "list": [
+                    {
+                        "lan": "zh-CN",
+                        "ai_status": 0,
+                        "subtitle_url": "https://example.test/view-subtitle.json",
+                    }
+                ]
+            },
+        },
+        subtitle_text=subtitle,
+    )
+
+    text = await try_bilibili_subtitle(
+        bili,
+        "BV1VIEW",
+        456,
+        video_info=bili.video_info,
+    )
+
+    assert text == subtitle
 
 
 @pytest.mark.asyncio

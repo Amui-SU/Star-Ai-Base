@@ -481,6 +481,31 @@ def test_content_fetcher_delegates_ai_summary_helpers_to_service():
     assert 'for point in item.get("part_outline"' not in fetcher_source
 
 
+def test_content_fetcher_delegates_subtitle_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/content_subtitles.py"
+    fetcher_source = (project_root / "app/services/content_fetcher.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in {
+        "extract_subtitles",
+        "extract_subtitle_url",
+        "pick_preferred_subtitle",
+        "try_bilibili_subtitle",
+    }:
+        assert f"def {name}" in service_source or f"async def {name}" in service_source
+
+    assert "from app.services.content_subtitles import" in fetcher_source
+    assert "def pick_subtitle(" not in fetcher_source
+    assert "def extract_subtitles(" not in fetcher_source
+    assert "def extract_url(" not in fetcher_source
+    assert "download_subtitle(" not in fetcher_source
+    assert "get_player_info(" not in fetcher_source
+
+
 def test_bilibili_service_delegates_cookie_and_response_helpers():
     project_root = get_project_root()
     cookie_service_path = project_root / "app/services/bilibili_cookies.py"
