@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, type UIEvent } from "react";
+import { useState, useRef, useEffect } from "react";
 import ChatEmptyState from "@/components/chat/ChatEmptyState";
 import ChatModelStatus from "@/components/chat/ChatModelStatus";
 import Composer from "@/components/chat/Composer";
@@ -13,19 +13,11 @@ import {
   type ChatKnowledgeContextActions,
 } from "@/components/chat/useChatKnowledgeContext";
 import { useChatModelSettings } from "@/components/chat/useChatModelSettings";
+import { useChatPanelViewport } from "@/components/chat/useChatPanelViewport";
 import { useChatStreaming } from "@/components/chat/useChatStreaming";
 import { useChatWebSearchSettings } from "@/components/chat/useChatWebSearchSettings";
 import type { Message } from "@/components/chat/types";
 import { displayKnowledgeBaseName } from "@/lib/displayNames";
-
-const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 96;
-
-function isNearScrollBottom(element: HTMLElement) {
-  return (
-    element.scrollHeight - element.scrollTop - element.clientHeight <=
-    CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD_PX
-  );
-}
 
 interface Props {
   statsKey?: number;
@@ -56,10 +48,6 @@ export default function ChatPanel({
     ? displayKnowledgeBaseName(knowledgeBaseName)
     : "选择知识库";
   const [input, setInput] = useState("");
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-  const scrollFrameRef = useRef<number | null>(null);
   const shouldFollowChatScrollRef = useRef(true);
   const knowledgeContextActionsRef = useRef<ChatKnowledgeContextActions>({
     onMessagesClear: () => {},
@@ -182,6 +170,18 @@ export default function ChatPanel({
       saveSettledMessagesRef.current(settledMessages);
     },
   });
+  const {
+    chatScrollRef,
+    endRef,
+    handleChatScroll,
+    handleComposerChange,
+    inputRef,
+  } = useChatPanelViewport({
+    input,
+    messages,
+    onInputChange: setInput,
+    shouldFollowChatScrollRef,
+  });
 
   const { saveSettledMessages, resetConversationIdentity } =
     useChatConversationHistory({
@@ -229,58 +229,8 @@ export default function ChatPanel({
     };
   }, [saveSettledMessages]);
 
-  const handleChatScroll = (event: UIEvent<HTMLDivElement>) => {
-    const shouldFollow = isNearScrollBottom(event.currentTarget);
-    shouldFollowChatScrollRef.current = shouldFollow;
-    if (!shouldFollow && scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
-    if (!shouldFollowChatScrollRef.current) {
-      return;
-    }
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    });
-    return () => {
-      if (scrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollFrameRef.current);
-        scrollFrameRef.current = null;
-      }
-    };
-  }, [messages]);
-
-  const adjustComposerHeight = (el?: HTMLTextAreaElement | null) => {
-    const textarea = el || inputRef.current;
-    if (!textarea) return;
-    textarea.style.height = "auto";
-    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 54), 180);
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > 180 ? "auto" : "hidden";
-  };
-
-  const handleComposerChange = (
-    value: string,
-    target?: HTMLTextAreaElement | null,
-  ) => {
-    setInput(value);
-    adjustComposerHeight(target);
-  };
-
   const isGenerating = loading || !!regeneratingMessageId;
   const canSend = Boolean(knowledgeBaseId) && !!input.trim() && !isGenerating;
-
-  useEffect(() => {
-    adjustComposerHeight();
-  }, [input]);
 
   return (
     <div className="panel-inner">

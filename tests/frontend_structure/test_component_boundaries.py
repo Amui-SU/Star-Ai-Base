@@ -140,6 +140,35 @@ def test_chat_panel_uses_knowledge_context_hook():
     assert "useState<ChatScopeSelection" not in chat_panel
 
 
+def test_chat_panel_uses_viewport_hook():
+    project_root = get_project_root()
+    chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    hook_file = (
+        project_root / "frontend" / "components" / "chat" / "useChatPanelViewport.ts"
+    )
+
+    assert hook_file.exists()
+    hook_source = hook_file.read_text(encoding="utf-8")
+    assert "export function useChatPanelViewport" in hook_source
+    assert "@/components/chat/useChatPanelViewport" in chat_panel
+    for token in [
+        "CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD_PX",
+        "isNearScrollBottom",
+        "requestAnimationFrame",
+        "cancelAnimationFrame",
+        "scrollIntoView",
+        "scrollHeight",
+        "style.height",
+        "style.overflowY",
+        "adjustComposerHeight",
+    ]:
+        assert token not in chat_panel
+    assert "const handleChatScroll" not in chat_panel
+    assert "const handleComposerChange" not in chat_panel
+
+
 def test_chat_panel_history_tests_are_split_from_main_suite():
     project_root = get_project_root()
     main_test = project_root / "frontend" / "components" / "ChatPanel.test.tsx"
