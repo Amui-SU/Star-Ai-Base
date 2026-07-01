@@ -331,6 +331,34 @@ def test_frontend_provider_presets_are_shared():
     assert "const providerLogoMap" not in chat_panel
 
 
+def test_api_accounts_panel_uses_state_hook():
+    project_root = get_project_root()
+    panel_source = (
+        project_root / "frontend" / "components" / "ApiAccountsPanel.tsx"
+    ).read_text(encoding="utf-8")
+    hook_file = (
+        project_root
+        / "frontend"
+        / "components"
+        / "api-accounts"
+        / "useApiAccountsPanel.ts"
+    )
+
+    assert hook_file.exists()
+    hook_source = hook_file.read_text(encoding="utf-8")
+    assert "export function useApiAccountsPanel" in hook_source
+    assert "@/components/api-accounts/useApiAccountsPanel" in panel_source
+    assert "apiAccountApi." not in panel_source
+    assert "const loadAccounts" not in panel_source
+    assert "const saveAccount" not in panel_source
+    assert "const setDefault" not in panel_source
+    assert "const validateAccount" not in panel_source
+    assert "const removeAccount" not in panel_source
+    assert "const selectProvider" not in panel_source
+    assert "const editAccount" not in panel_source
+    assert "const resetForm" not in panel_source
+
+
 def test_common_modals_use_shared_shell():
     project_root = get_project_root()
     modal_shell = project_root / "frontend" / "components" / "ui" / "ModalShell.tsx"
