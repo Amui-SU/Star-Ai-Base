@@ -379,6 +379,29 @@ def test_common_modals_use_shared_shell():
         assert 'className="modal-backdrop' not in source
 
 
+def test_import_modal_uses_state_hook():
+    project_root = get_project_root()
+    modal_source = (
+        project_root / "frontend" / "components" / "ImportModal.tsx"
+    ).read_text(encoding="utf-8")
+    hook_file = (
+        project_root / "frontend" / "components" / "import-modal" / "useImportModal.ts"
+    )
+
+    assert hook_file.exists()
+    hook_source = hook_file.read_text(encoding="utf-8")
+    assert "export function useImportModal" in hook_source
+    assert "@/components/import-modal/useImportModal" in modal_source
+    assert "importApi." not in modal_source
+    assert "sourceBindingApi." not in modal_source
+    assert "const getQR" not in modal_source
+    assert "const submitUrl" not in modal_source
+    assert "const submitLocalVideo" not in modal_source
+    assert "MAX_QR_POLL_ATTEMPTS" not in modal_source
+    assert "setInterval(" not in modal_source
+    assert "clearInterval(" not in modal_source
+
+
 def test_auth_demo_preview_is_extracted_from_auth_page():
     project_root = get_project_root()
     auth_page = (project_root / "frontend" / "components" / "AuthPage.tsx").read_text(
