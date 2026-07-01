@@ -165,10 +165,21 @@ def test_knowledge_base_scope_build_tests_are_split_from_scoping_file():
     scoping_source = (
         project_root / "tests" / "test_knowledge_base_scoping.py"
     ).read_text(encoding="utf-8")
-    scope_build_test = project_root / "tests" / "test_knowledge_base_scope_build.py"
+    tests_dir = project_root / "tests"
+    scope_build_test = tests_dir / "test_knowledge_base_scope_build.py"
+    focused_files = [
+        tests_dir / "test_knowledge_base_scope_resolution.py",
+        tests_dir / "test_knowledge_base_scope_options.py",
+        tests_dir / "test_knowledge_base_build_requests.py",
+        tests_dir / "test_knowledge_base_build_status.py",
+    ]
 
     assert scope_build_test.exists()
-    scope_build_source = scope_build_test.read_text(encoding="utf-8")
+    for focused_file in focused_files:
+        assert focused_file.exists()
+    focused_source = "\n".join(
+        focused_file.read_text(encoding="utf-8") for focused_file in focused_files
+    )
     for test_name in [
         "test_scoped_chat_unions_folder_and_explicit_video_scope",
         "test_scoped_search_passes_resolved_video_scope",
@@ -186,7 +197,50 @@ def test_knowledge_base_scope_build_tests_are_split_from_scoping_file():
         "test_build_status_polling_does_not_touch_session_last_seen",
     ]:
         assert test_name not in scoping_source
-        assert test_name in scope_build_source
+        assert test_name in focused_source
+
+
+def test_knowledge_base_scope_build_tests_are_split_by_domain():
+    project_root = get_project_root()
+    tests_dir = project_root / "tests"
+    mixed_test = tests_dir / "test_knowledge_base_scope_build.py"
+    mixed_source = mixed_test.read_text(encoding="utf-8") if mixed_test.exists() else ""
+
+    focused_files = {
+        "test_knowledge_base_scope_resolution.py": [
+            "test_scoped_chat_unions_folder_and_explicit_video_scope",
+            "test_scoped_search_passes_resolved_video_scope",
+            "test_scoped_chat_stream_uses_same_resolved_scope",
+            "test_scoped_chat_rejects_external_bvid",
+        ],
+        "test_knowledge_base_scope_options.py": [
+            "test_scope_options_only_returns_current_knowledge_base",
+            "test_scope_options_requires_login",
+            "test_scope_options_hides_other_users_knowledge_base",
+        ],
+        "test_knowledge_base_build_requests.py": [
+            "test_scoped_build_rejects_unknown_source_binding",
+            "test_scoped_build_records_scope_metadata",
+            "test_scoped_build_accepts_single_video_selection",
+            "test_scoped_build_starts_when_vector_service_is_unavailable",
+            "test_scoped_build_rejects_empty_folder_ids",
+            "test_scoped_build_rejects_other_users_source_binding",
+        ],
+        "test_knowledge_base_build_status.py": [
+            "test_build_status_polling_does_not_touch_session_last_seen",
+        ],
+    }
+
+    for file_name, test_names in focused_files.items():
+        focused_path = tests_dir / file_name
+        assert focused_path.exists()
+        focused_source = focused_path.read_text(encoding="utf-8")
+        for test_name in test_names:
+            assert test_name not in mixed_source
+            assert test_name in focused_source
+
+    if mixed_test.exists():
+        assert len(mixed_source.splitlines()) <= 80
 
 
 def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
