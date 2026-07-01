@@ -127,9 +127,19 @@ def test_knowledge_base_web_search_fallback_tests_are_split_from_scoping_file():
     fallback_test = (
         project_root / "tests" / "test_knowledge_base_web_search_fallback.py"
     )
+    fallback_dir = project_root / "tests" / "knowledge_base_web_search_fallback"
+    fallback_files = [
+        fallback_dir / "test_db_fallback_isolation.py",
+        fallback_dir / "test_initial_web_context.py",
+        fallback_dir / "test_web_only_answer.py",
+    ]
 
     assert fallback_test.exists()
-    fallback_source = fallback_test.read_text(encoding="utf-8")
+    for fallback_file in fallback_files:
+        assert fallback_file.exists()
+    fallback_source = "\n".join(
+        fallback_file.read_text(encoding="utf-8") for fallback_file in fallback_files
+    )
     for test_name in [
         "test_scoped_chat_web_search_does_not_attach_db_fallback_sources",
         "test_scoped_chat_does_not_use_db_fallback_when_vector_search_is_empty",
@@ -138,6 +148,38 @@ def test_knowledge_base_web_search_fallback_tests_are_split_from_scoping_file():
     ]:
         assert test_name not in scoping_source
         assert test_name in fallback_source
+
+
+def test_knowledge_base_web_search_fallback_tests_are_split_by_domain():
+    project_root = get_project_root()
+    tests_dir = project_root / "tests"
+    mixed_test = tests_dir / "test_knowledge_base_web_search_fallback.py"
+    mixed_source = mixed_test.read_text(encoding="utf-8") if mixed_test.exists() else ""
+    focused_dir = tests_dir / "knowledge_base_web_search_fallback"
+
+    focused_files = {
+        "test_db_fallback_isolation.py": [
+            "test_scoped_chat_web_search_does_not_attach_db_fallback_sources",
+            "test_scoped_chat_does_not_use_db_fallback_when_vector_search_is_empty",
+        ],
+        "test_initial_web_context.py": [
+            "test_scoped_chat_adds_initial_web_sources_to_first_answer_context",
+        ],
+        "test_web_only_answer.py": [
+            "test_scoped_chat_can_use_web_search_when_knowledge_base_has_no_hits",
+        ],
+    }
+
+    for file_name, test_names in focused_files.items():
+        focused_path = focused_dir / file_name
+        assert focused_path.exists()
+        focused_source = focused_path.read_text(encoding="utf-8")
+        for test_name in test_names:
+            assert test_name not in mixed_source
+            assert test_name in focused_source
+
+    if mixed_test.exists():
+        assert len(mixed_source.splitlines()) <= 80
 
 
 def test_knowledge_base_stream_tests_are_split_from_scoping_file():
