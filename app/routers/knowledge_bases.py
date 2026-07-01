@@ -43,6 +43,9 @@ from app.services.knowledge_base_build_tasks import (
     get_build_status_payload,
     run_scoped_build as _run_scoped_build,
 )
+from app.services.knowledge_base_answer_adapter import (
+    build_complete_knowledge_base_answer,
+)
 from app.services.knowledge_base_chat import answer_knowledge_base_chat
 from app.services.knowledge_base_chat_stream import stream_knowledge_base_chat
 from app.services.knowledge_base_delete import (
@@ -215,50 +218,18 @@ def _knowledge_web_search_module():
     return sys.modules[__name__]
 
 
-async def _complete_knowledge_base_answer(
-    messages: list[dict],
-    *,
-    question: str,
-    enable_web_search: bool,
-    web_search_provider: str = "auto",
-    tavily_api_key: str | None = None,
-    llm_config: dict | None = None,
-) -> tuple[str, str, list[dict[str, str]], dict | None]:
-    def complete_llm_with_config(next_messages: list[dict]) -> tuple[str, str]:
-        kwargs = {}
-        if _supports_keyword_argument(_complete_llm_answer, "llm_config"):
-            kwargs["llm_config"] = llm_config
-        return _complete_llm_answer(next_messages, **kwargs)
-
-    if not enable_web_search:
-        answer, thinking = complete_llm_with_config(messages)
-        return answer, thinking, [], None
-
-    tool_run, web_results, web_search_state = await getattr(
+_complete_knowledge_base_answer = build_complete_knowledge_base_answer(
+    complete_llm_answer_resolver=lambda: getattr(
+        _knowledge_web_search_module(),
+        "_complete_llm_answer",
+    ),
+    prepare_web_search_tool_run=lambda *args, **kwargs: getattr(
         _knowledge_web_search_module(),
         "_prepare_web_search_tool_run",
-    )(
-        messages,
-        question=question,
-        provider=web_search_provider,
-        tavily_api_key=tavily_api_key,
-        llm_config=llm_config,
-    )
-    if tool_run.answer is not None:
-        answer = tool_run.answer
-        thinking = tool_run.thinking
-    else:
-        answer, thinking = complete_llm_with_config(tool_run.messages)
-
-    return (
-        answer,
-        thinking,
-        web_results,
-        _status_from_web_search_state(
-            web_results,
-            web_search_state,
-        ),
-    )
+    )(*args, **kwargs),
+    status_from_web_search_state=_status_from_web_search_state,
+    supports_keyword_argument=_supports_keyword_argument,
+)
 
 
 _WEB_SEARCH_ORCHESTRATION_COMPAT = build_web_search_orchestration_compat(

@@ -469,6 +469,27 @@ def test_knowledge_base_router_delegates_non_streaming_chat_to_service():
     assert "ChatResponse(" not in chat_route_source
 
 
+def test_knowledge_base_router_delegates_answer_completion_adapter_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/knowledge_base_answer_adapter.py"
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    assert "def build_complete_knowledge_base_answer" in service_source
+    assert "from app.services.knowledge_base_answer_adapter import" in router_source
+    assert "complete_llm_answer_resolver" in service_source
+    assert "complete_llm_answer_resolver=lambda" in router_source
+    assert "_complete_knowledge_base_answer =" in router_source
+    assert "async def _complete_knowledge_base_answer" not in router_source
+    assert "def complete_llm_with_config" not in router_source
+    assert "tool_run.answer is not None" not in router_source
+    assert "_prepare_web_search_tool_run" not in declared_names
+
+
 def test_knowledge_base_router_delegates_streaming_chat_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_base_chat_stream.py"
