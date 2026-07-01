@@ -59,6 +59,9 @@ def test_chat_router_delegates_global_config_writes_to_service():
     web_search_service_source = (
         project_root / "app/services/chat_web_search_config.py"
     ).read_text(encoding="utf-8")
+    provider_config_service_source = (
+        project_root / "app/services/chat_provider_config.py"
+    ).read_text(encoding="utf-8")
 
     web_search_route_source = chat_source[
         chat_source.index("async def save_web_search_config(") : chat_source.index(
@@ -78,8 +81,10 @@ def test_chat_router_delegates_global_config_writes_to_service():
 
     assert "def save_global_web_search_config" in web_search_service_source
     assert "save_global_web_search_config" in service_source
-    assert "def save_global_llm_provider_config" in service_source
-    assert "def set_global_llm_provider" in service_source
+    assert "def save_global_llm_provider_config" in provider_config_service_source
+    assert "def set_global_llm_provider" in provider_config_service_source
+    assert "save_global_llm_provider_config" in service_source
+    assert "set_global_llm_provider" in service_source
 
     assert "save_global_web_search_config(" in web_search_route_source
     assert "_write_env_values(" not in web_search_route_source
@@ -174,6 +179,23 @@ def test_chat_config_delegates_provider_catalog_to_helper():
     assert "def _get_provider_thinking_template" not in chat_config_source
     assert "def _parse_thinking_config" not in chat_config_source
     assert "def _get_provider_thinking_config" not in chat_config_source
+
+
+def test_chat_config_delegates_provider_config_writes_to_helper():
+    project_root = get_project_root()
+    chat_config_source = (project_root / "app/services/chat_config.py").read_text(
+        encoding="utf-8"
+    )
+    provider_write_path = project_root / "app/services/chat_provider_config.py"
+
+    assert provider_write_path.exists()
+    provider_write_source = provider_write_path.read_text(encoding="utf-8")
+    assert "def save_global_llm_provider_config" in provider_write_source
+    assert "def set_global_llm_provider" in provider_write_source
+
+    assert "from app.services.chat_provider_config import" in chat_config_source
+    assert "def save_global_llm_provider_config" not in chat_config_source
+    assert "def set_global_llm_provider" not in chat_config_source
 
 
 def test_chat_router_delegates_llm_tool_helpers_to_service():
