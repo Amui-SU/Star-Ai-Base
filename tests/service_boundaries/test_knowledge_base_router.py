@@ -342,6 +342,7 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     documents_path = project_root / "app/services/rag_documents.py"
     filters_path = project_root / "app/services/rag_filters.py"
     collection_ops_path = project_root / "app/services/rag_collection_ops.py"
+    qa_path = project_root / "app/services/rag_qa.py"
     rag_source = (project_root / "app/services/rag.py").read_text(encoding="utf-8")
 
     assert documents_path.exists()
@@ -374,7 +375,21 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     }:
         assert f"def {name}" in collection_ops_source
     assert "from app.services.rag_collection_ops import" in rag_source
+    assert qa_path.exists()
+    qa_source = qa_path.read_text(encoding="utf-8")
+    for name in {
+        "answer_rag_question",
+        "build_rag_answer_context_and_sources",
+        "complete_rag_answer",
+        "fallback_rag_answer",
+    }:
+        assert f"def {name}" in qa_source or f"async def {name}" in qa_source
+    assert "from app.services.rag_qa import" in rag_source
     assert "Document(" not in rag_source
+    assert "context_parts = []" not in rag_source
+    assert "seen_bvids = set()" not in rag_source
+    assert '"知识库目前还没有内容"' not in rag_source
+    assert "AI 回答时发生错误" not in rag_source
     assert "self.vectorstore._collection.delete(" not in rag_source
     assert "self.vectorstore._collection.get(" not in rag_source
     assert "self.vectorstore._collection.count(" not in rag_source

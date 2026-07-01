@@ -28,6 +28,11 @@ from app.services.rag_documents import build_video_content_text, build_video_doc
 from app.services.rag_filters import (
     knowledge_base_filter,
 )
+from app.services.rag_qa import (
+    answer_rag_question,
+    complete_rag_answer,
+    fallback_rag_answer,
+)
 
 
 class RAGService:
@@ -298,22 +303,12 @@ class RAGService:
         Returns:
             回答结果
         """
-        try:
-            chain = (
-                {"question": RunnablePassthrough()}
-                | self.fallback_prompt
-                | self.llm
-                | StrOutputParser()
-            )
-
-            answer = await chain.ainvoke(question)
-            return {"answer": answer, "sources": []}
-        except Exception as e:
-            logger.error(f"Fallback 回复失败: {e}")
-            return {
-                "answer": f"抱歉，{reason}。您可以尝试构建更多收藏夹内容，或者换个问法试试。",
-                "sources": [],
-            }
+        return await fallback_rag_answer(
+            question,
+            reason,
+            fallback_prompt=self.fallback_prompt,
+            llm=self.llm,
+        )
 
     async def answer_question(
         self, question: str, k: int = 5, bvids: Optional[List[str]] = None
@@ -332,76 +327,23 @@ class RAGService:
                 "sources": 来源视频列表
             }
         """
-        # 先检查向量库是否有内容
-        stats = self.get_collection_stats()
-        if stats["total_chunks"] == 0:
-            # 知识库为空时，使用 fallback 让 AI 自然回复
-            return await self._fallback_answer(question, "知识库目前还没有内容")
+        return await answer_rag_question(
+            question,
+            k=k,
+            bvids=bvids,
+            get_collection_stats=self.get_collection_stats,
+            search_documents=self.search,
+            fallback_answer=self._fallback_answer,
+            complete_answer=self._complete_answer,
+        )
 
-        # 检索相关文档
-        try:
-            docs = self.search(question, k=k, bvids=bvids if bvids else None)
-        except Exception as e:
-            logger.error(f"检索失败: {e}")
-            return await self._fallback_answer(question, f"检索时遇到问题")
-
-        if not docs:
-            # 没检索到内容时，也让 AI 自然回复
-            return await self._fallback_answer(question, "没有找到相关内容")
-
-        # 构建上下文
-        context_parts = []
-        seen_bvids = set()
-        sources = []
-
-        for doc in docs:
-            bvid = doc.metadata.get("bvid", "")
-            title = doc.metadata.get("title", "未知标题")
-            content = doc.page_content.strip()
-
-            if content:  # 只添加有内容的文档
-                context_parts.append(f"【{title}】\n{content}")
-
-            if bvid and bvid not in seen_bvids:
-                seen_bvids.add(bvid)
-                sources.append(
-                    {
-                        "bvid": bvid,
-                        "title": title,
-                        "url": doc.metadata.get(
-                            "url", f"https://www.bilibili.com/video/{bvid}"
-                        ),
-                    }
-                )
-
-        # 如果没有有效内容
-        if not context_parts:
-            return {
-                "answer": "检索到了相关视频，但没有找到有效的文本内容。可能是视频还未完成内容提取。",
-                "sources": sources,
-            }
-
-        context = "\n\n---\n\n".join(context_parts)
-
-        # 确保 context 不为空
-        if not context.strip():
-            return {"answer": "没有找到可用的内容来回答您的问题。", "sources": sources}
-
-        # 构建链并执行
-        try:
-            chain = (
-                {"context": lambda _: context, "question": RunnablePassthrough()}
-                | self.qa_prompt
-                | self.llm
-                | StrOutputParser()
-            )
-
-            answer = await chain.ainvoke(question)
-
-            return {"answer": answer, "sources": sources}
-        except Exception as e:
-            logger.error(f"LLM 调用失败: {e}")
-            return {"answer": f"AI 回答时发生错误: {str(e)}", "sources": sources}
+    async def _complete_answer(self, question: str, context: str) -> str:
+        return await complete_rag_answer(
+            question,
+            context,
+            qa_prompt=self.qa_prompt,
+            llm=self.llm,
+        )
 
     async def summarize_content(self, content: str) -> str:
         """
