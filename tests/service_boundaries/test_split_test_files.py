@@ -243,6 +243,42 @@ def test_knowledge_base_scope_build_tests_are_split_by_domain():
         assert len(mixed_source.splitlines()) <= 80
 
 
+def test_web_search_tavily_tests_are_split_by_domain():
+    project_root = get_project_root()
+    tests_dir = project_root / "tests"
+    mixed_test = tests_dir / "test_web_search_tavily.py"
+    mixed_source = mixed_test.read_text(encoding="utf-8") if mixed_test.exists() else ""
+    focused_dir = tests_dir / "web_search_tavily"
+
+    focused_files = {
+        "test_success_paths.py": [
+            "test_search_web_uses_tavily_provider_when_configured",
+            "test_search_web_keeps_tavily_snippets_when_dns_lookup_fails",
+            "test_search_web_auto_uses_tavily_when_key_is_configured",
+        ],
+        "test_overrides.py": [
+            "test_search_web_uses_tavily_api_key_override",
+            "test_search_web_uses_request_provider_override",
+        ],
+        "test_fallbacks_and_failures.py": [
+            "test_search_web_falls_back_to_html_when_tavily_fails",
+            "test_search_web_returns_empty_without_html_fallback_when_tavily_fails",
+            "test_search_web_reports_missing_tavily_key_without_html_fallback",
+        ],
+    }
+
+    for file_name, test_names in focused_files.items():
+        focused_path = focused_dir / file_name
+        assert focused_path.exists()
+        focused_source = focused_path.read_text(encoding="utf-8")
+        for test_name in test_names:
+            assert test_name not in mixed_source
+            assert test_name in focused_source
+
+    if mixed_test.exists():
+        assert len(mixed_source.splitlines()) <= 80
+
+
 def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
     project_root = get_project_root()
     service_boundary_dir = project_root / "tests" / "service_boundaries"
