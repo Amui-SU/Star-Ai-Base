@@ -5,11 +5,12 @@ B站 API 服务模块
 """
 
 import httpx
-import asyncio
-import qrcode
-import io
-import base64
 from typing import Optional, Dict, Any, List, Mapping
+from app.services.bilibili_auth import (
+    generate_bilibili_qrcode,
+    get_bilibili_user_info,
+    poll_bilibili_qrcode_status,
+)
 from app.services.bilibili_cookies import (
     bilibili_service_from_cookies as _bilibili_service_from_cookies,
     normalize_bilibili_cookies,
@@ -111,49 +112,11 @@ class BilibiliService:
                 "qrcode_image_base64": "二维码图片 base64"
             }
         """
-        url = f"{self.PASSPORT_URL}/x/passport-login/web/qrcode/generate"
-        last_error: Exception | None = None
-        for attempt in range(3):
-            try:
-                response = await self.client.get(url)
-                data = self._parse_json_response(response, "生成二维码")
-                break
-            except (
-                httpx.TimeoutException,
-                httpx.NetworkError,
-                httpx.TransportError,
-            ) as e:
-                last_error = e
-                if attempt == 2:
-                    raise Exception(
-                        "连接 B站二维码接口超时或网络异常，请稍后重试"
-                    ) from e
-                await asyncio.sleep(0.6 * (attempt + 1))
-        else:
-            raise last_error or Exception("连接 B站二维码接口失败")
-
-        if data["code"] != 0:
-            raise Exception(f"生成二维码失败: {data['message']}")
-
-        qrcode_key = data["data"]["qrcode_key"]
-        qrcode_url = data["data"]["url"]
-
-        # 生成二维码图片
-        qr = qrcode.QRCode(version=1, box_size=10, border=2)
-        qr.add_data(qrcode_url)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-
-        # 转为 base64
-        buffer = io.BytesIO()
-        img.save(buffer, format="PNG")
-        img_base64 = base64.b64encode(buffer.getvalue()).decode()
-
-        return {
-            "qrcode_key": qrcode_key,
-            "qrcode_url": qrcode_url,
-            "qrcode_image_base64": f"data:image/png;base64,{img_base64}",
-        }
+        return await generate_bilibili_qrcode(
+            client=self.client,
+            passport_url=self.PASSPORT_URL,
+            parse_json_response=self._parse_json_response,
+        )
 
     async def poll_qrcode_status(self, qrcode_key: str) -> Dict[str, Any]:
         """
@@ -169,53 +132,12 @@ class BilibiliService:
                 "cookies": {...} (仅在 confirmed 时有值)
             }
         """
-        url = f"{self.PASSPORT_URL}/x/passport-login/web/qrcode/poll"
-        try:
-            response = await self.client.get(url, params={"qrcode_key": qrcode_key})
-            data = self._parse_json_response(response, "轮询二维码状态")
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as e:
-            raise Exception(
-                "连接 B站二维码状态接口超时或网络异常，请重新获取二维码"
-            ) from e
-
-        if data["code"] != 0:
-            raise Exception(f"轮询二维码状态失败: {data['message']}")
-
-        inner_code = data["data"]["code"]
-        message = data["data"]["message"]
-
-        status_map = {
-            86101: ("waiting", "等待扫码"),
-            86090: ("scanned", "已扫码，等待确认"),
-            86038: ("expired", "二维码已过期"),
-            0: ("confirmed", "登录成功"),
-        }
-
-        status, msg = status_map.get(inner_code, ("unknown", message))
-
-        result = {"status": status, "message": msg}
-
-        # 登录成功时，从响应头中提取 cookies
-        if status == "confirmed":
-            cookies = {}
-            for cookie in response.cookies.jar:
-                cookies[cookie.name] = cookie.value
-
-            # 也可能在 URL 中
-            url_str = data["data"].get("url", "")
-            if "SESSDATA=" in url_str:
-                # 从 URL 解析 cookies
-                import urllib.parse
-
-                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(url_str).query)
-                for key in ["SESSDATA", "bili_jct", "DedeUserID"]:
-                    if key in parsed:
-                        cookies[key] = parsed[key][0]
-
-            result["cookies"] = cookies
-            result["refresh_token"] = data["data"].get("refresh_token", "")
-
-        return result
+        return await poll_bilibili_qrcode_status(
+            client=self.client,
+            passport_url=self.PASSPORT_URL,
+            parse_json_response=self._parse_json_response,
+            qrcode_key=qrcode_key,
+        )
 
     async def get_user_info(self) -> Dict[str, Any]:
         """
@@ -224,14 +146,11 @@ class BilibiliService:
         Returns:
             用户信息字典
         """
-        url = f"{self.BASE_URL}/x/web-interface/nav"
-        response = await self.client.get(url, cookies=self._get_cookies())
-        data = response.json()
-
-        if data["code"] != 0:
-            raise Exception(f"获取用户信息失败: {data['message']}")
-
-        return data["data"]
+        return await get_bilibili_user_info(
+            client=self.client,
+            base_url=self.BASE_URL,
+            cookies=self._get_cookies(),
+        )
 
     # ==================== 收藏夹相关 ====================
 

@@ -105,3 +105,29 @@ def test_bilibili_service_delegates_video_api_helpers_to_service():
     assert "/x/player/wbi/playurl" not in bilibili_source
     assert "/x/player/playurl" not in bilibili_source
     assert "wbi_signer.sign(" not in bilibili_source
+
+
+def test_bilibili_service_delegates_auth_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/bilibili_auth.py"
+    bilibili_source = (project_root / "app/services/bilibili.py").read_text(
+        encoding="utf-8"
+    )
+
+    expected_service_names = {
+        "generate_bilibili_qrcode",
+        "poll_bilibili_qrcode_status",
+        "get_bilibili_user_info",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"async def {name}" in service_source
+    assert "from app.services.bilibili_auth import" in bilibili_source
+    assert "/x/passport-login/web/qrcode/generate" not in bilibili_source
+    assert "/x/passport-login/web/qrcode/poll" not in bilibili_source
+    assert "/x/web-interface/nav" not in bilibili_source
+    assert "qrcode.QRCode(" not in bilibili_source
+    assert "base64.b64encode" not in bilibili_source
+    assert "urllib.parse" not in bilibili_source
