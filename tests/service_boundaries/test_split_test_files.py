@@ -187,3 +187,54 @@ def test_knowledge_base_scope_build_tests_are_split_from_scoping_file():
     ]:
         assert test_name not in scoping_source
         assert test_name in scope_build_source
+
+
+def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
+    project_root = get_project_root()
+    service_boundary_dir = project_root / "tests" / "service_boundaries"
+    mixed_test = service_boundary_dir / "test_auth_database_ingestion.py"
+    mixed_source = mixed_test.read_text(encoding="utf-8") if mixed_test.exists() else ""
+
+    focused_files = {
+        "test_system_auth_router.py": [
+            "test_system_auth_router_delegates_oauth_state_helpers_to_service",
+            "test_system_auth_router_delegates_admin_helpers_to_service",
+        ],
+        "test_database_boundaries.py": [
+            "test_database_legacy_migration_entrypoint_delegates_without_nested_helpers",
+            "test_database_delegates_sqlite_legacy_schema_to_service",
+        ],
+        "test_legacy_bilibili_session_boundaries.py": [
+            "test_legacy_bilibili_session_helpers_live_in_service_not_auth_router",
+        ],
+        "test_ingestion_boundaries.py": [
+            "test_ingestion_task_persistence_and_status_mapping_live_in_service",
+            "test_import_router_delegates_import_task_runtime_to_service",
+            "test_scoped_folder_sync_tests_do_not_import_legacy_router",
+        ],
+        "test_content_fetcher_boundaries.py": [
+            "test_content_fetcher_delegates_ai_summary_helpers_to_service",
+            "test_content_fetcher_delegates_subtitle_helpers_to_service",
+            "test_content_fetcher_delegates_asr_audio_helpers_to_service",
+        ],
+        "test_asr_boundaries.py": [
+            "test_asr_service_delegates_audio_preparation_to_service",
+            "test_asr_service_delegates_transcription_runtime_to_service",
+        ],
+        "test_bilibili_service_boundaries.py": [
+            "test_bilibili_service_delegates_cookie_and_response_helpers",
+            "test_bilibili_service_delegates_media_helpers_to_service",
+            "test_bilibili_service_delegates_favorite_helpers_to_service",
+        ],
+    }
+
+    for file_name, test_names in focused_files.items():
+        focused_path = service_boundary_dir / file_name
+        assert focused_path.exists()
+        focused_source = focused_path.read_text(encoding="utf-8")
+        for test_name in test_names:
+            assert test_name not in mixed_source
+            assert test_name in focused_source
+
+    if mixed_test.exists():
+        assert len(mixed_source.splitlines()) <= 80
