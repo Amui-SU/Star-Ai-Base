@@ -1,14 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
-import {
-  localConnectionApi,
-  type LocalLanAddressResponse,
-  systemAuthApi,
-  type SystemUser,
-} from "@/lib/api";
-import ModalShell from "@/components/ui/ModalShell";
+import UserMenuLanQrModal from "@/components/user-menu/UserMenuLanQrModal";
+import { useUserMenuState } from "@/components/user-menu/useUserMenuState";
+import type { SystemUser } from "@/lib/api";
 
 interface Props {
   user: SystemUser;
@@ -25,115 +20,38 @@ export default function UserMenu({
   onOpenApiAccounts,
   onOpenAdmin,
 }: Props) {
-  const initial = user.display_name?.charAt(0)?.toUpperCase() || "?";
-  const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [copiedLan, setCopiedLan] = useState(false);
-  const [showLanQr, setShowLanQr] = useState(false);
-  const [lanAddress, setLanAddress] = useState<LocalLanAddressResponse | null>(
-    null,
-  );
-  const [lanLoading, setLanLoading] = useState(false);
-  const [editingName, setEditingName] = useState(false);
-  const [displayName, setDisplayName] = useState(user.display_name);
-  const [savingName, setSavingName] = useState(false);
-  const [nameError, setNameError] = useState("");
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onMouseDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onMouseDown);
-    return () => document.removeEventListener("mousedown", onMouseDown);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || lanAddress) return;
-    let cancelled = false;
-    void Promise.resolve()
-      .then(() => {
-        if (cancelled) return null;
-        setLanLoading(true);
-        return localConnectionApi.lanAddress();
-      })
-      .then((response) => {
-        if (!cancelled && response) setLanAddress(response);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setLanAddress({
-            host: null,
-            api_url: null,
-            frontend_url: null,
-            qr_url: null,
-            connect_page_url: null,
-            qr_image_url: null,
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLanLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [lanAddress, open]);
-
-  const copyEmail = async () => {
-    try {
-      await navigator.clipboard.writeText(user.email);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  const copyLanAddress = async () => {
-    if (!lanAddress?.api_url) return;
-    try {
-      await navigator.clipboard.writeText(lanAddress.api_url);
-      setCopiedLan(true);
-      setShowLanQr(true);
-      window.setTimeout(() => setCopiedLan(false), 1200);
-    } catch {
-      setCopiedLan(false);
-    }
-  };
-
-  const handleLogout = () => {
-    setOpen(false);
-    onLogout();
-  };
-
-  const saveDisplayName = async () => {
-    const nextName = displayName.trim();
-    if (!nextName) {
-      setNameError("用户名不能为空");
-      return;
-    }
-    if (nextName === user.display_name) {
-      setEditingName(false);
-      setNameError("");
-      return;
-    }
-    setSavingName(true);
-    setNameError("");
-    try {
-      const nextUser = await systemAuthApi.updateDisplayName(nextName);
-      onUserChange(nextUser);
-      setEditingName(false);
-      setDisplayName(nextUser.display_name);
-    } catch (err) {
-      setNameError(err instanceof Error ? err.message : "用户名保存失败");
-    } finally {
-      setSavingName(false);
-    }
-  };
+  const {
+    cancelEditingName,
+    closeLanQr,
+    copied,
+    copiedLan,
+    copyEmail,
+    copyLanAddress,
+    displayName,
+    editingName,
+    handleLogout,
+    handleNameKeyDown,
+    initial,
+    lanAddress,
+    lanLoading,
+    menuRef,
+    nameError,
+    open,
+    openAdmin,
+    openApiAccounts,
+    saveDisplayName,
+    savingName,
+    setDisplayName,
+    showLanQr,
+    startEditingName,
+    toggleOpen,
+  } = useUserMenuState({
+    user,
+    onUserChange,
+    onLogout,
+    onOpenApiAccounts,
+    onOpenAdmin,
+  });
 
   return (
     <div className="user-menu" ref={menuRef}>
@@ -143,12 +61,7 @@ export default function UserMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         title={user.display_name}
-        onClick={() => {
-          setDisplayName(user.display_name);
-          setNameError("");
-          setEditingName(false);
-          setOpen((value) => !value);
-        }}
+        onClick={toggleOpen}
       >
         {user.avatar_url ? (
           <Image
@@ -192,16 +105,7 @@ export default function UserMenu({
                   autoFocus
                   maxLength={100}
                   onChange={(event) => setDisplayName(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      void saveDisplayName();
-                    }
-                    if (event.key === "Escape") {
-                      setEditingName(false);
-                      setDisplayName(user.display_name);
-                      setNameError("");
-                    }
-                  }}
+                  onKeyDown={handleNameKeyDown}
                 />
               ) : (
                 <div className="user-menu-name">{user.display_name}</div>
@@ -256,11 +160,7 @@ export default function UserMenu({
                 <button
                   type="button"
                   className="user-menu-action"
-                  onClick={() => {
-                    setEditingName(false);
-                    setDisplayName(user.display_name);
-                    setNameError("");
-                  }}
+                  onClick={cancelEditingName}
                   disabled={savingName}
                 >
                   <span>取消</span>
@@ -270,11 +170,7 @@ export default function UserMenu({
               <button
                 type="button"
                 className="user-menu-action"
-                onClick={() => {
-                  setEditingName(true);
-                  setDisplayName(user.display_name);
-                  setNameError("");
-                }}
+                onClick={startEditingName}
               >
                 <span>更改用户名</span>
                 <span className="user-menu-action-hint">Edit</span>
@@ -284,10 +180,7 @@ export default function UserMenu({
               <button
                 type="button"
                 className="user-menu-action"
-                onClick={() => {
-                  setOpen(false);
-                  onOpenApiAccounts();
-                }}
+                onClick={openApiAccounts}
               >
                 <span>AI 服务密钥</span>
                 <span className="user-menu-action-hint">Keys</span>
@@ -297,10 +190,7 @@ export default function UserMenu({
               <button
                 type="button"
                 className="user-menu-action"
-                onClick={() => {
-                  setOpen(false);
-                  onOpenAdmin();
-                }}
+                onClick={openAdmin}
               >
                 <span>用户管理</span>
                 <span className="user-menu-action-hint">Admin</span>
@@ -332,49 +222,11 @@ export default function UserMenu({
         </div>
       )}
 
-      {showLanQr &&
-        lanAddress?.api_url &&
-        (lanAddress.qr_data_url ||
-          lanAddress.qr_image_url ||
-          lanAddress.qr_url) && (
-          <ModalShell
-            cardClassName="local-connection-qr-card"
-            onClose={() => setShowLanQr(false)}
-          >
-            <div className="local-connection-qr-head">
-              <div>
-                <div className="modal-title text-left">手机扫码连接</div>
-                <div className="modal-subtitle text-left">
-                  打开手机端连接设置，点“扫码”识别这个二维码。
-                </div>
-              </div>
-              <button
-                type="button"
-                className="provider-config-close"
-                onClick={() => setShowLanQr(false)}
-                aria-label="关闭手机扫码连接"
-              >
-                ×
-              </button>
-            </div>
-
-            <Image
-              className="local-connection-qr-image"
-              src={
-                lanAddress.qr_data_url ||
-                lanAddress.qr_image_url ||
-                lanAddress.qr_url ||
-                ""
-              }
-              alt="手机连接二维码"
-              width={220}
-              height={220}
-            />
-            <div className="local-connection-qr-address">
-              {lanAddress.api_url}
-            </div>
-          </ModalShell>
-        )}
+      <UserMenuLanQrModal
+        open={showLanQr}
+        lanAddress={lanAddress}
+        onClose={closeLanQr}
+      />
     </div>
   );
 }

@@ -40,7 +40,7 @@ def test_common_modals_use_shared_shell():
         "frontend/components/ImportModal.tsx",
         "frontend/components/LocalConnectionSettings.tsx",
         "frontend/components/OrganizePreviewModal.tsx",
-        "frontend/components/UserMenu.tsx",
+        "frontend/components/user-menu/UserMenuLanQrModal.tsx",
         "frontend/components/chat/ModelConfigModal.tsx",
         "frontend/components/chat/WebSearchConfigModal.tsx",
     ]:
@@ -70,3 +70,24 @@ def test_import_modal_uses_state_hook():
     assert "MAX_QR_POLL_ATTEMPTS" not in modal_source
     assert "setInterval(" not in modal_source
     assert "clearInterval(" not in modal_source
+
+
+def test_user_menu_state_and_qr_modal_are_extracted():
+    project_root = get_project_root()
+    user_menu = (project_root / "frontend" / "components" / "UserMenu.tsx").read_text(
+        encoding="utf-8"
+    )
+
+    for relative_path in [
+        "frontend/components/user-menu/useUserMenuState.ts",
+        "frontend/components/user-menu/UserMenuLanQrModal.tsx",
+    ]:
+        assert (project_root / relative_path).exists()
+
+    assert "@/components/user-menu/useUserMenuState" in user_menu
+    assert "@/components/user-menu/UserMenuLanQrModal" in user_menu
+    assert "localConnectionApi." not in user_menu
+    assert "systemAuthApi." not in user_menu
+    assert "ModalShell" not in user_menu
+    assert "local-connection-qr-card" not in user_menu
+    assert "const saveDisplayName" not in user_menu
