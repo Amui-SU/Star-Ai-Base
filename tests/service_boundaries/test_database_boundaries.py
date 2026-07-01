@@ -28,23 +28,23 @@ def test_database_delegates_sqlite_legacy_schema_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/sqlite_legacy_schema.py"
     inspection_path = project_root / "app/services/sqlite_schema_inspection.py"
+    video_cache_migration_path = (
+        project_root / "app/services/sqlite_video_cache_migration.py"
+    )
     database_source = (project_root / "app/database.py").read_text(encoding="utf-8")
 
-    expected_service_names = {
+    expected_local_service_names = {
         "SQLITE_LEGACY_COLUMNS",
         "ensure_sqlite_legacy_columns",
         "ensure_sqlite_legacy_schema_sync",
         "sqlite_add_missing_legacy_columns",
-        "sqlite_rebuild_video_cache_without_unique_bvid",
-        "sqlite_create_video_cache_indexes",
-        "sqlite_clone_scoped_video_cache_rows",
         "sqlite_create_api_account_indexes",
         "sqlite_create_chat_history_indexes",
     }
 
     assert service_path.exists()
     service_source = service_path.read_text(encoding="utf-8")
-    for name in expected_service_names:
+    for name in expected_local_service_names:
         assert f"def {name}" in service_source or f"{name}:" in service_source
 
     assert "from app.services.sqlite_legacy_schema import" in database_source
@@ -71,3 +71,20 @@ def test_database_delegates_sqlite_legacy_schema_to_service():
     assert "def sqlite_table_columns" not in service_source
     assert "def sqlite_has_unique_bvid_index" not in service_source
     assert "def sqlite_select_expr" not in service_source
+
+    assert video_cache_migration_path.exists()
+    video_cache_migration_source = video_cache_migration_path.read_text(
+        encoding="utf-8"
+    )
+    for name in {
+        "sqlite_rebuild_video_cache_without_unique_bvid",
+        "sqlite_create_video_cache_indexes",
+        "sqlite_clone_scoped_video_cache_rows",
+    }:
+        assert f"def {name}" in video_cache_migration_source
+        assert f"def {name}" not in service_source
+        assert name in service_source
+    assert "from app.services.sqlite_video_cache_migration import" in service_source
+    assert 'CREATE TABLE "video_cache_new"' not in service_source
+    assert "ix_video_cache_scope_bvid" not in service_source
+    assert "FROM favorite_videos fv" not in service_source
