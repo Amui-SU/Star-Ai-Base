@@ -161,3 +161,16 @@ def test_workspace_state_is_extracted_from_home_page():
     assert "const getInitialSidebarOpen" not in page
     assert "const isMobileViewport" not in page
     assert 'localStorage.getItem("sidebar_width")' not in page
+
+
+def test_home_page_shell_state_is_extracted():
+    project_root = get_project_root()
+    page = (project_root / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+
+    assert (project_root / "frontend/app/useHomePageShell.ts").exists()
+    assert "@/app/useHomePageShell" in page
+    assert "systemAuthApi" not in page
+    assert "sourceBindingApi" not in page
+    assert 'localStorage.getItem("active_kb_id")' not in page
+    assert 'localStorage.setItem("active_kb_id"' not in page
+    assert 'localStorage.removeItem("active_kb_id")' not in page

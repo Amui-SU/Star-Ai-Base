@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import type { CSSProperties } from "react";
 import AuthPage from "@/components/AuthPage";
 import UserMenu from "@/components/UserMenu";
 import KnowledgeBasePanel from "@/components/KnowledgeBasePanel";
@@ -12,31 +12,13 @@ import NotesSidebarPanel from "@/components/NotesSidebarPanel";
 import LocalConnectionSettings from "@/components/LocalConnectionSettings";
 import AdminUsersPanel from "@/components/AdminUsersPanel";
 import ApiAccountsPanel from "@/components/ApiAccountsPanel";
-import { systemAuthApi, sourceBindingApi } from "@/lib/api";
-import type { KnowledgeBase, SystemUser } from "@/lib/api";
 import { useTheme } from "@/hooks/useTheme";
+import { useHomePageShell } from "@/app/useHomePageShell";
 import { useWorkspaceState } from "@/app/useWorkspaceState";
 
 export default function Home() {
-  const [systemUser, setSystemUser] = useState<SystemUser | null>(null);
-  const [authChecking, setAuthChecking] = useState(true);
-  const [activeBindingId, setActiveBindingId] = useState<number | null>(null);
-  const [activeKbId, setActiveKbId] = useState<number | null>(() => {
-    if (typeof window === "undefined") return null;
-    const raw = localStorage.getItem("active_kb_id");
-    return raw ? Number(raw) : null;
-  });
-  const [activeKnowledgeBase, setActiveKnowledgeBase] =
-    useState<KnowledgeBase | null>(null);
-  const [kbRefreshKey, setKbRefreshKey] = useState(0);
-  const [showImport, setShowImport] = useState(false);
-  const [showAdminUsers, setShowAdminUsers] = useState(false);
-  const [showApiAccounts, setShowApiAccounts] = useState(false);
-  const [apiAccountsKey, setApiAccountsKey] = useState(0);
-  const [statsKey, setStatsKey] = useState(0);
-  const [knowledgeBuilding, setKnowledgeBuilding] = useState(false);
-
   const { isDarkMode, ready: themeReady, toggleTheme } = useTheme();
+  const shell = useHomePageShell();
   const {
     containerRef,
     handleMouseDown,
@@ -55,63 +37,8 @@ export default function Home() {
     refreshHistory,
   } = useWorkspaceState();
 
-  // 检查系统登录态
-  useEffect(() => {
-    systemAuthApi
-      .me()
-      .then(async (user) => {
-        setSystemUser(user);
-        try {
-          const bindings = await sourceBindingApi.list();
-          const active = bindings.find((b) => b.status === "active");
-          if (active) setActiveBindingId(active.id);
-        } catch {
-          /* 绑定接口失败不影响登录 */
-        }
-      })
-      .catch(() => setSystemUser(null))
-      .finally(() => setAuthChecking(false));
-  }, []);
-
-  const onAuthSuccess = (user: SystemUser) => {
-    setSystemUser(user);
-    setKbRefreshKey((v) => v + 1);
-  };
-
-  const onBiliBound = async () => {
-    setShowImport(false);
-    try {
-      const bindings = await sourceBindingApi.list();
-      const active = bindings.find((b) => b.status === "active");
-      if (active) setActiveBindingId(active.id);
-    } catch (e) {
-      console.error("获取绑定列表失败:", e);
-    }
-  };
-
-  const onLogout = () => {
-    systemAuthApi.logout().catch(() => {});
-    setSystemUser(null);
-    localStorage.removeItem("bili_session");
-    localStorage.removeItem("bili_user");
-    localStorage.removeItem("bili_user_face");
-    localStorage.removeItem("active_kb_id");
-    setActiveKbId(null);
-    setActiveKnowledgeBase(null);
-  };
-
-  const handleKnowledgeBaseSelect = useCallback((kb: KnowledgeBase | null) => {
-    setActiveKnowledgeBase(kb);
-    setActiveKbId(kb?.id ?? null);
-    if (kb) {
-      localStorage.setItem("active_kb_id", String(kb.id));
-    } else {
-      localStorage.removeItem("active_kb_id");
-    }
-  }, []);
-
   // 加载中
-  if (authChecking) {
+  if (shell.authChecking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-(--bg)">
         <div className="w-8 h-8 border-2 border-(--accent) border-t-transparent rounded-full animate-spin" />
@@ -120,8 +47,8 @@ export default function Home() {
   }
 
   // 未登录 → 显示 AuthPage
-  if (!systemUser) {
-    return <AuthPage onAuthSuccess={onAuthSuccess} />;
+  if (!shell.systemUser) {
+    return <AuthPage onAuthSuccess={shell.handleAuthSuccess} />;
   }
 
   // 已登录 → 工作台
@@ -176,11 +103,11 @@ export default function Home() {
                 </button>
               )}
               <UserMenu
-                user={systemUser}
-                onUserChange={setSystemUser}
-                onLogout={onLogout}
-                onOpenApiAccounts={() => setShowApiAccounts(true)}
-                onOpenAdmin={() => setShowAdminUsers(true)}
+                user={shell.systemUser}
+                onUserChange={shell.setSystemUser}
+                onLogout={shell.handleLogout}
+                onOpenApiAccounts={shell.openApiAccounts}
+                onOpenAdmin={shell.openAdminUsers}
               />
             </div>
           </header>
@@ -308,7 +235,7 @@ export default function Home() {
               style={
                 {
                   "--sidebar-width": `${sidebarWidth}px`,
-                } as React.CSSProperties
+                } as CSSProperties
               }
             >
               <aside className="panel panel-sources" style={sidebarPanelStyle}>
@@ -316,18 +243,18 @@ export default function Home() {
                   <>
                     {/* 知识库选择 */}
                     <KnowledgeBasePanel
-                      activeId={activeKbId}
-                      onSelect={handleKnowledgeBaseSelect}
-                      onActiveKnowledgeBase={setActiveKnowledgeBase}
-                      refreshKey={kbRefreshKey}
-                      disabled={knowledgeBuilding}
+                      activeId={shell.activeKbId}
+                      onSelect={shell.handleKnowledgeBaseSelect}
+                      onActiveKnowledgeBase={shell.setActiveKnowledgeBase}
+                      refreshKey={shell.kbRefreshKey}
+                      disabled={shell.knowledgeBuilding}
                     />
 
                     {/* 导入入口 */}
-                    {!activeBindingId && (
+                    {!shell.activeBindingId && (
                       <div className="import-sidebar-entry">
                         <button
-                          onClick={() => setShowImport(true)}
+                          onClick={shell.openImport}
                           className="import-sidebar-btn"
                         >
                           + 导入
@@ -335,14 +262,14 @@ export default function Home() {
                         <p>选择 B 站收藏夹、视频 URL 或更多平台导入资料</p>
                       </div>
                     )}
-                    {activeBindingId ? (
+                    {shell.activeBindingId ? (
                       <SourcesPanel
-                        sourceBindingId={activeBindingId}
-                        knowledgeBaseId={activeKbId ?? 0}
-                        knowledgeBaseName={activeKnowledgeBase?.name}
-                        onImportClick={() => setShowImport(true)}
-                        onBuildDone={() => setStatsKey((v) => v + 1)}
-                        onBuildingChange={setKnowledgeBuilding}
+                        sourceBindingId={shell.activeBindingId}
+                        knowledgeBaseId={shell.activeKbId ?? 0}
+                        knowledgeBaseName={shell.activeKnowledgeBase?.name}
+                        onImportClick={shell.openImport}
+                        onBuildDone={shell.markStatsChanged}
+                        onBuildingChange={shell.setKnowledgeBuilding}
                       />
                     ) : (
                       <div className="sources-initial-empty">
@@ -358,7 +285,7 @@ export default function Home() {
                           <button
                             type="button"
                             className="sources-empty-action"
-                            onClick={() => setShowImport(true)}
+                            onClick={shell.openImport}
                           >
                             选择资料来源
                           </button>
@@ -368,7 +295,7 @@ export default function Home() {
                   </>
                 ) : sidebarMode === "history" ? (
                   <ChatHistorySidebarPanel
-                    knowledgeBaseId={activeKbId}
+                    knowledgeBaseId={shell.activeKbId}
                     refreshKey={historyRefreshKey}
                     onOpenConversation={requestOpenConversation}
                     onNewConversation={requestNewConversation}
@@ -394,14 +321,14 @@ export default function Home() {
               style={{ flex: 1 }}
             >
               <ChatPanel
-                statsKey={statsKey}
+                statsKey={shell.statsKey}
                 sidebarOpen={isSidebarOpen}
                 sidebarWidth={sidebarWidth}
-                knowledgeBaseId={activeKbId}
-                knowledgeBaseName={activeKnowledgeBase?.name}
-                isAdmin={Boolean(systemUser?.is_admin)}
-                apiAccountsKey={apiAccountsKey}
-                onOpenApiAccounts={() => setShowApiAccounts(true)}
+                knowledgeBaseId={shell.activeKbId}
+                knowledgeBaseName={shell.activeKnowledgeBase?.name}
+                isAdmin={Boolean(shell.systemUser?.is_admin)}
+                apiAccountsKey={shell.apiAccountsKey}
+                onOpenApiAccounts={shell.openApiAccounts}
                 conversationOpenRequest={conversationOpenRequest}
                 newConversationRequestKey={newConversationRequestKey}
                 onConversationSaved={refreshHistory}
@@ -412,22 +339,22 @@ export default function Home() {
       </main>
 
       <ImportModal
-        open={showImport}
-        knowledgeBaseId={activeKbId}
-        hasBilibiliBinding={!!activeBindingId}
-        onClose={() => setShowImport(false)}
-        onBound={onBiliBound}
-        onImported={() => setStatsKey((v) => v + 1)}
+        open={shell.showImport}
+        knowledgeBaseId={shell.activeKbId}
+        hasBilibiliBinding={!!shell.activeBindingId}
+        onClose={shell.closeImport}
+        onBound={shell.handleBiliBound}
+        onImported={shell.markStatsChanged}
       />
       <AdminUsersPanel
-        open={showAdminUsers}
-        currentUserId={systemUser.id}
-        onClose={() => setShowAdminUsers(false)}
+        open={shell.showAdminUsers}
+        currentUserId={shell.systemUser.id}
+        onClose={shell.closeAdminUsers}
       />
       <ApiAccountsPanel
-        open={showApiAccounts}
-        onClose={() => setShowApiAccounts(false)}
-        onChanged={() => setApiAccountsKey((value) => value + 1)}
+        open={shell.showApiAccounts}
+        onClose={shell.closeApiAccounts}
+        onChanged={shell.markApiAccountsChanged}
       />
     </div>
   );
