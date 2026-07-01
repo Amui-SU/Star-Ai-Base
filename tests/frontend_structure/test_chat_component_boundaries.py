@@ -223,6 +223,40 @@ def test_message_list_uses_focused_subcomponents():
     assert 'aria-label="问题操作"' not in message_list
 
 
+def test_chat_scope_picker_uses_focused_subcomponents():
+    project_root = get_project_root()
+    picker = (
+        project_root / "frontend" / "components" / "ChatScopePicker.tsx"
+    ).read_text(encoding="utf-8")
+
+    for relative_path in [
+        "frontend/components/chat-scope/ChatScopeTrigger.tsx",
+        "frontend/components/chat-scope/ScopeWebSearchPanel.tsx",
+        "frontend/components/chat-scope/ScopeModeGrid.tsx",
+        "frontend/components/chat-scope/ScopeFolderSection.tsx",
+        "frontend/components/chat-scope/ScopeVideoSearchSection.tsx",
+    ]:
+        assert (project_root / relative_path).exists()
+
+    for import_path in [
+        "@/components/chat-scope/ChatScopeTrigger",
+        "@/components/chat-scope/ScopeWebSearchPanel",
+        "@/components/chat-scope/ScopeModeGrid",
+        "@/components/chat-scope/ScopeFolderSection",
+        "@/components/chat-scope/ScopeVideoSearchSection",
+    ]:
+        assert import_path in picker
+
+    for token in [
+        "scope-web-provider-panel",
+        "scope-mode-grid",
+        "scope-folder-row",
+        "scope-video-list",
+        "scope-web-search-privacy",
+    ]:
+        assert token not in picker
+
+
 def test_chat_panel_history_tests_are_split_from_main_suite():
     project_root = get_project_root()
     main_test = project_root / "frontend" / "components" / "ChatPanel.test.tsx"
