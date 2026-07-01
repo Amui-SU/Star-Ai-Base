@@ -131,3 +131,37 @@ def test_source_binding_router_delegates_bilibili_qr_flow_to_service():
         assert "SourceCredential(" not in route_source
         assert "encrypt_text(" not in route_source
         assert "bilibili_service_from_cookies(" not in route_source
+
+
+def test_source_binding_router_delegates_favorite_flows_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/source_binding_favorites.py"
+    router_source = (project_root / "app/routers/source_bindings.py").read_text(
+        encoding="utf-8"
+    )
+    declared_names = declared_callable_names(router_source)
+
+    expected_service_names = {
+        "list_bilibili_favorite_folders",
+        "list_bilibili_favorite_videos",
+        "list_all_bilibili_favorite_videos",
+        "preview_bilibili_favorite_organization",
+        "execute_bilibili_favorite_moves",
+        "clean_invalid_bilibili_favorite_resources",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"async def {name}" in service_source
+
+    assert "from app.services.source_binding_favorites import" in router_source
+    assert "FavoriteFolderInfo(" not in router_source
+    assert "defaultdict(" not in router_source
+    assert "get_user_favorites(" not in router_source
+    assert "get_favorite_content(" not in router_source
+    assert "get_all_favorite_videos(" not in router_source
+    assert "move_favorite_resources(" not in router_source
+    assert "clean_favorite_resources(" not in router_source
+    assert "is_default_favorite_folder(" not in router_source
+    assert declared_names.isdisjoint(expected_service_names)
