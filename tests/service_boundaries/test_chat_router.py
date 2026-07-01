@@ -143,6 +143,39 @@ def test_chat_config_delegates_web_search_config_to_helper():
     assert "def save_global_web_search_config" not in chat_config_source
 
 
+def test_chat_config_delegates_provider_catalog_to_helper():
+    project_root = get_project_root()
+    chat_config_source = (project_root / "app/services/chat_config.py").read_text(
+        encoding="utf-8"
+    )
+    provider_helper_path = project_root / "app/services/chat_provider_catalog.py"
+
+    assert provider_helper_path.exists()
+    provider_helper_source = provider_helper_path.read_text(encoding="utf-8")
+    assert "PROVIDER_META = {" in provider_helper_source
+    assert "PROVIDER_ENV_FIELDS = {" in provider_helper_source
+    assert "PROVIDER_THINKING_SETTINGS_FIELDS = {" in provider_helper_source
+    assert "PROVIDER_THINKING_TEMPLATES = {" in provider_helper_source
+    assert "def _normalize_provider" in provider_helper_source
+    assert "def _current_default_llm_provider" in provider_helper_source
+    assert "def _resolve_llm_config" in provider_helper_source
+    assert "def _get_provider_thinking_template" in provider_helper_source
+    assert "def _parse_thinking_config" in provider_helper_source
+    assert "def _get_provider_thinking_config" in provider_helper_source
+
+    assert "from app.services.chat_provider_catalog import" in chat_config_source
+    assert "PROVIDER_META = {" not in chat_config_source
+    assert "PROVIDER_ENV_FIELDS = {" not in chat_config_source
+    assert "PROVIDER_THINKING_SETTINGS_FIELDS = {" not in chat_config_source
+    assert "PROVIDER_THINKING_TEMPLATES = {" not in chat_config_source
+    assert "def _normalize_provider" not in chat_config_source
+    assert "def _current_default_llm_provider" not in chat_config_source
+    assert "def _resolve_llm_config" not in chat_config_source
+    assert "def _get_provider_thinking_template" not in chat_config_source
+    assert "def _parse_thinking_config" not in chat_config_source
+    assert "def _get_provider_thinking_config" not in chat_config_source
+
+
 def test_chat_router_delegates_llm_tool_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/llm_tool_calls.py"

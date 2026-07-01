@@ -1,0 +1,64 @@
+import importlib.util
+import json
+
+import pytest
+from fastapi import HTTPException
+
+
+def test_provider_catalog_resolves_config_and_thinking(monkeypatch):
+    assert importlib.util.find_spec("app.services.chat_provider_catalog") is not None
+    from app.config import settings
+    from app.services.chat_provider_catalog import PROVIDER_ENV_FIELDS
+    from app.services.chat_provider_catalog import _current_default_llm_provider
+    from app.services.chat_provider_catalog import _get_provider_thinking_config
+    from app.services.chat_provider_catalog import _get_provider_thinking_template
+    from app.services.chat_provider_catalog import _normalize_provider
+    from app.services.chat_provider_catalog import _resolve_llm_config
+
+    monkeypatch.setattr(settings, "llm_provider", "unknown")
+    monkeypatch.setattr(settings, "deepseek_api_key", "deepseek-key")
+    monkeypatch.setattr(settings, "deepseek_base_url", "https://api.deepseek.test")
+    monkeypatch.setattr(settings, "deepseek_model", "deepseek-chat")
+    monkeypatch.setattr(
+        settings,
+        "deepseek_thinking_config",
+        json.dumps({"thinking": {"type": "enabled"}}),
+    )
+
+    assert PROVIDER_ENV_FIELDS["deepseek"]["api_key"] == "DEEPSEEK_API_KEY"
+    assert _current_default_llm_provider() == "dashscope"
+    assert _normalize_provider(" DEEPSEEK ") == "deepseek"
+    assert _get_provider_thinking_template("deepseek") == {
+        "thinking": {"type": "enabled"},
+        "reasoning_effort": "high",
+    }
+    assert _get_provider_thinking_config("deepseek") == {
+        "thinking": {"type": "enabled"}
+    }
+
+    assert _resolve_llm_config("deepseek") == {
+        "provider": "deepseek",
+        "provider_label": "DeepSeek",
+        "api_key": "deepseek-key",
+        "base_url": "https://api.deepseek.test",
+        "model": "deepseek-chat",
+        "thinking_config": {"thinking": {"type": "enabled"}},
+    }
+
+
+def test_provider_catalog_rejects_invalid_provider_and_thinking_json():
+    assert importlib.util.find_spec("app.services.chat_provider_catalog") is not None
+    from app.services.chat_provider_catalog import _normalize_provider
+    from app.services.chat_provider_catalog import _parse_thinking_config
+
+    with pytest.raises(HTTPException) as provider_exc:
+        _normalize_provider("unsupported")
+    assert provider_exc.value.status_code == 400
+
+    with pytest.raises(HTTPException) as json_exc:
+        _parse_thinking_config("{bad json")
+    assert json_exc.value.status_code == 400
+
+    with pytest.raises(HTTPException) as object_exc:
+        _parse_thinking_config('["not", "object"]')
+    assert object_exc.value.status_code == 400
