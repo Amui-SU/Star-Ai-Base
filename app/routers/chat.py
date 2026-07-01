@@ -1,6 +1,5 @@
 """Chat routes for RAG question answering."""
 
-import time
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -36,6 +35,7 @@ from app.services.chat_config import (
     save_global_web_search_config,
     set_global_llm_provider,
 )
+from app.services.chat_health import llm_health_response
 from app.services.llm_tool_calls import (
     LLMToolRunResult,
     append_no_more_tool_calls_instruction as _append_no_more_tool_calls_instruction,
@@ -238,53 +238,14 @@ async def llm_health_check(
     db: AsyncSession = Depends(get_db),
 ):
     """LLM 连通性检查"""
-    try:
-        credential = await resolve_user_llm_credentials(
-            db,
-            current_user,
-            global_config_resolver=_resolve_llm_config,
-        )
-        llm_config = credential.to_llm_config()
-    except HTTPException as exc:
-        fallback_config = _resolve_llm_config()
-        detail = exc.detail
-        message = detail.get("message") if isinstance(detail, dict) else str(detail)
-        return {
-            "status": "down",
-            "message": message or "未配置 LLM API Key",
-            "latency_ms": None,
-            "model": fallback_config["model"],
-            "provider": fallback_config["provider"],
-        }
-
-    start = time.perf_counter()
-    try:
-        client = _get_llm_client(llm_config)
-        # 最小化探活请求，避免额外开销
-        client.chat.completions.create(
-            model=llm_config["model"],
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-            temperature=0,
-        )
-        latency_ms = int((time.perf_counter() - start) * 1000)
-        return {
-            "status": "ok",
-            "message": "模型服务可用",
-            "latency_ms": latency_ms,
-            "model": llm_config["model"],
-            "provider": llm_config["provider"],
-        }
-    except Exception as e:
-        latency_ms = int((time.perf_counter() - start) * 1000)
-        logger.warning(f"LLM 健康检查失败: {e}")
-        return {
-            "status": "down",
-            "message": str(e) or "模型服务不可用",
-            "latency_ms": latency_ms,
-            "model": llm_config["model"],
-            "provider": llm_config["provider"],
-        }
+    return await llm_health_response(
+        db,
+        current_user,
+        resolve_llm_credentials=resolve_user_llm_credentials,
+        global_config_resolver=_resolve_llm_config,
+        get_llm_client=_get_llm_client,
+        warning_logger=logger.warning,
+    )
 
 
 _create_chat_completion_async = create_chat_completion_async

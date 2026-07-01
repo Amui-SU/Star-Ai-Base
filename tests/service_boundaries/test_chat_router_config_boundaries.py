@@ -100,6 +100,28 @@ def test_chat_router_delegates_global_config_writes_to_service():
     assert "_write_env_values(" not in provider_switch_route_source
 
 
+def test_chat_router_delegates_llm_health_check_to_service():
+    project_root = get_project_root()
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    service_path = project_root / "app/services/chat_health.py"
+    service_source = service_path.read_text(encoding="utf-8")
+
+    route_source = chat_source[
+        chat_source.index("async def llm_health_check(") : chat_source.index(
+            "_create_chat_completion_async ="
+        )
+    ]
+
+    assert service_path.exists()
+    assert "async def llm_health_response" in service_source
+    assert "from app.services.chat_health import" in chat_source
+    assert "llm_health_response(" in route_source
+    assert "time.perf_counter(" not in route_source
+    assert "client.chat.completions.create(" not in route_source
+    assert "resolve_user_llm_credentials(" not in route_source
+    assert "logger.warning(" not in route_source
+
+
 def test_chat_config_delegates_env_persistence_to_helper():
     project_root = get_project_root()
     chat_config_source = (project_root / "app/services/chat_config.py").read_text(
