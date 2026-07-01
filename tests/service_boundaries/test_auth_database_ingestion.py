@@ -581,6 +581,34 @@ def test_bilibili_service_delegates_media_helpers_to_service():
     assert 'for item in data.get("body", [])' not in bilibili_source
 
 
+def test_bilibili_service_delegates_favorite_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/bilibili_favorites.py"
+    bilibili_source = (project_root / "app/services/bilibili.py").read_text(
+        encoding="utf-8"
+    )
+
+    expected_service_names = {
+        "get_bilibili_user_favorites",
+        "get_bilibili_favorite_content",
+        "get_all_bilibili_favorite_videos",
+        "move_bilibili_favorite_resources",
+        "clean_bilibili_favorite_resources",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"async def {name}" in service_source
+    assert "from app.services.bilibili_favorites import" in bilibili_source
+    assert "/x/v3/fav/folder/created/list-all" not in bilibili_source
+    assert "/x/v3/fav/resource/list" not in bilibili_source
+    assert "/x/v3/fav/resource/move" not in bilibili_source
+    assert "/x/v3/fav/resource/clean" not in bilibili_source
+    assert '",".join(resources)' not in bilibili_source
+    assert "while True" not in bilibili_source
+
+
 def test_scoped_folder_sync_tests_do_not_import_legacy_router():
     project_root = get_project_root()
 

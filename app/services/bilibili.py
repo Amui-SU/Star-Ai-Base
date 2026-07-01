@@ -16,6 +16,13 @@ from app.services.bilibili_cookies import (
     normalize_bilibili_cookies,
     service_kwargs_from_cookies,
 )
+from app.services.bilibili_favorites import (
+    clean_bilibili_favorite_resources,
+    get_all_bilibili_favorite_videos,
+    get_bilibili_favorite_content,
+    get_bilibili_user_favorites,
+    move_bilibili_favorite_resources,
+)
 from app.services.bilibili_media import (
     download_bilibili_audio_to_file,
     normalize_bilibili_media_url,
@@ -236,44 +243,13 @@ class BilibiliService:
         """
         if mid is None:
             mid = self.dedeuserid
-
-        if not mid:
-            raise Exception("未指定用户 ID")
-
-        url = f"{self.BASE_URL}/x/v3/fav/folder/created/list-all"
-        params = {"up_mid": mid}
-
-        last_error: Exception | None = None
-        for attempt in range(3):
-            try:
-                response = await self.client.get(
-                    url, params=params, cookies=self._get_cookies()
-                )
-                data = self._parse_json_response(response, "获取收藏夹")
-                break
-            except (
-                httpx.TimeoutException,
-                httpx.NetworkError,
-                httpx.TransportError,
-            ) as e:
-                last_error = e
-                if attempt == 2:
-                    raise Exception(
-                        "连接 B站收藏夹接口超时或网络异常，请稍后重试"
-                    ) from e
-                await asyncio.sleep(0.8 * (attempt + 1))
-        else:
-            raise last_error or Exception("连接 B站收藏夹接口失败")
-
-        if data["code"] != 0:
-            message = data.get("message") or data.get("msg") or "未知错误"
-            if data.get("code") in {-101, -400, -403}:
-                raise Exception(
-                    f"获取收藏夹失败: B站登录态可能已失效，请重新扫码登录（{message}）"
-                )
-            raise Exception(f"获取收藏夹失败: {message}")
-
-        return data["data"]["list"] or []
+        return await get_bilibili_user_favorites(
+            client=self.client,
+            base_url=self.BASE_URL,
+            cookies=self._get_cookies(),
+            parse_json_response=self._parse_json_response,
+            mid=mid,
+        )
 
     async def get_favorite_content(
         self, media_id: int, pn: int = 1, ps: int = 20
@@ -293,22 +269,15 @@ class BilibiliService:
                 "has_more": 是否有更多
             }
         """
-        url = f"{self.BASE_URL}/x/v3/fav/resource/list"
-        params = {"media_id": media_id, "pn": pn, "ps": min(ps, 20), "platform": "web"}
-
-        response = await self.client.get(
-            url, params=params, cookies=self._get_cookies()
+        return await get_bilibili_favorite_content(
+            client=self.client,
+            base_url=self.BASE_URL,
+            cookies=self._get_cookies(),
+            parse_json_response=self._parse_json_response,
+            media_id=media_id,
+            pn=pn,
+            ps=ps,
         )
-        data = self._parse_json_response(response, "获取收藏夹内容")
-
-        if data["code"] != 0:
-            raise Exception(f"获取收藏夹内容失败: {data['message']}")
-
-        return {
-            "info": data["data"]["info"],
-            "medias": data["data"]["medias"] or [],
-            "has_more": data["data"]["has_more"],
-        }
 
     async def get_all_favorite_videos(self, media_id: int) -> List[Dict[str, Any]]:
         """
@@ -320,23 +289,10 @@ class BilibiliService:
         Returns:
             完整视频列表
         """
-        all_videos = []
-        pn = 1
-
-        while True:
-            result = await self.get_favorite_content(media_id, pn=pn, ps=20)
-            all_videos.extend(result["medias"])
-
-            if not result["has_more"]:
-                break
-            pn += 1
-
-            # 避免请求过快
-            import asyncio
-
-            await asyncio.sleep(0.3)
-
-        return all_videos
+        return await get_all_bilibili_favorite_videos(
+            media_id=media_id,
+            load_content=self.get_favorite_content,
+        )
 
     async def move_favorite_resources(
         self,
@@ -352,42 +308,28 @@ class BilibiliService:
             tar_media_id: 目标收藏夹 ID
             resources: ["avid:type", ...]
         """
-        if not self.bili_jct:
-            raise Exception("缺少 bili_jct，无法进行收藏夹移动")
-
-        if not resources:
-            return {"moved": 0}
-
-        url = f"{self.BASE_URL}/x/v3/fav/resource/move"
-        data = {
-            "src_media_id": src_media_id,
-            "tar_media_id": tar_media_id,
-            "resources": ",".join(resources),
-            "csrf": self.bili_jct,
-        }
-        if self.dedeuserid:
-            data["mid"] = self.dedeuserid
-
-        response = await self.client.post(url, data=data, cookies=self._get_cookies())
-        result = response.json()
-        if result.get("code") != 0:
-            raise Exception(f"移动收藏夹内容失败: {result.get('message')}")
-        return result.get("data") or {}
+        return await move_bilibili_favorite_resources(
+            client=self.client,
+            base_url=self.BASE_URL,
+            cookies=self._get_cookies(),
+            bili_jct=self.bili_jct,
+            dedeuserid=self.dedeuserid,
+            src_media_id=src_media_id,
+            tar_media_id=tar_media_id,
+            resources=resources,
+        )
 
     async def clean_favorite_resources(self, media_id: int) -> Dict[str, Any]:
         """
         清理收藏夹失效内容
         """
-        if not self.bili_jct:
-            raise Exception("缺少 bili_jct，无法清理失效内容")
-
-        url = f"{self.BASE_URL}/x/v3/fav/resource/clean"
-        data = {"media_id": media_id, "csrf": self.bili_jct}
-        response = await self.client.post(url, data=data, cookies=self._get_cookies())
-        result = response.json()
-        if result.get("code") != 0:
-            raise Exception(f"清理失效内容失败: {result.get('message')}")
-        return result.get("data") or {}
+        return await clean_bilibili_favorite_resources(
+            client=self.client,
+            base_url=self.BASE_URL,
+            cookies=self._get_cookies(),
+            bili_jct=self.bili_jct,
+            media_id=media_id,
+        )
 
     # ==================== 视频信息相关 ====================
 
