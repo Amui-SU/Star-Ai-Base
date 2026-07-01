@@ -105,3 +105,38 @@ def test_frontend_api_is_a_barrel_for_remaining_domain_modules():
     assert "export interface " not in api_source
     assert "export type WebSearchProvider =" not in api_source
     assert "import { getApiBaseUrl, request }" not in api_source
+
+
+def test_frontend_api_tests_are_split_by_domain():
+    project_root = get_project_root()
+    api_test = project_root / "frontend" / "lib" / "api.test.ts"
+    focused_dir = project_root / "frontend" / "lib" / "api" / "__tests__"
+    api_source = api_test.read_text(encoding="utf-8")
+
+    focused_files = {
+        "apiRuntime.test.ts": [
+            "uses the saved native mobile API URL from local connection settings",
+            "adds the saved native session token to API requests",
+            "uses the saved API URL in Capacitor's localhost Android shell",
+            "falls back to CapacitorHttp for native API requests when fetch fails",
+        ],
+        "systemAdminApi.test.ts": [
+            "wraps admin user management requests",
+        ],
+        "userApiAccounts.test.ts": [
+            "wraps user API account requests",
+        ],
+        "importUploads.test.ts": [
+            "uploads local videos with FormData and no JSON content type",
+        ],
+    }
+
+    for file_name, test_names in focused_files.items():
+        focused_path = focused_dir / file_name
+        assert focused_path.exists()
+        focused_source = focused_path.read_text(encoding="utf-8")
+        for test_name in test_names:
+            assert test_name not in api_source
+            assert test_name in focused_source
+
+    assert len(api_source.splitlines()) <= 80
