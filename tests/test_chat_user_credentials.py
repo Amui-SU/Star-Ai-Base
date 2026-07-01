@@ -81,7 +81,10 @@ def _patch_fake_llm(monkeypatch, captured_config: dict):
         captured_config.update(config)
         return _FakeClient()
 
-    monkeypatch.setattr("app.routers.chat._get_llm_client", fake_get_llm_client)
+    monkeypatch.setattr(
+        "app.routers.knowledge_bases._get_llm_client",
+        fake_get_llm_client,
+    )
 
 
 def _configure_official_deepseek(monkeypatch):

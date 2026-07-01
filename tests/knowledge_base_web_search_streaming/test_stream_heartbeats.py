@@ -21,7 +21,7 @@ async def test_scoped_chat_stream_emits_web_search_heartbeat_while_preparing(
             return []
 
     async def slow_prepare_knowledge_base_web_search(messages, *, question):
-        from app.routers.chat import LLMToolRunResult
+        from app.services.llm_tool_calls import LLMToolRunResult
 
         await asyncio.sleep(0.05)
         return (

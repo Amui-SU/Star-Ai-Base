@@ -65,13 +65,16 @@ from app.services.chat_messages import (
     apply_mode_instructions as _apply_mode_instructions,
     enforce_markdown_output as _enforce_markdown_output,
 )
-from app.routers.chat import (
-    _append_no_more_tool_calls_instruction,
-    _complete_llm_answer,
-    _encode_thinking_delta,
-    _prepare_llm_messages_with_tools,
-    _resolve_llm_config,
-    _stream_llm_events,
+from app.services.chat_completion import (
+    complete_llm_answer,
+    encode_thinking_delta,
+    prepare_llm_messages_with_tools,
+    stream_llm_events,
+)
+from app.services.chat_provider_catalog import _resolve_llm_config
+from app.services.llm_client import get_llm_client as _get_llm_client
+from app.services.llm_tool_calls import (
+    append_no_more_tool_calls_instruction as _append_no_more_tool_calls_instruction,
 )
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
@@ -121,6 +124,52 @@ from app.services.web_search import fetch_web_page, search_web
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
 
 WEB_SEARCH_PROGRESS_MARKER = "[[WEB_SEARCH_PROGRESS]]"
+
+
+def _encode_thinking_delta(content: str) -> str:
+    return encode_thinking_delta(content)
+
+
+def _stream_llm_events(messages: list[dict], llm_config: dict | None = None):
+    return stream_llm_events(
+        messages,
+        llm_config,
+        resolve_llm_config=_resolve_llm_config,
+        get_llm_client=_get_llm_client,
+    )
+
+
+def _complete_llm_answer(
+    messages: list[dict],
+    llm_config: dict | None = None,
+) -> tuple[str, str]:
+    return complete_llm_answer(
+        messages,
+        llm_config,
+        resolve_llm_config=_resolve_llm_config,
+        get_llm_client=_get_llm_client,
+    )
+
+
+async def _prepare_llm_messages_with_tools(
+    messages: list[dict],
+    *,
+    tools: list[dict],
+    tool_handlers: dict,
+    max_tool_calls: int = 2,
+    after_tool_messages=None,
+    llm_config: dict | None = None,
+):
+    return await prepare_llm_messages_with_tools(
+        messages,
+        tools=tools,
+        tool_handlers=tool_handlers,
+        max_tool_calls=max_tool_calls,
+        after_tool_messages=after_tool_messages,
+        llm_config=llm_config,
+        resolve_llm_config=_resolve_llm_config,
+        get_llm_client=_get_llm_client,
+    )
 
 
 def _encode_web_search_progress(content: str) -> str:

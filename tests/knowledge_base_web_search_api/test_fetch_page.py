@@ -175,16 +175,8 @@ async def test_scoped_chat_tool_chain_can_fetch_selected_web_page(client, monkey
         lambda: FakeRAGService(),
     )
     monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
+        "app.routers.knowledge_bases._get_llm_client", lambda config: fake_client
     )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
     monkeypatch.setattr(
         "app.routers.knowledge_bases._resolve_llm_config",
         lambda: {"thinking_config": {}},
@@ -315,16 +307,8 @@ async def test_scoped_chat_direct_fetch_tool_reports_page_source(client, monkeyp
         lambda: FakeRAGService(),
     )
     monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
+        "app.routers.knowledge_bases._get_llm_client", lambda config: fake_client
     )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
     monkeypatch.setattr(
         "app.routers.knowledge_bases._resolve_llm_config",
         lambda: {"thinking_config": {}},

@@ -81,16 +81,8 @@ async def test_scoped_chat_stream_reports_web_search_no_results(client, monkeypa
         lambda: FakeRAGService(),
     )
     monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
+        "app.routers.knowledge_bases._get_llm_client", lambda config: fake_client
     )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
     monkeypatch.setattr(
         "app.routers.knowledge_bases._resolve_llm_config",
         lambda: {"thinking_config": {}},
@@ -184,7 +176,7 @@ async def test_scoped_chat_stream_emits_web_search_progress_before_tool_setup(
             return []
 
     async def fake_prepare_knowledge_base_web_search(messages, *, question):
-        from app.routers.chat import LLMToolRunResult
+        from app.services.llm_tool_calls import LLMToolRunResult
 
         return (
             LLMToolRunResult(

@@ -119,6 +119,20 @@ def test_knowledge_base_router_delegates_web_search_orchestration_to_service():
     assert declared_names.isdisjoint(router_private_names)
 
 
+def test_knowledge_base_router_uses_services_for_shared_llm_runtime():
+    project_root = get_project_root()
+    router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from app.routers.chat import" not in router_source
+    assert "from app.services.chat_completion import" in router_source
+    assert "from app.services.chat_provider_catalog import" in router_source
+    assert "from app.services.llm_client import" in router_source
+    assert "from app.services.llm_tool_calls import" in router_source
+    assert "_get_llm_client" in router_source
+
+
 def test_knowledge_base_router_delegates_presenter_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_base_presenters.py"

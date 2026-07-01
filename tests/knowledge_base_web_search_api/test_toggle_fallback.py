@@ -110,16 +110,8 @@ async def test_scoped_chat_forces_web_search_when_enabled_without_model_tool_cal
         lambda: FakeRAGService(),
     )
     monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
+        "app.routers.knowledge_bases._get_llm_client", lambda config: fake_client
     )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
     monkeypatch.setattr(
         "app.routers.knowledge_bases._resolve_llm_config",
         lambda: {"thinking_config": {}},

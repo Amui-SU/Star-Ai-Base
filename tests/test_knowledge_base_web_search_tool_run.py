@@ -20,7 +20,7 @@ async def test_initial_web_context_is_not_duplicated_after_tool_run(monkeypatch)
 
     async def fake_prepare_llm_messages_with_tools(messages, **kwargs):
         captured["messages"] = messages
-        from app.routers.chat import LLMToolRunResult
+        from app.services.llm_tool_calls import LLMToolRunResult
 
         return LLMToolRunResult(messages=messages, answer="answer", thinking="")
 
@@ -57,7 +57,7 @@ async def test_initial_web_search_no_results_is_visible_to_model(monkeypatch):
 
     async def fake_prepare_llm_messages_with_tools(messages, **kwargs):
         captured["messages"] = messages
-        from app.routers.chat import LLMToolRunResult
+        from app.services.llm_tool_calls import LLMToolRunResult
 
         return LLMToolRunResult(messages=messages, answer="answer", thinking="")
 
@@ -93,7 +93,7 @@ async def test_web_search_tool_run_uses_request_provider(monkeypatch):
 
     async def fake_prepare_llm_messages_with_tools(messages, **kwargs):
         await kwargs["tool_handlers"]["web_search"]({"query": "tool query"})
-        from app.routers.chat import LLMToolRunResult
+        from app.services.llm_tool_calls import LLMToolRunResult
 
         return LLMToolRunResult(messages=messages, answer="answer", thinking="")
 
@@ -131,7 +131,7 @@ async def test_web_search_tool_run_uses_tavily_api_key(monkeypatch):
 
     async def fake_prepare_llm_messages_with_tools(messages, **kwargs):
         await kwargs["tool_handlers"]["web_search"]({"query": "tool query"})
-        from app.routers.chat import LLMToolRunResult
+        from app.services.llm_tool_calls import LLMToolRunResult
 
         return LLMToolRunResult(messages=messages, answer="answer", thinking="")
 
@@ -172,7 +172,7 @@ async def test_initial_web_search_diagnostics_are_reported_when_search_fails(
         return []
 
     async def fake_prepare_llm_messages_with_tools(messages, **kwargs):
-        from app.routers.chat import LLMToolRunResult
+        from app.services.llm_tool_calls import LLMToolRunResult
 
         return LLMToolRunResult(messages=messages, answer="answer", thinking="")
 
@@ -224,7 +224,7 @@ async def test_only_new_tool_results_are_appended_after_initial_web_context(
 
     async def fake_prepare_llm_messages_with_tools(messages, **kwargs):
         await kwargs["tool_handlers"]["web_search"]({"query": "extra query"})
-        from app.routers.chat import LLMToolRunResult
+        from app.services.llm_tool_calls import LLMToolRunResult
 
         return LLMToolRunResult(messages=messages, answer="answer", thinking="")
 
@@ -328,16 +328,8 @@ async def test_tool_web_results_remove_initial_no_results_instruction(monkeypatc
         ]
 
     monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
+        "app.routers.knowledge_bases._get_llm_client", lambda config: fake_client
     )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
     monkeypatch.setattr("app.routers.knowledge_bases.search_web", fake_search_web)
 
     tool_run, web_results, _state = await _prepare_web_search_tool_run(
