@@ -557,6 +557,30 @@ def test_bilibili_service_delegates_cookie_and_response_helpers():
     assert "def _parse_json_response" not in bilibili_source
 
 
+def test_bilibili_service_delegates_media_helpers_to_service():
+    project_root = get_project_root()
+    service_path = project_root / "app/services/bilibili_media.py"
+    bilibili_source = (project_root / "app/services/bilibili.py").read_text(
+        encoding="utf-8"
+    )
+
+    expected_service_names = {
+        "normalize_bilibili_media_url",
+        "select_audio_url_from_playurl_payload",
+        "subtitle_text_from_payload",
+        "download_bilibili_audio_to_file",
+    }
+
+    assert service_path.exists()
+    service_source = service_path.read_text(encoding="utf-8")
+    for name in expected_service_names:
+        assert f"def {name}" in service_source or f"async def {name}" in service_source
+    assert "from app.services.bilibili_media import" in bilibili_source
+    assert "def _bw(" not in bilibili_source
+    assert 'subtitle_url.startswith("//")' not in bilibili_source
+    assert 'for item in data.get("body", [])' not in bilibili_source
+
+
 def test_scoped_folder_sync_tests_do_not_import_legacy_router():
     project_root = get_project_root()
 

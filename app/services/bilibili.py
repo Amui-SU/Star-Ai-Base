@@ -16,6 +16,12 @@ from app.services.bilibili_cookies import (
     normalize_bilibili_cookies,
     service_kwargs_from_cookies,
 )
+from app.services.bilibili_media import (
+    download_bilibili_audio_to_file,
+    normalize_bilibili_media_url,
+    select_audio_url_from_playurl_payload,
+    subtitle_text_from_payload,
+)
 from app.services.bilibili_responses import parse_bilibili_json_response
 from app.services.wbi import wbi_signer
 
@@ -550,35 +556,7 @@ class BilibiliService:
             return None
 
         payload = data.get("data") or {}
-        dash = payload.get("dash") or {}
-        audio_list = dash.get("audio") or []
-        if audio_list:
-
-            def _bw(item) -> int:
-                value = item.get("bandwidth") or item.get("bandWidth") or 0
-                try:
-                    return int(value)
-                except Exception:
-                    return 0
-
-            # 优先选择 <= 96kbps 的最高档，兼顾速度与识别效果；否则选最低带宽兜底
-            max_bw = 64_000
-            candidates = [a for a in audio_list if _bw(a) > 0]
-            if candidates:
-                preferred = [a for a in candidates if _bw(a) <= max_bw]
-                if preferred:
-                    best = max(preferred, key=_bw)
-                else:
-                    best = min(candidates, key=_bw)
-            else:
-                best = audio_list[0]
-            return best.get("baseUrl") or best.get("base_url") or best.get("url")
-
-        durl = payload.get("durl") or []
-        if durl:
-            return durl[0].get("url")
-
-        return None
+        return select_audio_url_from_playurl_payload(payload)
 
     async def download_subtitle(self, subtitle_url: str) -> str:
         """
@@ -590,21 +568,9 @@ class BilibiliService:
         Returns:
             字幕文本
         """
-        # 处理协议
-        if subtitle_url.startswith("//"):
-            subtitle_url = "https:" + subtitle_url
-
-        response = await self.client.get(subtitle_url)
+        response = await self.client.get(normalize_bilibili_media_url(subtitle_url))
         data = response.json()
-
-        # 拼接字幕文本
-        texts = []
-        for item in data.get("body", []):
-            content = item.get("content", "")
-            if content:
-                texts.append(content)
-
-        return "\n".join(texts)
+        return subtitle_text_from_payload(data)
 
     async def download_audio_to_file(self, audio_url: str, file_path: str) -> bool:
         """
@@ -617,30 +583,13 @@ class BilibiliService:
         Returns:
             是否下载成功
         """
-        if not audio_url:
-            return False
-
-        headers = dict(self.HEADERS)
-        cookies = self._get_cookies()
-
-        try:
-            async with self.client.stream(
-                "GET", audio_url, headers=headers, cookies=cookies
-            ) as resp:
-                if resp.status_code not in (200, 206):
-                    logger.warning(
-                        f"下载音频失败: status_code={resp.status_code} url={audio_url}"
-                    )
-                    return False
-                with open(file_path, "wb") as f:
-                    async for chunk in resp.aiter_bytes():
-                        if not chunk:
-                            continue
-                        f.write(chunk)
-            return True
-        except Exception as e:
-            logger.warning(f"下载音频异常: {e}")
-            return False
+        return await download_bilibili_audio_to_file(
+            self.client,
+            audio_url,
+            file_path,
+            headers=self.HEADERS,
+            cookies=self._get_cookies(),
+        )
 
 
 def _default_bilibili_service_from_cookies(
