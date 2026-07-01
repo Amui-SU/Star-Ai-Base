@@ -27,6 +27,7 @@ def test_database_legacy_migration_entrypoint_delegates_without_nested_helpers()
 def test_database_delegates_sqlite_legacy_schema_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/sqlite_legacy_schema.py"
+    inspection_path = project_root / "app/services/sqlite_schema_inspection.py"
     database_source = (project_root / "app/database.py").read_text(encoding="utf-8")
 
     expected_service_names = {
@@ -55,3 +56,18 @@ def test_database_delegates_sqlite_legacy_schema_to_service():
     assert "CREATE UNIQUE INDEX IF NOT EXISTS" not in database_source
     assert 'CREATE TABLE "video_cache_new"' not in database_source
     assert "SQLITE_LEGACY_COLUMNS: dict" not in database_source
+
+    assert inspection_path.exists()
+    inspection_source = inspection_path.read_text(encoding="utf-8")
+    for name in {
+        "quote_sqlite_identifier",
+        "sqlite_table_columns",
+        "sqlite_has_unique_bvid_index",
+        "sqlite_select_expr",
+    }:
+        assert f"def {name}" in inspection_source
+    assert "from app.services.sqlite_schema_inspection import" in service_source
+    assert "def quote_sqlite_identifier" not in service_source
+    assert "def sqlite_table_columns" not in service_source
+    assert "def sqlite_has_unique_bvid_index" not in service_source
+    assert "def sqlite_select_expr" not in service_source
