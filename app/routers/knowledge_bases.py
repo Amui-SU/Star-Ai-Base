@@ -1,4 +1,3 @@
-import json
 import sys
 from datetime import datetime, timezone
 
@@ -77,6 +76,12 @@ from app.services.chat_completion import (
     stream_llm_events,
 )
 from app.services.chat_provider_catalog import _resolve_llm_config
+from app.services.knowledge_base_llm_runtime import (
+    build_complete_llm_answer_adapter,
+    build_prepare_llm_messages_with_tools_adapter,
+    build_stream_llm_events_adapter,
+    encode_web_search_progress as _encode_web_search_progress,
+)
 from app.services.llm_client import get_llm_client as _get_llm_client
 from app.services.llm_tool_calls import (
     append_no_more_tool_calls_instruction as _append_no_more_tool_calls_instruction,
@@ -123,57 +128,28 @@ from app.services.web_search import fetch_web_page, search_web
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
 
-WEB_SEARCH_PROGRESS_MARKER = "[[WEB_SEARCH_PROGRESS]]"
-
 
 def _encode_thinking_delta(content: str) -> str:
     return encode_thinking_delta(content)
 
 
-def _stream_llm_events(messages: list[dict], llm_config: dict | None = None):
-    return stream_llm_events(
-        messages,
-        llm_config,
-        resolve_llm_config=_resolve_llm_config,
-        get_llm_client=_get_llm_client,
-    )
+_stream_llm_events = build_stream_llm_events_adapter(
+    stream_llm_events=stream_llm_events,
+    resolve_llm_config=lambda: _resolve_llm_config(),
+    get_llm_client=lambda config: _get_llm_client(config),
+)
 
+_complete_llm_answer = build_complete_llm_answer_adapter(
+    complete_llm_answer=complete_llm_answer,
+    resolve_llm_config=lambda: _resolve_llm_config(),
+    get_llm_client=lambda config: _get_llm_client(config),
+)
 
-def _complete_llm_answer(
-    messages: list[dict],
-    llm_config: dict | None = None,
-) -> tuple[str, str]:
-    return complete_llm_answer(
-        messages,
-        llm_config,
-        resolve_llm_config=_resolve_llm_config,
-        get_llm_client=_get_llm_client,
-    )
-
-
-async def _prepare_llm_messages_with_tools(
-    messages: list[dict],
-    *,
-    tools: list[dict],
-    tool_handlers: dict,
-    max_tool_calls: int = 2,
-    after_tool_messages=None,
-    llm_config: dict | None = None,
-):
-    return await prepare_llm_messages_with_tools(
-        messages,
-        tools=tools,
-        tool_handlers=tool_handlers,
-        max_tool_calls=max_tool_calls,
-        after_tool_messages=after_tool_messages,
-        llm_config=llm_config,
-        resolve_llm_config=_resolve_llm_config,
-        get_llm_client=_get_llm_client,
-    )
-
-
-def _encode_web_search_progress(content: str) -> str:
-    return f"{WEB_SEARCH_PROGRESS_MARKER}{json.dumps(content, ensure_ascii=False)}\n"
+_prepare_llm_messages_with_tools = build_prepare_llm_messages_with_tools_adapter(
+    prepare_llm_messages_with_tools=prepare_llm_messages_with_tools,
+    resolve_llm_config=lambda: _resolve_llm_config(),
+    get_llm_client=lambda config: _get_llm_client(config),
+)
 
 
 class _NoopRAGService:
