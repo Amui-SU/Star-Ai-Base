@@ -70,6 +70,35 @@ def test_source_binding_service_tests_are_split_by_domain():
         assert len(read_source(mixed_test).splitlines()) <= 80
 
 
+def test_folder_ingestion_tests_are_split_by_domain():
+    project_tests = project_tests_dir()
+    mixed_test = project_tests / "test_folder_ingestion.py"
+
+    assert_focused_files_contain_tests(
+        mixed_source=read_optional_source(mixed_test),
+        focused_dir=project_tests / "folder_ingestion",
+        focused_files={
+            "test_helpers_and_records.py": [
+                "test_sync_folder_progress_callback_annotation_matches_runtime_calls",
+                "test_delete_video_vectors_for_scope_uses_matching_rag_delete_method",
+                "test_folder_ingestion_content_helpers_select_cache_and_source_policy",
+                "test_folder_ingestion_record_helpers_respect_scope",
+            ],
+            "test_empty_and_partial_sync.py": [
+                "test_sync_folder_skips_deletion_when_nonempty_folder_returns_empty_list",
+                "test_partial_folder_sync_keeps_existing_unselected_videos",
+            ],
+            "test_scoped_vector_rebuild.py": [
+                "test_scoped_sync_rebuilds_missing_vectors_from_existing_cache",
+                "test_scoped_sync_skips_reindex_when_old_vector_delete_fails",
+            ],
+        },
+    )
+
+    if mixed_test.exists():
+        assert len(read_source(mixed_test).splitlines()) <= 80
+
+
 def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
     boundary_dir = service_boundary_dir()
     mixed_test = boundary_dir / "test_auth_database_ingestion.py"
