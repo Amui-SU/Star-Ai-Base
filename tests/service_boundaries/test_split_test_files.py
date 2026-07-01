@@ -279,6 +279,47 @@ def test_web_search_tavily_tests_are_split_by_domain():
         assert len(mixed_source.splitlines()) <= 80
 
 
+def test_source_binding_service_tests_are_split_by_domain():
+    project_root = get_project_root()
+    tests_dir = project_root / "tests"
+    mixed_test = tests_dir / "test_source_binding_services.py"
+    mixed_source = mixed_test.read_text(encoding="utf-8") if mixed_test.exists() else ""
+    focused_dir = tests_dir / "source_binding_services"
+
+    focused_files = {
+        "test_binding_catalog.py": [
+            "test_list_source_bindings_returns_current_workspace_bindings_desc",
+            "test_revoke_source_binding_marks_owned_workspace_binding_revoked",
+            "test_revoke_source_binding_rejects_missing_or_foreign_binding",
+            "test_ensure_active_source_binding_returns_owned_active_binding",
+            "test_ensure_active_source_binding_rejects_revoked_binding",
+        ],
+        "test_binding_credentials.py": [
+            "test_get_bilibili_service_for_binding_builds_service_from_credentials",
+            "test_get_bilibili_service_for_binding_rejects_missing_binding",
+            "test_get_bilibili_service_for_binding_rejects_missing_credentials",
+            "test_get_bilibili_service_for_binding_wraps_decrypt_errors",
+        ],
+        "test_bilibili_qrcode.py": [
+            "test_generate_bilibili_binding_qrcode_records_pending_state",
+            "test_generate_bilibili_binding_qrcode_closes_service_on_failure",
+            "test_poll_bilibili_binding_qrcode_confirms_and_clears_pending",
+            "test_poll_bilibili_binding_qrcode_uses_persisted_pending_state",
+        ],
+    }
+
+    for file_name, test_names in focused_files.items():
+        focused_path = focused_dir / file_name
+        assert focused_path.exists()
+        focused_source = focused_path.read_text(encoding="utf-8")
+        for test_name in test_names:
+            assert test_name not in mixed_source
+            assert test_name in focused_source
+
+    if mixed_test.exists():
+        assert len(mixed_source.splitlines()) <= 80
+
+
 def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
     project_root = get_project_root()
     service_boundary_dir = project_root / "tests" / "service_boundaries"
