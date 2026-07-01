@@ -156,3 +156,40 @@ def test_knowledge_base_router_boundary_tests_are_split_by_domain():
 
     if mixed_test.exists():
         assert len(read_source(mixed_test).splitlines()) <= 80
+
+
+def test_chat_router_boundary_tests_are_split_by_domain():
+    boundary_dir = service_boundary_dir()
+    mixed_test = boundary_dir / "test_chat_router.py"
+
+    assert_focused_files_contain_tests(
+        mixed_source=read_optional_source(mixed_test),
+        focused_dir=boundary_dir,
+        focused_files={
+            "test_chat_router_config_boundaries.py": [
+                "test_chat_router_does_not_keep_mutable_current_llm_provider",
+                "test_chat_router_delegates_configuration_boundaries_to_service",
+                "test_chat_router_delegates_global_config_writes_to_service",
+                "test_chat_config_delegates_env_persistence_to_helper",
+                "test_chat_config_delegates_web_search_config_to_helper",
+                "test_chat_config_delegates_provider_catalog_to_helper",
+                "test_chat_config_delegates_provider_config_writes_to_helper",
+                "test_chat_router_uses_admin_service_instead_of_system_auth_router",
+            ],
+            "test_chat_router_llm_message_boundaries.py": [
+                "test_chat_router_delegates_llm_tool_helpers_to_service",
+                "test_chat_router_delegates_message_helpers_to_service",
+                "test_chat_router_delegates_question_routing_helpers_to_service",
+                "test_chat_router_delegates_completion_helpers_to_service",
+                "test_chat_router_delegates_llm_client_factory_to_service",
+            ],
+            "test_chat_router_context_runtime_boundaries.py": [
+                "test_chat_router_delegates_video_context_helpers_to_service",
+                "test_chat_router_delegates_message_preparation_to_service",
+                "test_chat_router_delegates_legacy_ask_runtime_to_service",
+            ],
+        },
+    )
+
+    if mixed_test.exists():
+        assert len(read_source(mixed_test).splitlines()) <= 80
