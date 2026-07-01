@@ -238,3 +238,52 @@ def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
 
     if mixed_test.exists():
         assert len(mixed_source.splitlines()) <= 80
+
+
+def test_knowledge_base_router_boundary_tests_are_split_by_domain():
+    project_root = get_project_root()
+    service_boundary_dir = project_root / "tests" / "service_boundaries"
+    mixed_test = service_boundary_dir / "test_knowledge_base_router.py"
+    mixed_source = mixed_test.read_text(encoding="utf-8") if mixed_test.exists() else ""
+
+    focused_files = {
+        "test_knowledge_base_router_web_search_boundaries.py": [
+            "test_knowledge_base_router_delegates_web_search_helpers_to_service",
+            "test_knowledge_base_router_delegates_web_search_orchestration_to_service",
+            "test_knowledge_base_router_uses_services_for_shared_llm_runtime",
+            "test_knowledge_base_router_delegates_answer_completion_adapter_to_service",
+        ],
+        "test_knowledge_base_router_catalog_build_boundaries.py": [
+            "test_knowledge_base_router_delegates_presenter_helpers_to_service",
+            "test_knowledge_base_router_delegates_catalog_commands_to_service",
+            "test_knowledge_base_router_delegates_message_helpers_to_service",
+            "test_knowledge_base_router_delegates_scoped_document_loading_to_service",
+            "test_knowledge_base_router_delegates_build_task_helpers_to_service",
+            "test_knowledge_base_router_delegates_build_request_preparation_to_service",
+            "test_knowledge_base_router_delegates_stats_helpers_to_service",
+        ],
+        "test_knowledge_base_router_chat_search_boundaries.py": [
+            "test_knowledge_base_router_delegates_search_helpers_to_service",
+            "test_knowledge_base_router_delegates_non_streaming_chat_to_service",
+            "test_knowledge_base_router_delegates_streaming_chat_to_service",
+        ],
+        "test_knowledge_base_delete_boundaries.py": [
+            "test_knowledge_base_router_delegates_record_deletion_to_service",
+        ],
+        "test_rag_ingestion_boundaries.py": [
+            "test_folder_ingestion_delegates_records_and_content_helpers_to_services",
+            "test_rag_service_delegates_document_and_filter_helpers_to_services",
+            "test_favorite_router_uses_shared_default_folder_detection",
+        ],
+    }
+
+    for file_name, test_names in focused_files.items():
+        focused_path = service_boundary_dir / file_name
+        assert focused_path.exists()
+        focused_source = focused_path.read_text(encoding="utf-8")
+        for test_name in test_names:
+            assert test_name not in mixed_source
+            assert test_name in focused_source
+
+    if mixed_test.exists():
+        assert len(mixed_source.splitlines()) <= 80
