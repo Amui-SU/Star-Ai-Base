@@ -71,6 +71,7 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     filters_path = project_root / "app/services/rag_filters.py"
     collection_ops_path = project_root / "app/services/rag_collection_ops.py"
     runtime_path = project_root / "app/services/rag_runtime_components.py"
+    indexing_path = project_root / "app/services/rag_indexing.py"
     qa_path = project_root / "app/services/rag_qa.py"
     summary_path = project_root / "app/services/rag_summary.py"
     rag_source = (project_root / "app/services/rag.py").read_text(encoding="utf-8")
@@ -91,7 +92,6 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     }:
         assert f"def {name}" in filters_source
 
-    assert "from app.services.rag_documents import" in rag_source
     assert "from app.services.rag_filters import" in rag_source
     assert runtime_path.exists()
     runtime_source = runtime_path.read_text(encoding="utf-8")
@@ -106,6 +106,15 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     }:
         assert f"def {name}" in runtime_source
     assert "from app.services.rag_runtime_components import" in rag_source
+    assert indexing_path.exists()
+    indexing_source = indexing_path.read_text(encoding="utf-8")
+    for name in {
+        "index_video_content",
+        "index_videos_batch",
+    }:
+        assert f"def {name}" in indexing_source
+    assert "from app.services.rag_documents import" in indexing_source
+    assert "from app.services.rag_indexing import" in rag_source
     assert collection_ops_path.exists()
     collection_ops_source = collection_ops_path.read_text(encoding="utf-8")
     for name in {
@@ -142,6 +151,10 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     assert "max_length = 10000" not in rag_source
     assert "| self.summary_prompt" not in rag_source
     assert "Document(" not in rag_source
+    assert "build_video_content_text(" not in rag_source
+    assert "build_video_documents(" not in rag_source
+    assert ".add_documents(" not in rag_source
+    assert "batch_size = 10" not in rag_source
     assert "context_parts = []" not in rag_source
     assert "seen_bvids = set()" not in rag_source
     assert '"知识库目前还没有内容"' not in rag_source

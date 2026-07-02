@@ -17,10 +17,10 @@ from app.services.rag_collection_ops import (
     delete_video_vectors_in_knowledge_base,
     has_video_vectors_in_knowledge_base as has_scoped_video_vectors,
 )
-from app.services.rag_documents import build_video_content_text, build_video_documents
 from app.services.rag_filters import (
     knowledge_base_filter,
 )
+from app.services.rag_indexing import index_video_content, index_videos_batch
 from app.services.rag_runtime_components import (
     build_embeddings,
     build_fallback_prompt,
@@ -81,38 +81,17 @@ class RAGService:
         Returns:
             添加的文档块数量
         """
-        full_content = build_video_content_text(video)
-
-        # 验证内容不为空
-        if not full_content or len(full_content.strip()) < 10:
-            logger.warning(f"[{video.bvid}] 内容太少，跳过")
-            return 0
-
-        if workspace_id is None or knowledge_base_id is None:
-            logger.warning(f"[{video.bvid}] 缺少多用户范围元数据，按旧模式写入")
-
-        documents = build_video_documents(
+        return index_video_content(
             video,
             text_splitter=self.text_splitter,
+            vectorstore=self.vectorstore,
             workspace_id=workspace_id,
             knowledge_base_id=knowledge_base_id,
             source_binding_id=source_binding_id,
+            warning_logger=logger.warning,
+            info_logger=logger.info,
+            error_logger=logger.error,
         )
-        if not documents:
-            logger.warning(f"[{video.bvid}] 没有有效的文档块")
-            return 0
-
-        # 添加到向量库
-        try:
-            batch_size = 10
-            for idx in range(0, len(documents), batch_size):
-                self.vectorstore.add_documents(documents[idx : idx + batch_size])
-            logger.info(f"[{video.bvid}] 添加了 {len(documents)} 个文档块")
-        except Exception as e:
-            logger.error(f"[{video.bvid}] 添加到向量库失败: {e}")
-            raise
-
-        return len(documents)
 
     def add_videos_batch(
         self, videos: List[VideoContent], progress_callback=None
@@ -127,24 +106,12 @@ class RAGService:
         Returns:
             {"success": 成功数, "failed": 失败数, "chunks": 总块数}
         """
-        success = 0
-        failed = 0
-        total_chunks = 0
-
-        for i, video in enumerate(videos):
-            try:
-                chunks = self.add_video_content(video)
-                total_chunks += chunks
-                success += 1
-
-                if progress_callback:
-                    progress_callback(i + 1, len(videos), video.title)
-
-            except Exception as e:
-                logger.error(f"添加视频失败 [{video.bvid}]: {e}")
-                failed += 1
-
-        return {"success": success, "failed": failed, "chunks": total_chunks}
+        return index_videos_batch(
+            videos,
+            add_video_content=self.add_video_content,
+            progress_callback=progress_callback,
+            error_logger=logger.error,
+        )
 
     def search(
         self, query: str, k: int = 5, bvids: Optional[List[str]] = None
