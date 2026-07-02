@@ -64,6 +64,7 @@ def test_knowledge_base_router_delegates_web_search_helpers_to_service():
 def test_knowledge_base_router_delegates_web_search_orchestration_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_web_search_orchestration.py"
+    tools_path = project_root / "app/services/knowledge_web_search_tools.py"
     compat_service_path = (
         project_root / "app/services/knowledge_base_web_search_compat.py"
     )
@@ -99,8 +100,25 @@ def test_knowledge_base_router_delegates_web_search_orchestration_to_service():
 
     assert service_path.exists()
     service_source = service_path.read_text(encoding="utf-8")
-    for name in expected_service_names:
+    for name in expected_service_names - {
+        "MAX_FETCH_WEB_PAGE_CALLS",
+        "FETCH_WEB_PAGE_CONTEXT_CHARS",
+        "execute_web_search_tool",
+        "execute_fetch_web_page_tool",
+    }:
         assert f"def {name}" in service_source or f"{name} =" in service_source
+    assert tools_path.exists()
+    tools_source = tools_path.read_text(encoding="utf-8")
+    for name in {
+        "MAX_FETCH_WEB_PAGE_CALLS",
+        "FETCH_WEB_PAGE_CONTEXT_CHARS",
+        "execute_web_search_tool",
+        "execute_fetch_web_page_tool",
+    }:
+        assert f"def {name}" in tools_source or f"{name} =" in tools_source
+    assert "from app.services.knowledge_web_search_tools import" in service_source
+    assert "supports_keyword_argument(search_web" not in service_source
+    assert "await fetch_web_page(url" not in service_source
     assert compat_service_path.exists()
     compat_service_source = compat_service_path.read_text(encoding="utf-8")
     for name in {
