@@ -398,30 +398,3 @@ async def ask_question_stream(
 async def search_videos(query: Optional[str] = None, k: int = 5):
     """搜索相关视频片段"""
     _raise_legacy_scoped_api_required()
-    if not query or not query.strip():
-        raise HTTPException(status_code=400, detail="查询不能为空")
-    try:
-        rag = get_rag_service()
-        docs = rag.search(query, k=k)
-        results, seen_bvids = [], set()
-        for doc in docs:
-            bvid = doc.metadata.get("bvid", "")
-            if bvid in seen_bvids:
-                continue
-            seen_bvids.add(bvid)
-            results.append(
-                {
-                    "bvid": bvid,
-                    "title": doc.metadata.get("title", ""),
-                    "url": doc.metadata.get("url", ""),
-                    "content_preview": (
-                        doc.page_content[:200] + "..."
-                        if len(doc.page_content) > 200
-                        else doc.page_content
-                    ),
-                }
-            )
-        return {"results": results}
-    except Exception as e:
-        logger.error(f"搜索失败: {e}")
-        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")

@@ -1,4 +1,5 @@
 from tests.service_boundaries.helpers import declared_callable_names
+from tests.service_boundaries.helpers import function_source
 from tests.service_boundaries.helpers import get_project_root
 
 
@@ -97,3 +98,16 @@ def test_chat_router_delegates_legacy_ask_runtime_to_service():
     assert "_stream_llm_events(" not in stream_route_source
     assert "_encode_thinking_delta(" not in stream_route_source
     assert "json.dumps(" not in stream_route_source
+
+
+def test_chat_router_legacy_search_keeps_only_disabled_entrypoint():
+    project_root = get_project_root()
+    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
+    search_route_source = function_source(chat_source, "search_videos")
+
+    assert "_raise_legacy_scoped_api_required()" in search_route_source
+    assert "if not query" not in search_route_source
+    assert "get_rag_service(" not in search_route_source
+    assert "rag.search(" not in search_route_source
+    assert "seen_bvids" not in search_route_source
+    assert "content_preview" not in search_route_source

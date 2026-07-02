@@ -228,6 +228,7 @@ def test_chat_router_boundary_tests_are_split_by_domain():
                 "test_chat_router_delegates_video_context_helpers_to_service",
                 "test_chat_router_delegates_message_preparation_to_service",
                 "test_chat_router_delegates_legacy_ask_runtime_to_service",
+                "test_chat_router_legacy_search_keeps_only_disabled_entrypoint",
             ],
         },
     )
