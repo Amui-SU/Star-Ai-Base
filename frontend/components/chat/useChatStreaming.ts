@@ -1,29 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  knowledgeBaseApi,
-  type KnowledgeBaseChatRequest,
-  type WebSearchProvider,
-} from "@/lib/api";
+import type { KnowledgeBaseChatRequest, WebSearchProvider } from "@/lib/api";
 import type { ChatScopeSelection } from "@/lib/chatScope";
 import { toScopePayload } from "@/lib/chatScope";
-import { parseChatStream } from "@/lib/chatStream";
 import { copyText } from "@/lib/clipboard";
-import { getLocalAuthHeaders } from "@/lib/localConnection";
 import type { Message, Reaction } from "@/components/chat/types";
+import { streamKnowledgeBaseAnswer } from "@/components/chat/chatStreamingRuntime";
 import {
   applyAssistantError,
   applyParsedStreamUpdate,
-  extractThinkingFromContent,
   finalizeFallbackAssistantAnswer,
   finalizeStreamedAssistantAnswer,
   resetAssistantForRegeneration,
   startAssistantStreaming,
   updateAssistantMessage,
 } from "@/components/chat/chatStreamingState";
-
-const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 interface UseChatStreamingParams {
   knowledgeBaseId?: number | null;
@@ -61,8 +53,6 @@ export function useChatStreaming({
   }, [messages, onMessagesSettled]);
 
   const fetchAssistantAnswer = async (q: string, assistantId: string) => {
-    const abortController = new AbortController();
-    streamAbortRef.current = abortController;
     const thinkingStartedAt = Date.now();
     setMessages((prev) =>
       updateAssistantMessage(prev, assistantId, (message) =>
@@ -76,119 +66,79 @@ export function useChatStreaming({
       web_search_provider: webSearchProvider,
       ...toScopePayload(chatScope),
     };
-    let streamTimedOut = false;
-    let streamBuffer = "";
-    let streamIdleTimer: number | null = null;
     let didSettle = false;
-    const resetStreamIdleTimer = () => {
-      if (streamIdleTimer !== null) {
-        window.clearTimeout(streamIdleTimer);
-      }
-      streamIdleTimer = window.setTimeout(() => {
-        streamTimedOut = true;
-        abortController.abort();
-      }, CHAT_STREAM_IDLE_TIMEOUT_MS);
-    };
-    resetStreamIdleTimer();
+    let activeAbortController: AbortController | null = null;
+
     try {
       if (!knowledgeBaseId) return;
-      const streamUrl = knowledgeBaseApi.chatStreamUrl(knowledgeBaseId);
-      const response = await fetch(streamUrl, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...getLocalAuthHeaders(),
+      const result = await streamKnowledgeBaseAnswer({
+        knowledgeBaseId,
+        payload: scopedPayload,
+        onAbortController: (controller) => {
+          activeAbortController = controller;
+          streamAbortRef.current = controller;
         },
-        signal: abortController.signal,
-        body: JSON.stringify(scopedPayload),
+        onParsedStream: (parsed) => {
+          setMessages((prev) =>
+            updateAssistantMessage(prev, assistantId, (message) =>
+              applyParsedStreamUpdate(message, parsed),
+            ),
+          );
+        },
       });
 
-      if (!response.ok || !response.body) {
-        throw new Error("流式接口不可用");
+      if (result.status === "aborted") {
+        return;
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let done = false;
-
-      while (!done) {
-        const { value, done: doneReading } = await reader.read();
-        done = doneReading;
-        if (value) {
-          resetStreamIdleTimer();
-          const chunk = decoder.decode(value, { stream: !done });
-          if (chunk) {
-            streamBuffer += chunk;
-            const parsed = parseChatStream(streamBuffer);
-            setMessages((prev) =>
-              updateAssistantMessage(prev, assistantId, (message) =>
-                applyParsedStreamUpdate(message, parsed),
-              ),
-            );
-          }
-        }
+      if (result.status === "streamed") {
+        setMessages((prev) =>
+          updateAssistantMessage(prev, assistantId, (message) =>
+            finalizeStreamedAssistantAnswer(message, result.parsed),
+          ),
+        );
+        didSettle = true;
       }
 
-      const parsed = parseChatStream(streamBuffer);
+      if (result.status === "partial") {
+        setMessages((prev) =>
+          updateAssistantMessage(prev, assistantId, (message) => ({
+            ...applyParsedStreamUpdate(message, result.parsed),
+            content: result.content,
+            thinking: result.thinking || message.thinking,
+          })),
+        );
+        didSettle = true;
+      }
 
+      if (result.status === "fallback") {
+        setMessages((prev) =>
+          updateAssistantMessage(prev, assistantId, (message) =>
+            finalizeFallbackAssistantAnswer(message, result.response),
+          ),
+        );
+        didSettle = true;
+      }
+
+      if (result.status === "error") {
+        setMessages((prev) =>
+          updateAssistantMessage(prev, assistantId, (message) =>
+            applyAssistantError(message, result.message),
+          ),
+        );
+        didSettle = true;
+      }
+    } catch (error) {
       setMessages((prev) =>
         updateAssistantMessage(prev, assistantId, (message) =>
-          finalizeStreamedAssistantAnswer(message, parsed),
+          applyAssistantError(
+            message,
+            error instanceof Error ? error.message : "请求失败",
+          ),
         ),
       );
       didSettle = true;
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        if (!streamTimedOut) {
-          return;
-        }
-        const parsed = parseChatStream(streamBuffer);
-        const extracted = extractThinkingFromContent(parsed.answer);
-        const finalThinking = (
-          parsed.thinking ||
-          extracted.thinking ||
-          ""
-        ).trim();
-        const finalAnswer = extracted.answer;
-        if (finalAnswer.trim() || finalThinking) {
-          setMessages((prev) =>
-            updateAssistantMessage(prev, assistantId, (message) => ({
-              ...applyParsedStreamUpdate(message, parsed),
-              content: finalAnswer,
-              thinking: finalThinking || message.thinking,
-            })),
-          );
-          didSettle = true;
-          return;
-        }
-      }
-      try {
-        if (!knowledgeBaseId) return;
-        const res = await knowledgeBaseApi.chat(knowledgeBaseId, scopedPayload);
-        setMessages((prev) =>
-          updateAssistantMessage(prev, assistantId, (message) =>
-            finalizeFallbackAssistantAnswer(message, res),
-          ),
-        );
-        didSettle = true;
-      } catch (fallbackError) {
-        setMessages((prev) =>
-          updateAssistantMessage(prev, assistantId, (message) =>
-            applyAssistantError(
-              message,
-              fallbackError instanceof Error
-                ? fallbackError.message
-                : "请求失败",
-            ),
-          ),
-        );
-        didSettle = true;
-      }
     } finally {
-      if (streamIdleTimer !== null) {
-        window.clearTimeout(streamIdleTimer);
-      }
       const thinkingDurationMs = Date.now() - thinkingStartedAt;
       if (didSettle) {
         notifySettledRef.current = true;
@@ -202,7 +152,10 @@ export function useChatStreaming({
           webSearchProgress: undefined,
         })),
       );
-      if (streamAbortRef.current === abortController) {
+      if (
+        activeAbortController &&
+        streamAbortRef.current === activeAbortController
+      ) {
         streamAbortRef.current = null;
       }
     }
