@@ -226,3 +226,23 @@ def test_home_page_shell_state_is_extracted():
     assert 'localStorage.getItem("active_kb_id")' not in page
     assert 'localStorage.setItem("active_kb_id"' not in page
     assert 'localStorage.removeItem("active_kb_id")' not in page
+
+
+def test_home_page_layout_sections_are_extracted():
+    project_root = get_project_root()
+    page = (project_root / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")
+
+    assert (project_root / "frontend/app/WorkspaceTopbar.tsx").exists()
+    assert (project_root / "frontend/app/WorkspaceCornerTools.tsx").exists()
+    assert (project_root / "frontend/app/WorkspaceSidebar.tsx").exists()
+    assert (project_root / "frontend/app/WorkspaceResizer.tsx").exists()
+    assert "@/app/WorkspaceTopbar" in page
+    assert "@/app/WorkspaceCornerTools" in page
+    assert "@/app/WorkspaceSidebar" in page
+    assert "@/app/WorkspaceResizer" in page
+    assert "workspace-brand-mark" not in page
+    assert "workspace-corner-tools" not in page
+    assert "workspace-sidebar-toggle" not in page
+    assert "sidebar-shell" not in page
+    assert "import-sidebar-entry" not in page
+    assert "resizer transition" not in page

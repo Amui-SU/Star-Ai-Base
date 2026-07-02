@@ -1,20 +1,18 @@
 "use client";
 
-import type { CSSProperties } from "react";
 import AuthPage from "@/components/AuthPage";
-import UserMenu from "@/components/UserMenu";
-import KnowledgeBasePanel from "@/components/KnowledgeBasePanel";
 import ImportModal from "@/components/ImportModal";
-import SourcesPanel from "@/components/SourcesPanel";
 import ChatPanel from "@/components/ChatPanel";
-import ChatHistorySidebarPanel from "@/components/ChatHistorySidebarPanel";
-import NotesSidebarPanel from "@/components/NotesSidebarPanel";
-import LocalConnectionSettings from "@/components/LocalConnectionSettings";
 import AdminUsersPanel from "@/components/AdminUsersPanel";
 import ApiAccountsPanel from "@/components/ApiAccountsPanel";
 import { useTheme } from "@/hooks/useTheme";
 import { useHomePageShell } from "@/app/useHomePageShell";
 import { useWorkspaceState } from "@/app/useWorkspaceState";
+import WorkspaceCornerTools from "@/app/WorkspaceCornerTools";
+import WorkspaceResizer from "@/app/WorkspaceResizer";
+import WorkspaceSidebar from "@/app/WorkspaceSidebar";
+import WorkspaceSidebarToggle from "@/app/WorkspaceSidebarToggle";
+import WorkspaceTopbar from "@/app/WorkspaceTopbar";
 
 export default function Home() {
   const { isDarkMode, ready: themeReady, toggleTheme } = useTheme();
@@ -58,262 +56,53 @@ export default function Home() {
     >
       <main className="app-main">
         <section className="workspace-card relative" ref={containerRef}>
-          <header className="workspace-topbar">
-            <div className="workspace-brand">
-              <span className="workspace-brand-mark">◇</span>
-              <span>智库云</span>
-            </div>
-            <div className="workspace-top-actions">
-              <LocalConnectionSettings />
-              {themeReady && (
-                <button
-                  onClick={toggleTheme}
-                  className="workspace-icon-btn"
-                  title={isDarkMode ? "切换到白天模式" : "切换到夜间模式"}
-                >
-                  {isDarkMode ? (
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-                      />
-                    </svg>
-                  ) : (
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-                      />
-                    </svg>
-                  )}
-                </button>
-              )}
-              <UserMenu
-                user={shell.systemUser}
-                onUserChange={shell.setSystemUser}
-                onLogout={shell.handleLogout}
-                onOpenApiAccounts={shell.openApiAccounts}
-                onOpenAdmin={shell.openAdminUsers}
-              />
-            </div>
-          </header>
+          <WorkspaceTopbar
+            isDarkMode={isDarkMode}
+            themeReady={themeReady}
+            user={shell.systemUser}
+            onLogout={shell.handleLogout}
+            onOpenAdmin={shell.openAdminUsers}
+            onOpenApiAccounts={shell.openApiAccounts}
+            onThemeToggle={toggleTheme}
+            onUserChange={shell.setSystemUser}
+          />
 
           <div className="workspace">
             {!isSidebarOpen && (
-              <div
-                className="workspace-corner-tools"
-                role="toolbar"
-                aria-label="工作区快捷入口"
-              >
-                <button
-                  type="button"
-                  className="workspace-corner-tool"
-                  title="展开资料"
-                  aria-label="展开资料"
-                  onClick={() => openSidebarMode("sources")}
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    aria-hidden="true"
-                  >
-                    <rect
-                      x="4"
-                      y="5"
-                      width="16"
-                      height="14"
-                      rx="3"
-                      strokeWidth="1.8"
-                    />
-                    <path d="M9 5v14" strokeWidth="1.8" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className="workspace-corner-tool"
-                  title="对话历史"
-                  aria-label="打开对话历史"
-                  onClick={() => openSidebarMode("history")}
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M4 12a8 8 0 1 0 2.34-5.66"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                    <path
-                      d="M4 5.5v4h4"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M12 8v4l3 2"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className="workspace-corner-tool"
-                  title="笔记"
-                  aria-label="打开笔记"
-                  onClick={() => openSidebarMode("notes")}
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M6 4h9l3 3v13H6z"
-                      strokeWidth="1.8"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M14 4v4h4M9 12h6M9 16h4"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              </div>
+              <WorkspaceCornerTools onOpenSidebarMode={openSidebarMode} />
             )}
 
             {isSidebarOpen && sidebarMode !== "history" && (
-              <button
-                onClick={collapseSidebar}
-                className="workspace-sidebar-toggle left-[calc(var(--sidebar-width)-16px)]"
+              <WorkspaceSidebarToggle
                 style={sidebarHandleStyle}
-                title="收起展开页"
-                aria-label="收起展开页"
-              >
-                <svg
-                  className="sidebar-toggle-icon w-4 h-4 transition-transform"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-              </button>
+                onCollapse={collapseSidebar}
+              />
             )}
 
-            {/* 收藏夹侧栏 */}
-            <div
-              className={`sidebar-shell ${isSidebarOpen ? "open" : "closed"}`}
-              style={
-                {
-                  "--sidebar-width": `${sidebarWidth}px`,
-                } as CSSProperties
-              }
-            >
-              <aside className="panel panel-sources" style={sidebarPanelStyle}>
-                {sidebarMode === "sources" ? (
-                  <>
-                    {/* 知识库选择 */}
-                    <KnowledgeBasePanel
-                      activeId={shell.activeKbId}
-                      onSelect={shell.handleKnowledgeBaseSelect}
-                      onActiveKnowledgeBase={shell.setActiveKnowledgeBase}
-                      refreshKey={shell.kbRefreshKey}
-                      disabled={shell.knowledgeBuilding}
-                    />
+            <WorkspaceSidebar
+              activeBindingId={shell.activeBindingId}
+              activeKbId={shell.activeKbId}
+              activeKnowledgeBase={shell.activeKnowledgeBase}
+              historyRefreshKey={historyRefreshKey}
+              isSidebarOpen={isSidebarOpen}
+              knowledgeBuilding={shell.knowledgeBuilding}
+              kbRefreshKey={shell.kbRefreshKey}
+              sidebarMode={sidebarMode}
+              sidebarPanelStyle={sidebarPanelStyle}
+              sidebarWidth={sidebarWidth}
+              onActiveKnowledgeBase={shell.setActiveKnowledgeBase}
+              onBuildingChange={shell.setKnowledgeBuilding}
+              onBuildDone={shell.markStatsChanged}
+              onCollapse={collapseSidebar}
+              onImportClick={shell.openImport}
+              onKnowledgeBaseSelect={shell.handleKnowledgeBaseSelect}
+              onNewConversation={requestNewConversation}
+              onOpenConversation={requestOpenConversation}
+            />
 
-                    {/* 导入入口 */}
-                    {!shell.activeBindingId && (
-                      <div className="import-sidebar-entry">
-                        <button
-                          onClick={shell.openImport}
-                          className="import-sidebar-btn"
-                        >
-                          + 导入
-                        </button>
-                        <p>选择 B 站收藏夹、视频 URL 或更多平台导入资料</p>
-                      </div>
-                    )}
-                    {shell.activeBindingId ? (
-                      <SourcesPanel
-                        sourceBindingId={shell.activeBindingId}
-                        knowledgeBaseId={shell.activeKbId ?? 0}
-                        knowledgeBaseName={shell.activeKnowledgeBase?.name}
-                        onImportClick={shell.openImport}
-                        onBuildDone={shell.markStatsChanged}
-                        onBuildingChange={shell.setKnowledgeBuilding}
-                      />
-                    ) : (
-                      <div className="sources-initial-empty">
-                        <div className="sources-empty-card">
-                          <div className="sources-empty-kicker">收藏夹资料</div>
-                          <div className="sources-empty-title">
-                            暂无收藏夹资料
-                          </div>
-                          <p>
-                            导入 B 站收藏夹、视频 URL
-                            或更多平台资料后，会显示在这里。
-                          </p>
-                          <button
-                            type="button"
-                            className="sources-empty-action"
-                            onClick={shell.openImport}
-                          >
-                            选择资料来源
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : sidebarMode === "history" ? (
-                  <ChatHistorySidebarPanel
-                    knowledgeBaseId={shell.activeKbId}
-                    refreshKey={historyRefreshKey}
-                    onOpenConversation={requestOpenConversation}
-                    onNewConversation={requestNewConversation}
-                    onCollapse={collapseSidebar}
-                  />
-                ) : (
-                  <NotesSidebarPanel />
-                )}
-              </aside>
-            </div>
-
-            {/* 拖拽分隔条 */}
-            <div
-              className={`resizer transition-[width,opacity] duration-300 ${
-                isSidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-              }`}
+            <WorkspaceResizer
+              isSidebarOpen={isSidebarOpen}
               onMouseDown={handleMouseDown}
-              style={{ cursor: "col-resize", width: isSidebarOpen ? 8 : 0 }}
             />
 
             <section
