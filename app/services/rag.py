@@ -17,9 +17,6 @@ from app.services.rag_collection_ops import (
     delete_video_vectors_in_knowledge_base,
     has_video_vectors_in_knowledge_base as has_scoped_video_vectors,
 )
-from app.services.rag_filters import (
-    knowledge_base_filter,
-)
 from app.services.rag_indexing import index_video_content, index_videos_batch
 from app.services.rag_runtime_components import (
     build_embeddings,
@@ -35,6 +32,7 @@ from app.services.rag_qa import (
     complete_rag_answer,
     fallback_rag_answer,
 )
+from app.services.rag_search import legacy_similarity_search, scoped_similarity_search
 from app.services.rag_summary import summarize_text_content
 
 
@@ -125,31 +123,14 @@ class RAGService:
             DeprecationWarning,
             stacklevel=2,
         )
-        if not query or not query.strip():
-            logger.warning("检索查询为空")
-            return []
-
-        try:
-            if bvids:
-                docs = self.vectorstore.similarity_search(
-                    query, k=k, filter={"bvid": {"$in": bvids}}
-                )
-            else:
-                docs = self.vectorstore.similarity_search(query, k=k)
-
-            logger.info(f"检索完成：query='{query}'，召回={len(docs)}")
-            for idx, doc in enumerate(docs):
-                meta = doc.metadata or {}
-                title = meta.get("title", "")
-                bvid = meta.get("bvid", "")
-                chunk_index = meta.get("chunk_index", "")
-                preview = doc.page_content[:120].replace("\n", " ").strip()
-                logger.info(f"召回[{idx+1}] {bvid} #{chunk_index} {title} | {preview}")
-
-            return docs
-        except Exception as e:
-            logger.warning(f"向量检索失败: {e}")
-            return []
+        return legacy_similarity_search(
+            query,
+            vectorstore=self.vectorstore,
+            k=k,
+            bvids=bvids,
+            warning_logger=logger.warning,
+            info_logger=logger.info,
+        )
 
     def search_in_knowledge_base(
         self,
@@ -159,17 +140,13 @@ class RAGService:
         k: int = 5,
         bvids: Optional[List[str]] = None,
     ) -> List[Document]:
-        if not query or not query.strip():
-            return []
-
-        return self.vectorstore.similarity_search(
+        return scoped_similarity_search(
             query,
+            vectorstore=self.vectorstore,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
             k=k,
-            filter=knowledge_base_filter(
-                workspace_id=workspace_id,
-                knowledge_base_id=knowledge_base_id,
-                bvids=bvids,
-            ),
+            bvids=bvids,
         )
 
     async def _fallback_answer(self, question: str, reason: str = "") -> dict:

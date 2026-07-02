@@ -72,6 +72,7 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     collection_ops_path = project_root / "app/services/rag_collection_ops.py"
     runtime_path = project_root / "app/services/rag_runtime_components.py"
     indexing_path = project_root / "app/services/rag_indexing.py"
+    search_path = project_root / "app/services/rag_search.py"
     qa_path = project_root / "app/services/rag_qa.py"
     summary_path = project_root / "app/services/rag_summary.py"
     rag_source = (project_root / "app/services/rag.py").read_text(encoding="utf-8")
@@ -92,7 +93,15 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     }:
         assert f"def {name}" in filters_source
 
-    assert "from app.services.rag_filters import" in rag_source
+    assert search_path.exists()
+    search_source = search_path.read_text(encoding="utf-8")
+    for name in {
+        "legacy_similarity_search",
+        "scoped_similarity_search",
+    }:
+        assert f"def {name}" in search_source
+    assert "from app.services.rag_filters import" in search_source
+    assert "from app.services.rag_search import" in rag_source
     assert runtime_path.exists()
     runtime_source = runtime_path.read_text(encoding="utf-8")
     for name in {
@@ -155,6 +164,10 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     assert "build_video_documents(" not in rag_source
     assert ".add_documents(" not in rag_source
     assert "batch_size = 10" not in rag_source
+    assert ".similarity_search(" not in rag_source
+    assert "knowledge_base_filter(" not in rag_source
+    assert "检索完成" not in rag_source
+    assert "向量检索失败" not in rag_source
     assert "context_parts = []" not in rag_source
     assert "seen_bvids = set()" not in rag_source
     assert '"知识库目前还没有内容"' not in rag_source
