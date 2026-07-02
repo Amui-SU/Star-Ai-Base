@@ -145,7 +145,13 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
 
 def test_favorite_router_uses_shared_default_folder_detection():
     project_root = get_project_root()
-    source = (project_root / "app/routers/favorites.py").read_text(encoding="utf-8")
+    router_source = (project_root / "app/routers/favorites.py").read_text(
+        encoding="utf-8"
+    )
+    runtime_source = (
+        project_root / "app/services/favorites_route_runtime.py"
+    ).read_text(encoding="utf-8")
 
-    assert "def _is_default_folder" not in source
-    assert "is_legacy_default_favorite_folder" in source
+    assert "def _is_default_folder" not in router_source
+    assert "def _is_default_folder" not in runtime_source
+    assert "is_legacy_default_favorite_folder" in (router_source + runtime_source)
