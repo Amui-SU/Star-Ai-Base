@@ -46,8 +46,10 @@ from app.services.knowledge_base_build_tasks import (
 from app.services.knowledge_base_answer_adapter import (
     build_complete_knowledge_base_answer,
 )
-from app.services.knowledge_base_chat import answer_knowledge_base_chat
-from app.services.knowledge_base_chat_stream import stream_knowledge_base_chat
+from app.services.knowledge_base_chat_runtime import (
+    answer_knowledge_base_chat_from_router,
+    stream_knowledge_base_chat_from_router,
+)
 from app.services.knowledge_base_delete import (
     delete_knowledge_base as delete_knowledge_base_service,
 )
@@ -358,26 +360,13 @@ async def chat_with_knowledge_base(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
-    return await answer_knowledge_base_chat(
+    return await answer_knowledge_base_chat_from_router(
         db,
         payload=payload,
         knowledge_base=knowledge_base,
         user=current_user,
         workspace=current_workspace,
-        load_documents=_load_scoped_chat_documents,
-        answer_from_documents=_answer_from_documents,
-        resolve_llm_credentials=resolve_user_llm_credentials,
-        global_config_resolver=_resolve_llm_config,
-        resolve_web_search_api_key=_resolve_web_search_api_key,
-        build_messages=_build_knowledge_base_messages,
-        complete_answer=_complete_knowledge_base_answer,
-        supports_keyword_argument=_supports_keyword_argument,
-        record_usage=record_usage_event,
-        source_from_document=_source_from_document,
-        source_from_web_result=_source_from_web_result,
-        web_search_failed_status_from_exception=(
-            _web_search_failed_status_from_exception
-        ),
+        router_module=_knowledge_web_search_module(),
         warning_logger=logger.warning,
     )
 
@@ -390,33 +379,13 @@ async def stream_chat_with_knowledge_base(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
-    stream = await stream_knowledge_base_chat(
+    stream = await stream_knowledge_base_chat_from_router(
         db,
         payload=payload,
         knowledge_base=knowledge_base,
         user=current_user,
         workspace=current_workspace,
-        load_documents=_load_scoped_chat_documents,
-        answer_from_documents=_answer_from_documents,
-        resolve_llm_credentials=resolve_user_llm_credentials,
-        global_config_resolver=_resolve_llm_config,
-        resolve_web_search_api_key=_resolve_web_search_api_key,
-        build_messages=_build_knowledge_base_messages,
-        prepare_web_search_with_heartbeats=getattr(
-            _knowledge_web_search_module(),
-            "_prepare_knowledge_base_web_search_with_heartbeats",
-        ),
-        append_no_more_tool_calls_instruction=(_append_no_more_tool_calls_instruction),
-        stream_llm_events=_stream_llm_events,
-        supports_keyword_argument=_supports_keyword_argument,
-        encode_web_search_progress=_encode_web_search_progress,
-        encode_thinking_delta=_encode_thinking_delta,
-        source_from_document=_source_from_document,
-        source_from_web_result=_source_from_web_result,
-        web_search_failed_status_from_exception=(
-            _web_search_failed_status_from_exception
-        ),
-        record_usage=record_usage_event,
+        router_module=_knowledge_web_search_module(),
         warning_logger=logger.warning,
     )
     return StreamingResponse(
