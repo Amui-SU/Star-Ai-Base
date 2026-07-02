@@ -208,13 +208,55 @@ function Get-ProcessCommandLine {
     return ""
 }
 
-function Test-ProjectProcess {
+function Get-ProcessExecutableDirectory {
+    param([int]$ProcessId)
+
+    try {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+        if ($process -and $process.ExecutablePath) {
+            return "" + (Split-Path -Parent $process.ExecutablePath)
+        }
+    }
+    catch {
+        return ""
+    }
+
+    return ""
+}
+
+function Test-PathWithinProject {
     param(
-        [int]$ProcessId,
+        [string]$Path,
         [string]$ProjectRoot
     )
 
-    $commandLine = (Get-ProcessCommandLine -ProcessId $ProcessId).ToLowerInvariant()
+    if (-not $Path) {
+        return $false
+    }
+
+    $normalizedRoot = Resolve-Path -LiteralPath $ProjectRoot -ErrorAction SilentlyContinue
+    if ($normalizedRoot) {
+        $root = $normalizedRoot.Path.TrimEnd("\", "/").ToLowerInvariant()
+    }
+    else {
+        $root = $ProjectRoot.TrimEnd("\", "/").ToLowerInvariant()
+    }
+
+    $candidate = $Path.TrimEnd("\", "/").ToLowerInvariant()
+    return $candidate -eq $root -or $candidate.StartsWith("$root\")
+}
+
+function Test-ProjectCommandLine {
+    param(
+        [string]$CommandLine,
+        [string]$ProjectRoot
+    )
+
+    if (-not $CommandLine) {
+        return $false
+    }
+
+    $commandLine = $CommandLine.ToLowerInvariant()
     $normalizedRoot = Resolve-Path -LiteralPath $ProjectRoot -ErrorAction SilentlyContinue
     if ($normalizedRoot) {
         $root = $normalizedRoot.Path.ToLowerInvariant()
@@ -247,6 +289,91 @@ function Test-ProjectProcess {
         }
 
         $startIndex = $index + 1
+    }
+}
+
+function Test-ProjectProcess {
+    param(
+        [int]$ProcessId,
+        [string]$ProjectRoot
+    )
+
+    $commandLine = Get-ProcessCommandLine -ProcessId $ProcessId
+    if (Test-ProjectCommandLine -CommandLine $commandLine -ProjectRoot $ProjectRoot) {
+        return $true
+    }
+
+    $executableDirectory = Get-ProcessExecutableDirectory -ProcessId $ProcessId
+    return Test-PathWithinProject -Path $executableDirectory -ProjectRoot $ProjectRoot
+}
+
+function Test-ProjectPortProcess {
+    param(
+        [int]$ProcessId,
+        [string]$ProjectRoot,
+        [int]$Port
+    )
+
+    $commandLine = Get-ProcessCommandLine -ProcessId $ProcessId
+    if (Test-ProjectProcess -ProcessId $ProcessId -ProjectRoot $ProjectRoot) {
+        return $true
+    }
+
+    $frontendPath = Get-FrontendPath $ProjectRoot
+    $lower = $commandLine.ToLowerInvariant()
+    if ($Port -eq 8000 -and $lower.Contains("uvicorn") -and $lower.Contains("app.main:app")) {
+        return $true
+    }
+    if ($Port -eq 3000 -and (
+            $lower.Contains("npm run dev") -or
+            $lower.Contains("next dev") -or
+            ($lower.Contains("next") -and $lower.Contains(" dev"))
+        )) {
+        return $true
+    }
+
+    $executableDirectory = Get-ProcessExecutableDirectory -ProcessId $ProcessId
+    return (Test-PathWithinProject -Path $executableDirectory -ProjectRoot $ProjectRoot) -or (Test-PathWithinProject -Path $executableDirectory -ProjectRoot $frontendPath)
+}
+
+function Get-ListeningProcessIds {
+    param([int]$Port)
+
+    $ids = @()
+    try {
+        $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+        foreach ($connection in $connections) {
+            if ($connection.OwningProcess) {
+                $ids += [int]$connection.OwningProcess
+            }
+        }
+    }
+    catch {
+        $lines = netstat -ano | Select-String ":$Port\s+.*LISTENING"
+        foreach ($line in $lines) {
+            $parts = ("" + $line).Trim() -split "\s+"
+            $ids += [int]$parts[-1]
+        }
+    }
+
+    return @($ids | Select-Object -Unique)
+}
+
+function Stop-ProjectPortListeners {
+    param(
+        [string]$ProjectRoot,
+        [switch]$Quiet
+    )
+
+    foreach ($port in @(8000, 3000)) {
+        foreach ($processId in (Get-ListeningProcessIds -Port $port)) {
+            if (Test-ProjectPortProcess -ProcessId $processId -ProjectRoot $ProjectRoot -Port $port) {
+                Stop-ProjectPid -ProcessId $processId -ProjectRoot $ProjectRoot -Quiet:$Quiet -AllowPortMatch
+            }
+            elseif (-not $Quiet) {
+                Write-WarnMsg "Port $port is used by PID $processId, but it is not recognized as this project."
+            }
+        }
     }
 }
 
@@ -515,14 +642,14 @@ function Invoke-Start {
     if (-not (Test-Path -LiteralPath (Join-Path $frontendPath "node_modules") -PathType Container)) {
         throw "Frontend dependencies are missing. Run scripts\dev.ps1 install."
     }
+    Ensure-Directory $logsPath
+    Invoke-Stop -ProjectRoot $ProjectRoot -Quiet
+
     foreach ($port in @(8000, 3000)) {
         if (Test-PortListening $port) {
             throw "Port $port is already listening. Stop the existing service before running start."
         }
     }
-
-    Ensure-Directory $logsPath
-    Invoke-Stop -ProjectRoot $ProjectRoot -Quiet
 
     Remove-Item -LiteralPath $backendLog, $backendErrLog, $frontendLog, $frontendErrLog -Force -ErrorAction SilentlyContinue
 
@@ -599,7 +726,8 @@ function Stop-ProjectPid {
     param(
         [int]$ProcessId,
         [string]$ProjectRoot,
-        [switch]$Quiet
+        [switch]$Quiet,
+        [switch]$AllowPortMatch
     )
 
     $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
@@ -607,7 +735,7 @@ function Stop-ProjectPid {
         return
     }
 
-    if (-not (Test-ProjectProcess -ProcessId $ProcessId -ProjectRoot $ProjectRoot)) {
+    if (-not $AllowPortMatch -and -not (Test-ProjectProcess -ProcessId $ProcessId -ProjectRoot $ProjectRoot)) {
         if (-not $Quiet) {
             Write-WarnMsg "Refusing to stop PID $ProcessId because it is not owned by this project."
         }
@@ -637,6 +765,8 @@ function Invoke-Stop {
 
         Remove-RuntimeState $ProjectRoot
     }
+
+    Stop-ProjectPortListeners -ProjectRoot $ProjectRoot -Quiet:$Quiet
 
     Get-CimInstance Win32_Process | Where-Object {
         $_.Name -in @("python.exe", "node.exe", "cmd.exe")
