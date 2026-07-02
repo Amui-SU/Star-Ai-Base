@@ -15,6 +15,9 @@ def test_legacy_bilibili_session_helpers_live_in_service_not_auth_router():
     legacy_knowledge_source = (project_root / "app/routers/knowledge.py").read_text(
         encoding="utf-8"
     )
+    legacy_knowledge_runtime_source = (
+        project_root / "app/services/knowledge_legacy_runtime.py"
+    ).read_text(encoding="utf-8")
     declared_names = declared_callable_names(auth_source)
 
     assert service_path.exists()
@@ -35,11 +38,19 @@ def test_legacy_bilibili_session_helpers_live_in_service_not_auth_router():
     assert "from app.services.legacy_bilibili_sessions import" in source_bindings_source
     assert "from app.services.legacy_bilibili_sessions import" in favorites_source
     assert (
-        "from app.services.legacy_bilibili_sessions import" in legacy_knowledge_source
+        "from app.services.legacy_bilibili_sessions import"
+        in legacy_knowledge_runtime_source
+    )
+    assert (
+        "from app.services.knowledge_legacy_runtime import" in legacy_knowledge_source
     )
     assert "from app.routers.auth import" not in source_bindings_source
     assert "from app.routers.auth import get_session" not in favorites_source
     assert "from app.routers.auth import get_session" not in legacy_knowledge_source
+    assert (
+        "from app.services.legacy_bilibili_sessions import"
+        not in legacy_knowledge_source
+    )
     assert declared_names.isdisjoint(
         {
             "_encrypt_session_cookie",
