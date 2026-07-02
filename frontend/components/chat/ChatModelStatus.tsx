@@ -8,7 +8,7 @@ import { providerLogoMap } from "@/lib/providers";
 import type {
   ModelMenuProvider,
   ModelSourceOption,
-} from "@/components/chat/useChatModelSettings";
+} from "@/components/chat/chatModelSettingsState";
 
 interface ChatModelStatusProps {
   activeProvider: ModelMenuProvider | undefined;

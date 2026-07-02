@@ -50,6 +50,36 @@ def test_chat_panel_uses_model_settings_hook():
     assert "chatApi.saveModelProviderConfig" not in chat_panel
 
 
+def test_chat_model_settings_hook_uses_state_helpers():
+    project_root = get_project_root()
+    hook_file = (
+        project_root / "frontend" / "components" / "chat" / "useChatModelSettings.ts"
+    )
+    state_helper = (
+        project_root / "frontend" / "components" / "chat" / "chatModelSettingsState.ts"
+    )
+
+    assert state_helper.exists()
+    hook_source = hook_file.read_text(encoding="utf-8")
+    helper_source = state_helper.read_text(encoding="utf-8")
+
+    for helper_name in [
+        "resolveCurrentApiSource",
+        "resolveSourceAvailability",
+        "buildModelSourceOptions",
+        "buildProvidersForMenu",
+        "hasEnabledCurrentSource",
+        "shouldShowAiKeyHint",
+    ]:
+        assert f"export function {helper_name}" in helper_source
+        assert helper_name in hook_source
+        assert f"function {helper_name}" not in hook_source
+
+    assert 'from "@/components/chat/chatModelSettingsState"' in hook_source
+    assert "LLM_PROVIDER_PRESETS" not in hook_source
+    assert "new Map(remoteProviders.map" not in hook_source
+
+
 def test_chat_panel_model_status_menu_is_extracted():
     project_root = get_project_root()
     chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(

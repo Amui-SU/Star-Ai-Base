@@ -4,14 +4,23 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { ModelConfigProvider } from "@/components/chat/types";
 import {
+  buildModelSourceOptions,
+  buildProvidersForMenu,
+  EMPTY_PROVIDERS,
+  hasEnabledCurrentSource,
+  resolveCurrentApiSource,
+  resolveSourceAvailability,
+  shouldShowAiKeyHint as resolveShouldShowAiKeyHint,
+  type ModelMenuProvider,
+  type ModelSourceOption,
+} from "@/components/chat/chatModelSettingsState";
+import {
   chatApi,
   type LLMApiSource,
   type LLMConfigResponse,
   type LLMHealthResponse,
   type LLMProvider,
-  type LLMProviderInfo,
 } from "@/lib/api";
-import { LLM_PROVIDER_PRESETS } from "@/lib/providers";
 import {
   formatThinkingConfig,
   inferThinkingMode,
@@ -19,25 +28,13 @@ import {
   type ThinkingMode,
 } from "@/lib/thinkingConfig";
 
-const EMPTY_PROVIDERS: LLMProviderInfo[] = [];
-
 interface UseChatModelSettingsOptions {
   apiAccountsKey: number;
   isAdmin: boolean;
   onNotice: (message: string, timeoutMs?: number) => void;
 }
 
-export interface ModelSourceOption {
-  value: LLMApiSource;
-  label: string;
-  hint: string;
-  enabled: boolean;
-}
-
-export interface ModelMenuProvider extends ModelConfigProvider {
-  official_enabled?: boolean;
-  personal_enabled?: boolean;
-}
+export type { ModelMenuProvider, ModelSourceOption };
 
 export function useChatModelSettings({
   apiAccountsKey,
@@ -233,79 +230,32 @@ export function useChatModelSettings({
   );
 
   const remoteProviders = llmConfig?.providers ?? EMPTY_PROVIDERS;
-  const currentApiSource: LLMApiSource =
-    llmConfig?.current_api_source === "personal" ? "personal" : "official";
+  const currentApiSource: LLMApiSource = resolveCurrentApiSource(llmConfig);
 
   const sourceAvailability = useMemo(
-    () => ({
-      official: remoteProviders.some(
-        (provider) => provider.official_enabled ?? provider.enabled,
-      ),
-      personal: remoteProviders.some(
-        (provider) => provider.personal_enabled ?? provider.enabled,
-      ),
-    }),
+    () => resolveSourceAvailability(remoteProviders),
     [remoteProviders],
   );
 
-  const hasEnabledCurrentSource = useMemo(
-    () => remoteProviders.some((provider) => provider.enabled),
+  const currentSourceHasEnabledProvider = useMemo(
+    () => hasEnabledCurrentSource(remoteProviders),
     [remoteProviders],
   );
 
-  const shouldShowAiKeyHint =
-    Boolean(llmConfig) &&
-    currentApiSource === "personal" &&
-    !hasEnabledCurrentSource;
-
-  const remoteProviderMap = useMemo(
-    () =>
-      new Map(remoteProviders.map((provider) => [provider.provider, provider])),
-    [remoteProviders],
+  const shouldShowAiKeyHint = resolveShouldShowAiKeyHint(
+    llmConfig,
+    currentApiSource,
+    currentSourceHasEnabledProvider,
   );
 
   const sourceOptions: ModelSourceOption[] = useMemo(
-    () => [
-      {
-        value: "official",
-        label: "官方",
-        hint: "付费通道",
-        enabled: sourceAvailability.official,
-      },
-      {
-        value: "personal",
-        label: "个人",
-        hint: "自带 Key",
-        enabled: true,
-      },
-    ],
-    [sourceAvailability.official],
+    () => buildModelSourceOptions(sourceAvailability),
+    [sourceAvailability],
   );
 
   const providersForMenu: ModelMenuProvider[] = useMemo(
-    () => [
-      ...LLM_PROVIDER_PRESETS.map((base) => {
-        const remote = remoteProviderMap.get(base.provider);
-        return {
-          provider: base.provider,
-          label: remote?.label ?? base.label,
-          enabled: remote?.enabled ?? false,
-          official_enabled: remote?.official_enabled ?? false,
-          personal_enabled: remote?.personal_enabled ?? false,
-          model: remote?.model ?? base.model,
-          base_url: remote?.base_url,
-          thinking_config: remote?.thinking_config ?? {},
-          thinking_template: remote?.thinking_template ?? {},
-        };
-      }),
-      ...remoteProviders.filter(
-        (provider) =>
-          !LLM_PROVIDER_PRESETS.some(
-            (base) => base.provider === provider.provider,
-          ),
-      ),
-    ],
-    [remoteProviderMap, remoteProviders],
+    () => buildProvidersForMenu(remoteProviders),
+    [remoteProviders],
   );
 
   const currentProvider =
