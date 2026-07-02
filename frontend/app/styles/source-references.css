@@ -23,6 +23,14 @@
   gap: 4px;
 }
 
+.source-link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .source-link {
   display: inline-flex;
   align-items: center;
@@ -55,4 +63,23 @@
 .source-link:hover {
   color: var(--ink-soft);
   text-decoration: underline;
+}
+
+.source-note-action {
+  min-height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--accent-strong);
+  padding: 0 7px;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.source-note-action:hover {
+  border-color: var(--border-strong);
+  background: var(--paper-3);
+  color: var(--ink);
 }

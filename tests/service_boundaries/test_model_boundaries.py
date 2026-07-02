@@ -165,3 +165,22 @@ def test_models_delegates_content_ingestion_orm_models_to_focused_module():
     assert "from app.models_base import" in models_source
     assert "from app.models_content import" in models_source
     assert declared_names.isdisjoint(content_model_names)
+
+
+def test_models_delegates_video_note_orm_models_to_focused_module():
+    project_root = get_project_root()
+    models_source = (project_root / "app/models.py").read_text(encoding="utf-8")
+    declared_names = declared_callable_names(models_source)
+
+    note_model_path = project_root / "app/models_notes.py"
+    note_model_names = {"VideoNote"}
+
+    assert note_model_path.exists()
+    note_model_source = note_model_path.read_text(encoding="utf-8")
+    assert "from app.models_base import Base" in note_model_source
+    assert "from app.models_base import _utc_now" in note_model_source
+    assert "class VideoNote(Base)" in note_model_source
+    assert '__tablename__ = "video_notes"' in note_model_source
+
+    assert "from app.models_notes import" in models_source
+    assert declared_names.isdisjoint(note_model_names)

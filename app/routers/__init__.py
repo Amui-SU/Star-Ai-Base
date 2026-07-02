@@ -16,6 +16,7 @@ from app.routers import (
     local_connection,
     source_bindings,
     system_auth,
+    video_notes,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "local_connection",
     "source_bindings",
     "system_auth",
+    "video_notes",
 ]

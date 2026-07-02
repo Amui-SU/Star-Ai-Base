@@ -5,6 +5,7 @@ import ImportModal from "@/components/ImportModal";
 import ChatPanel from "@/components/ChatPanel";
 import AdminUsersPanel from "@/components/AdminUsersPanel";
 import ApiAccountsPanel from "@/components/ApiAccountsPanel";
+import VideoNoteWorkspace from "@/components/video-notes/VideoNoteWorkspace";
 import { useTheme } from "@/hooks/useTheme";
 import { useHomePageShell } from "@/app/useHomePageShell";
 import { useWorkspaceState } from "@/app/useWorkspaceState";
@@ -28,11 +29,14 @@ export default function Home() {
     conversationOpenRequest,
     newConversationRequestKey,
     historyRefreshKey,
+    activeVideoNote,
     openSidebarMode,
     collapseSidebar,
     requestOpenConversation,
     requestNewConversation,
     refreshHistory,
+    openVideoNoteWorkspace,
+    closeVideoNoteWorkspace,
   } = useWorkspaceState();
 
   // 加载中
@@ -97,6 +101,8 @@ export default function Home() {
               onImportClick={shell.openImport}
               onKnowledgeBaseSelect={shell.handleKnowledgeBaseSelect}
               onNewConversation={requestNewConversation}
+              onOpenVideoNotes={() => openVideoNoteWorkspace(null)}
+              onOpenVideoNote={openVideoNoteWorkspace}
               onOpenConversation={requestOpenConversation}
             />
 
@@ -121,11 +127,22 @@ export default function Home() {
                 conversationOpenRequest={conversationOpenRequest}
                 newConversationRequestKey={newConversationRequestKey}
                 onConversationSaved={refreshHistory}
+                onOpenVideoNote={openVideoNoteWorkspace}
               />
             </section>
           </div>
         </section>
       </main>
+
+      {activeVideoNote && shell.activeKbId && (
+        <VideoNoteWorkspace
+          key={activeVideoNote.key}
+          knowledgeBaseId={shell.activeKbId}
+          knowledgeBaseName={shell.activeKnowledgeBase?.name}
+          initialBvid={activeVideoNote.bvid}
+          onClose={closeVideoNoteWorkspace}
+        />
+      )}
 
       <ImportModal
         open={shell.showImport}

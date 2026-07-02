@@ -41,6 +41,11 @@ export function useWorkspaceState() {
   } | null>(null);
   const [newConversationRequestKey, setNewConversationRequestKey] = useState(0);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [activeVideoNote, setActiveVideoNote] = useState<{
+    bvid: string | null;
+    key: number;
+  } | null>(null);
+  const videoNoteRequestKeyRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLElement>(null);
 
@@ -100,6 +105,18 @@ export function useWorkspaceState() {
     setHistoryRefreshKey((key) => key + 1);
   }, []);
 
+  const openVideoNoteWorkspace = useCallback((bvid?: string | null) => {
+    videoNoteRequestKeyRef.current += 1;
+    setActiveVideoNote({
+      bvid: bvid ?? null,
+      key: videoNoteRequestKeyRef.current,
+    });
+  }, []);
+
+  const closeVideoNoteWorkspace = useCallback(() => {
+    setActiveVideoNote(null);
+  }, []);
+
   useEffect(() => {
     if (isDragging) {
       window.addEventListener("mousemove", handleMouseMove);
@@ -150,10 +167,13 @@ export function useWorkspaceState() {
     conversationOpenRequest,
     newConversationRequestKey,
     historyRefreshKey,
+    activeVideoNote,
     openSidebarMode,
     collapseSidebar,
     requestOpenConversation,
     requestNewConversation,
     refreshHistory,
+    openVideoNoteWorkspace,
+    closeVideoNoteWorkspace,
   };
 }

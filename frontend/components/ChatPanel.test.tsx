@@ -273,4 +273,56 @@ describe("ChatPanel", () => {
       screen.getByText("正在读取知识库并等待模型返回思考内容"),
     ).toBeVisible();
   });
+
+  it("opens video notes from knowledge source references", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatHistoryApi.get).mockResolvedValue({
+      id: 42,
+      user_id: 1,
+      workspace_id: 1,
+      knowledge_base_id: 1,
+      title: "Loaded answer",
+      scope: null,
+      web_search: false,
+      web_search_provider: "auto",
+      message_count: 1,
+      created_at: "2026-06-26T00:00:00Z",
+      updated_at: "2026-06-26T00:00:00Z",
+      messages: [
+        {
+          id: 1,
+          sequence: 0,
+          role: "assistant",
+          content: "answer",
+          sources: [
+            {
+              type: "knowledge",
+              bvid: "BVNOTE123",
+              title: "知识库资料",
+              url: "https://www.bilibili.com/video/BVNOTE123",
+            },
+          ],
+          created_at: "2026-06-26T00:00:00Z",
+        },
+      ],
+    });
+    const onOpenVideoNote = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <ChatPanel
+        knowledgeBaseId={1}
+        knowledgeBaseName="Test KB"
+        conversationOpenRequest={{ id: 42, key: 1 }}
+        onOpenVideoNote={onOpenVideoNote}
+      />,
+    );
+
+    await user.click(await screen.findByText("参考链接（1）"));
+    await user.click(
+      screen.getByRole("button", { name: "打开视频笔记 知识库资料" }),
+    );
+
+    expect(onOpenVideoNote).toHaveBeenCalledWith("BVNOTE123");
+  });
 });

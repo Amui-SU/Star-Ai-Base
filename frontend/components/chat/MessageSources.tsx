@@ -4,9 +4,13 @@ import type { Message } from "@/components/chat/types";
 
 interface MessageSourcesProps {
   message: Message;
+  onOpenVideoNote?: (bvid: string) => void;
 }
 
-export default function MessageSources({ message }: MessageSourcesProps) {
+export default function MessageSources({
+  message,
+  onOpenVideoNote,
+}: MessageSourcesProps) {
   const sourceCount = message.sources?.length ?? 0;
   if (sourceCount === 0 && !message.webSearch) return null;
 
@@ -17,18 +21,28 @@ export default function MessageSources({ message }: MessageSourcesProps) {
       </summary>
       <div className="source-list">
         {message.sources?.map((source, index) => (
-          <a
-            key={index}
-            href={source.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="source-link"
-          >
-            <span className="source-type-badge">
-              {source.type === "web" ? "网页" : "知识库"}
-            </span>
-            <span className="source-link-title">{source.title}</span>
-          </a>
+          <div key={index} className="source-link-row">
+            <a
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="source-link"
+            >
+              <span className="source-type-badge">
+                {source.type === "web" ? "网页" : "知识库"}
+              </span>
+              <span className="source-link-title">{source.title}</span>
+            </a>
+            {source.bvid && source.type !== "web" && onOpenVideoNote && (
+              <button
+                type="button"
+                className="source-note-action"
+                onClick={() => onOpenVideoNote(source.bvid!)}
+              >
+                打开视频笔记 {source.title}
+              </button>
+            )}
+          </div>
         ))}
         {message.webSearch?.message && (
           <div className="web-search-block">

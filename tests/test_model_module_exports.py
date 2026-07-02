@@ -2,8 +2,10 @@ from app.models import Base
 from app.models import FavoriteFolder
 from app.models import FavoriteVideo
 from app.models import IngestionTask
+from app.models import VideoNote
 from app.models import VideoCache
 from app.models import VideoTitleOverride
+from app.models_notes import VideoNote as FocusedVideoNote
 from app.models_content import FavoriteFolder as FocusedFavoriteFolder
 from app.models_content import FavoriteVideo as FocusedFavoriteVideo
 from app.models_content import IngestionTask as FocusedIngestionTask
@@ -17,6 +19,7 @@ def test_content_ingestion_models_keep_legacy_app_models_exports():
     assert FavoriteVideo is FocusedFavoriteVideo
     assert VideoTitleOverride is FocusedVideoTitleOverride
     assert IngestionTask is FocusedIngestionTask
+    assert VideoNote is FocusedVideoNote
 
 
 def test_content_ingestion_models_share_declarative_base_metadata():
@@ -26,6 +29,7 @@ def test_content_ingestion_models_share_declarative_base_metadata():
         "favorite_videos": FavoriteVideo,
         "video_title_overrides": VideoTitleOverride,
         "ingestion_tasks": IngestionTask,
+        "video_notes": VideoNote,
     }
 
     for table_name, model_class in expected_tables.items():

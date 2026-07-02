@@ -31,6 +31,7 @@ interface Props {
   conversationOpenRequest?: { id: number; key: number } | null;
   newConversationRequestKey?: number;
   onConversationSaved?: (conversationId: number) => void;
+  onOpenVideoNote?: (bvid: string) => void;
 }
 
 export default function ChatPanel({
@@ -43,6 +44,7 @@ export default function ChatPanel({
   conversationOpenRequest = null,
   newConversationRequestKey = 0,
   onConversationSaved,
+  onOpenVideoNote,
 }: Props) {
   const knowledgeBaseTitle = knowledgeBaseId
     ? displayKnowledgeBaseName(knowledgeBaseName)
@@ -297,6 +299,7 @@ export default function ChatPanel({
               }
               onReaction={handleReaction}
               onEditQuestion={handleEditQuestion}
+              onOpenVideoNote={onOpenVideoNote}
             />
           )}
         </div>

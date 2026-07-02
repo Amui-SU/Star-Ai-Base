@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Home from "@/app/page";
 import { chatHistoryApi, sourceBindingApi, systemAuthApi } from "@/lib/api";
 
-const { chatPanelMock } = vi.hoisted(() => ({
+const { chatPanelMock, videoNoteWorkspaceMock } = vi.hoisted(() => ({
   chatPanelMock: vi.fn(),
+  videoNoteWorkspaceMock: vi.fn(),
 }));
 
 vi.mock("@/components/AuthPage", () => ({
@@ -32,7 +33,30 @@ vi.mock("@/components/SourcesPanel", () => ({
 vi.mock("@/components/ChatPanel", () => ({
   default: (props: Record<string, unknown>) => {
     chatPanelMock(props);
-    return <div>Chat Panel</div>;
+    return (
+      <div>
+        Chat Panel
+        {typeof props.onOpenVideoNote === "function" && (
+          <button
+            type="button"
+            onClick={() =>
+              (props.onOpenVideoNote as (bvid: string) => void)("BVNOTE123")
+            }
+          >
+            Mock open video note
+          </button>
+        )}
+      </div>
+    );
+  },
+}));
+
+vi.mock("@/components/video-notes/VideoNoteWorkspace", () => ({
+  default: (props: Record<string, unknown>) => {
+    videoNoteWorkspaceMock(props);
+    return (
+      <div>Video Note Workspace {String(props.initialBvid ?? "list")}</div>
+    );
   },
 }));
 
@@ -80,6 +104,7 @@ describe("Home mobile shell", () => {
     vi.mocked(sourceBindingApi.list).mockResolvedValue([]);
     vi.mocked(chatHistoryApi.list).mockResolvedValue({ items: [] });
     chatPanelMock.mockClear();
+    videoNoteWorkspaceMock.mockClear();
   });
 
   afterEach(() => {
@@ -203,6 +228,28 @@ describe("Home mobile shell", () => {
     expect(
       screen.getByPlaceholderText("写下这次学习的要点"),
     ).toBeInTheDocument();
+  });
+
+  it("opens the video note workspace from chat callbacks with the active knowledge base", async () => {
+    localStorage.setItem("active_kb_id", "7");
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat Panel")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Mock open video note" }),
+    );
+
+    expect(screen.getByText("Video Note Workspace BVNOTE123")).toBeVisible();
+    expect(videoNoteWorkspaceMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        knowledgeBaseId: 7,
+        initialBvid: "BVNOTE123",
+      }),
+    );
   });
 
   it("marks the shell with the sidebar state so mobile topbar styles can switch", async () => {

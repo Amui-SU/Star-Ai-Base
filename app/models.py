@@ -16,6 +16,7 @@ from app.models_content import (
     VideoCache,
     VideoTitleOverride,
 )
+from app.models_notes import VideoNote
 from app.schemas.api_accounts import (
     ApiAccountCreateRequest,
     ApiAccountResponse,

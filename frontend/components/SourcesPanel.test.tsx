@@ -260,4 +260,44 @@ describe("SourcesPanel", () => {
       "button",
     );
   });
+
+  it("opens video notes from a source video without owning note runtime", async () => {
+    const user = userEvent.setup();
+    const onOpenVideoNote = vi.fn();
+    vi.mocked(sourceBindingApi.getFavorites).mockResolvedValue([
+      {
+        media_id: 10,
+        title: "Folder A",
+        media_count: 1,
+        is_selected: true,
+      },
+    ]);
+    vi.mocked(sourceBindingApi.getAllFavoriteVideos).mockResolvedValue({
+      total: 1,
+      valid: 1,
+      videos: [{ bvid: "BV1NOTE", title: "Video one" }],
+    });
+    vi.mocked(knowledgeBaseApi.stats).mockResolvedValue({
+      knowledge_base_id: 1,
+      workspace_id: 1,
+      total_videos: 0,
+      folders: [],
+      scoped: true,
+    });
+
+    render(
+      <SourcesPanel
+        sourceBindingId={7}
+        knowledgeBaseId={1}
+        onOpenVideoNote={onOpenVideoNote}
+      />,
+    );
+
+    await user.click(await screen.findByText("Folder A"));
+    await user.click(
+      screen.getByRole("button", { name: "打开视频笔记 Video one" }),
+    );
+
+    expect(onOpenVideoNote).toHaveBeenCalledWith("BV1NOTE");
+  });
 });

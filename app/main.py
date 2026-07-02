@@ -24,6 +24,7 @@ from app.routers import (
     local_connection,
     source_bindings,
     system_auth,
+    video_notes,
 )
 from app.services.ingestion_tasks import mark_stale_active_tasks_interrupted
 
@@ -112,6 +113,7 @@ app.include_router(auth.router)
 app.include_router(favorites.router)
 app.include_router(knowledge.router)
 app.include_router(chat.router)
+app.include_router(video_notes.router)
 
 
 @app.get("/")

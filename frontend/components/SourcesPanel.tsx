@@ -26,6 +26,7 @@ interface Props {
   onImportClick?: () => void;
   onBuildDone?: () => void;
   onBuildingChange?: (building: boolean) => void;
+  onOpenVideoNote?: (bvid: string) => void;
 }
 
 export default function SourcesPanel({
@@ -36,6 +37,7 @@ export default function SourcesPanel({
   onImportClick,
   onBuildDone,
   onBuildingChange,
+  onOpenVideoNote,
 }: Props) {
   const [playingVideo, setPlayingVideo] = useState<PlayingVideo | null>(null);
   const targetKnowledgeBase = !isMissingDisplayText(knowledgeBaseName)
@@ -173,6 +175,7 @@ export default function SourcesPanel({
               onSaveVideoTitle={(video, title) =>
                 void saveVideoTitle(video, title)
               }
+              onOpenVideoNote={onOpenVideoNote}
               onToggleFolder={toggleExpand}
               onToggleFolderSelect={toggleFolderSelection}
               onToggleVideoSelect={toggleVideoSelection}

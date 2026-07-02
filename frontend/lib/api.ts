@@ -53,6 +53,25 @@ export { knowledgeApi } from "./api/legacyKnowledge";
 export { localConnectionApi } from "./api/localConnection";
 export type { LocalLanAddressResponse } from "./api/localConnectionTypes";
 export { sourceBindingApi } from "./api/sourceBindings";
+export { videoNoteApi } from "./api/videoNotes";
+export type {
+  VideoNote,
+  VideoNoteAiEditRequest,
+  VideoNoteAiOperation,
+  VideoNoteAiResponse,
+  VideoNoteBlock,
+  VideoNoteBlockItem,
+  VideoNoteBlockType,
+  VideoNoteCreateRequest,
+  VideoNoteDetailResponse,
+  VideoNoteExportResponse,
+  VideoNoteListItem,
+  VideoNoteListParams,
+  VideoNoteListResponse,
+  VideoNoteSaveRequest,
+  VideoNoteTemplateId,
+  VideoNoteVideo,
+} from "./api/videoNoteTypes";
 export type {
   FavoriteFolder,
   FavoriteVideosResponse,

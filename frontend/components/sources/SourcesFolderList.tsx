@@ -22,6 +22,7 @@ interface SourcesFolderListProps {
   onPlayVideo: (video: { bvid: string; title: string }) => void;
   onRenameVideo: (video: Video) => void;
   onSaveVideoTitle: (video: Video, title: string) => void;
+  onOpenVideoNote?: (bvid: string) => void;
   onToggleFolder: (folderId: number) => void;
   onToggleFolderSelect: (folderId: number) => void;
   onToggleVideoSelect: (folderId: number, bvid: string) => void;
@@ -42,6 +43,7 @@ export default function SourcesFolderList({
   onPlayVideo,
   onRenameVideo,
   onSaveVideoTitle,
+  onOpenVideoNote,
   onToggleFolder,
   onToggleFolderSelect,
   onToggleVideoSelect,
@@ -140,6 +142,7 @@ export default function SourcesFolderList({
                       onPlay={onPlayVideo}
                       onRename={onRenameVideo}
                       onSaveTitle={onSaveVideoTitle}
+                      onOpenVideoNote={onOpenVideoNote}
                       onToggleSelect={onToggleVideoSelect}
                     />
                   ))
@@ -168,6 +171,7 @@ interface SourcesVideoCardProps {
   onPlay: (video: { bvid: string; title: string }) => void;
   onRename: (video: Video) => void;
   onSaveTitle: (video: Video, title: string) => void;
+  onOpenVideoNote?: (bvid: string) => void;
   onToggleSelect: (folderId: number, bvid: string) => void;
 }
 
@@ -186,6 +190,7 @@ function SourcesVideoCard({
   onPlay,
   onRename,
   onSaveTitle,
+  onOpenVideoNote,
   onToggleSelect,
 }: SourcesVideoCardProps) {
   const displayTitle = getVideoTitle(video);
@@ -275,6 +280,16 @@ function SourcesVideoCard({
             >
               重命名
             </button>
+            {onOpenVideoNote && (
+              <button
+                type="button"
+                className="video-card-action"
+                onClick={() => onOpenVideoNote(video.bvid)}
+                aria-label={`打开视频笔记 ${displayTitle}`}
+              >
+                记笔记
+              </button>
+            )}
             {(video.custom_title || displayTitle !== originalTitle) && (
               <button
                 type="button"

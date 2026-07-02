@@ -25,6 +25,8 @@ interface WorkspaceSidebarProps {
   onImportClick: () => void;
   onKnowledgeBaseSelect: (knowledgeBase: KnowledgeBase | null) => void;
   onNewConversation: () => void;
+  onOpenVideoNote: (bvid: string) => void;
+  onOpenVideoNotes: () => void;
   onOpenConversation: (conversationId: number) => void;
 }
 
@@ -46,6 +48,8 @@ export default function WorkspaceSidebar({
   onImportClick,
   onKnowledgeBaseSelect,
   onNewConversation,
+  onOpenVideoNote,
+  onOpenVideoNotes,
   onOpenConversation,
 }: WorkspaceSidebarProps) {
   return (
@@ -70,6 +74,7 @@ export default function WorkspaceSidebar({
             onBuildDone={onBuildDone}
             onImportClick={onImportClick}
             onKnowledgeBaseSelect={onKnowledgeBaseSelect}
+            onOpenVideoNote={onOpenVideoNote}
           />
         ) : sidebarMode === "history" ? (
           <ChatHistorySidebarPanel
@@ -80,7 +85,7 @@ export default function WorkspaceSidebar({
             onCollapse={onCollapse}
           />
         ) : (
-          <NotesSidebarPanel />
+          <NotesSidebarPanel onOpenVideoNotes={onOpenVideoNotes} />
         )}
       </aside>
     </div>
@@ -98,6 +103,7 @@ function SourcesSidebarContent({
   onBuildDone,
   onImportClick,
   onKnowledgeBaseSelect,
+  onOpenVideoNote,
 }: {
   activeBindingId: number | null;
   activeKbId: number | null;
@@ -109,6 +115,7 @@ function SourcesSidebarContent({
   onBuildDone: () => void;
   onImportClick: () => void;
   onKnowledgeBaseSelect: (knowledgeBase: KnowledgeBase | null) => void;
+  onOpenVideoNote: (bvid: string) => void;
 }) {
   return (
     <>
@@ -129,6 +136,7 @@ function SourcesSidebarContent({
           onImportClick={onImportClick}
           onBuildDone={onBuildDone}
           onBuildingChange={onBuildingChange}
+          onOpenVideoNote={onOpenVideoNote}
         />
       ) : (
         <SourcesInitialEmpty onImportClick={onImportClick} />

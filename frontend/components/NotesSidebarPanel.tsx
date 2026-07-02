@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 
-export default function NotesSidebarPanel() {
+interface NotesSidebarPanelProps {
+  onOpenVideoNotes?: () => void;
+}
+
+export default function NotesSidebarPanel({
+  onOpenVideoNotes,
+}: NotesSidebarPanelProps) {
   const [note, setNote] = useState("");
 
   return (
@@ -12,6 +18,15 @@ export default function NotesSidebarPanel() {
           <span className="sidebar-tool-kicker">学习</span>
           <h2>笔记</h2>
         </div>
+        {onOpenVideoNotes && (
+          <button
+            type="button"
+            className="sidebar-tool-action"
+            onClick={onOpenVideoNotes}
+          >
+            打开视频笔记库
+          </button>
+        )}
       </div>
       <textarea
         aria-label="学习笔记"

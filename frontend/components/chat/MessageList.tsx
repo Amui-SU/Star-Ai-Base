@@ -26,6 +26,7 @@ interface MessageListProps {
   onRegenerate: (assistantId: string, question: string) => void;
   onReaction: (messageId: string, reaction: Exclude<Reaction, null>) => void;
   onEditQuestion: (messageId: string, question: string) => void;
+  onOpenVideoNote?: (bvid: string) => void;
 }
 
 export default function MessageList({
@@ -43,6 +44,7 @@ export default function MessageList({
   onRegenerate,
   onReaction,
   onEditQuestion,
+  onOpenVideoNote,
 }: MessageListProps) {
   return (
     <div className="chat-window">
@@ -129,7 +131,7 @@ export default function MessageList({
                   {m.content}
                 </ReactMarkdown>
               )}
-              <MessageSources message={m} />
+              <MessageSources message={m} onOpenVideoNote={onOpenVideoNote} />
               <AssistantMessageActions
                 message={m}
                 messages={messages}
