@@ -1,5 +1,116 @@
 # Codex Project Instructions
 
+## Development Scope
+
+This repository is now past the large-version maintenance baseline. New feature
+work is allowed, but it must still preserve the architecture boundaries created
+during maintenance.
+
+- Use small vertical slices. Do not combine learning review, source import
+  expansion, chat history, and web-source backfill in one change.
+- Prefer an end-to-end MVP slice before broad horizontal expansion.
+- Keep legacy compatibility paths working unless there is an explicit removal
+  plan, tests, and migration note.
+- Do not move business logic back into routers, large React containers, or mixed
+  structure-test files for convenience.
+
+## Worktree Flow
+
+Use an isolated worktree for every feature, refactor, or maintenance slice.
+
+1. Create the branch under `.worktrees/<slice-name>`.
+2. Confirm the baseline with targeted tests before editing.
+3. Write or update the failing test/guard first for behavior or boundary
+   changes.
+4. Make the smallest implementation that satisfies the test.
+5. Run targeted regressions in the worktree.
+6. Run the full commit verification before committing.
+7. Merge back to `main` with `git merge --ff-only`.
+8. Re-run targeted regressions on `main`.
+9. Remove the worktree and branch.
+
+If `frontend/node_modules` is needed only for verification inside a temporary
+worktree, install it there, then remove it before removing the worktree. Never
+stage generated dependencies or build output.
+
+## File Boundary Rules
+
+Backend boundaries:
+
+- `app/routers/*` should contain FastAPI parameters, dependency injection,
+  DTOs, compatibility wrappers, and service delegation only.
+- Route orchestration belongs in `app/services/*_runtime.py`.
+- Pure response shaping, item mapping, and display payload rules belong in
+  `app/services/*_presenters.py` or focused helper modules.
+- RAG behavior should stay split by domain:
+  - `rag_runtime_components.py` for construction of embeddings, vectorstore,
+    LLM, splitters, and prompts.
+  - `rag_indexing.py` for vector indexing/write behavior.
+  - `rag_search.py` for vector search/filter behavior.
+  - `rag_qa.py` for answer orchestration.
+  - `rag_summary.py` for summarization chain behavior.
+  - `rag_collection_ops.py` for low-level collection operations.
+- Source binding and favorite-folder rules should reuse shared presenters and
+  service helpers. Do not duplicate invalid-video, default-folder, or organize
+  candidate rules across legacy and scoped paths.
+
+Frontend boundaries:
+
+- `ChatPanel.tsx` should remain an orchestrating shell, not a place for stream
+  reading, model config logic, web-search config persistence, history mapping,
+  viewport math, or large section JSX.
+- Streaming network/runtime logic belongs in
+  `frontend/components/chat/chatStreamingRuntime.ts`.
+- Streaming state transitions belong in
+  `frontend/components/chat/chatStreamingState.ts`.
+- Chat UI sections belong in focused section components such as
+  `ChatPanelHeader.tsx` and `ChatPanelComposerSection.tsx`.
+- Scope picker UI should stay in `frontend/components/chat-scope/*` focused
+  components.
+- Shared provider metadata belongs in `frontend/lib/providers.ts`, not inside
+  panels.
+
+## Structure Test Rules
+
+Structure tests are boundary guards, not behavior test dumping grounds.
+
+- Keep sentinel files light. If a structure test file grows into mixed domains,
+  split it into focused files and add a split guard.
+- `tests/frontend_structure/test_chat_component_boundaries.py` is intentionally
+  a lightweight sentinel. Chat-specific structure checks belong in the focused
+  files beside it.
+- `tests/service_boundaries/*` should guard backend ownership boundaries and
+  prevent router/service logic from flowing back to the wrong layer.
+- When introducing a new architectural boundary, add or update a structure guard
+  that prevents the old anti-pattern from returning.
+- Prefer checking imports, file existence, public function placement, and
+  absence of known implementation tokens over brittle formatting assertions.
+
+## New Feature Entry Points
+
+Learning review features:
+
+- Start with one vertical MVP: source selection, summary/review generation,
+  persistence if needed, and minimal UI access.
+- Reuse knowledge-base, chat, RAG, source binding, and presenter services before
+  creating new abstractions.
+- Do not put learning-review orchestration directly into routers or ChatPanel.
+
+Source import expansion:
+
+- Extend source binding/service abstractions first.
+- Reuse shared favorite/source presenter rules when possible.
+- Keep provider-specific API quirks in provider services, not routers or generic
+  UI components.
+
+Chat history and web-source backfill:
+
+- Keep history persistence in focused hooks/services.
+- Keep streaming, fallback, and source trailer parsing inside the existing chat
+  runtime/state boundaries.
+- Add regression coverage for source visibility and regeneration behavior before
+  changing UI orchestration.
+
 ## Stable Commit Workflow
 
 Before creating a git commit in this repository, run the commit checks in this order.
