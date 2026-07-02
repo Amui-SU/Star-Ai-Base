@@ -51,6 +51,7 @@ def test_chat_router_delegates_message_preparation_to_service():
 def test_chat_router_delegates_legacy_ask_runtime_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/chat_runtime.py"
+    route_runtime_path = project_root / "app/services/chat_route_runtime.py"
     chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
 
     ask_route_source = chat_source[
@@ -68,16 +69,30 @@ def test_chat_router_delegates_legacy_ask_runtime_to_service():
     service_source = service_path.read_text(encoding="utf-8")
     assert "async def answer_legacy_chat" in service_source
     assert "async def stream_legacy_chat" in service_source
-    assert "from app.services.chat_runtime import" in chat_source
+    assert route_runtime_path.exists()
+    route_runtime_source = route_runtime_path.read_text(encoding="utf-8")
+    assert "async def answer_legacy_chat_from_router" in route_runtime_source
+    assert "async def stream_legacy_chat_from_router" in route_runtime_source
+    assert "from app.services.chat_runtime import" in route_runtime_source
+    assert "from app.services.chat_route_runtime import" in chat_source
+    assert "from app.services.chat_runtime import" not in chat_source
 
-    assert "answer_legacy_chat(" in ask_route_source
+    assert "answer_legacy_chat_from_router(" in ask_route_source
+    assert "answer_legacy_chat(" not in ask_route_source
+    assert "resolve_llm_config=" not in ask_route_source
+    assert "prepare_messages=" not in ask_route_source
+    assert "get_llm_client=" not in ask_route_source
     assert "_resolve_llm_config(" not in ask_route_source
     assert "_prepare_messages(" not in ask_route_source
     assert "_get_llm_client(" not in ask_route_source
     assert "client.chat.completions.create(" not in ask_route_source
     assert "ChatResponse(" not in ask_route_source
 
-    assert "stream_legacy_chat(" in stream_route_source
+    assert "stream_legacy_chat_from_router(" in stream_route_source
+    assert "stream_legacy_chat(" not in stream_route_source
+    assert "resolve_llm_config=" not in stream_route_source
+    assert "prepare_messages=" not in stream_route_source
+    assert "stream_llm_events=" not in stream_route_source
     assert "def generate" not in stream_route_source
     assert "_stream_llm_events(" not in stream_route_source
     assert "_encode_thinking_delta(" not in stream_route_source

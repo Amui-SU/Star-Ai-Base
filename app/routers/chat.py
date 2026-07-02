@@ -1,5 +1,6 @@
 """Chat routes for RAG question answering."""
 
+import sys
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -87,7 +88,10 @@ from app.services.chat_video_context import (
     is_related_to_collection as _is_related_to_collection,
 )
 from app.services.chat_message_preparation import prepare_chat_messages
-from app.services.chat_runtime import answer_legacy_chat, stream_legacy_chat
+from app.services.chat_route_runtime import (
+    answer_legacy_chat_from_router,
+    stream_legacy_chat_from_router,
+)
 from app.services.llm_client import get_llm_client as _get_llm_client
 from app.services.rag_runtime import get_rag_service, reset_rag_service
 
@@ -259,6 +263,10 @@ _is_llm_connection_error = is_llm_connection_error
 _build_llm_unavailable_answer = build_llm_unavailable_answer
 
 
+def _chat_router_module():
+    return sys.modules[__name__]
+
+
 def _log_final_payload(route: str, messages: list[dict], sources: list[dict]) -> None:
     """记录最终发送给 LLM 的内容与来源"""
     logger.info(f"最终路由: {route}")
@@ -349,18 +357,10 @@ async def ask_question(
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
-        return await answer_legacy_chat(
+        return await answer_legacy_chat_from_router(
             request,
             db,
-            resolve_llm_config=_resolve_llm_config,
-            prepare_messages=_prepare_messages,
-            enforce_markdown_output=_enforce_markdown_output,
-            apply_mode_instructions=_apply_mode_instructions,
-            get_llm_client=_get_llm_client,
-            build_thinking_completion_options=_build_thinking_completion_options,
-            extract_thinking_and_answer=_extract_thinking_and_answer,
-            is_llm_connection_error=_is_llm_connection_error,
-            build_llm_unavailable_answer=_build_llm_unavailable_answer,
+            router_module=_chat_router_module(),
             warning_logger=logger.warning,
         )
     except HTTPException:
@@ -380,17 +380,10 @@ async def ask_question_stream(
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
     try:
-        stream = await stream_legacy_chat(
+        stream = await stream_legacy_chat_from_router(
             request,
             db,
-            resolve_llm_config=_resolve_llm_config,
-            prepare_messages=_prepare_messages,
-            enforce_markdown_output=_enforce_markdown_output,
-            apply_mode_instructions=_apply_mode_instructions,
-            stream_llm_events=_stream_llm_events,
-            encode_thinking_delta=_encode_thinking_delta,
-            is_llm_connection_error=_is_llm_connection_error,
-            build_llm_unavailable_answer=_build_llm_unavailable_answer,
+            router_module=_chat_router_module(),
             warning_logger=logger.warning,
         )
         return StreamingResponse(stream, media_type="text/plain; charset=utf-8")
