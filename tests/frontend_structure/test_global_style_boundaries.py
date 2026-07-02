@@ -29,6 +29,38 @@ def test_global_styles_delegate_modal_shell_styles_to_feature_file():
     assert ".provider-config-body" not in globals_css
 
 
+def test_modal_styles_delegate_to_focused_files():
+    project_root = get_project_root()
+    styles_dir = project_root / "frontend" / "app" / "styles"
+    modals_css = (styles_dir / "modals.css").read_text(encoding="utf-8")
+
+    expected_imports = [
+        "./modal-provider-config.css",
+        "./modal-shell.css",
+        "./modal-responsive.css",
+    ]
+    expected_anchors = {
+        "modal-provider-config.css": ".thinking-provider-modal {",
+        "modal-shell.css": ".modal-backdrop {",
+        "modal-responsive.css": "@media (max-width: 1024px)",
+    }
+
+    for imported_path in expected_imports:
+        imported_file = styles_dir / imported_path.removeprefix("./")
+        assert imported_file.exists()
+        assert expected_anchors[imported_file.name] in imported_file.read_text(
+            encoding="utf-8"
+        )
+        assert f'@import "{imported_path}";' in modals_css
+
+    for selector in [
+        "\n.thinking-provider-modal {",
+        "\n.modal-backdrop {",
+        "\n@media (max-width: 1024px)",
+    ]:
+        assert selector not in modals_css
+
+
 def test_global_styles_delegate_workspace_styles_to_feature_file():
     project_root = get_project_root()
     globals_css = (project_root / "frontend" / "app" / "globals.css").read_text(
