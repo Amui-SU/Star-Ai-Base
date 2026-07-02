@@ -13,5 +13,6 @@ def test_auth_database_ingestion_boundary_file_delegates_to_focused_files():
         "test_content_fetcher_boundaries.py",
         "test_asr_boundaries.py",
         "test_bilibili_service_boundaries.py",
+        "test_favorites_router_boundaries.py",
     ]:
         assert (service_boundary_dir / file_name).exists()

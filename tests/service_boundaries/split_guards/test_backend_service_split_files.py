@@ -137,6 +137,9 @@ def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
                 "test_bilibili_service_delegates_media_helpers_to_service",
                 "test_bilibili_service_delegates_favorite_helpers_to_service",
             ],
+            "test_favorites_router_boundaries.py": [
+                "test_favorites_router_delegates_listing_runtime_to_service",
+            ],
         },
     )
 

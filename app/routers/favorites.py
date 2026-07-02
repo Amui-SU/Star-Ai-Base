@@ -12,8 +12,21 @@ from app.schemas.content import FavoriteFolderInfo
 from app.services.favorite_folders import is_legacy_default_favorite_folder
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.services.legacy_bilibili_sessions import get_session
+from app.services.favorites_route_runtime import (
+    list_all_legacy_favorite_videos,
+    list_legacy_favorite_folders,
+    list_legacy_favorite_videos,
+)
 
 router = APIRouter(prefix="/favorites", tags=["收藏夹"])
+
+
+def _get_legacy_favorites_session(session_id: str):
+    return get_session(session_id)
+
+
+def _legacy_favorites_service_from_cookies(cookies: dict, service_cls: type):
+    return bilibili_service_from_cookies(cookies, service_cls)
 
 
 class OrganizePreviewRequest(BaseModel):
@@ -58,37 +71,18 @@ async def get_favorites_list(session_id: str = Query(..., description="会话ID"
     """
     获取用户的收藏夹列表
     """
-    session = await get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=401, detail="未登录或会话已过期")
-
-    cookies = session.get("cookies", {})
-    user_info = session.get("user_info", {})
-
-    bili = bilibili_service_from_cookies(cookies, BilibiliService)
     try:
-        mid = user_info.get("mid") or cookies.get("DedeUserID")
-        folders = await bili.get_user_favorites(mid=mid)
-
-        result = []
-        for folder in folders:
-            result.append(
-                FavoriteFolderInfo(
-                    media_id=folder["id"],
-                    title=folder["title"],
-                    media_count=folder.get("media_count", 0),
-                    is_selected=True,
-                    is_default=is_legacy_default_favorite_folder(folder),
-                )
-            )
-
-        return result
-
+        return await list_legacy_favorite_folders(
+            session_id,
+            get_session_func=_get_legacy_favorites_session,
+            service_from_cookies=_legacy_favorites_service_from_cookies,
+            service_cls=BilibiliService,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"获取收藏夹列表失败: {type(e).__name__}: {e!r}")
         raise HTTPException(status_code=500, detail=f"获取收藏夹失败: {str(e)}")
-    finally:
-        await bili.close()
 
 
 @router.get("/{media_id}/videos")
@@ -101,45 +95,21 @@ async def get_favorite_videos(
     """
     获取收藏夹中的视频列表
     """
-    session = await get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=401, detail="未登录或会话已过期")
-
-    cookies = session.get("cookies", {})
-
-    bili = bilibili_service_from_cookies(cookies, BilibiliService)
     try:
-        result = await bili.get_favorite_content(media_id, pn=page, ps=page_size)
-
-        # 处理视频列表
-        videos = []
-        for media in result.get("medias", []):
-            videos.append(
-                {
-                    "bvid": media.get("bvid") or media.get("bv_id"),
-                    "title": media.get("title"),
-                    "cover": media.get("cover"),
-                    "duration": media.get("duration"),
-                    "owner": media.get("upper", {}).get("name"),
-                    "play_count": media.get("cnt_info", {}).get("play"),
-                    "intro": media.get("intro"),
-                    "is_selected": True,  # 默认选中
-                }
-            )
-
-        return {
-            "folder_info": result.get("info"),
-            "videos": videos,
-            "has_more": result.get("has_more", False),
-            "page": page,
-            "page_size": page_size,
-        }
-
+        return await list_legacy_favorite_videos(
+            media_id,
+            session_id=session_id,
+            page=page,
+            page_size=page_size,
+            get_session_func=_get_legacy_favorites_session,
+            service_from_cookies=_legacy_favorites_service_from_cookies,
+            service_cls=BilibiliService,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取收藏夹视频失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取视频失败: {str(e)}")
-    finally:
-        await bili.close()
 
 
 @router.get("/{media_id}/all-videos")
@@ -149,51 +119,19 @@ async def get_all_favorite_videos(
     """
     获取收藏夹中的所有视频（用于构建知识库）
     """
-    session = await get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=401, detail="未登录或会话已过期")
-
-    cookies = session.get("cookies", {})
-
-    bili = bilibili_service_from_cookies(cookies, BilibiliService)
     try:
-        all_videos = await bili.get_all_favorite_videos(media_id)
-
-        # 处理视频列表（过滤失效视频）
-        videos = []
-        for media in all_videos:
-            bvid = media.get("bvid") or media.get("bv_id")
-            title = media.get("title", "")
-            if not bvid:
-                continue
-
-            # 过滤失效视频
-            attr = media.get("attr", 0)
-            if attr == 9 or title in ["已失效视频", "已删除视频"]:
-                continue
-
-            videos.append(
-                {
-                    "bvid": bvid,
-                    "title": title,
-                    "cover": media.get("cover"),
-                    "duration": media.get("duration"),
-                    "owner": media.get("upper", {}).get("name"),
-                    "cid": (
-                        media.get("ugc", {}).get("first_cid")
-                        if media.get("ugc")
-                        else None
-                    ),
-                }
-            )
-
-        return {"total": len(videos), "videos": videos}
-
+        return await list_all_legacy_favorite_videos(
+            media_id,
+            session_id=session_id,
+            get_session_func=_get_legacy_favorites_session,
+            service_from_cookies=_legacy_favorites_service_from_cookies,
+            service_cls=BilibiliService,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取所有视频失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取视频失败: {str(e)}")
-    finally:
-        await bili.close()
 
 
 @router.post("/organize/preview", response_model=OrganizePreviewResponse)
