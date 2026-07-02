@@ -8,9 +8,12 @@ from fastapi import HTTPException
 from app.schemas.content import FavoriteFolderInfo
 from app.services.bilibili import BilibiliService, bilibili_service_from_cookies
 from app.services.favorite_folders import is_legacy_default_favorite_folder
+from app.services.favorite_video_presenters import favorite_organize_candidate
+from app.services.favorite_video_presenters import favorite_video_summary
+from app.services.favorite_video_presenters import (
+    legacy_valid_favorite_video_summary as valid_favorite_video_summary,
+)
 from app.services.legacy_bilibili_sessions import get_session
-
-INVALID_FAVORITE_VIDEO_TITLES = {"已失效视频", "已删除视频"}
 
 
 async def get_bilibili_service_for_legacy_favorites_session(
@@ -26,36 +29,6 @@ async def get_bilibili_service_for_legacy_favorites_session(
     cookies = session.get("cookies", {})
     user_info = session.get("user_info", {})
     return service_from_cookies(cookies, service_cls), cookies, user_info
-
-
-def favorite_video_summary(media: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "bvid": media.get("bvid") or media.get("bv_id"),
-        "title": media.get("title"),
-        "cover": media.get("cover"),
-        "duration": media.get("duration"),
-        "owner": media.get("upper", {}).get("name"),
-        "play_count": media.get("cnt_info", {}).get("play"),
-        "intro": media.get("intro"),
-        "is_selected": True,
-    }
-
-
-def valid_favorite_video_summary(media: dict[str, Any]) -> dict[str, Any] | None:
-    bvid = media.get("bvid") or media.get("bv_id")
-    title = media.get("title", "")
-    if not bvid:
-        return None
-    if media.get("attr", 0) == 9 or title in INVALID_FAVORITE_VIDEO_TITLES:
-        return None
-    return {
-        "bvid": bvid,
-        "title": title,
-        "cover": media.get("cover"),
-        "duration": media.get("duration"),
-        "owner": media.get("upper", {}).get("name"),
-        "cid": media.get("ugc", {}).get("first_cid") if media.get("ugc") else None,
-    }
 
 
 async def list_legacy_favorite_folders(
@@ -143,36 +116,6 @@ async def list_all_legacy_favorite_videos(
         return {"total": len(videos), "videos": videos}
     finally:
         await bili.close()
-
-
-def favorite_organize_candidate(media: dict[str, Any]) -> dict[str, Any] | None:
-    bvid = media.get("bvid") or media.get("bv_id")
-    title = media.get("title") or bvid or ""
-    if not bvid:
-        return None
-    if media.get("attr", 0) == 9 or title in INVALID_FAVORITE_VIDEO_TITLES:
-        return None
-
-    resource_id = media.get("id") or media.get("aid") or media.get("avid")
-    if not resource_id:
-        return None
-    try:
-        resource_id = int(resource_id)
-    except Exception:
-        return None
-
-    resource_type = media.get("type") or 2
-    try:
-        resource_type = int(resource_type)
-    except Exception:
-        resource_type = 2
-
-    return {
-        "bvid": bvid,
-        "title": title,
-        "resource_id": resource_id,
-        "resource_type": resource_type,
-    }
 
 
 async def preview_legacy_favorite_organization(

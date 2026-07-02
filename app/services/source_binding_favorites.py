@@ -12,6 +12,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import SystemUser, Workspace
 from app.schemas.content import FavoriteFolderInfo
 from app.services.favorite_folders import is_default_favorite_folder
+from app.services.favorite_video_presenters import (
+    dedupe_favorite_organization_items as _dedupe_organization_items,
+)
+from app.services.favorite_video_presenters import (
+    favorite_video_summary as _favorite_video_summary,
+)
+from app.services.favorite_video_presenters import (
+    source_binding_favorite_organization_item as _organization_item,
+)
+from app.services.favorite_video_presenters import (
+    source_binding_valid_favorite_video_summary as _valid_favorite_video_summary,
+)
 from app.services.source_binding_presenters import (
     get_video_title_overrides as default_get_video_title_overrides,
     video_with_display_title as default_with_display_title,
@@ -30,78 +42,6 @@ async def _resolve_bilibili_service(
     if isawaitable(service):
         return await service
     return service
-
-
-def _favorite_video_summary(media: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "bvid": media.get("bvid") or media.get("bv_id"),
-        "title": media.get("title"),
-        "cover": media.get("cover"),
-        "duration": media.get("duration"),
-        "owner": (media.get("upper") or {}).get("name"),
-        "play_count": (media.get("cnt_info") or {}).get("play"),
-        "intro": media.get("intro"),
-        "is_selected": True,
-    }
-
-
-def _valid_favorite_video_summary(media: dict[str, Any]) -> dict[str, Any] | None:
-    bvid = media.get("bvid") or media.get("bv_id")
-    title = media.get("title", "")
-    if not bvid:
-        return None
-    attr = media.get("attr", 0)
-    if attr == 9 or title in ["已失效视频", "已删除视频"]:
-        return None
-    return {
-        "bvid": bvid,
-        "title": title,
-        "cover": media.get("cover"),
-        "duration": media.get("duration"),
-        "owner": (media.get("upper") or {}).get("name"),
-        "intro": media.get("intro"),
-        "is_selected": True,
-    }
-
-
-def _organization_item(
-    media: dict[str, Any],
-    *,
-    default_folder_title: str,
-) -> dict[str, Any] | None:
-    bvid = media.get("bvid") or media.get("bv_id")
-    title = media.get("title") or bvid or ""
-    if not bvid:
-        return None
-    attr = media.get("attr", 0)
-    if attr == 9 or title in ["已失效视频", "已删除视频"]:
-        return None
-    resource_id = media.get("id") or media.get("aid") or media.get("avid")
-    if not resource_id:
-        return None
-    return {
-        "bvid": bvid,
-        "title": title,
-        "resource_id": int(resource_id),
-        "resource_type": int(media.get("type") or 2),
-        "target_folder_id": None,
-        "target_folder_title": default_folder_title,
-        "reason": "待手动分类",
-    }
-
-
-def _dedupe_organization_items(
-    items: Sequence[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    seen = set()
-    deduped = []
-    for item in items:
-        key = (item["resource_id"], item["resource_type"])
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped
 
 
 async def list_bilibili_favorite_folders(
