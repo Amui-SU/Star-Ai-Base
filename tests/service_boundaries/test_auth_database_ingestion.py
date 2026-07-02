@@ -10,6 +10,7 @@ def test_auth_database_ingestion_boundary_file_delegates_to_focused_files():
         "test_database_boundaries.py",
         "test_legacy_bilibili_session_boundaries.py",
         "test_ingestion_boundaries.py",
+        "test_import_request_boundaries.py",
         "test_content_fetcher_boundaries.py",
         "test_asr_boundaries.py",
         "test_bilibili_service_boundaries.py",

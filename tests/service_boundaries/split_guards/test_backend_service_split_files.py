@@ -123,6 +123,9 @@ def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
                 "test_import_router_delegates_import_task_runtime_to_service",
                 "test_scoped_folder_sync_tests_do_not_import_legacy_router",
             ],
+            "test_import_request_boundaries.py": [
+                "test_import_router_delegates_request_runtime_to_service",
+            ],
             "test_content_fetcher_boundaries.py": [
                 "test_content_fetcher_delegates_ai_summary_helpers_to_service",
                 "test_content_fetcher_delegates_subtitle_helpers_to_service",
