@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import ChatPanelComposerSection from "@/components/chat/ChatPanelComposerSection";
 import ChatEmptyState from "@/components/chat/ChatEmptyState";
 import ChatModelStatus from "@/components/chat/ChatModelStatus";
-import Composer from "@/components/chat/Composer";
 import MessageList from "@/components/chat/MessageList";
 import ModelConfigModal from "@/components/chat/ModelConfigModal";
 import WebSearchConfigModal from "@/components/chat/WebSearchConfigModal";
@@ -313,43 +313,31 @@ export default function ChatPanel({
         </div>
       </div>
 
-      <div className="panel-footer border-transparent bg-transparent flex flex-col items-center gap-2">
-        <div className="w-full max-w-3xl mx-auto mt-1">
-          {scopeNotice && (
-            <div className="scope-notice" aria-live="polite">
-              {scopeNotice}
-            </div>
-          )}
-          <Composer
-            inputRef={inputRef}
-            input={input}
-            knowledgeBaseId={knowledgeBaseId}
-            isGenerating={isGenerating}
-            canSend={canSend}
-            scopeOptions={scopeOptions}
-            chatScope={chatScope}
-            webSearchEnabled={webSearchEnabled}
-            webSearchProvider={webSearchProvider}
-            webSearchConfig={webSearchConfig}
-            canConfigureWebSearch={Boolean(onOpenApiAccounts) || isAdmin}
-            webSearchNotice={webSearchNotice}
-            onInputChange={handleComposerChange}
-            onSend={() => {
-              const question = input;
-              setInput("");
-              void sendQuestion(question);
-            }}
-            onStopGenerating={stopGenerating}
-            onScopeChange={handleScopeChange}
-            onWebSearchChange={handleWebSearchChange}
-            onWebSearchProviderChange={handleWebSearchProviderChange}
-            onConfigureTavily={openWebSearchConfig}
-          />
-        </div>
-        <div className="composer-disclaimer text-[10px] text-(--muted) text-center">
-          内容由 AI 生成，请注意甄别。
-        </div>
-      </div>
+      <ChatPanelComposerSection
+        inputRef={inputRef}
+        input={input}
+        knowledgeBaseId={knowledgeBaseId}
+        isGenerating={isGenerating}
+        canSend={canSend}
+        scopeNotice={scopeNotice}
+        scopeOptions={scopeOptions}
+        chatScope={chatScope}
+        webSearchEnabled={webSearchEnabled}
+        webSearchProvider={webSearchProvider}
+        webSearchConfig={webSearchConfig}
+        canConfigureWebSearch={Boolean(onOpenApiAccounts) || isAdmin}
+        webSearchNotice={webSearchNotice}
+        onInputChange={handleComposerChange}
+        onSendQuestion={(question) => {
+          setInput("");
+          void sendQuestion(question);
+        }}
+        onStopGenerating={stopGenerating}
+        onScopeChange={handleScopeChange}
+        onWebSearchChange={handleWebSearchChange}
+        onWebSearchProviderChange={handleWebSearchProviderChange}
+        onConfigureTavily={openWebSearchConfig}
+      />
 
       {webSearchConfigOpen && (
         <WebSearchConfigModal

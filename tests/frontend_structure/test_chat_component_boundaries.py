@@ -6,10 +6,18 @@ def test_chat_panel_uses_chat_subcomponents():
     chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
         encoding="utf-8"
     )
+    composer_section = (
+        project_root
+        / "frontend"
+        / "components"
+        / "chat"
+        / "ChatPanelComposerSection.tsx"
+    ).read_text(encoding="utf-8")
 
     for relative_path in [
         "frontend/components/chat/MessageList.tsx",
         "frontend/components/chat/Composer.tsx",
+        "frontend/components/chat/ChatPanelComposerSection.tsx",
         "frontend/components/chat/WebSearchConfigModal.tsx",
         "frontend/components/chat/ModelConfigModal.tsx",
         "frontend/components/chat/useChatStreaming.ts",
@@ -18,7 +26,9 @@ def test_chat_panel_uses_chat_subcomponents():
         assert (project_root / relative_path).exists()
 
     assert "@/components/chat/MessageList" in chat_panel
-    assert "@/components/chat/Composer" in chat_panel
+    assert "@/components/chat/ChatPanelComposerSection" in chat_panel
+    assert "@/components/chat/Composer" not in chat_panel
+    assert "@/components/chat/Composer" in composer_section
     assert "@/components/chat/WebSearchConfigModal" in chat_panel
     assert "@/components/chat/ModelConfigModal" in chat_panel
     assert "@/components/chat/useChatStreaming" in chat_panel
@@ -197,6 +207,29 @@ def test_chat_panel_uses_viewport_hook():
         assert token not in chat_panel
     assert "const handleChatScroll" not in chat_panel
     assert "const handleComposerChange" not in chat_panel
+
+
+def test_chat_panel_uses_composer_section_component():
+    project_root = get_project_root()
+    chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    section_file = (
+        project_root
+        / "frontend"
+        / "components"
+        / "chat"
+        / "ChatPanelComposerSection.tsx"
+    )
+
+    assert section_file.exists()
+    section_source = section_file.read_text(encoding="utf-8")
+    assert "export default function ChatPanelComposerSection" in section_source
+    assert "@/components/chat/ChatPanelComposerSection" in chat_panel
+    assert "panel-footer border-transparent" not in chat_panel
+    assert "scope-notice" not in chat_panel
+    assert "composer-disclaimer" not in chat_panel
+    assert "<Composer" not in chat_panel
 
 
 def test_chat_streaming_uses_state_helpers():
