@@ -8,6 +8,7 @@ def test_knowledge_base_router_boundary_file_delegates_to_focused_files():
     for file_name in [
         "test_knowledge_base_router_web_search_boundaries.py",
         "test_knowledge_base_router_catalog_build_boundaries.py",
+        "test_knowledge_base_build_route_boundaries.py",
         "test_knowledge_base_router_chat_search_boundaries.py",
         "test_knowledge_base_delete_boundaries.py",
         "test_rag_ingestion_boundaries.py",

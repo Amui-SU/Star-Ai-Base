@@ -35,10 +35,7 @@ from app.services.knowledge_base_catalog import (
     create_workspace_knowledge_base,
     list_workspace_knowledge_bases,
 )
-from app.services.knowledge_base_build_requests import (
-    prepare_knowledge_base_build_request,
-)
-from app.services.knowledge_base_build_runtime import resolve_build_rag_service
+from app.services.knowledge_base_build_route_runtime import start_knowledge_base_build
 from app.services.knowledge_base_build_tasks import (
     get_build_status_payload,
     run_scoped_build as _run_scoped_build,
@@ -153,13 +150,6 @@ _prepare_llm_messages_with_tools = build_prepare_llm_messages_with_tools_adapter
     resolve_llm_config=lambda: _resolve_llm_config(),
     get_llm_client=lambda config: _get_llm_client(config),
 )
-
-
-def _get_rag_service_for_build():
-    return resolve_build_rag_service(
-        rag_service_factory=lambda: get_rag_service(),
-        warning_logger=logger.warning,
-    )
 
 
 _answer_from_documents = lambda question, documents: answer_from_documents(
@@ -302,24 +292,20 @@ async def build_knowledge_base(
     knowledge_base: KnowledgeBase = Depends(get_knowledge_base_for_user),
     db: AsyncSession = Depends(get_db),
 ) -> KnowledgeBaseBuildResponse:
-    plan = await prepare_knowledge_base_build_request(
-        db,
+    return await start_knowledge_base_build(
+        db=db,
         payload=payload,
+        background_tasks=background_tasks,
         user=current_user,
         workspace=current_workspace,
         knowledge_base=knowledge_base,
         bilibili_service_class=BilibiliService,
         asr_service_factory=ASRService,
         content_fetcher_class=ContentFetcher,
-        rag_service_factory=_get_rag_service_for_build,
+        rag_service_factory=get_rag_service,
+        run_scoped_build=_run_scoped_build,
+        warning_logger=logger.warning,
     )
-
-    background_tasks.add_task(
-        _run_scoped_build,
-        **plan.task_kwargs,
-    )
-
-    return plan.response
 
 
 @router.get("/{knowledge_base_id}/build/status/{task_id}")

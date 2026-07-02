@@ -157,10 +157,18 @@ def test_knowledge_base_router_delegates_build_request_preparation_to_service():
 
     assert service_path.exists()
     service_source = service_path.read_text(encoding="utf-8")
+    route_runtime_path = (
+        project_root / "app/services/knowledge_base_build_route_runtime.py"
+    )
+    route_runtime_source = route_runtime_path.read_text(encoding="utf-8")
     assert "class KnowledgeBaseBuildPlan" in service_source
     assert "async def prepare_knowledge_base_build_request" in service_source
-    assert "from app.services.knowledge_base_build_requests import" in router_source
-    assert "prepare_knowledge_base_build_request(" in router_source
+    assert route_runtime_path.exists()
+    assert "from app.services.knowledge_base_build_requests import" not in router_source
+    assert (
+        "from app.services.knowledge_base_build_requests import" in route_runtime_source
+    )
+    assert "prepare_knowledge_base_build_request(" not in router_source
     assert "db.get(SourceBinding" not in router_source
     assert "select(SourceCredential)" not in router_source
     assert "decrypt_text(" not in router_source
@@ -172,23 +180,32 @@ def test_knowledge_base_router_delegates_build_request_preparation_to_service():
 def test_knowledge_base_router_delegates_build_runtime_fallback_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_base_build_runtime.py"
+    route_runtime_path = (
+        project_root / "app/services/knowledge_base_build_route_runtime.py"
+    )
     router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
         encoding="utf-8"
     )
     declared_names = declared_callable_names(router_source)
-    build_factory_source = function_source(router_source, "_get_rag_service_for_build")
+    build_route_source = function_source(router_source, "build_knowledge_base")
 
     assert service_path.exists()
     service_source = service_path.read_text(encoding="utf-8")
+    assert route_runtime_path.exists()
+    route_runtime_source = route_runtime_path.read_text(encoding="utf-8")
     assert "class NoopBuildRAGService" in service_source
     assert "def resolve_build_rag_service" in service_source
-    assert "from app.services.knowledge_base_build_runtime import" in router_source
-    assert "resolve_build_rag_service(" in build_factory_source
-    assert "rag_service_factory=lambda: get_rag_service()" in build_factory_source
+    assert "from app.services.knowledge_base_build_runtime import" not in router_source
+    assert (
+        "from app.services.knowledge_base_build_runtime import" in route_runtime_source
+    )
+    assert "resolve_build_rag_service" in route_runtime_source
+    assert "resolve_rag_service(" in route_runtime_source
+    assert "rag_service_factory=get_rag_service" in build_route_source
     assert "_NoopRAGService" not in router_source
-    assert "try:" not in build_factory_source
-    assert "except Exception" not in build_factory_source
-    assert "logger.warning(" not in build_factory_source
+    assert "try:" not in build_route_source
+    assert "except Exception" not in build_route_source
+    assert "logger.warning(" not in build_route_source
     assert "_NoopRAGService" not in declared_names
 
 
