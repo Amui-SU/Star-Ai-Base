@@ -5,6 +5,7 @@ from tests.service_boundaries.helpers import get_project_root
 def test_knowledge_base_router_delegates_search_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_base_search.py"
+    runtime_path = project_root / "app/services/knowledge_base_route_runtime.py"
     router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
         encoding="utf-8"
     )
@@ -12,7 +13,11 @@ def test_knowledge_base_router_delegates_search_helpers_to_service():
     assert service_path.exists()
     service_source = service_path.read_text(encoding="utf-8")
     assert "async def search_knowledge_base_documents" in service_source
-    assert "from app.services.knowledge_base_search import" in router_source
+    assert runtime_path.exists()
+    runtime_source = runtime_path.read_text(encoding="utf-8")
+    assert "from app.services.knowledge_base_search import" in runtime_source
+    assert "from app.services.knowledge_base_search import" not in router_source
+    assert "from app.services.knowledge_base_route_runtime import" in router_source
     assert 'detail="Search query cannot be empty"' not in router_source
     assert "rag.search_in_knowledge_base(" not in router_source
     assert "KnowledgeBaseSearchResponse(" not in router_source

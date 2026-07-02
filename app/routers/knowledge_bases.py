@@ -37,7 +37,6 @@ from app.services.knowledge_base_catalog import (
 )
 from app.services.knowledge_base_build_route_runtime import start_knowledge_base_build
 from app.services.knowledge_base_build_tasks import (
-    get_build_status_payload,
     run_scoped_build as _run_scoped_build,
 )
 from app.services.knowledge_base_answer_adapter import (
@@ -47,8 +46,10 @@ from app.services.knowledge_base_chat_runtime import (
     answer_knowledge_base_chat_from_router,
     stream_knowledge_base_chat_from_router,
 )
-from app.services.knowledge_base_delete import (
-    delete_knowledge_base as delete_knowledge_base_service,
+from app.services.knowledge_base_route_runtime import (
+    delete_knowledge_base_from_router,
+    get_knowledge_base_build_status_from_router,
+    search_knowledge_base_from_router,
 )
 from app.services.knowledge_base_documents import (
     load_db_fallback_documents as _load_db_fallback_documents,
@@ -64,7 +65,6 @@ from app.services.knowledge_base_messages import (
     build_knowledge_base_messages,
 )
 from app.services.knowledge_base_stats import build_knowledge_base_stats
-from app.services.knowledge_base_search import search_knowledge_base_documents
 from app.services.chat_messages import (
     apply_mode_instructions as _apply_mode_instructions,
     enforce_markdown_output as _enforce_markdown_output,
@@ -315,7 +315,7 @@ async def get_build_status(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """获取构建任务状态（按知识库校验）。"""
-    return await get_build_status_payload(
+    return await get_knowledge_base_build_status_from_router(
         db,
         task_id=task_id,
         knowledge_base=knowledge_base,
@@ -329,7 +329,7 @@ async def search_knowledge_base(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> KnowledgeBaseSearchResponse:
-    return await search_knowledge_base_documents(
+    return await search_knowledge_base_from_router(
         db,
         payload=payload,
         knowledge_base=knowledge_base,
@@ -387,7 +387,7 @@ async def delete_knowledge_base(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """删除知识库及其相关数据。"""
-    return await delete_knowledge_base_service(
+    return await delete_knowledge_base_from_router(
         db,
         knowledge_base=knowledge_base,
         workspace=current_workspace,

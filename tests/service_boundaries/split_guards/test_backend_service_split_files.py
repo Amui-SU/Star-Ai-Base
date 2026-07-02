@@ -179,6 +179,9 @@ def test_knowledge_base_router_boundary_tests_are_split_by_domain():
             "test_knowledge_base_build_route_boundaries.py": [
                 "test_knowledge_base_router_delegates_build_route_runtime_to_service",
             ],
+            "test_knowledge_base_route_runtime_boundaries.py": [
+                "test_knowledge_base_router_delegates_status_search_delete_runtime_to_service",
+            ],
             "test_knowledge_base_router_chat_search_boundaries.py": [
                 "test_knowledge_base_router_delegates_search_helpers_to_service",
                 "test_knowledge_base_router_delegates_non_streaming_chat_to_service",
