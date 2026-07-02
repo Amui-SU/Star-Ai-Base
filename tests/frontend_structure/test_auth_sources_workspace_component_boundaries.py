@@ -49,6 +49,26 @@ def test_auth_page_presentation_components_are_extracted():
     assert "auth-code-row" not in auth_page
 
 
+def test_auth_card_presentation_boundaries_are_extracted():
+    project_root = get_project_root()
+    auth_card = (
+        project_root / "frontend" / "components" / "auth" / "AuthCard.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert (project_root / "frontend/components/auth/authCardStyles.ts").exists()
+    assert (project_root / "frontend/components/auth/AuthCardParts.tsx").exists()
+    assert (project_root / "frontend/components/auth/AuthCardSteps.tsx").exists()
+    assert "@/components/auth/authCardStyles" in auth_card
+    assert "@/components/auth/AuthCardSteps" in auth_card
+    assert "CSSProperties" not in auth_card
+    assert "AuthOAuthButtons" not in auth_card
+    assert "const inputStyle" not in auth_card
+    assert "const authCardStyle" not in auth_card
+    assert "function AuthError" not in auth_card
+    assert "function AuthSeparator" not in auth_card
+    assert "auth-code-row" not in auth_card
+
+
 def test_sources_video_player_portal_is_extracted():
     project_root = get_project_root()
     sources_panel = (
