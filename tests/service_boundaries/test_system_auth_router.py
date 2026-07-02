@@ -133,9 +133,9 @@ def test_system_auth_router_delegates_oauth_provider_network_to_service():
     for name in expected_service_names:
         assert f"def {name}" in service_source or f"async def {name}" in service_source
     assert "from app.services.system_auth_oauth_providers import" in router_source
-    assert "_fetch_google_oauth_user(" in router_source
-    assert "_fetch_wechat_oauth_user(" in router_source
-    assert "_fetch_qq_oauth_user(" in router_source
+    assert "fetch_google_oauth_user as _fetch_google_oauth_user" in router_source
+    assert "fetch_wechat_oauth_user as _fetch_wechat_oauth_user" in router_source
+    assert "fetch_qq_oauth_user as _fetch_qq_oauth_user" in router_source
     for name in provider_url_names:
         assert name not in router_source
 

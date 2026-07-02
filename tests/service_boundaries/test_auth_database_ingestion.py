@@ -7,6 +7,7 @@ def test_auth_database_ingestion_boundary_file_delegates_to_focused_files():
 
     for file_name in [
         "test_system_auth_router.py",
+        "test_system_auth_callback_boundaries.py",
         "test_database_boundaries.py",
         "test_legacy_bilibili_session_boundaries.py",
         "test_ingestion_boundaries.py",

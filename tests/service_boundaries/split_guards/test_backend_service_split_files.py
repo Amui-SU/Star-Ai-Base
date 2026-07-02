@@ -111,6 +111,9 @@ def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
                 "test_system_auth_router_delegates_oauth_state_helpers_to_service",
                 "test_system_auth_router_delegates_admin_helpers_to_service",
             ],
+            "test_system_auth_callback_boundaries.py": [
+                "test_system_auth_router_delegates_callback_runtime_to_service",
+            ],
             "test_database_boundaries.py": [
                 "test_database_legacy_migration_entrypoint_delegates_without_nested_helpers",
                 "test_database_delegates_sqlite_legacy_schema_to_service",
