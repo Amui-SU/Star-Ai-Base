@@ -46,6 +46,7 @@ def test_content_fetcher_delegates_subtitle_helpers_to_service():
 def test_content_fetcher_delegates_asr_audio_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/content_asr.py"
+    local_audio_path = project_root / "app/services/content_audio_runtime.py"
     fetcher_source = (project_root / "app/services/content_fetcher.py").read_text(
         encoding="utf-8"
     )
@@ -66,3 +67,17 @@ def test_content_fetcher_delegates_asr_audio_helpers_to_service():
     assert "transcribe_local_file(" not in fetcher_source
     assert "def _probe_audio_url(" not in fetcher_source
     assert "def _try_asr_with_local_audio(" not in fetcher_source
+
+    assert local_audio_path.exists()
+    local_audio_source = local_audio_path.read_text(encoding="utf-8")
+    for name in {
+        "transcode_audio_to_wav",
+        "get_audio_duration_sec",
+        "split_audio_wav",
+    }:
+        assert f"def {name}" in local_audio_source
+    assert "from app.services.content_audio_runtime import" in fetcher_source
+    assert "shutil.which" not in fetcher_source
+    assert "subprocess.run" not in fetcher_source
+    assert "math.ceil" not in fetcher_source
+    assert '"-ss",' not in fetcher_source
