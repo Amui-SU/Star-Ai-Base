@@ -86,9 +86,12 @@ def test_sources_panel_pure_logic_is_extracted():
     sources_panel = (
         project_root / "frontend" / "components" / "SourcesPanel.tsx"
     ).read_text(encoding="utf-8")
+    footer = (
+        project_root / "frontend" / "components" / "sources" / "SourcesPanelFooter.tsx"
+    ).read_text(encoding="utf-8")
 
     assert (project_root / "frontend/components/sources/sourcesPanelLogic.ts").exists()
-    assert "@/components/sources/sourcesPanelLogic" in sources_panel
+    assert "@/components/sources/sourcesPanelLogic" in footer
     assert "const formatTime" not in sources_panel
     assert "const getFolderStatus" not in sources_panel
     assert "const getButtonText" not in sources_panel
@@ -170,6 +173,35 @@ def test_sources_panel_folder_list_is_extracted():
     assert "folder-list-wrapper" not in sources_panel
     assert "video-card" not in sources_panel
     assert "video-title-input" not in sources_panel
+
+
+def test_sources_panel_sections_and_selection_are_extracted():
+    project_root = get_project_root()
+    sources_panel = (
+        project_root / "frontend" / "components" / "SourcesPanel.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        project_root / "frontend/components/sources/useSourcesSelection.ts"
+    ).exists()
+    assert (
+        project_root / "frontend/components/sources/SourcesPanelHeader.tsx"
+    ).exists()
+    assert (project_root / "frontend/components/sources/SourcesEmptyState.tsx").exists()
+    assert (
+        project_root / "frontend/components/sources/SourcesPanelFooter.tsx"
+    ).exists()
+    assert "@/components/sources/useSourcesSelection" in sources_panel
+    assert "@/components/sources/SourcesPanelHeader" in sources_panel
+    assert "@/components/sources/SourcesEmptyState" in sources_panel
+    assert "@/components/sources/SourcesPanelFooter" in sources_panel
+    assert "const [selected" not in sources_panel
+    assert "const toggleSelect" not in sources_panel
+    assert "const toggleVideoSelect" not in sources_panel
+    assert "sources-empty-state" not in sources_panel
+    assert "panel-footer" not in sources_panel
+    assert "默认收藏夹" not in sources_panel
+    assert "getSourcesBuildButtonText" not in sources_panel
 
 
 def test_workspace_state_is_extracted_from_home_page():
