@@ -1,0 +1,95 @@
+.scope-picker {
+  position: relative;
+}
+
+.scope-picker-trigger {
+  height: 28px;
+  min-width: 0;
+  max-width: 134px;
+  padding: 0 9px;
+  gap: 5px;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: var(--paper-3);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: none;
+}
+
+.scope-picker-trigger:hover,
+.scope-picker-trigger[aria-expanded="true"] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--paper-3) 86%, var(--ink) 14%);
+  color: var(--ink-soft);
+}
+
+.scope-picker-trigger.web-search-enabled:not([aria-expanded="true"]) {
+  background: rgba(95, 163, 255, 0.16);
+  color: #b8d8ff;
+}
+
+.scope-picker-trigger.web-search-notice:not([aria-expanded="true"]) {
+  animation: webSearchPulse 1.8s ease-in-out 1;
+}
+
+.scope-picker-trigger.web-search-enabled:not([aria-expanded="true"])
+  span:first-child {
+  color: #7fb7ff;
+  filter: drop-shadow(0 0 5px rgba(95, 163, 255, 0.42));
+}
+
+.scope-picker-trigger:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+html.light .scope-picker-trigger {
+  background: rgba(43, 36, 29, 0.08);
+  color: var(--muted);
+}
+
+html.light .scope-picker-trigger:hover,
+html.light .scope-picker-trigger[aria-expanded="true"] {
+  background: rgba(43, 36, 29, 0.12);
+  color: var(--ink-soft);
+}
+
+html.light
+  .scope-picker-trigger.web-search-enabled:not([aria-expanded="true"]) {
+  background: rgba(47, 124, 120, 0.15);
+  border-color: rgba(47, 124, 120, 0.35);
+  color: #1f7a75;
+}
+
+html.light .scope-picker-trigger.web-search-enabled:not([aria-expanded="true"]),
+html.light .scope-picker-trigger.web-search-notice:not([aria-expanded="true"]) {
+  background: rgba(47, 124, 120, 0.15);
+  border-color: rgba(47, 124, 120, 0.35);
+  color: #1f7a75;
+}
+
+html.light .scope-picker-trigger.web-search-notice:not([aria-expanded="true"]) {
+  animation-name: webSearchPulseLight;
+}
+
+html.light
+  .scope-picker-trigger.web-search-enabled:not([aria-expanded="true"])
+  span:first-child,
+html.light
+  .scope-picker-trigger.web-search-notice:not([aria-expanded="true"])
+  span:first-child {
+  color: #2f7c78;
+  filter: drop-shadow(0 0 5px rgba(47, 124, 120, 0.34));
+}
+
+.scope-picker-summary {
+  display: inline-block;
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  line-height: 1;
+}

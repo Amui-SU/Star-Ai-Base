@@ -1,0 +1,35 @@
+.scope-picker-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 70;
+  width: min(340px, calc(100vw - 28px));
+  max-height: min(520px, 70vh);
+  overflow: auto;
+  padding: 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  background: var(--panel-bg);
+  box-shadow: 0 18px 44px var(--shadow);
+}
+
+.scope-picker-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 10px;
+}
+
+.scope-picker-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.scope-picker-subtitle,
+.scope-option-subtitle,
+.scope-empty {
+  font-size: 11px;
+  color: var(--muted);
+}

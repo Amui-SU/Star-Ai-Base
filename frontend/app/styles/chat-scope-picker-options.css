@@ -1,0 +1,119 @@
+.scope-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.scope-section + .scope-section {
+  margin-top: 12px;
+}
+
+.scope-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.scope-folder {
+  border-radius: 13px;
+}
+
+.scope-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scope-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 38px;
+  border-radius: 11px;
+  padding: 8px 10px;
+  color: var(--ink-soft);
+}
+
+.scope-option:hover {
+  background: var(--paper-2);
+}
+
+.scope-option input {
+  accent-color: var(--accent-strong);
+}
+
+.scope-option-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.scope-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: var(--muted);
+  transition:
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.scope-expand-btn[aria-expanded="true"] {
+  transform: rotate(90deg);
+}
+
+.scope-expand-btn:not(:disabled):hover {
+  background: var(--paper-2);
+}
+
+.scope-expand-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.scope-folder-videos {
+  margin-left: 23px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.scope-search-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--input-bg);
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 12px;
+  outline: none;
+}
+
+.scope-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.16);
+}
+
+.scope-video-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 210px;
+  overflow: auto;
+}
+
+.scope-notice {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}

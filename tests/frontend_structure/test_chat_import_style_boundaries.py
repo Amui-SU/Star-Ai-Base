@@ -65,7 +65,7 @@ def test_chat_control_styles_delegate_to_focused_files():
     ]
     expected_anchors = {
         "chat-composer-controls.css": ".composer-shell {",
-        "chat-scope-picker.css": ".scope-picker {",
+        "chat-scope-picker.css": '@import "./chat-scope-picker-trigger.css";',
         "chat-model-controls.css": ".model-status-card {",
         "control-primitives.css": ".input {",
         "chat-controls-responsive.css": "@media (max-width: 1024px)",
@@ -88,6 +88,47 @@ def test_chat_control_styles_delegate_to_focused_files():
         "\n@media (max-width: 1024px)",
     ]:
         assert selector not in controls_css
+
+
+def test_chat_scope_picker_styles_delegate_to_focused_files():
+    project_root = get_project_root()
+    styles_dir = project_root / "frontend" / "app" / "styles"
+    scope_css = (styles_dir / "chat-scope-picker.css").read_text(encoding="utf-8")
+
+    expected_imports = [
+        "./chat-scope-picker-trigger.css",
+        "./chat-scope-picker-popover.css",
+        "./chat-scope-picker-web-search.css",
+        "./chat-scope-picker-modes.css",
+        "./chat-scope-picker-options.css",
+        "./chat-scope-picker-motion.css",
+    ]
+    expected_anchors = {
+        "chat-scope-picker-trigger.css": ".scope-picker {",
+        "chat-scope-picker-popover.css": ".scope-picker-popover {",
+        "chat-scope-picker-web-search.css": ".scope-web-search-btn {",
+        "chat-scope-picker-modes.css": ".scope-mode-grid {",
+        "chat-scope-picker-options.css": ".scope-section {",
+        "chat-scope-picker-motion.css": "@keyframes webSearchPulse",
+    }
+
+    for imported_path in expected_imports:
+        imported_file = styles_dir / imported_path.removeprefix("./")
+        assert imported_file.exists()
+        assert expected_anchors[imported_file.name] in imported_file.read_text(
+            encoding="utf-8"
+        )
+        assert f'@import "{imported_path}";' in scope_css
+
+    for selector in [
+        "\n.scope-picker {",
+        "\n.scope-picker-popover {",
+        "\n.scope-web-search-btn {",
+        "\n.scope-mode-grid {",
+        "\n.scope-section {",
+        "\n@keyframes webSearchPulse",
+    ]:
+        assert selector not in scope_css
 
 
 def test_import_organize_styles_delegate_to_focused_files():
