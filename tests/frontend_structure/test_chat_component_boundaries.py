@@ -95,17 +95,43 @@ def test_chat_panel_model_status_menu_is_extracted():
     chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
         encoding="utf-8"
     )
+    header_component = (
+        project_root / "frontend" / "components" / "chat" / "ChatPanelHeader.tsx"
+    ).read_text(encoding="utf-8")
     status_component = (
         project_root / "frontend" / "components" / "chat" / "ChatModelStatus.tsx"
     )
 
     assert status_component.exists()
-    assert "@/components/chat/ChatModelStatus" in chat_panel
+    assert "@/components/chat/ChatPanelHeader" in chat_panel
+    assert "@/components/chat/ChatModelStatus" not in chat_panel
+    assert "@/components/chat/ChatModelStatus" in header_component
     assert 'from "next/image"' not in chat_panel
     assert "@/lib/providers" not in chat_panel
     assert "modelMenuRef" not in chat_panel
     assert "model-provider-menu" not in chat_panel
     assert "model-source-switch" not in chat_panel
+
+
+def test_chat_panel_uses_header_section_component():
+    project_root = get_project_root()
+    chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    header_file = (
+        project_root / "frontend" / "components" / "chat" / "ChatPanelHeader.tsx"
+    )
+
+    assert header_file.exists()
+    header_source = header_file.read_text(encoding="utf-8")
+    assert "export default function ChatPanelHeader" in header_source
+    assert "@/components/chat/ChatPanelHeader" in chat_panel
+    assert "@/components/chat/ChatModelStatus" not in chat_panel
+    assert "@/components/chat/ChatModelStatus" in header_source
+    assert "chat-context-row" not in chat_panel
+    assert "chat-context-actions" not in chat_panel
+    assert "chat-kb-context" not in chat_panel
+    assert "chat-kb-meta" not in chat_panel
 
 
 def test_chat_panel_uses_web_search_settings_hook():
@@ -476,6 +502,9 @@ def test_frontend_provider_presets_are_shared():
     chat_panel = (project_root / "frontend" / "components" / "ChatPanel.tsx").read_text(
         encoding="utf-8"
     )
+    chat_panel_header = (
+        project_root / "frontend" / "components" / "chat" / "ChatPanelHeader.tsx"
+    ).read_text(encoding="utf-8")
     chat_model_status = (
         project_root / "frontend" / "components" / "chat" / "ChatModelStatus.tsx"
     ).read_text(encoding="utf-8")
@@ -484,7 +513,8 @@ def test_frontend_provider_presets_are_shared():
     ).read_text(encoding="utf-8")
 
     assert providers_file.exists()
-    assert "@/components/chat/ChatModelStatus" in chat_panel
+    assert "@/components/chat/ChatPanelHeader" in chat_panel
+    assert "@/components/chat/ChatModelStatus" in chat_panel_header
     assert "@/lib/providers" in chat_model_status
     assert "@/lib/providers" in api_accounts_panel
     assert "const PROVIDERS" not in api_accounts_panel

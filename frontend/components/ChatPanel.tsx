@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import ChatPanelComposerSection from "@/components/chat/ChatPanelComposerSection";
 import ChatEmptyState from "@/components/chat/ChatEmptyState";
-import ChatModelStatus from "@/components/chat/ChatModelStatus";
+import ChatPanelHeader from "@/components/chat/ChatPanelHeader";
 import MessageList from "@/components/chat/MessageList";
 import ModelConfigModal from "@/components/chat/ModelConfigModal";
 import WebSearchConfigModal from "@/components/chat/WebSearchConfigModal";
@@ -234,45 +234,34 @@ export default function ChatPanel({
 
   return (
     <div className="panel-inner">
-      <div className="chat-context-row">
-        <div className="chat-context-actions">
-          <div className="chat-kb-context">
-            {knowledgeBaseTitle}
-            {stats && (stats.total_videos ?? 0) > 0 && (
-              <span className="chat-kb-meta">
-                {" "}
-                · {stats.total_videos} 个视频
-              </span>
-            )}
-          </div>
-          <ChatModelStatus
-            activeProvider={activeProvider}
-            currentApiSource={currentApiSource}
-            currentProvider={currentProvider}
-            isAdmin={isAdmin}
-            llmChecking={llmChecking}
-            llmConfig={llmConfig}
-            llmSwitching={llmSwitching}
-            menuOpen={modelMenuOpen}
-            modelLatencyText={modelLatencyText}
-            modelReady={modelReady}
-            modelStatusTitle={modelStatusTitle}
-            providers={providersForMenu}
-            setMenuOpen={setModelMenuOpen}
-            sourceOptions={sourceOptions}
-            onConfigureProvider={openProviderConfig}
-            onProviderBlocked={(provider) =>
-              setScopeNotice(
-                provider.enabled ? "需要管理员切换模型" : "需要管理员配置模型",
-              )
-            }
-            onSwitchModelSource={(apiSource) =>
-              void handleSwitchModelSource(apiSource)
-            }
-            onSwitchProvider={(provider) => void handleSwitchProvider(provider)}
-          />
-        </div>
-      </div>
+      <ChatPanelHeader
+        knowledgeBaseTitle={knowledgeBaseTitle}
+        totalVideos={stats?.total_videos ?? null}
+        activeProvider={activeProvider}
+        currentApiSource={currentApiSource}
+        currentProvider={currentProvider}
+        isAdmin={isAdmin}
+        llmChecking={llmChecking}
+        llmConfig={llmConfig}
+        llmSwitching={llmSwitching}
+        menuOpen={modelMenuOpen}
+        modelLatencyText={modelLatencyText}
+        modelReady={modelReady}
+        modelStatusTitle={modelStatusTitle}
+        providers={providersForMenu}
+        setMenuOpen={setModelMenuOpen}
+        sourceOptions={sourceOptions}
+        onConfigureProvider={openProviderConfig}
+        onProviderBlocked={(provider) =>
+          setScopeNotice(
+            provider.enabled ? "需要管理员切换模型" : "需要管理员配置模型",
+          )
+        }
+        onSwitchModelSource={(apiSource) =>
+          void handleSwitchModelSource(apiSource)
+        }
+        onSwitchProvider={(provider) => void handleSwitchProvider(provider)}
+      />
 
       <div className="panel-body">
         <div
