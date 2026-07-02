@@ -72,6 +72,7 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     collection_ops_path = project_root / "app/services/rag_collection_ops.py"
     runtime_path = project_root / "app/services/rag_runtime_components.py"
     qa_path = project_root / "app/services/rag_qa.py"
+    summary_path = project_root / "app/services/rag_summary.py"
     rag_source = (project_root / "app/services/rag.py").read_text(encoding="utf-8")
 
     assert documents_path.exists()
@@ -127,10 +128,19 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     }:
         assert f"def {name}" in qa_source or f"async def {name}" in qa_source
     assert "from app.services.rag_qa import" in rag_source
+    assert summary_path.exists()
+    summary_source = summary_path.read_text(encoding="utf-8")
+    assert "def build_summary_chain" in summary_source
+    assert "async def summarize_text_content" in summary_source
+    assert "from app.services.rag_summary import" in rag_source
     assert "from langchain_openai import OpenAIEmbeddings, ChatOpenAI" not in rag_source
     assert "from langchain_chroma import Chroma" not in rag_source
     assert "RecursiveCharacterTextSplitter" not in rag_source
     assert "ChatPromptTemplate.from_messages" not in rag_source
+    assert "RunnablePassthrough" not in rag_source
+    assert "StrOutputParser" not in rag_source
+    assert "max_length = 10000" not in rag_source
+    assert "| self.summary_prompt" not in rag_source
     assert "Document(" not in rag_source
     assert "context_parts = []" not in rag_source
     assert "seen_bvids = set()" not in rag_source

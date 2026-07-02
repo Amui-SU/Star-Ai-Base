@@ -8,8 +8,6 @@ import warnings
 from typing import List, Optional
 from loguru import logger
 from langchain.schema import Document
-from langchain.schema.runnable import RunnablePassthrough
-from langchain.schema.output_parser import StrOutputParser
 from app.schemas.content import VideoContent
 from app.services.rag_collection_ops import (
     clear_collection as clear_collection_vectors,
@@ -37,6 +35,7 @@ from app.services.rag_qa import (
     complete_rag_answer,
     fallback_rag_answer,
 )
+from app.services.rag_summary import summarize_text_content
 
 
 class RAGService:
@@ -269,19 +268,11 @@ class RAGService:
         Returns:
             总结后的内容
         """
-        # 如果内容太长，先截断
-        max_length = 10000
-        if len(content) > max_length:
-            content = content[:max_length] + "\n...(内容已截断)"
-
-        chain = (
-            {"content": RunnablePassthrough()}
-            | self.summary_prompt
-            | self.llm
-            | StrOutputParser()
+        return await summarize_text_content(
+            content,
+            summary_prompt=self.summary_prompt,
+            llm=self.llm,
         )
-
-        return await chain.ainvoke(content)
 
     def get_collection_stats(self) -> dict:
         """
