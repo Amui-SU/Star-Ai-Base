@@ -23,6 +23,10 @@ from app.services.folder_ingestion_records import (
     has_cache_scope as _has_cache_scope,
     upsert_video_cache as _upsert_video_cache,
 )
+from app.services.folder_ingestion_vector_runtime import (
+    has_scoped_vectors as _has_scoped_vectors,
+    process_vector_target as _process_vector_target,
+)
 from app.services.rag import RAGService
 from app.time_utils import utc_now
 
@@ -156,24 +160,6 @@ async def sync_folder(
             source_binding_id=source_binding_id,
         )
 
-    def _has_scoped_vectors(bvid: str) -> bool:
-        if not _has_cache_scope(workspace_id, knowledge_base_id):
-            return True
-        checker = getattr(rag, "has_video_vectors_in_knowledge_base", None)
-        if checker is None:
-            return False
-        try:
-            return bool(
-                checker(
-                    workspace_id=workspace_id,
-                    knowledge_base_id=knowledge_base_id,
-                    bvid=bvid,
-                )
-            )
-        except Exception as e:
-            logger.warning(f"检查 scoped 向量失败 [{knowledge_base_id}/{bvid}]: {e}")
-            return False
-
     # 需要更新的已存在视频（缓存过少或来源较弱）
     update_candidates: set[str] = set()
     for bvid in current_bvids & existing_bvids:
@@ -193,7 +179,13 @@ async def sync_folder(
     missing_vector_candidates: set[str] = set()
     if _has_cache_scope(workspace_id, knowledge_base_id):
         for bvid in current_bvids:
-            if not _has_scoped_vectors(bvid):
+            if not _has_scoped_vectors(
+                rag,
+                bvid,
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                warn=logger.warning,
+            ):
                 missing_vector_candidates.add(bvid)
 
     targets = list(added | update_candidates | missing_vector_candidates)
@@ -206,87 +198,24 @@ async def sync_folder(
 
         # 尝试添加到向量库（可能失败，但不影响记录入库）
         try:
-            # 检查缓存内容是否缺失
-            cache = await _get_video_cache_for_scope(
-                db,
-                bvid,
+            await _process_vector_target(
+                db=db,
+                bvid=bvid,
+                meta=meta,
+                rag=rag,
+                content_fetcher=content_fetcher,
+                missing_vector_candidates=missing_vector_candidates,
                 workspace_id=workspace_id,
                 knowledge_base_id=knowledge_base_id,
                 source_binding_id=source_binding_id,
+                warn=logger.warning,
+                info=logger.info,
+                load_cache=_get_video_cache_for_scope,
+                refresh_checker=_should_refresh_cache,
+                source_ranker=_is_better_source,
+                cache_to_content=_video_content_from_cache,
+                delete_vectors=_delete_video_vectors_for_scope,
             )
-            old_content = (cache.content or "").strip() if cache else ""
-            old_source = cache.content_source if cache else None
-
-            needs_fetch = _should_refresh_cache(cache)
-            content = None
-            should_update_cache = False
-            should_reindex = False
-
-            if needs_fetch:
-                content = await content_fetcher.fetch_content(
-                    bvid, cid=meta["cid"], title=meta["title"]
-                )
-                new_text = (content.content or "").strip() if content else ""
-                new_source = content.source.value if content else None
-
-                if not old_content:
-                    should_update_cache = True
-                    should_reindex = True
-                elif new_source and _is_better_source(new_source, old_source):
-                    should_update_cache = True
-                    should_reindex = True
-                elif new_text and new_text != old_content:
-                    should_update_cache = True
-                    should_reindex = True
-
-                if cache and should_update_cache:
-                    cache.content = content.content
-                    cache.content_source = content.source.value
-                    cache.outline_json = content.outline
-                    cache.is_processed = True
-                    logger.info(f"[{bvid}] 已写入缓存: source={cache.content_source}")
-
-            # 需要重建向量：新增/升级/内容变化 或 向量缺失
-            if bvid in missing_vector_candidates or should_reindex:
-                if not content:
-                    cached_content = _video_content_from_cache(
-                        cache, bvid, meta["title"]
-                    )
-                    if cached_content:
-                        content = cached_content
-                        cache.is_processed = True
-                        logger.info(f"[{bvid}] 使用缓存内容重建 scoped 向量")
-                    else:
-                        content = await content_fetcher.fetch_content(
-                            bvid, cid=meta["cid"], title=meta["title"]
-                        )
-                        if cache:
-                            cache.content = content.content
-                            cache.content_source = content.source.value
-                            cache.outline_json = content.outline
-                            cache.is_processed = True
-                            logger.info(
-                                f"[{bvid}] wrote refreshed cache source={cache.content_source}"
-                            )
-                try:
-                    _delete_video_vectors_for_scope(
-                        rag,
-                        bvid,
-                        workspace_id=workspace_id,
-                        knowledge_base_id=knowledge_base_id,
-                    )
-                except Exception as e:
-                    logger.warning(f"删除旧向量失败 [{bvid}]: {e}")
-                else:
-                    chunks = rag.add_video_content(
-                        content,
-                        workspace_id=workspace_id,
-                        knowledge_base_id=knowledge_base_id,
-                        source_binding_id=source_binding_id,
-                    )
-                    logger.info(f"[{bvid}] 向量化完成，块数={chunks}")
-            else:
-                logger.info(f"[{bvid}] 内容未变化或无需升级，跳过向量化")
         except Exception as e:
             logger.warning(f"添加向量失败 [{bvid}]: {e} (仍会记录到数据库)")
 

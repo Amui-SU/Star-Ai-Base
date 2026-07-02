@@ -6,6 +6,9 @@ def test_folder_ingestion_delegates_records_and_content_helpers_to_services():
     ingestion_path = project_root / "app/services/folder_ingestion.py"
     records_path = project_root / "app/services/folder_ingestion_records.py"
     content_path = project_root / "app/services/folder_ingestion_content.py"
+    vector_runtime_path = (
+        project_root / "app/services/folder_ingestion_vector_runtime.py"
+    )
 
     ingestion_source = ingestion_path.read_text(encoding="utf-8")
 
@@ -34,12 +37,32 @@ def test_folder_ingestion_delegates_records_and_content_helpers_to_services():
 
     assert "from app.services.folder_ingestion_records import" in ingestion_source
     assert "from app.services.folder_ingestion_content import" in ingestion_source
+    assert vector_runtime_path.exists()
+    vector_runtime_source = vector_runtime_path.read_text(encoding="utf-8")
+    for name in {
+        "has_scoped_vectors",
+        "process_vector_target",
+    }:
+        assert (
+            f"def {name}" in vector_runtime_source
+            or f"async def {name}" in vector_runtime_source
+        )
+    assert (
+        "from app.services.folder_ingestion_vector_runtime import" in ingestion_source
+    )
     assert "select(VideoCache)" not in ingestion_source
     assert "VideoCache(" not in ingestion_source
     assert "source_priority =" not in ingestion_source
     assert "def _is_better_source" not in ingestion_source
     assert "def _should_refresh_cache" not in ingestion_source
     assert "def _video_content_from_cache" not in ingestion_source
+    assert "def _has_scoped_vectors" not in ingestion_source
+    assert (
+        'getattr(rag, "has_video_vectors_in_knowledge_base", None)'
+        not in ingestion_source
+    )
+    assert "content_fetcher.fetch_content(" not in ingestion_source
+    assert 'old_content = (cache.content or "").strip()' not in ingestion_source
 
 
 def test_rag_service_delegates_document_and_filter_helpers_to_services():
