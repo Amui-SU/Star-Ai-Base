@@ -105,6 +105,46 @@ def test_video_note_styles_are_split_by_surface():
             assert token in source
 
 
+def test_video_note_workspace_tests_are_split_by_workflow():
+    project_root = get_project_root()
+    test_dir = project_root / "frontend/components/video-notes"
+    expected_files = {
+        "VideoNoteWorkspace.selection.test.tsx": [
+            "opens directly into the first existing note",
+            "opens selectable videos in a chooser menu",
+            "loads the list and creates a standard template note",
+        ],
+        "VideoNoteWorkspace.export.test.tsx": [
+            "autosaves copied Markdown from the toolbar menu",
+            "downloads exported Markdown from the toolbar export menu",
+        ],
+        "VideoNoteWorkspace.ai.test.tsx": [
+            "collapses and restores the right AI tools",
+            "applies AI suggestions with status",
+        ],
+    }
+    helper_path = test_dir / "VideoNoteWorkspace.test-utils.tsx"
+    original_path = test_dir / "VideoNoteWorkspace.test.tsx"
+
+    assert helper_path.exists()
+    helper_source = helper_path.read_text(encoding="utf-8")
+    assert 'vi.mock("@/lib/api"' in helper_source
+    assert 'vi.mock("vditor"' in helper_source
+    assert "function findMarkdownEditor" in helper_source
+
+    focused_source = ""
+    for file_name, expected_names in expected_files.items():
+        path = test_dir / file_name
+        assert path.exists()
+        source = path.read_text(encoding="utf-8")
+        focused_source += source
+        for expected_name in expected_names:
+            assert expected_name in source
+
+    assert not original_path.exists()
+    assert focused_source.count("it(") == 7
+
+
 def test_video_note_mobile_drawer_collapses_to_single_column_layout():
     project_root = get_project_root()
     css = _video_note_style_source(project_root)
