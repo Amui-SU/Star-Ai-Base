@@ -49,6 +49,30 @@ def test_video_note_mobile_drawer_collapses_to_single_column_layout():
     )
 
 
+def test_video_note_menu_polish_styles_guard_overlay_and_scroll_layout():
+    project_root = get_project_root()
+    css = (project_root / "frontend/app/styles/video-notes.css").read_text(
+        encoding="utf-8"
+    )
+    mobile_css = css.split("@media (max-width: 1024px)", maxsplit=1)[1]
+
+    assert ".video-note-chooser-menu" in css
+    assert ".video-note-export-menu" in css
+    assert ".video-note-workspace.ai-collapsed" in css
+    assert ".video-note-vditor .vditor-ir" in css
+    assert ".video-note-vditor .vditor-ir .vditor-reset" in css
+    assert "overflow: auto;" in css
+    assert ".video-note-chooser-menu" in mobile_css
+    assert "position: fixed;" in mobile_css
+    assert "inset: 0;" in mobile_css
+    assert ".video-note-workspace .video-note-chooser-menu {" in mobile_css
+    assert (
+        ".video-note-workspace .video-note-chooser-menu .video-note-list-panel"
+        in mobile_css
+    )
+    assert "height: 100dvh;" in mobile_css
+
+
 def test_video_note_editor_polish_styles_guard_tooltips_and_blocks():
     project_root = get_project_root()
     css = (project_root / "frontend/app/styles/video-notes.css").read_text(

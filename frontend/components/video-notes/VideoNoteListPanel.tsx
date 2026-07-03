@@ -8,7 +8,6 @@ interface VideoNoteListPanelProps {
   items: VideoNoteListItem[];
   counts: Record<VideoNoteListFilter, number>;
   filter: VideoNoteListFilter;
-  hidden?: boolean;
   loading: boolean;
   query: string;
   includeBodySearch: boolean;
@@ -17,6 +16,7 @@ interface VideoNoteListPanelProps {
   onFilterChange: (filter: VideoNoteListFilter) => void;
   onQueryChange: (query: string) => void;
   onIncludeBodySearchChange: (include: boolean) => void;
+  onClose?: () => void;
   onSelectVideo: (bvid: string) => void;
 }
 
@@ -30,7 +30,6 @@ export default function VideoNoteListPanel({
   items,
   counts,
   filter,
-  hidden,
   loading,
   query,
   includeBodySearch,
@@ -39,16 +38,22 @@ export default function VideoNoteListPanel({
   onFilterChange,
   onQueryChange,
   onIncludeBodySearchChange,
+  onClose,
   onSelectVideo,
 }: VideoNoteListPanelProps) {
   return (
-    <aside className="video-note-list-panel" hidden={hidden}>
+    <aside className="video-note-list-panel">
       <div className="video-note-list-search">
         <div className="video-note-list-head">
           <div>
             <span className="video-note-kicker">选择笔记</span>
             <strong>{totalCount} 个视频</strong>
           </div>
+          {onClose && (
+            <button type="button" onClick={onClose} aria-label="关闭选择笔记">
+              ×
+            </button>
+          )}
         </div>
         <input
           type="search"

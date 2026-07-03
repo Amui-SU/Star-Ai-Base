@@ -155,13 +155,11 @@ describe("VideoNoteWorkspace", () => {
     expect(container.querySelector(".video-note-workspace")).toHaveClass(
       "chooser-collapsed",
     );
-    expect(container.querySelector(".video-note-list-panel")).toHaveAttribute(
-      "hidden",
-    );
+    expect(container.querySelector(".video-note-chooser-menu")).toBeNull();
     expect(videoNoteApi.detail).toHaveBeenCalledWith(7, "BVNOTE123");
   });
 
-  it("filters selectable videos by note creation status", async () => {
+  it("opens selectable videos in a chooser menu and filters by note creation status", async () => {
     const user = userEvent.setup();
     vi.mocked(videoNoteApi.list).mockResolvedValue({
       knowledge_base_id: 7,
@@ -191,7 +189,7 @@ describe("VideoNoteWorkspace", () => {
       can_create: false,
     });
 
-    render(
+    const { container } = render(
       <VideoNoteWorkspace
         knowledgeBaseId={7}
         initialBvid="BVNOTE123"
@@ -201,6 +199,14 @@ describe("VideoNoteWorkspace", () => {
 
     expect(await findMarkdownEditor()).toBeVisible();
     await user.click(screen.getByRole("button", { name: "选择笔记" }));
+
+    const chooserMenu = container.querySelector(".video-note-chooser-menu");
+    expect(chooserMenu).not.toBeNull();
+    expect(
+      within(chooserMenu as HTMLElement).getByRole("button", {
+        name: "关闭选择笔记",
+      }),
+    ).toBeVisible();
 
     expect(await screen.findByText("AI 视频学习法")).toBeVisible();
     expect(screen.getByText("还没有笔记的视频")).toBeVisible();
@@ -256,8 +262,13 @@ describe("VideoNoteWorkspace", () => {
     expect((await findMarkdownEditor()).value).toContain("旧内容");
   });
 
-  it("edits blocks, autosaves, exports Markdown, and toggles fullscreen", async () => {
+  it("edits blocks, autosaves, copies exported Markdown from a toolbar menu, and toggles fullscreen", async () => {
     const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     vi.mocked(videoNoteApi.list).mockResolvedValue({
       knowledge_base_id: 7,
       items: [
@@ -315,13 +326,36 @@ describe("VideoNoteWorkspace", () => {
     const toolRail = container.querySelector(".video-note-tool-rail");
     expect(toolRail).not.toBeNull();
     expect(container.querySelector(".video-note-export-panel")).toBeNull();
+    expect(container.querySelector(".video-note-tool-spacer")).toBeNull();
+
+    const toolButtons = within(toolRail as HTMLElement).getAllByRole("button");
+    expect(
+      toolButtons.map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["添加段落", "添加待办", "折叠 AI 工具", "导出 Markdown"]);
 
     await user.click(
       within(toolRail as HTMLElement).getByRole("button", {
-        name: /Markdown/,
+        name: "导出 Markdown",
       }),
     );
-    expect(await screen.findByText("AI 视频学习法.md")).toBeVisible();
+    const exportMenu = await screen.findByRole("menu", {
+      name: "Markdown 导出操作",
+    });
+    expect(
+      within(exportMenu).getByRole("button", { name: "复制 Markdown" }),
+    ).toBeVisible();
+    expect(
+      within(exportMenu).getByRole("button", { name: "下载 Markdown 文件" }),
+    ).toBeVisible();
+    expect(screen.queryByLabelText("Markdown 预览")).toBeNull();
+
+    await user.click(
+      within(exportMenu).getByRole("button", { name: "复制 Markdown" }),
+    );
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("# AI 视频学习法\n"),
+    );
+    expect(await screen.findByText("已复制 Markdown")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "全屏" }));
     expect(container.querySelector(".video-note-drawer")).toHaveClass(
@@ -330,6 +364,66 @@ describe("VideoNoteWorkspace", () => {
     expect(container.querySelector(".video-note-workspace")).toHaveClass(
       "fullscreen",
     );
+  });
+
+  it("downloads exported Markdown from the toolbar export menu", async () => {
+    const user = userEvent.setup();
+    const createObjectUrl = vi.fn().mockReturnValue("blob:video-note-md");
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectUrl,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectUrl,
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    vi.mocked(videoNoteApi.list).mockResolvedValue({
+      knowledge_base_id: 7,
+      items: [
+        {
+          bvid: "BVNOTE123",
+          title: "AI 视频学习法",
+          has_note: true,
+          note_id: 9,
+          summary_status: "seeded",
+          tags: ["AI"],
+        },
+      ],
+    });
+    vi.mocked(videoNoteApi.detail).mockResolvedValue({
+      note: baseNote,
+      video,
+      can_create: false,
+    });
+    vi.mocked(videoNoteApi.exportMarkdown).mockResolvedValue({
+      filename: "AI 视频学习法.md",
+      markdown: "# AI 视频学习法\n",
+    });
+
+    const { container } = render(
+      <VideoNoteWorkspace
+        knowledgeBaseId={7}
+        initialBvid="BVNOTE123"
+        autosaveDelayMs={2000}
+      />,
+    );
+
+    await findMarkdownEditor();
+    const toolRail = container.querySelector(".video-note-tool-rail");
+    await user.click(
+      within(toolRail as HTMLElement).getByRole("button", {
+        name: "导出 Markdown",
+      }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "下载 Markdown 文件" }),
+    );
+
+    await waitFor(() => expect(createObjectUrl).toHaveBeenCalledOnce());
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:video-note-md");
+    expect(await screen.findByText("已下载 Markdown")).toBeVisible();
   });
 
   it("collapses and restores the right AI tools without removing editor tools", async () => {
@@ -365,18 +459,31 @@ describe("VideoNoteWorkspace", () => {
 
     const sidePanel = container.querySelector(".video-note-side-panel");
     expect(sidePanel).not.toHaveClass("collapsed");
-    expect(screen.getByRole("button", { name: "折叠 AI 工具" })).toBeVisible();
+    const toolRail = container.querySelector(
+      ".video-note-tool-rail",
+    ) as HTMLElement;
     expect(
-      within(
-        container.querySelector(".video-note-tool-rail") as HTMLElement,
-      ).getByRole("button", { name: /Markdown/ }),
+      within(toolRail).getByRole("button", { name: "折叠 AI 工具" }),
     ).toBeVisible();
+    expect(
+      within(toolRail).getByRole("button", { name: "导出 Markdown" }),
+    ).toBeVisible();
+    expect(within(toolRail).getAllByRole("button")[2]).toHaveAccessibleName(
+      "折叠 AI 工具",
+    );
 
-    await user.click(screen.getByRole("button", { name: "折叠 AI 工具" }));
+    await user.click(
+      within(toolRail).getByRole("button", { name: "折叠 AI 工具" }),
+    );
     expect(sidePanel).toHaveClass("collapsed");
     expect(screen.queryByRole("button", { name: "生成摘要" })).toBeNull();
+    expect(within(toolRail).getAllByRole("button")[2]).toHaveAccessibleName(
+      "展开 AI 工具",
+    );
 
-    await user.click(screen.getByRole("button", { name: "展开 AI 工具" }));
+    await user.click(
+      within(toolRail).getByRole("button", { name: "展开 AI 工具" }),
+    );
     expect(sidePanel).not.toHaveClass("collapsed");
     expect(screen.getByRole("button", { name: "生成摘要" })).toBeVisible();
   });

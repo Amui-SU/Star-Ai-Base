@@ -42,9 +42,7 @@ export default function VideoNoteWorkspace({
   onClose,
 }: VideoNoteWorkspaceProps) {
   const [fullscreen, setFullscreen] = useState(initialMode === "fullscreen");
-  const [noteChooserOpen, setNoteChooserOpen] = useState(
-    initialMode === "fullscreen",
-  );
+  const [noteChooserOpen, setNoteChooserOpen] = useState(false);
   const [items, setItems] = useState<VideoNoteListItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -154,8 +152,6 @@ export default function VideoNoteWorkspace({
     blocks,
     onBlocksChange: setBlocks,
   });
-  const noteChooserVisible = fullscreen || noteChooserOpen;
-
   const selectVideo = useCallback(
     (bvid: string) => {
       setSelectedBvid(bvid);
@@ -185,10 +181,12 @@ export default function VideoNoteWorkspace({
   };
 
   const exportMarkdown = async () => {
-    if (!note) return;
+    if (!note) return null;
     setExporting(true);
     try {
-      setExported(await videoNoteApi.exportMarkdown(note.id));
+      const response = await videoNoteApi.exportMarkdown(note.id);
+      setExported(response);
+      return response;
     } finally {
       setExporting(false);
     }
@@ -242,29 +240,37 @@ export default function VideoNoteWorkspace({
     <VideoNoteDrawer fullscreen={fullscreen}>
       <section
         className={`video-note-workspace ${fullscreen ? "fullscreen" : "drawer"} ${
-          noteChooserVisible ? "chooser-open" : "chooser-collapsed"
+          noteChooserOpen ? "chooser-open" : "chooser-collapsed"
         } ${aiPanelCollapsed ? "ai-collapsed" : ""}`}
       >
-        <VideoNoteListPanel
-          items={visibleItems}
-          counts={noteCounts}
-          filter={listFilter}
-          hidden={!noteChooserVisible}
-          loading={listLoading}
-          query={query}
-          includeBodySearch={includeBodySearch}
-          totalCount={items.length}
-          selectedBvid={selectedBvid}
-          onFilterChange={setListFilter}
-          onQueryChange={setQuery}
-          onIncludeBodySearchChange={setIncludeBodySearch}
-          onSelectVideo={selectVideo}
-        />
+        {noteChooserOpen && (
+          <div
+            className="video-note-chooser-menu"
+            role="dialog"
+            aria-label="选择笔记菜单"
+          >
+            <VideoNoteListPanel
+              items={visibleItems}
+              counts={noteCounts}
+              filter={listFilter}
+              loading={listLoading}
+              query={query}
+              includeBodySearch={includeBodySearch}
+              totalCount={items.length}
+              selectedBvid={selectedBvid}
+              onFilterChange={setListFilter}
+              onQueryChange={setQuery}
+              onIncludeBodySearchChange={setIncludeBodySearch}
+              onClose={() => setNoteChooserOpen(false)}
+              onSelectVideo={selectVideo}
+            />
+          </div>
+        )}
         <main className="video-note-main">
           <VideoNoteHeader
             title={title || video?.title || "未命名笔记"}
             fullscreen={fullscreen}
-            noteChooserOpen={noteChooserVisible}
+            noteChooserOpen={noteChooserOpen}
             knowledgeBaseName={knowledgeBaseName}
             saveStatus={saveState.status}
             onClose={onClose}
@@ -277,12 +283,14 @@ export default function VideoNoteWorkspace({
           ) : note ? (
             <div className="video-note-editor-shell">
               <VideoNoteToolRail
+                aiPanelCollapsed={aiPanelCollapsed}
                 canExport={Boolean(note)}
                 exported={exported}
                 exporting={exporting}
                 onAddParagraph={addParagraph}
                 onAddTodo={addTodo}
                 onExportMarkdown={exportMarkdown}
+                onToggleAiPanel={() => setAiPanelCollapsed((value) => !value)}
               />
               <VideoNoteMarkdownEditor blocks={blocks} onChange={setBlocks} />
             </div>
@@ -308,7 +316,6 @@ export default function VideoNoteWorkspace({
             message={aiMessage}
             onGenerateSummary={generateSummary}
             onGenerateQuestions={generateQuestions}
-            onToggleCollapsed={() => setAiPanelCollapsed((value) => !value)}
             onUndoAiEdit={aiEditing.undoAiEdit}
           />
         </aside>
