@@ -1,12 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import ChatPanelComposerSection from "@/components/chat/ChatPanelComposerSection";
-import ChatEmptyState from "@/components/chat/ChatEmptyState";
-import ChatPanelHeader from "@/components/chat/ChatPanelHeader";
-import MessageList from "@/components/chat/MessageList";
-import ModelConfigModal from "@/components/chat/ModelConfigModal";
-import WebSearchConfigModal from "@/components/chat/WebSearchConfigModal";
+import ChatPanelView from "@/components/chat/ChatPanelView";
 import { useChatConversationHistory } from "@/components/chat/useChatConversationHistory";
 import {
   useChatKnowledgeContext,
@@ -235,137 +230,123 @@ export default function ChatPanel({
   const canSend = Boolean(knowledgeBaseId) && !!input.trim() && !isGenerating;
 
   return (
-    <div className="panel-inner">
-      <ChatPanelHeader
-        knowledgeBaseTitle={knowledgeBaseTitle}
-        totalVideos={stats?.total_videos ?? null}
-        activeProvider={activeProvider}
-        currentApiSource={currentApiSource}
-        currentProvider={currentProvider}
-        isAdmin={isAdmin}
-        llmChecking={llmChecking}
-        llmConfig={llmConfig}
-        llmSwitching={llmSwitching}
-        menuOpen={modelMenuOpen}
-        modelLatencyText={modelLatencyText}
-        modelReady={modelReady}
-        modelStatusTitle={modelStatusTitle}
-        providers={providersForMenu}
-        setMenuOpen={setModelMenuOpen}
-        sourceOptions={sourceOptions}
-        onConfigureProvider={openProviderConfig}
-        onProviderBlocked={(provider) =>
+    <ChatPanelView
+      headerProps={{
+        knowledgeBaseTitle,
+        totalVideos: stats?.total_videos ?? null,
+        activeProvider,
+        currentApiSource,
+        currentProvider,
+        isAdmin,
+        llmChecking,
+        llmConfig,
+        llmSwitching,
+        menuOpen: modelMenuOpen,
+        modelLatencyText,
+        modelReady,
+        modelStatusTitle,
+        providers: providersForMenu,
+        setMenuOpen: setModelMenuOpen,
+        sourceOptions,
+        onConfigureProvider: openProviderConfig,
+        onProviderBlocked: (provider) =>
           setScopeNotice(
             provider.enabled ? "需要管理员切换模型" : "需要管理员配置模型",
-          )
-        }
-        onSwitchModelSource={(apiSource) =>
-          void handleSwitchModelSource(apiSource)
-        }
-        onSwitchProvider={(provider) => void handleSwitchProvider(provider)}
-      />
-
-      <div className="panel-body">
-        <div
-          className="chat-scroll"
-          ref={chatScrollRef}
-          onScroll={handleChatScroll}
-        >
-          {messages.length === 0 ? (
-            <ChatEmptyState
-              showAiKeyHint={shouldShowAiKeyHint}
-              onOpenApiAccounts={onOpenApiAccounts}
-              onPromptSelect={setInput}
-            />
-          ) : (
-            <MessageList
-              messages={messages}
-              copiedMessageId={copiedMessageId}
-              regeneratingMessageId={regeneratingMessageId}
-              editingMessageId={editingMessageId}
-              editingQuestion={editingQuestion}
-              reactionMap={reactionMap}
-              endRef={endRef}
-              onEditingQuestionChange={setEditingQuestion}
-              onSubmitEditedQuestion={(messageId) =>
-                void handleSubmitEditedQuestion(messageId)
-              }
-              onCancelEdit={handleCancelEdit}
-              onCopyMessage={(messageId, content) =>
-                void handleCopyMessage(messageId, content)
-              }
-              onRegenerate={(assistantId, question) =>
-                void handleRegenerate(assistantId, question)
-              }
-              onReaction={handleReaction}
-              onEditQuestion={handleEditQuestion}
-              onOpenVideoNote={onOpenVideoNote}
-            />
-          )}
-        </div>
-      </div>
-
-      <ChatPanelComposerSection
-        inputRef={inputRef}
-        input={input}
-        knowledgeBaseId={knowledgeBaseId}
-        isGenerating={isGenerating}
-        canSend={canSend}
-        scopeNotice={scopeNotice}
-        scopeOptions={scopeOptions}
-        chatScope={chatScope}
-        webSearchEnabled={webSearchEnabled}
-        webSearchProvider={webSearchProvider}
-        webSearchConfig={webSearchConfig}
-        canConfigureWebSearch={Boolean(onOpenApiAccounts) || isAdmin}
-        webSearchNotice={webSearchNotice}
-        onInputChange={handleComposerChange}
-        onSendQuestion={(question) => {
+          ),
+        onSwitchModelSource: (apiSource) =>
+          void handleSwitchModelSource(apiSource),
+        onSwitchProvider: (provider) => void handleSwitchProvider(provider),
+      }}
+      messages={messages}
+      chatScrollRef={chatScrollRef}
+      onChatScroll={handleChatScroll}
+      emptyStateProps={{
+        showAiKeyHint: shouldShowAiKeyHint,
+        onOpenApiAccounts,
+        onPromptSelect: setInput,
+      }}
+      messageListProps={{
+        copiedMessageId,
+        regeneratingMessageId,
+        editingMessageId,
+        editingQuestion,
+        reactionMap,
+        endRef,
+        onEditingQuestionChange: setEditingQuestion,
+        onSubmitEditedQuestion: (messageId) =>
+          void handleSubmitEditedQuestion(messageId),
+        onCancelEdit: handleCancelEdit,
+        onCopyMessage: (messageId, content) =>
+          void handleCopyMessage(messageId, content),
+        onRegenerate: (assistantId, question) =>
+          void handleRegenerate(assistantId, question),
+        onReaction: handleReaction,
+        onEditQuestion: handleEditQuestion,
+        onOpenVideoNote,
+      }}
+      composerProps={{
+        inputRef,
+        input,
+        knowledgeBaseId,
+        isGenerating,
+        canSend,
+        scopeNotice,
+        scopeOptions,
+        chatScope,
+        webSearchEnabled,
+        webSearchProvider,
+        webSearchConfig,
+        canConfigureWebSearch: Boolean(onOpenApiAccounts) || isAdmin,
+        webSearchNotice,
+        onInputChange: handleComposerChange,
+        onSendQuestion: (question) => {
           setInput("");
           void sendQuestion(question);
-        }}
-        onStopGenerating={stopGenerating}
-        onScopeChange={handleScopeChange}
-        onWebSearchChange={handleWebSearchChange}
-        onWebSearchProviderChange={handleWebSearchProviderChange}
-        onConfigureTavily={openWebSearchConfig}
-      />
-
-      {webSearchConfigOpen && (
-        <WebSearchConfigModal
-          config={webSearchConfig}
-          apiKey={webSearchApiKey}
-          saving={webSearchConfigSaving}
-          error={webSearchConfigError}
-          onApiKeyChange={setWebSearchApiKey}
-          onClose={() => closeWebSearchConfig()}
-          onSave={() => void handleSaveWebSearchConfig()}
-        />
-      )}
-
-      {configProvider && (
-        <ModelConfigModal
-          provider={configProvider}
-          apiKey={configApiKey}
-          baseUrl={configBaseUrl}
-          model={configModel}
-          thinkingMode={configThinkingMode}
-          thinkingJson={configThinkingJson}
-          saving={configSaving}
-          error={configError}
-          onApiKeyChange={setConfigApiKey}
-          onBaseUrlChange={setConfigBaseUrl}
-          onModelChange={setConfigModel}
-          onThinkingModeChange={(mode, json) => {
-            setConfigThinkingMode(mode);
-            setConfigThinkingJson(json);
-          }}
-          onThinkingJsonChange={setConfigThinkingJson}
-          onClearError={() => setConfigError("")}
-          onClose={() => closeProviderConfig()}
-          onSave={() => void handleSaveProviderConfig()}
-        />
-      )}
-    </div>
+        },
+        onStopGenerating: stopGenerating,
+        onScopeChange: handleScopeChange,
+        onWebSearchChange: handleWebSearchChange,
+        onWebSearchProviderChange: handleWebSearchProviderChange,
+        onConfigureTavily: openWebSearchConfig,
+      }}
+      webSearchModalProps={
+        webSearchConfigOpen
+          ? {
+              config: webSearchConfig,
+              apiKey: webSearchApiKey,
+              saving: webSearchConfigSaving,
+              error: webSearchConfigError,
+              onApiKeyChange: setWebSearchApiKey,
+              onClose: () => closeWebSearchConfig(),
+              onSave: () => void handleSaveWebSearchConfig(),
+            }
+          : null
+      }
+      modelConfigModalProps={
+        configProvider
+          ? {
+              provider: configProvider,
+              apiKey: configApiKey,
+              baseUrl: configBaseUrl,
+              model: configModel,
+              thinkingMode: configThinkingMode,
+              thinkingJson: configThinkingJson,
+              saving: configSaving,
+              error: configError,
+              onApiKeyChange: setConfigApiKey,
+              onBaseUrlChange: setConfigBaseUrl,
+              onModelChange: setConfigModel,
+              onThinkingModeChange: (mode, json) => {
+                setConfigThinkingMode(mode);
+                setConfigThinkingJson(json);
+              },
+              onThinkingJsonChange: setConfigThinkingJson,
+              onClearError: () => setConfigError(""),
+              onClose: () => closeProviderConfig(),
+              onSave: () => void handleSaveProviderConfig(),
+            }
+          : null
+      }
+    />
   );
 }
