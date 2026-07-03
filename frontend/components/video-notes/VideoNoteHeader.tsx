@@ -5,9 +5,11 @@ import type { VideoNoteSaveStatus } from "./useVideoNoteAutosave";
 interface VideoNoteHeaderProps {
   title: string;
   fullscreen: boolean;
+  noteChooserOpen: boolean;
   saveStatus: VideoNoteSaveStatus;
   knowledgeBaseName?: string;
   onClose?: () => void;
+  onToggleNoteChooser: () => void;
   onTitleChange: (title: string) => void;
   onToggleFullscreen: () => void;
 }
@@ -24,15 +26,19 @@ export default function VideoNoteHeader({
   title,
   fullscreen,
   knowledgeBaseName,
+  noteChooserOpen,
   saveStatus,
   onClose,
+  onToggleNoteChooser,
   onTitleChange,
   onToggleFullscreen,
 }: VideoNoteHeaderProps) {
   return (
     <header className="video-note-header">
       <div className="video-note-title-group">
-        <span className="video-note-kicker">{knowledgeBaseName ?? "视频笔记"}</span>
+        <span className="video-note-kicker">
+          {knowledgeBaseName ?? "视频笔记"}
+        </span>
         <input
           aria-label="笔记标题"
           value={title}
@@ -43,6 +49,13 @@ export default function VideoNoteHeader({
         <span className={`video-note-save-status ${saveStatus}`}>
           {statusLabel[saveStatus]}
         </span>
+        <button
+          type="button"
+          onClick={onToggleNoteChooser}
+          aria-pressed={noteChooserOpen}
+        >
+          选择笔记
+        </button>
         <button type="button" onClick={onToggleFullscreen}>
           {fullscreen ? "半屏" : "全屏"}
         </button>

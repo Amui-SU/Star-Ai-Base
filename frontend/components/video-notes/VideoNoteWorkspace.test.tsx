@@ -146,9 +146,17 @@ describe("VideoNoteWorkspace", () => {
       can_create: false,
     });
 
-    render(<VideoNoteWorkspace knowledgeBaseId={7} autosaveDelayMs={2000} />);
+    const { container } = render(
+      <VideoNoteWorkspace knowledgeBaseId={7} autosaveDelayMs={2000} />,
+    );
 
     expect((await findMarkdownEditor()).value).toContain("旧内容");
+    expect(container.querySelector(".video-note-workspace")).toHaveClass(
+      "chooser-collapsed",
+    );
+    expect(container.querySelector(".video-note-list-panel")).toHaveAttribute(
+      "hidden",
+    );
     expect(videoNoteApi.detail).toHaveBeenCalledWith(7, "BVNOTE123");
   });
 
@@ -189,6 +197,9 @@ describe("VideoNoteWorkspace", () => {
         autosaveDelayMs={2000}
       />,
     );
+
+    expect(await findMarkdownEditor()).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "选择笔记" }));
 
     expect(await screen.findByText("AI 视频学习法")).toBeVisible();
     expect(screen.getByText("还没有笔记的视频")).toBeVisible();

@@ -33,6 +33,11 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.video-note-workspace.drawer.chooser-collapsed {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.42fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .video-note-workspace.drawer .video-note-list-panel {
   grid-column: 1 / -1;
   display: grid;
@@ -473,4 +478,8 @@
     border-bottom: 1px solid var(--border);
     max-height: 28dvh;
   }
+}
+
+.video-note-workspace .video-note-list-panel[hidden] {
+  display: none;
 }

@@ -8,6 +8,7 @@ interface VideoNoteListPanelProps {
   items: VideoNoteListItem[];
   counts: Record<VideoNoteListFilter, number>;
   filter: VideoNoteListFilter;
+  hidden?: boolean;
   loading: boolean;
   query: string;
   includeBodySearch: boolean;
@@ -29,6 +30,7 @@ export default function VideoNoteListPanel({
   items,
   counts,
   filter,
+  hidden,
   loading,
   query,
   includeBodySearch,
@@ -40,7 +42,7 @@ export default function VideoNoteListPanel({
   onSelectVideo,
 }: VideoNoteListPanelProps) {
   return (
-    <aside className="video-note-list-panel">
+    <aside className="video-note-list-panel" hidden={hidden}>
       <div className="video-note-list-search">
         <div className="video-note-list-head">
           <div>

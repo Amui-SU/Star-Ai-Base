@@ -43,6 +43,9 @@ export default function VideoNoteWorkspace({
   onClose,
 }: VideoNoteWorkspaceProps) {
   const [fullscreen, setFullscreen] = useState(initialMode === "fullscreen");
+  const [noteChooserOpen, setNoteChooserOpen] = useState(
+    initialMode === "fullscreen",
+  );
   const [items, setItems] = useState<VideoNoteListItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -151,6 +154,7 @@ export default function VideoNoteWorkspace({
     blocks,
     onBlocksChange: setBlocks,
   });
+  const noteChooserVisible = fullscreen || noteChooserOpen;
 
   const selectVideo = useCallback(
     (bvid: string) => {
@@ -159,6 +163,7 @@ export default function VideoNoteWorkspace({
       syncNoteState(null);
       setExported(null);
       setAiMessage(null);
+      setNoteChooserOpen(false);
     },
     [syncNoteState],
   );
@@ -236,12 +241,15 @@ export default function VideoNoteWorkspace({
   return (
     <VideoNoteDrawer fullscreen={fullscreen}>
       <section
-        className={`video-note-workspace ${fullscreen ? "fullscreen" : "drawer"}`}
+        className={`video-note-workspace ${fullscreen ? "fullscreen" : "drawer"} ${
+          noteChooserVisible ? "chooser-open" : "chooser-collapsed"
+        }`}
       >
         <VideoNoteListPanel
           items={visibleItems}
           counts={noteCounts}
           filter={listFilter}
+          hidden={!noteChooserVisible}
           loading={listLoading}
           query={query}
           includeBodySearch={includeBodySearch}
@@ -256,9 +264,11 @@ export default function VideoNoteWorkspace({
           <VideoNoteHeader
             title={title || video?.title || "未命名笔记"}
             fullscreen={fullscreen}
+            noteChooserOpen={noteChooserVisible}
             knowledgeBaseName={knowledgeBaseName}
             saveStatus={saveState.status}
             onClose={onClose}
+            onToggleNoteChooser={() => setNoteChooserOpen((value) => !value)}
             onTitleChange={setTitle}
             onToggleFullscreen={() => setFullscreen((value) => !value)}
           />
