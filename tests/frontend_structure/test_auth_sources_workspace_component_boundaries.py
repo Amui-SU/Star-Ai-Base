@@ -166,13 +166,23 @@ def test_sources_panel_folder_list_is_extracted():
     folder_list = (
         project_root / "frontend" / "components" / "sources" / "SourcesFolderList.tsx"
     )
+    video_card = (
+        project_root / "frontend" / "components" / "sources" / "SourcesVideoCard.tsx"
+    )
 
     assert folder_list.exists()
+    assert video_card.exists()
+    folder_list_source = folder_list.read_text(encoding="utf-8")
     assert "@/components/sources/SourcesFolderList" in sources_panel
+    assert "@/components/sources/SourcesVideoCard" in folder_list_source
     assert "folder-card" not in sources_panel
     assert "folder-list-wrapper" not in sources_panel
     assert "video-card" not in sources_panel
     assert "video-title-input" not in sources_panel
+    assert "function SourcesVideoCard" not in folder_list_source
+    assert 'className="video-card"' not in folder_list_source
+    assert "video-title-input" not in folder_list_source
+    assert "video-card-action" not in folder_list_source
 
 
 def test_sources_panel_sections_and_selection_are_extracted():
