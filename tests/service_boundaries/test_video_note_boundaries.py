@@ -24,6 +24,21 @@ def test_video_note_domain_has_focused_service_modules():
     project_root = get_project_root()
 
     expected = {
+        "app/services/video_note_route_query_runtime.py": [
+            "list_video_notes_from_router",
+            "get_video_note_detail_from_router",
+        ],
+        "app/services/video_note_route_mutation_runtime.py": [
+            "create_video_note_from_router",
+            "update_video_note_from_router",
+        ],
+        "app/services/video_note_route_export_runtime.py": [
+            "export_video_note_markdown_from_router",
+        ],
+        "app/services/video_note_route_ai_runtime.py": [
+            "generate_video_note_summary_from_router",
+            "edit_video_note_with_ai_from_router",
+        ],
         "app/services/video_note_presenters.py": [
             "resolve_video_note_source",
             "build_standard_note_blocks",
@@ -48,6 +63,33 @@ def test_video_note_domain_has_focused_service_modules():
         source = path.read_text(encoding="utf-8")
         for symbol in symbols:
             assert f"def {symbol}" in source or f"async def {symbol}" in source
+
+
+def test_video_note_route_runtime_stays_a_facade():
+    project_root = get_project_root()
+    runtime_path = project_root / "app/services/video_note_route_runtime.py"
+    runtime_source = runtime_path.read_text(encoding="utf-8")
+    runtime_callables = declared_callable_names(runtime_source)
+
+    assert "from app.services.video_note_route_query_runtime import" in runtime_source
+    assert (
+        "from app.services.video_note_route_mutation_runtime import" in runtime_source
+    )
+    assert "from app.services.video_note_route_export_runtime import" in runtime_source
+    assert "from app.services.video_note_route_ai_runtime import" in runtime_source
+    assert runtime_callables == set()
+
+    misplaced_tokens = {
+        "select(",
+        "VideoNote(",
+        "resolve_user_llm_credentials",
+        "generate_video_note_ai_json",
+        "render_video_note_markdown",
+        "build_standard_note_blocks",
+        "_normalized_tags",
+    }
+    for token in misplaced_tokens:
+        assert token not in runtime_source
 
 
 def test_video_note_ai_suggestions_stay_out_of_prompt_runtime():

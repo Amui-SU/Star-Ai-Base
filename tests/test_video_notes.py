@@ -327,7 +327,7 @@ async def test_ai_endpoints_return_suggestions_without_mutating_note(
         raise HTTPException(status_code=400, detail="未配置 LLM API Key")
 
     monkeypatch.setattr(
-        "app.services.video_note_route_runtime.resolve_user_llm_credentials",
+        "app.services.video_note_route_ai_runtime.resolve_user_llm_credentials",
         missing_llm_credentials,
     )
 
@@ -448,11 +448,11 @@ async def test_ai_endpoints_use_model_generated_structured_content(
         )
 
     monkeypatch.setattr(
-        "app.services.video_note_route_runtime.resolve_user_llm_credentials",
+        "app.services.video_note_route_ai_runtime.resolve_user_llm_credentials",
         fake_resolve_user_llm_credentials,
     )
     monkeypatch.setattr(
-        "app.services.video_note_route_runtime.generate_video_note_ai_json",
+        "app.services.video_note_route_ai_runtime.generate_video_note_ai_json",
         fake_generate_video_note_ai_json,
     )
 
