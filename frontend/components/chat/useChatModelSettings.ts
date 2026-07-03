@@ -4,6 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { ModelConfigProvider } from "@/components/chat/types";
 import {
+  buildModelSwitchFailureHealth,
+  checkModelHealth,
+  loadModelConfig,
+  saveProviderModelConfig,
+  switchModelProvider,
+  switchModelSource,
+} from "@/components/chat/chatModelSettingsRuntime";
+import {
   buildModelSourceOptions,
   buildProvidersForMenu,
   EMPTY_PROVIDERS,
@@ -15,7 +23,6 @@ import {
   type ModelSourceOption,
 } from "@/components/chat/chatModelSettingsState";
 import {
-  chatApi,
   type LLMApiSource,
   type LLMConfigResponse,
   type LLMHealthResponse,
@@ -114,7 +121,7 @@ export function useChatModelSettings({
     setConfigSaving(true);
     setConfigError("");
     try {
-      const saved = await chatApi.saveModelProviderConfig({
+      const { saved, config, health } = await saveProviderModelConfig({
         provider: configProvider.provider,
         api_key: configApiKey.trim() || undefined,
         base_url: configBaseUrl.trim() || undefined,
@@ -122,11 +129,7 @@ export function useChatModelSettings({
         thinking_mode: configThinkingMode,
         thinking_config: thinkingConfig,
       });
-      const [cfg, health] = await Promise.all([
-        chatApi.getModelConfig(),
-        chatApi.health(),
-      ]);
-      setLlmConfig(cfg);
+      setLlmConfig(config);
       setLlmHealth(health);
       onNotice(`模型与思考配置验证成功 · ${saved.latency_ms}ms`, 2600);
       closeProviderConfig(true);
@@ -151,7 +154,7 @@ export function useChatModelSettings({
     let cancelled = false;
     const loadConfig = async () => {
       try {
-        const cfg = await chatApi.getModelConfig();
+        const cfg = await loadModelConfig();
         if (!cancelled) setLlmConfig(cfg);
       } catch {
         // 忽略配置加载失败，不影响聊天主流程
@@ -160,7 +163,7 @@ export function useChatModelSettings({
     const check = async () => {
       setLlmChecking(true);
       try {
-        const res = await chatApi.health();
+        const res = await checkModelHealth();
         if (!cancelled) setLlmHealth(res);
       } catch {
         if (!cancelled) {
@@ -190,20 +193,11 @@ export function useChatModelSettings({
       if (llmSwitching) return;
       setLlmSwitching(true);
       try {
-        await chatApi.setModelProvider(provider);
-        const [cfg, health] = await Promise.all([
-          chatApi.getModelConfig(),
-          chatApi.health(),
-        ]);
-        setLlmConfig(cfg);
+        const { config, health } = await switchModelProvider(provider);
+        setLlmConfig(config);
         setLlmHealth(health);
       } catch (err) {
-        setLlmHealth({
-          status: "down",
-          message: err instanceof Error ? err.message : "模型切换失败",
-          model: "unknown",
-          provider: "unknown",
-        });
+        setLlmHealth(buildModelSwitchFailureHealth(err));
       } finally {
         setLlmSwitching(false);
       }
@@ -216,9 +210,8 @@ export function useChatModelSettings({
       if (llmSwitching || llmConfig?.current_api_source === apiSource) return;
       setLlmSwitching(true);
       try {
-        const cfg = await chatApi.setModelSource(apiSource);
-        const health = await chatApi.health();
-        setLlmConfig(cfg);
+        const { config, health } = await switchModelSource(apiSource);
+        setLlmConfig(config);
         setLlmHealth(health);
       } catch (err) {
         onNotice(err instanceof Error ? err.message : "模型来源切换失败");

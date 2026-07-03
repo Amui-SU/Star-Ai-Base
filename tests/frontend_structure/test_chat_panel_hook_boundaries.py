@@ -30,10 +30,19 @@ def test_chat_model_settings_hook_uses_state_helpers():
     state_helper = (
         project_root / "frontend" / "components" / "chat" / "chatModelSettingsState.ts"
     )
+    runtime_helper = (
+        project_root
+        / "frontend"
+        / "components"
+        / "chat"
+        / "chatModelSettingsRuntime.ts"
+    )
 
     assert state_helper.exists()
+    assert runtime_helper.exists()
     hook_source = hook_file.read_text(encoding="utf-8")
     helper_source = state_helper.read_text(encoding="utf-8")
+    runtime_source = runtime_helper.read_text(encoding="utf-8")
 
     for helper_name in [
         "resolveCurrentApiSource",
@@ -50,6 +59,28 @@ def test_chat_model_settings_hook_uses_state_helpers():
     assert 'from "@/components/chat/chatModelSettingsState"' in hook_source
     assert "LLM_PROVIDER_PRESETS" not in hook_source
     assert "new Map(remoteProviders.map" not in hook_source
+    assert 'from "@/components/chat/chatModelSettingsRuntime"' in hook_source
+    for runtime_name in [
+        "loadModelConfig",
+        "checkModelHealth",
+        "saveProviderModelConfig",
+        "switchModelProvider",
+        "switchModelSource",
+        "buildModelSwitchFailureHealth",
+    ]:
+        assert f"export async function {runtime_name}" in runtime_source or (
+            runtime_name == "buildModelSwitchFailureHealth"
+            and f"export function {runtime_name}" in runtime_source
+        )
+        assert runtime_name in hook_source
+    for api_call in [
+        "chatApi.getModelConfig",
+        "chatApi.health",
+        "chatApi.setModelProvider",
+        "chatApi.setModelSource",
+        "chatApi.saveModelProviderConfig",
+    ]:
+        assert api_call not in hook_source
 
 
 def test_chat_panel_uses_web_search_settings_hook():
