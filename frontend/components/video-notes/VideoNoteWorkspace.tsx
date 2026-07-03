@@ -15,13 +15,13 @@ import { addVideoNoteBlock, createVideoNoteBlock } from "./videoNoteBlocks";
 import { useVideoNoteAiEditing } from "./useVideoNoteAiEditing";
 import { useVideoNoteAutosave } from "./useVideoNoteAutosave";
 import VideoNoteAiPanel from "./VideoNoteAiPanel";
-import VideoNoteBlockEditor from "./VideoNoteBlockEditor";
 import VideoNoteDrawer from "./VideoNoteDrawer";
 import VideoNoteExportPanel from "./VideoNoteExportPanel";
 import VideoNoteHeader from "./VideoNoteHeader";
 import VideoNoteListPanel, {
   type VideoNoteListFilter,
 } from "./VideoNoteListPanel";
+import VideoNoteMarkdownEditor from "./VideoNoteMarkdownEditor";
 import VideoNoteTemplatePicker from "./VideoNoteTemplatePicker";
 import VideoNoteToolRail from "./VideoNoteToolRail";
 
@@ -270,7 +270,7 @@ export default function VideoNoteWorkspace({
                 onAddParagraph={addParagraph}
                 onAddTodo={addTodo}
               />
-              <VideoNoteBlockEditor blocks={blocks} onChange={setBlocks} />
+              <VideoNoteMarkdownEditor blocks={blocks} onChange={setBlocks} />
             </div>
           ) : video ? (
             <VideoNoteTemplatePicker

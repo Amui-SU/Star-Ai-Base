@@ -1,4 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +26,61 @@ vi.mock("@/lib/api", async (importOriginal) => {
     },
   };
 });
+
+interface MockVditorOptions {
+  input?: (value: string) => void;
+  mode?: string;
+  value?: string;
+}
+
+const vditorState = vi.hoisted(() => ({
+  instances: [] as Array<{
+    destroyed: boolean;
+    element: HTMLTextAreaElement;
+    getValue: () => string;
+    options: MockVditorOptions;
+    setValue: (value: string) => void;
+  }>,
+}));
+
+vi.mock("vditor", () => ({
+  default: class MockVditor {
+    destroyed = false;
+    element: HTMLTextAreaElement;
+    options: MockVditorOptions;
+
+    constructor(id: string, options: MockVditorOptions) {
+      this.options = options;
+      this.element = document.createElement("textarea");
+      this.element.setAttribute("aria-label", "Vditor mock editor");
+      this.element.value = options.value ?? "";
+      this.element.addEventListener("input", () => {
+        options.input?.(this.element.value);
+      });
+      document.getElementById(id)?.append(this.element);
+      vditorState.instances.push(this);
+    }
+
+    getValue() {
+      return this.element.value;
+    }
+
+    setValue(value: string) {
+      this.element.value = value;
+    }
+
+    destroy() {
+      this.destroyed = true;
+      this.element.remove();
+    }
+  },
+}));
+
+async function findMarkdownEditor() {
+  return (await screen.findByLabelText(
+    "Vditor mock editor",
+  )) as HTMLTextAreaElement;
+}
 
 const baseNote: VideoNote = {
   id: 9,
@@ -52,6 +113,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   vi.useRealTimers();
+  vditorState.instances.length = 0;
 });
 
 describe("VideoNoteWorkspace", () => {
@@ -86,7 +148,7 @@ describe("VideoNoteWorkspace", () => {
 
     render(<VideoNoteWorkspace knowledgeBaseId={7} autosaveDelayMs={2000} />);
 
-    expect(await screen.findByDisplayValue("旧内容")).toBeVisible();
+    expect((await findMarkdownEditor()).value).toContain("旧内容");
     expect(videoNoteApi.detail).toHaveBeenCalledWith(7, "BVNOTE123");
   });
 
@@ -179,7 +241,7 @@ describe("VideoNoteWorkspace", () => {
         template_id: "standard",
       }),
     );
-    expect(await screen.findByDisplayValue("旧内容")).toBeVisible();
+    expect((await findMarkdownEditor()).value).toContain("旧内容");
   });
 
   it("edits blocks, autosaves, exports Markdown, and toggles fullscreen", async () => {
@@ -219,11 +281,24 @@ describe("VideoNoteWorkspace", () => {
       />,
     );
 
-    const paragraph = await screen.findByDisplayValue("旧内容");
-    await user.clear(paragraph);
-    await user.type(paragraph, "新内容");
+    const editor = await findMarkdownEditor();
+    fireEvent.input(editor, {
+      target: { value: "# AI 视频学习法\n\n新内容" },
+    });
 
     await waitFor(() => expect(videoNoteApi.save).toHaveBeenCalled());
+    expect(videoNoteApi.save).toHaveBeenLastCalledWith(
+      9,
+      expect.objectContaining({
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            id: "p1",
+            text: "新内容",
+            type: "paragraph",
+          }),
+        ]),
+      }),
+    );
 
     await user.click(screen.getByRole("button", { name: "导出 Markdown" }));
     expect(await screen.findByText("AI 视频学习法.md")).toBeVisible();
@@ -275,9 +350,9 @@ describe("VideoNoteWorkspace", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "生成摘要" }));
-    expect(await screen.findByDisplayValue("AI 新摘要")).toBeVisible();
+    expect((await findMarkdownEditor()).value).toContain("AI 新摘要");
 
     await user.click(screen.getByRole("button", { name: "撤销 AI 编辑" }));
-    expect(screen.getByDisplayValue("旧内容")).toBeVisible();
+    expect((await findMarkdownEditor()).value).toContain("旧内容");
   });
 });
