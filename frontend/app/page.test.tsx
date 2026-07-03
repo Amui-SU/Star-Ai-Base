@@ -55,7 +55,9 @@ vi.mock("@/components/video-notes/VideoNoteWorkspace", () => ({
   default: (props: Record<string, unknown>) => {
     videoNoteWorkspaceMock(props);
     return (
-      <div>Video Note Workspace {String(props.initialBvid ?? "list")}</div>
+      <div className="video-note-drawer">
+        Video Note Workspace {String(props.initialBvid ?? "list")}
+      </div>
     );
   },
 }));
@@ -236,6 +238,35 @@ describe("Home mobile shell", () => {
     expect(
       screen.queryByPlaceholderText("写下这次学习的要点"),
     ).not.toBeInTheDocument();
+  });
+
+  it("docks the video note workspace inside the workspace before chat", async () => {
+    localStorage.setItem("active_kb_id", "7");
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat Panel")).toBeInTheDocument();
+    });
+
+    const notesButton = container.querySelectorAll(".workspace-corner-tool")[2];
+    expect(notesButton).toBeInstanceOf(HTMLElement);
+    await user.click(notesButton as HTMLElement);
+
+    const workspace = container.querySelector(".workspace");
+    const drawer = container.querySelector(".video-note-drawer");
+    const chat = container.querySelector(".panel-chat-embedded");
+
+    expect(workspace).not.toBeNull();
+    expect(drawer).not.toBeNull();
+    expect(chat).not.toBeNull();
+    expect(drawer?.parentElement).toBe(workspace);
+    expect(chat?.parentElement).toBe(workspace);
+
+    const workspaceChildren = Array.from(workspace?.children ?? []);
+    expect(workspaceChildren.indexOf(drawer as Element)).toBeLessThan(
+      workspaceChildren.indexOf(chat as Element),
+    );
   });
 
   it("opens the video note workspace from chat callbacks with the active knowledge base", async () => {

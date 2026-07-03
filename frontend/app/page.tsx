@@ -114,6 +114,16 @@ export default function Home() {
               onMouseDown={handleMouseDown}
             />
 
+            {activeVideoNote && shell.activeKbId && (
+              <VideoNoteWorkspace
+                key={activeVideoNote.key}
+                knowledgeBaseId={shell.activeKbId}
+                knowledgeBaseName={shell.activeKnowledgeBase?.name}
+                initialBvid={activeVideoNote.bvid}
+                onClose={closeVideoNoteWorkspace}
+              />
+            )}
+
             <section
               className={`panel-chat-embedded ${isSidebarOpen ? "" : "full-width"}`}
               style={{ flex: 1 }}
@@ -136,16 +146,6 @@ export default function Home() {
           </div>
         </section>
       </main>
-
-      {activeVideoNote && shell.activeKbId && (
-        <VideoNoteWorkspace
-          key={activeVideoNote.key}
-          knowledgeBaseId={shell.activeKbId}
-          knowledgeBaseName={shell.activeKnowledgeBase?.name}
-          initialBvid={activeVideoNote.bvid}
-          onClose={closeVideoNoteWorkspace}
-        />
-      )}
 
       <ImportModal
         open={shell.showImport}
