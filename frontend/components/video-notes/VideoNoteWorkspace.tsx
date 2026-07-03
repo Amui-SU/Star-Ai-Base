@@ -199,6 +199,7 @@ export default function VideoNoteWorkspace({
   const generateSummary = async () => {
     if (!note) return;
     setAiLoading(true);
+    setAiMessage("正在生成摘要...");
     try {
       const response = await videoNoteApi.generateSummary(note.id);
       aiEditing.applyAiOperations(response.operations);
@@ -215,10 +216,29 @@ export default function VideoNoteWorkspace({
   const generateQuestions = async () => {
     if (!note) return;
     setAiLoading(true);
+    setAiMessage("正在生成复盘问题...");
     try {
       const response = await videoNoteApi.aiEdit(note.id, {
         action: "generate_questions",
-        instruction: "生成复盘问题",
+        instruction: null,
+        selected_block_ids: [],
+      });
+      aiEditing.applyAiOperations(response.operations);
+      setAiMessage(response.message);
+      return response;
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const generateTimestamps = async () => {
+    if (!note) return;
+    setAiLoading(true);
+    setAiMessage("正在生成时间戳提纲...");
+    try {
+      const response = await videoNoteApi.aiEdit(note.id, {
+        action: "generate_timestamps",
+        instruction: null,
         selected_block_ids: [],
       });
       aiEditing.applyAiOperations(response.operations);
@@ -327,6 +347,7 @@ export default function VideoNoteWorkspace({
             onCollapse={() => setAiPanelCollapsed(true)}
             onGenerateSummary={generateSummary}
             onGenerateQuestions={generateQuestions}
+            onGenerateTimestamps={generateTimestamps}
             onUndoAiEdit={aiEditing.undoAiEdit}
           />
         </aside>

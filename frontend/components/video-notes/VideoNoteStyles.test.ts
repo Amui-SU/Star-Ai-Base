@@ -21,4 +21,21 @@ describe("video note styles", () => {
       /\.video-note-vditor \.vditor-content,[\s\S]*?overflow:\s*visible/s,
     );
   });
+
+  it("keeps AI tools from creating horizontal scroll and adapts collapse icon direction", () => {
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-side-panel\s*{[^}]*overflow-x:\s*hidden/s,
+    );
+    expect(videoNoteStyles).toContain(".video-note-ai-collapse .chevron-left");
+    expect(videoNoteStyles).toContain(".video-note-ai-collapse .chevron-down");
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-side-panel \.video-note-ai-collapse::after\s*{[^}]*right:\s*calc\(100% \+ 10px\)/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /@media \(max-width: 1024px\)[\s\S]*?\.video-note-ai-collapse \.chevron-left\s*{[\s\S]*?display:\s*none/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /@media \(max-width: 1024px\)[\s\S]*?\.video-note-ai-collapse \.chevron-down\s*{[\s\S]*?display:\s*block/s,
+    );
+  });
 });

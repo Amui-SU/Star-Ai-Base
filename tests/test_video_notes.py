@@ -353,9 +353,30 @@ async def test_ai_endpoints_return_suggestions_without_mutating_note(
         headers=headers,
     )
     assert edit.status_code == 200
-    assert edit.json()["operations"][0]["kind"] == "insert_block"
+    assert edit.json()["operations"][0]["kind"] == "replace_or_insert_block"
+    assert edit.json()["operations"][0]["target_block_id"] == "ai-review-questions"
     question_items = edit.json()["operations"][0]["block"]["items"]
     assert any("介绍学习目标" in item["text"] for item in question_items)
+    assert all("生成复盘问题" not in item["text"] for item in question_items)
+
+    timestamps = await client.post(
+        f"/video-notes/{note_id}/ai-edit",
+        json={
+            "action": "generate_timestamps",
+            "instruction": "生成时间戳",
+            "selected_block_ids": [],
+        },
+        headers=headers,
+    )
+    assert timestamps.status_code == 200
+    timestamp_operation = timestamps.json()["operations"][0]
+    assert timestamp_operation["kind"] == "replace_or_insert_block"
+    assert timestamp_operation["target_block_id"] == "timestamp-outline"
+    assert timestamp_operation["block"]["type"] == "timestamp_outline"
+    assert timestamp_operation["block"]["items"][0]["time"] == 12
+    assert any(
+        item["text"] == "介绍学习目标" for item in timestamp_operation["block"]["items"]
+    )
 
     async with db_session_factory() as session:
         note = await session.get(VideoNote, note_id)

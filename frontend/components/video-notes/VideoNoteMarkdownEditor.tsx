@@ -188,7 +188,10 @@ export default function VideoNoteMarkdownEditor({
 
     async function mountEditor() {
       try {
-        const { default: Vditor } = await import("vditor");
+        const [{ default: Vditor }] = await Promise.all([
+          import("vditor"),
+          import("vditor/dist/js/i18n/zh_CN.js"),
+        ]);
         if (cancelled) return;
         const host = vditorHostRef.current;
         if (!host) return;
@@ -196,6 +199,8 @@ export default function VideoNoteMarkdownEditor({
         mountedEditor = new Vditor(host, {
           cache: { enable: false },
           height: "auto",
+          i18n: window.VditorI18n,
+          lang: "zh_CN",
           minHeight: 420,
           mode: "ir",
           placeholder: "开始记录这段视频里的观点、问题和行动项...",

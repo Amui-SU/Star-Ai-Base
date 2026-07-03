@@ -1,6 +1,7 @@
 import type { VideoNoteAiOperation, VideoNoteBlock } from "@/lib/api";
 
-const createId = () => `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const createId = () =>
+  `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 export function createVideoNoteBlock(
   type: VideoNoteBlock["type"] = "paragraph",
@@ -74,7 +75,14 @@ export function convertVideoNoteBlock(
     };
     if (type === "heading") converted.level = block.level ?? 2;
     if (type === "todo") converted.checked = Boolean(block.checked);
-    if (["key_points", "questions", "timestamp_outline", "bulleted_list"].includes(type)) {
+    if (
+      [
+        "key_points",
+        "questions",
+        "timestamp_outline",
+        "bulleted_list",
+      ].includes(type)
+    ) {
       converted.items = block.items ?? [];
     }
     return converted;
@@ -105,28 +113,38 @@ function replaceOrInsertBlock(
   const targetId = operation.target_block_id ?? operation.block.id;
   const index = blocks.findIndex((block) => block.id === targetId);
   if (index === -1) return [...blocks, operation.block];
-  return blocks.map((block, blockIndex) =>
-    blockIndex === index ? { ...operation.block!, id: targetId } : block,
-  );
+  return blocks.reduce<VideoNoteBlock[]>((nextBlocks, block, blockIndex) => {
+    if (block.id !== targetId) {
+      nextBlocks.push(block);
+      return nextBlocks;
+    }
+    if (blockIndex === index) {
+      nextBlocks.push({ ...operation.block!, id: targetId });
+    }
+    return nextBlocks;
+  }, []);
 }
 
 export function applyVideoNoteAiOperations(
   blocks: VideoNoteBlock[],
   operations: VideoNoteAiOperation[],
 ): VideoNoteBlock[] {
-  return operations.reduce((current, operation) => {
-    if (operation.kind === "insert_block" && operation.block) {
-      return [...current, operation.block];
-    }
-    if (operation.kind === "replace_or_insert_block") {
-      return replaceOrInsertBlock(current, operation);
-    }
-    if (operation.kind === "replace_blocks" && operation.blocks) {
-      return [...operation.blocks];
-    }
-    if (operation.kind === "remove_block" && operation.target_block_id) {
-      return removeVideoNoteBlock(current, operation.target_block_id);
-    }
-    return current;
-  }, [...blocks]);
+  return operations.reduce(
+    (current, operation) => {
+      if (operation.kind === "insert_block" && operation.block) {
+        return [...current, operation.block];
+      }
+      if (operation.kind === "replace_or_insert_block") {
+        return replaceOrInsertBlock(current, operation);
+      }
+      if (operation.kind === "replace_blocks" && operation.blocks) {
+        return [...operation.blocks];
+      }
+      if (operation.kind === "remove_block" && operation.target_block_id) {
+        return removeVideoNoteBlock(current, operation.target_block_id);
+      }
+      return current;
+    },
+    [...blocks],
+  );
 }

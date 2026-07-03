@@ -29,6 +29,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 interface MockVditorOptions {
+  i18n?: Record<string, string>;
   input?: (value: string) => void;
   mode?: string;
   value?: string;
@@ -78,6 +79,11 @@ vi.mock("vditor", () => ({
     }
   },
 }));
+
+vi.mock("vditor/dist/js/i18n/zh_CN.js", () => {
+  window.VditorI18n = { headings: "标题" };
+  return {};
+});
 
 async function findMarkdownEditor() {
   return (await screen.findByLabelText(
@@ -154,6 +160,9 @@ describe("VideoNoteWorkspace", () => {
     );
 
     expect((await findMarkdownEditor()).value).toContain("旧内容");
+    expect(vditorState.instances.at(-1)?.options.i18n).toMatchObject({
+      headings: "标题",
+    });
     expect(container.querySelector(".video-note-workspace")).toHaveClass(
       "chooser-collapsed",
     );
@@ -526,7 +535,7 @@ describe("VideoNoteWorkspace", () => {
     expect(screen.getByRole("button", { name: "生成摘要" })).toBeVisible();
   });
 
-  it("applies AI summary suggestions and can undo them", async () => {
+  it("applies AI suggestions with status, timestamp generation, and undo", async () => {
     const user = userEvent.setup();
     vi.mocked(videoNoteApi.list).mockResolvedValue({
       knowledge_base_id: 7,
@@ -547,7 +556,7 @@ describe("VideoNoteWorkspace", () => {
       can_create: false,
     });
     vi.mocked(videoNoteApi.generateSummary).mockResolvedValue({
-      message: "ok",
+      message: "已应用摘要",
       tag_suggestions: ["学习"],
       operations: [
         {
@@ -557,6 +566,42 @@ describe("VideoNoteWorkspace", () => {
         },
       ],
     });
+    vi.mocked(videoNoteApi.aiEdit).mockImplementation(
+      async (_noteId, payload) => {
+        if (payload.action === "generate_timestamps") {
+          return {
+            message: "已重新生成时间戳提纲",
+            tag_suggestions: [],
+            operations: [
+              {
+                kind: "replace_or_insert_block",
+                target_block_id: "timestamp-outline",
+                block: {
+                  id: "timestamp-outline",
+                  type: "timestamp_outline",
+                  items: [{ time: 24, text: "开场目标" }],
+                },
+              },
+            ],
+          };
+        }
+        return {
+          message: "已重新生成复盘问题",
+          tag_suggestions: [],
+          operations: [
+            {
+              kind: "replace_or_insert_block",
+              target_block_id: "ai-review-questions",
+              block: {
+                id: "ai-review-questions",
+                type: "questions",
+                items: [{ text: "如何复述学习目标？" }],
+              },
+            },
+          ],
+        };
+      },
+    );
 
     render(
       <VideoNoteWorkspace
@@ -567,9 +612,37 @@ describe("VideoNoteWorkspace", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "生成摘要" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已应用摘要");
     expect((await findMarkdownEditor()).value).toContain("AI 新摘要");
 
+    await user.click(screen.getByRole("button", { name: "生成问题" }));
+    expect(videoNoteApi.aiEdit).toHaveBeenLastCalledWith(
+      9,
+      expect.objectContaining({
+        action: "generate_questions",
+        instruction: null,
+      }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "已重新生成复盘问题",
+    );
+    expect((await findMarkdownEditor()).value).toContain("如何复述学习目标？");
+    expect((await findMarkdownEditor()).value).not.toContain("生成复盘问题");
+
+    await user.click(screen.getByRole("button", { name: "生成时间戳" }));
+    expect(videoNoteApi.aiEdit).toHaveBeenLastCalledWith(
+      9,
+      expect.objectContaining({
+        action: "generate_timestamps",
+        instruction: null,
+      }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "已重新生成时间戳提纲",
+    );
+    expect((await findMarkdownEditor()).value).toContain("[0:24] 开场目标");
+
     await user.click(screen.getByRole("button", { name: "撤销 AI 编辑" }));
-    expect((await findMarkdownEditor()).value).toContain("旧内容");
+    expect((await findMarkdownEditor()).value).not.toContain("[0:24] 开场目标");
   });
 });

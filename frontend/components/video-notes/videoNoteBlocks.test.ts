@@ -74,4 +74,40 @@ describe("video note block helpers", () => {
     expect(next.map((block) => block.id)).toEqual(["h1", "p1", "todo1", "q1"]);
     expect(next[1]).toMatchObject({ type: "ai_summary", text: "摘要" });
   });
+
+  it("collapses duplicate generated AI blocks when replacing by target id", () => {
+    const duplicatedBlocks: VideoNoteBlock[] = [
+      blocks[0],
+      {
+        id: "ai-review-questions",
+        type: "questions",
+        items: [{ text: "旧问题 1" }],
+      },
+      blocks[1],
+      {
+        id: "ai-review-questions",
+        type: "questions",
+        items: [{ text: "旧问题 2" }],
+      },
+    ];
+
+    const next = applyVideoNoteAiOperations(duplicatedBlocks, [
+      {
+        kind: "replace_or_insert_block",
+        target_block_id: "ai-review-questions",
+        block: {
+          id: "ai-review-questions",
+          type: "questions",
+          items: [{ text: "新问题" }],
+        },
+      },
+    ]);
+
+    expect(next.map((block) => block.id)).toEqual([
+      "h1",
+      "ai-review-questions",
+      "p1",
+    ]);
+    expect(next[1].items).toEqual([{ text: "新问题" }]);
+  });
 });
