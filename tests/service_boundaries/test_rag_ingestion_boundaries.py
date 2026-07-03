@@ -6,6 +6,7 @@ def test_folder_ingestion_delegates_records_and_content_helpers_to_services():
     ingestion_path = project_root / "app/services/folder_ingestion.py"
     records_path = project_root / "app/services/folder_ingestion_records.py"
     content_path = project_root / "app/services/folder_ingestion_content.py"
+    plan_path = project_root / "app/services/folder_ingestion_plan.py"
     vector_runtime_path = (
         project_root / "app/services/folder_ingestion_vector_runtime.py"
     )
@@ -37,6 +38,14 @@ def test_folder_ingestion_delegates_records_and_content_helpers_to_services():
 
     assert "from app.services.folder_ingestion_records import" in ingestion_source
     assert "from app.services.folder_ingestion_content import" in ingestion_source
+    assert plan_path.exists()
+    plan_source = plan_path.read_text(encoding="utf-8")
+    for name in {
+        "build_video_map",
+        "diff_folder_videos",
+    }:
+        assert f"def {name}" in plan_source
+    assert "from app.services.folder_ingestion_plan import" in ingestion_source
     assert vector_runtime_path.exists()
     vector_runtime_source = vector_runtime_path.read_text(encoding="utf-8")
     for name in {
@@ -53,6 +62,10 @@ def test_folder_ingestion_delegates_records_and_content_helpers_to_services():
     assert "select(VideoCache)" not in ingestion_source
     assert "VideoCache(" not in ingestion_source
     assert "source_priority =" not in ingestion_source
+    assert "attr = media.get" not in ingestion_source
+    assert 'title in ["已失效视频", "已删除视频"]' not in ingestion_source
+    assert "added = current_bvids - existing_bvids" not in ingestion_source
+    assert "existing_bvids - current_bvids" not in ingestion_source
     assert "def _is_better_source" not in ingestion_source
     assert "def _should_refresh_cache" not in ingestion_source
     assert "def _video_content_from_cache" not in ingestion_source

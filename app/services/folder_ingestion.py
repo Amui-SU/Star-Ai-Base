@@ -10,10 +10,13 @@ from app.models import FavoriteVideo
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
 from app.services.folder_ingestion_content import (
-    extract_video_info as _extract_video_info,
     is_better_source as _is_better_source,
     should_refresh_cache as _should_refresh_cache,
     video_content_from_cache as _video_content_from_cache,
+)
+from app.services.folder_ingestion_plan import (
+    build_video_map as _build_video_map,
+    diff_folder_videos as _diff_folder_videos,
 )
 from app.services.folder_ingestion_records import (
     delete_video_vectors_for_scope as _delete_video_vectors_for_scope,
@@ -85,35 +88,11 @@ async def sync_folder(
                 "last_sync_at": utc_now(),
             }
 
-    video_map = {}
-    skipped_invalid = 0
-    for media in videos:
-        bvid, title, cid = _extract_video_info(media)
-        if not bvid:
-            continue
-        if include_bvids is not None and bvid not in include_bvids:
-            continue
-        if exclude_bvids and bvid in exclude_bvids:
-            continue
-
-        # 过滤失效视频（被删除、下架等）
-        # attr 字段: 0=正常, 9=已失效, 1=私密等
-        attr = media.get("attr", 0)
-        if attr == 9 or title in ["已失效视频", "已删除视频"]:
-            skipped_invalid += 1
-            logger.debug(f"跳过失效视频: {bvid} - {title}")
-            continue
-
-        owner = media.get("upper") or {}
-        video_map[bvid] = {
-            "title": title,
-            "cid": cid,
-            "intro": media.get("intro"),
-            "cover": media.get("cover"),
-            "duration": media.get("duration"),
-            "owner_name": owner.get("name"),
-            "owner_mid": owner.get("mid"),
-        }
+    video_map, skipped_invalid = _build_video_map(
+        videos,
+        include_bvids=include_bvids,
+        exclude_bvids=exclude_bvids,
+    )
 
     if skipped_invalid > 0:
         logger.info(f"[{folder_id}] 过滤了 {skipped_invalid} 个失效视频")
@@ -146,8 +125,11 @@ async def sync_folder(
     )
     existing_bvids = {row[0] for row in existing_rows.fetchall()}
 
-    added = current_bvids - existing_bvids
-    removed = set() if include_bvids is not None else existing_bvids - current_bvids
+    added, removed = _diff_folder_videos(
+        current_bvids=current_bvids,
+        existing_bvids=existing_bvids,
+        partial=include_bvids is not None,
+    )
 
     # 写入标题/简介等信息（含多用户范围）
     for bvid, meta in video_map.items():
