@@ -8,10 +8,12 @@ interface VideoNoteToolRailProps {
   aiPanelCollapsed: boolean;
   canExport: boolean;
   exported: VideoNoteExportResponse | null;
+  exportFilenameTemplate: string;
   exporting: boolean;
   onAddParagraph: () => void;
   onAddTodo: () => void;
   onExportMarkdown: () => Promise<VideoNoteExportResponse | null>;
+  onExportFilenameTemplateChange: (value: string) => void;
   onToggleAiPanel: () => void;
 }
 
@@ -19,10 +21,12 @@ export default function VideoNoteToolRail({
   aiPanelCollapsed,
   canExport,
   exported,
+  exportFilenameTemplate,
   exporting,
   onAddParagraph,
   onAddTodo,
   onExportMarkdown,
+  onExportFilenameTemplateChange,
   onToggleAiPanel,
 }: VideoNoteToolRailProps) {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
@@ -62,7 +66,8 @@ export default function VideoNoteToolRail({
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-    setExportStatus("已下载 Markdown");
+    setExportStatus(null);
+    setExportMenuOpen(false);
   };
 
   return (
@@ -125,6 +130,19 @@ export default function VideoNoteToolRail({
                 ×
               </button>
             </div>
+            <label className="video-note-export-field">
+              <span>导出文件名</span>
+              <input
+                className="video-note-export-template-input"
+                type="text"
+                value={exportFilenameTemplate}
+                onChange={(event) => {
+                  onExportFilenameTemplateChange(event.target.value);
+                  setExportStatus(null);
+                }}
+                placeholder="{{title}}.md"
+              />
+            </label>
             <button
               type="button"
               className="video-note-export-action"

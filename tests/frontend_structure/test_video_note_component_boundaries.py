@@ -1,3 +1,5 @@
+import re
+
 from .helpers import get_project_root
 
 
@@ -71,6 +73,24 @@ def test_video_note_menu_polish_styles_guard_overlay_and_scroll_layout():
         in mobile_css
     )
     assert "height: 100dvh;" in mobile_css
+
+
+def test_video_note_export_menu_styles_keep_actions_readable():
+    project_root = get_project_root()
+    css = (project_root / "frontend/app/styles/video-notes.css").read_text(
+        encoding="utf-8"
+    )
+    action_override = re.search(
+        r"\.video-note-tool-rail \.video-note-export-action\s*\{(?P<body>[^}]+)\}",
+        css,
+    )
+
+    assert action_override is not None
+    action_body = action_override.group("body")
+    assert "grid-template-columns: 18px minmax(0, 1fr);" in action_body
+    assert "padding: 0 12px;" in action_body
+    assert ".video-note-export-field" in css
+    assert ".video-note-export-template-input" in css
 
 
 def test_video_note_editor_polish_styles_guard_tooltips_and_blocks():

@@ -397,8 +397,12 @@ describe("VideoNoteWorkspace", () => {
       video,
       can_create: false,
     });
+    vi.mocked(videoNoteApi.save).mockResolvedValue({
+      ...baseNote,
+      export_filename_template: "学习复盘 - {{bvid}}.md",
+    });
     vi.mocked(videoNoteApi.exportMarkdown).mockResolvedValue({
-      filename: "AI 视频学习法.md",
+      filename: "学习复盘 - BVNOTE123.md",
       markdown: "# AI 视频学习法\n",
     });
 
@@ -406,7 +410,7 @@ describe("VideoNoteWorkspace", () => {
       <VideoNoteWorkspace
         knowledgeBaseId={7}
         initialBvid="BVNOTE123"
-        autosaveDelayMs={2000}
+        autosaveDelayMs={10}
       />,
     );
 
@@ -417,13 +421,31 @@ describe("VideoNoteWorkspace", () => {
         name: "导出 Markdown",
       }),
     );
+    const filenameInput = await screen.findByLabelText("导出文件名");
+    expect(filenameInput).toHaveAttribute("placeholder", "{{title}}.md");
+    fireEvent.change(filenameInput, {
+      target: { value: "学习复盘 - {{bvid}}.md" },
+    });
+    await waitFor(() =>
+      expect(videoNoteApi.save).toHaveBeenLastCalledWith(
+        9,
+        expect.objectContaining({
+          export_filename_template: "学习复盘 - {{bvid}}.md",
+        }),
+      ),
+    );
+
     await user.click(
       await screen.findByRole("button", { name: "下载 Markdown 文件" }),
     );
 
     await waitFor(() => expect(createObjectUrl).toHaveBeenCalledOnce());
     expect(revokeObjectUrl).toHaveBeenCalledWith("blob:video-note-md");
-    expect(await screen.findByText("已下载 Markdown")).toBeVisible();
+    expect(videoNoteApi.exportMarkdown).toHaveBeenCalledWith(9);
+    expect(screen.queryByText("已下载 Markdown")).toBeNull();
+    expect(
+      screen.queryByRole("menu", { name: "Markdown 导出操作" }),
+    ).toBeNull();
   });
 
   it("collapses and restores the right AI tools without removing editor tools", async () => {

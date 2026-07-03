@@ -54,6 +54,7 @@ export default function VideoNoteWorkspace({
   const [title, setTitle] = useState("");
   const [blocks, setBlocks] = useState<VideoNoteBlock[]>([]);
   const [tags, setTags] = useState<string[]>([]);
+  const [exportFilenameTemplate, setExportFilenameTemplate] = useState("");
   const [creating, setCreating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState<VideoNoteExportResponse | null>(
@@ -69,11 +70,13 @@ export default function VideoNoteWorkspace({
       setTitle("");
       setBlocks([]);
       setTags([]);
+      setExportFilenameTemplate("");
       return;
     }
     setTitle(nextNote.title);
     setBlocks(nextNote.blocks);
     setTags(nextNote.tags);
+    setExportFilenameTemplate(nextNote.export_filename_template ?? "");
   }, []);
 
   const loadList = useCallback(async () => {
@@ -144,7 +147,7 @@ export default function VideoNoteWorkspace({
     title,
     blocks,
     tags,
-    exportFilenameTemplate: note?.export_filename_template,
+    exportFilenameTemplate: exportFilenameTemplate.trim() || undefined,
     save: videoNoteApi.save,
     delayMs: autosaveDelayMs,
   });
@@ -184,6 +187,7 @@ export default function VideoNoteWorkspace({
     if (!note) return null;
     setExporting(true);
     try {
+      await saveState.flush();
       const response = await videoNoteApi.exportMarkdown(note.id);
       setExported(response);
       return response;
@@ -234,6 +238,10 @@ export default function VideoNoteWorkspace({
     setBlocks((current) =>
       addVideoNoteBlock(current, createVideoNoteBlock("todo")),
     );
+  };
+  const updateExportFilenameTemplate = (value: string) => {
+    setExportFilenameTemplate(value);
+    setExported(null);
   };
 
   return (
@@ -286,10 +294,12 @@ export default function VideoNoteWorkspace({
                 aiPanelCollapsed={aiPanelCollapsed}
                 canExport={Boolean(note)}
                 exported={exported}
+                exportFilenameTemplate={exportFilenameTemplate}
                 exporting={exporting}
                 onAddParagraph={addParagraph}
                 onAddTodo={addTodo}
                 onExportMarkdown={exportMarkdown}
+                onExportFilenameTemplateChange={updateExportFilenameTemplate}
                 onToggleAiPanel={() => setAiPanelCollapsed((value) => !value)}
               />
               <VideoNoteMarkdownEditor blocks={blocks} onChange={setBlocks} />
