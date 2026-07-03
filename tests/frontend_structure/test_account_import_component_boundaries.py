@@ -107,6 +107,28 @@ def test_import_modal_uses_state_hook():
     assert "clearInterval(" not in modal_source
 
 
+def test_import_modal_view_is_extracted():
+    project_root = get_project_root()
+    modal_source = (
+        project_root / "frontend" / "components" / "ImportModal.tsx"
+    ).read_text(encoding="utf-8")
+    for relative_path in [
+        "frontend/components/import-modal/ImportModalView.tsx",
+        "frontend/components/import-modal/ImportMethodGrid.tsx",
+        "frontend/components/import-modal/ImportBilibiliStep.tsx",
+        "frontend/components/import-modal/ImportVideoStep.tsx",
+    ]:
+        assert (project_root / relative_path).exists()
+
+    assert "@/components/import-modal/ImportModalView" in modal_source
+    assert "Image" not in modal_source
+    assert "import-method-grid" not in modal_source
+    assert "import-qr-wrap" not in modal_source
+    assert "import-video-mode-tabs" not in modal_source
+    assert "import-local-video-card" not in modal_source
+    assert "import-actions" not in modal_source
+
+
 def test_user_menu_state_and_qr_modal_are_extracted():
     project_root = get_project_root()
     user_menu = (project_root / "frontend" / "components" / "UserMenu.tsx").read_text(
