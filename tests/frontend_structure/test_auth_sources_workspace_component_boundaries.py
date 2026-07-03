@@ -204,6 +204,37 @@ def test_sources_panel_sections_and_selection_are_extracted():
     assert "getSourcesBuildButtonText" not in sources_panel
 
 
+def test_knowledge_base_panel_view_is_extracted():
+    project_root = get_project_root()
+    panel = (
+        project_root / "frontend" / "components" / "KnowledgeBasePanel.tsx"
+    ).read_text(encoding="utf-8")
+    view = (
+        project_root
+        / "frontend"
+        / "components"
+        / "knowledge-base"
+        / "KnowledgeBasePanelView.tsx"
+    )
+    create_card = (
+        project_root
+        / "frontend"
+        / "components"
+        / "knowledge-base"
+        / "KnowledgeBaseCreateCard.tsx"
+    )
+
+    assert view.exists()
+    assert create_card.exists()
+    assert "@/components/knowledge-base/KnowledgeBasePanelView" in panel
+    assert "knowledge-create-card" not in panel
+    assert "knowledge-select-popover" not in panel
+    assert "knowledge-option-row" not in panel
+    assert "knowledge-delete-card" not in panel
+    assert "knowledge-loading-spinner" not in panel
+    assert "暂无知识库" not in panel
+
+
 def test_workspace_state_is_extracted_from_home_page():
     project_root = get_project_root()
     page = (project_root / "frontend" / "app" / "page.tsx").read_text(encoding="utf-8")

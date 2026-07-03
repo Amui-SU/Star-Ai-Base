@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+
+import { KnowledgeBasePanelView } from "@/components/knowledge-base/KnowledgeBasePanelView";
 import { knowledgeBaseApi, type KnowledgeBase } from "@/lib/api";
 import { displayKnowledgeBaseName } from "@/lib/displayNames";
 
@@ -138,184 +140,36 @@ export default function KnowledgeBasePanel({
 
   return (
     <div className="knowledge-panel" ref={rootRef}>
-      <div className="knowledge-panel-head">
-        <span className="knowledge-panel-label">当前知识库</span>
-        <button
-          type="button"
-          onClick={() => {
-            if (disabled) return;
-            setCreating((next) => !next);
-            setOpen(false);
-            setDeleteTarget(null);
-            setError(null);
-          }}
-          disabled={disabled}
-          className="knowledge-new-btn"
-        >
-          {creating ? "取消" : "+ 新建"}
-        </button>
-      </div>
-
-      {creating && (
-        <div className="knowledge-create-card animate-[fadeIn_200ms_ease-out]">
-          <div className="knowledge-create-head">
-            <div>
-              <div className="knowledge-create-title">新建知识库</div>
-              <div className="knowledge-create-copy">
-                为收藏夹资料准备一个独立的提问空间
-              </div>
-            </div>
-          </div>
-          <input
-            type="text"
-            value={newName}
-            onChange={(event) => setNewName(event.target.value)}
-            placeholder="知识库名称"
-            className="knowledge-create-input"
-            onKeyDown={(event) => event.key === "Enter" && handleCreate()}
-          />
-          <input
-            type="text"
-            value={newDesc}
-            onChange={(event) => setNewDesc(event.target.value)}
-            placeholder="描述（可选）"
-            className="knowledge-create-input"
-            onKeyDown={(event) => event.key === "Enter" && handleCreate()}
-          />
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={disabled || !newName.trim()}
-            className="knowledge-create-submit"
-          >
-            创建知识库
-          </button>
-        </div>
-      )}
-
-      {error && (
-        <div className="knowledge-error" role="status">
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="knowledge-loading">
-          <span className="knowledge-loading-spinner" />
-          <span>加载中...</span>
-        </div>
-      ) : kbs.length === 0 ? (
-        <div>
-          <div
-            className="knowledge-item knowledge-empty-card"
-            aria-disabled="true"
-          >
-            <div className="knowledge-empty-title">暂无知识库</div>
-          </div>
-          <div className="knowledge-empty-hint">点击「+ 新建」创建第一个</div>
-        </div>
-      ) : (
-        <div className="knowledge-select">
-          <button
-            type="button"
-            className="knowledge-select-trigger"
-            disabled={disabled}
-            onClick={() => setOpen((next) => !next)}
-            aria-haspopup="listbox"
-            aria-expanded={open}
-          >
-            <span className="knowledge-select-dot" aria-hidden="true" />
-            <span className="knowledge-select-main">
-              <span className="knowledge-select-name">{activeKbName}</span>
-              <span className="knowledge-select-meta">
-                {disabled ? "入库处理中，暂不可切换" : "用于当前聊天"}
-              </span>
-            </span>
-            <span className="knowledge-select-caret" aria-hidden="true">
-              ▾
-            </span>
-          </button>
-
-          {open && (
-            <div className="knowledge-select-popover" role="listbox">
-              <div className="knowledge-option-list">
-                {kbs.map((kb) => {
-                  const active = activeId === kb.id;
-                  const deleting = deletingId === kb.id;
-                  const kbName = displayKnowledgeBaseName(kb.name);
-                  return (
-                    <div
-                      key={kb.id}
-                      className={`knowledge-option-row ${active ? "active" : ""}`}
-                    >
-                      <button
-                        type="button"
-                        className="knowledge-option-btn"
-                        onClick={() => selectKnowledgeBase(kb)}
-                        disabled={disabled}
-                        role="option"
-                        aria-selected={active}
-                        title={kbName}
-                      >
-                        <span className="knowledge-option-dot" />
-                        <span className="knowledge-option-text">
-                          <span className="knowledge-option-name">
-                            {kbName}
-                          </span>
-                          <span className="knowledge-option-meta">
-                            {active ? "当前聊天" : "切换到这个知识库"}
-                          </span>
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="knowledge-delete-icon"
-                        disabled={disabled || deleting}
-                        onClick={() => setDeleteTarget(kb)}
-                        title={`删除 ${kbName}`}
-                        aria-label={`删除 ${kbName}`}
-                      >
-                        {deleting ? "..." : "×"}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {deleteTarget && (
-                <div className="knowledge-delete-card">
-                  <div>
-                    <div className="knowledge-delete-title">
-                      删除「{displayKnowledgeBaseName(deleteTarget.name)}」？
-                    </div>
-                    <div className="knowledge-delete-copy">
-                      会移除该知识库记录与入库索引，操作不可撤销。
-                    </div>
-                  </div>
-                  <div className="knowledge-delete-actions">
-                    <button
-                      type="button"
-                      className="knowledge-delete-cancel"
-                      onClick={() => setDeleteTarget(null)}
-                      disabled={deletingId !== null}
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      className="knowledge-delete-confirm"
-                      onClick={handleDelete}
-                      disabled={deletingId !== null}
-                    >
-                      {deletingId === deleteTarget.id ? "删除中" : "确认删除"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      <KnowledgeBasePanelView
+        activeId={activeId}
+        activeKbName={activeKbName}
+        creating={creating}
+        deleteTarget={deleteTarget}
+        deletingId={deletingId}
+        disabled={disabled}
+        error={error}
+        kbs={kbs}
+        loading={loading}
+        newDesc={newDesc}
+        newName={newName}
+        open={open}
+        displayName={displayKnowledgeBaseName}
+        onCancelDelete={() => setDeleteTarget(null)}
+        onCreate={handleCreate}
+        onDelete={handleDelete}
+        onDeleteTarget={setDeleteTarget}
+        onDescChange={setNewDesc}
+        onNameChange={setNewName}
+        onSelectKnowledgeBase={selectKnowledgeBase}
+        onToggleCreate={() => {
+          if (disabled) return;
+          setCreating((next) => !next);
+          setOpen(false);
+          setDeleteTarget(null);
+          setError(null);
+        }}
+        onToggleOpen={() => setOpen((next) => !next)}
+      />
     </div>
   );
 }
