@@ -14,15 +14,7 @@ import {
 import { addVideoNoteBlock, createVideoNoteBlock } from "./videoNoteBlocks";
 import { useVideoNoteAiEditing } from "./useVideoNoteAiEditing";
 import { useVideoNoteAutosave } from "./useVideoNoteAutosave";
-import VideoNoteAiPanel from "./VideoNoteAiPanel";
-import VideoNoteDrawer from "./VideoNoteDrawer";
-import VideoNoteHeader from "./VideoNoteHeader";
-import VideoNoteListPanel, {
-  type VideoNoteListFilter,
-} from "./VideoNoteListPanel";
-import VideoNoteMarkdownEditor from "./VideoNoteMarkdownEditor";
-import VideoNoteTemplatePicker from "./VideoNoteTemplatePicker";
-import VideoNoteToolRail from "./VideoNoteToolRail";
+import VideoNoteWorkspaceView from "./VideoNoteWorkspaceView";
 
 interface VideoNoteWorkspaceProps {
   knowledgeBaseId: number;
@@ -32,6 +24,8 @@ interface VideoNoteWorkspaceProps {
   autosaveDelayMs?: number;
   onClose?: () => void;
 }
+
+type WorkspaceListFilter = "all" | "with_notes" | "without_notes";
 
 export default function VideoNoteWorkspace({
   knowledgeBaseId,
@@ -47,7 +41,7 @@ export default function VideoNoteWorkspace({
   const [listLoading, setListLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [includeBodySearch, setIncludeBodySearch] = useState(false);
-  const [listFilter, setListFilter] = useState<VideoNoteListFilter>("all");
+  const [listFilter, setListFilter] = useState<WorkspaceListFilter>("all");
   const [selectedBvid, setSelectedBvid] = useState<string | null>(initialBvid);
   const [note, setNote] = useState<VideoNote | null>(null);
   const [video, setVideo] = useState<VideoNoteVideo | null>(null);
@@ -265,93 +259,52 @@ export default function VideoNoteWorkspace({
   };
 
   return (
-    <VideoNoteDrawer fullscreen={fullscreen} aiCollapsed={aiPanelCollapsed}>
-      <section
-        className={`video-note-workspace ${fullscreen ? "fullscreen" : "drawer"} ${
-          noteChooserOpen ? "chooser-open" : "chooser-collapsed"
-        } ${aiPanelCollapsed ? "ai-collapsed" : ""}`}
-      >
-        {noteChooserOpen && (
-          <div
-            className="video-note-chooser-menu"
-            role="dialog"
-            aria-label="选择笔记菜单"
-          >
-            <VideoNoteListPanel
-              items={visibleItems}
-              counts={noteCounts}
-              filter={listFilter}
-              loading={listLoading}
-              query={query}
-              includeBodySearch={includeBodySearch}
-              totalCount={items.length}
-              selectedBvid={selectedBvid}
-              onFilterChange={setListFilter}
-              onQueryChange={setQuery}
-              onIncludeBodySearchChange={setIncludeBodySearch}
-              onClose={() => setNoteChooserOpen(false)}
-              onSelectVideo={selectVideo}
-            />
-          </div>
-        )}
-        <main className="video-note-main">
-          <VideoNoteHeader
-            title={title || video?.title || "未命名笔记"}
-            fullscreen={fullscreen}
-            noteChooserOpen={noteChooserOpen}
-            knowledgeBaseName={knowledgeBaseName}
-            saveStatus={saveState.status}
-            onClose={onClose}
-            onToggleNoteChooser={() => setNoteChooserOpen((value) => !value)}
-            onTitleChange={setTitle}
-            onToggleFullscreen={() => setFullscreen((value) => !value)}
-          />
-          {!selectedBvid ? (
-            <div className="video-note-empty">选择一个视频开始记录</div>
-          ) : note ? (
-            <div className="video-note-editor-shell">
-              <VideoNoteToolRail
-                aiPanelCollapsed={aiPanelCollapsed}
-                canExport={Boolean(note)}
-                exported={exported}
-                exportFilenameTemplate={exportFilenameTemplate}
-                exporting={exporting}
-                onAddParagraph={addParagraph}
-                onAddTodo={addTodo}
-                onExportMarkdown={exportMarkdown}
-                onExportFilenameTemplateChange={updateExportFilenameTemplate}
-                onToggleAiPanel={() => setAiPanelCollapsed((value) => !value)}
-              />
-              <VideoNoteMarkdownEditor blocks={blocks} onChange={setBlocks} />
-            </div>
-          ) : video ? (
-            <VideoNoteTemplatePicker
-              video={video}
-              creating={creating}
-              onCreate={createNote}
-            />
-          ) : (
-            <div className="video-note-empty">加载视频信息...</div>
-          )}
-        </main>
-        <aside
-          className={`video-note-side-panel ${
-            aiPanelCollapsed ? "collapsed" : ""
-          }`}
-        >
-          <VideoNoteAiPanel
-            collapsed={aiPanelCollapsed}
-            loading={aiLoading}
-            canUndoAiEdit={aiEditing.canUndoAiEdit}
-            message={aiMessage}
-            onCollapse={() => setAiPanelCollapsed(true)}
-            onGenerateSummary={generateSummary}
-            onGenerateQuestions={generateQuestions}
-            onGenerateTimestamps={generateTimestamps}
-            onUndoAiEdit={aiEditing.undoAiEdit}
-          />
-        </aside>
-      </section>
-    </VideoNoteDrawer>
+    <VideoNoteWorkspaceView
+      fullscreen={fullscreen}
+      noteChooserOpen={noteChooserOpen}
+      aiPanelCollapsed={aiPanelCollapsed}
+      visibleItems={visibleItems}
+      noteCounts={noteCounts}
+      listFilter={listFilter}
+      listLoading={listLoading}
+      query={query}
+      includeBodySearch={includeBodySearch}
+      totalCount={items.length}
+      selectedBvid={selectedBvid}
+      title={title}
+      knowledgeBaseName={knowledgeBaseName}
+      saveStatus={saveState.status}
+      note={note}
+      video={video}
+      blocks={blocks}
+      creating={creating}
+      exported={exported}
+      exportFilenameTemplate={exportFilenameTemplate}
+      exporting={exporting}
+      aiLoading={aiLoading}
+      aiMessage={aiMessage}
+      canUndoAiEdit={aiEditing.canUndoAiEdit}
+      onClose={onClose}
+      onFilterChange={setListFilter}
+      onQueryChange={setQuery}
+      onIncludeBodySearchChange={setIncludeBodySearch}
+      onCloseNoteChooser={() => setNoteChooserOpen(false)}
+      onSelectVideo={selectVideo}
+      onToggleNoteChooser={() => setNoteChooserOpen((value) => !value)}
+      onTitleChange={setTitle}
+      onToggleFullscreen={() => setFullscreen((value) => !value)}
+      onAddParagraph={addParagraph}
+      onAddTodo={addTodo}
+      onExportMarkdown={exportMarkdown}
+      onExportFilenameTemplateChange={updateExportFilenameTemplate}
+      onToggleAiPanel={() => setAiPanelCollapsed((value) => !value)}
+      onCreateNote={createNote}
+      onBlocksChange={setBlocks}
+      onCollapseAiPanel={() => setAiPanelCollapsed(true)}
+      onGenerateSummary={generateSummary}
+      onGenerateQuestions={generateQuestions}
+      onGenerateTimestamps={generateTimestamps}
+      onUndoAiEdit={aiEditing.undoAiEdit}
+    />
   );
 }

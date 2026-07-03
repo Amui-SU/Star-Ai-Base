@@ -145,6 +145,36 @@ def test_video_note_workspace_tests_are_split_by_workflow():
     assert focused_source.count("it(") == 7
 
 
+def test_video_note_workspace_uses_focused_view_component():
+    project_root = get_project_root()
+    component_dir = project_root / "frontend/components/video-notes"
+    workspace_path = component_dir / "VideoNoteWorkspace.tsx"
+    view_path = component_dir / "VideoNoteWorkspaceView.tsx"
+
+    assert view_path.exists()
+
+    workspace_source = workspace_path.read_text(encoding="utf-8")
+    view_source = view_path.read_text(encoding="utf-8")
+
+    assert 'import VideoNoteWorkspaceView from "./VideoNoteWorkspaceView";' in (
+        workspace_source
+    )
+    assert "<VideoNoteWorkspaceView" in workspace_source
+    for token in [
+        "VideoNoteHeader",
+        "VideoNoteListPanel",
+        "VideoNoteMarkdownEditor",
+        "VideoNoteAiPanel",
+        "VideoNoteTemplatePicker",
+        "VideoNoteToolRail",
+        "video-note-workspace",
+        "video-note-chooser-menu",
+        "video-note-side-panel",
+    ]:
+        assert token not in workspace_source
+        assert token in view_source
+
+
 def test_video_note_mobile_drawer_collapses_to_single_column_layout():
     project_root = get_project_root()
     css = _video_note_style_source(project_root)
