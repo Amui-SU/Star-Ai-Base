@@ -29,6 +29,41 @@ def test_api_accounts_panel_uses_state_hook():
     assert "const resetForm" not in panel_source
 
 
+def test_api_accounts_panel_view_is_extracted():
+    project_root = get_project_root()
+    panel_source = (
+        project_root / "frontend" / "components" / "ApiAccountsPanel.tsx"
+    ).read_text(encoding="utf-8")
+    view = (
+        project_root
+        / "frontend"
+        / "components"
+        / "api-accounts"
+        / "ApiAccountsPanelView.tsx"
+    )
+    account_list = (
+        project_root
+        / "frontend"
+        / "components"
+        / "api-accounts"
+        / "ApiAccountsList.tsx"
+    )
+    account_form = (
+        project_root / "frontend" / "components" / "api-accounts" / "ApiAccountForm.tsx"
+    )
+
+    assert view.exists()
+    assert account_list.exists()
+    assert account_form.exists()
+    assert "@/components/api-accounts/ApiAccountsPanelView" in panel_source
+    assert "PROVIDER_PRESETS" not in panel_source
+    assert "api-accounts-layout" not in panel_source
+    assert "api-accounts-list" not in panel_source
+    assert "api-account-form" not in panel_source
+    assert "api-account-row" not in panel_source
+    assert "api-account-field" not in panel_source
+
+
 def test_common_modals_use_shared_shell():
     project_root = get_project_root()
     modal_shell = project_root / "frontend" / "components" / "ui" / "ModalShell.tsx"
