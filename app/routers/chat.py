@@ -67,11 +67,8 @@ from app.services.chat_completion import (
     stream_llm_events,
     verify_provider_configuration,
 )
-from app.services.chat_llm_runtime import (
-    build_complete_llm_answer_adapter,
-    build_complete_llm_answer_with_tools_adapter,
-    build_prepare_llm_messages_with_tools_adapter,
-    build_stream_llm_events_adapter,
+from app.services.chat_router_adapters import (
+    build_chat_router_adapters,
 )
 from app.services.chat_routing import (
     filter_docs_by_keywords as _filter_docs_by_keywords,
@@ -283,37 +280,25 @@ _verify_provider_configuration = lambda llm_config: verify_provider_configuratio
 )
 
 
-_encode_thinking_delta = lambda content: encode_thinking_delta(
-    content, THINKING_DELTA_MARKER
-)
-
-
-_stream_llm_events = build_stream_llm_events_adapter(
+_CHAT_ROUTER_ADAPTERS = build_chat_router_adapters(
+    _chat_router_module(),
     stream_llm_events=stream_llm_events,
-    resolve_llm_config=lambda: _resolve_llm_config(),
-    get_llm_client=lambda config: _get_llm_client(config),
-)
-
-
-_complete_llm_answer = build_complete_llm_answer_adapter(
     complete_llm_answer=complete_llm_answer,
-    resolve_llm_config=lambda: _resolve_llm_config(),
-    get_llm_client=lambda config: _get_llm_client(config),
-)
-
-
-_complete_llm_answer_with_tools = build_complete_llm_answer_with_tools_adapter(
     complete_llm_answer_with_tools=complete_llm_answer_with_tools,
-    resolve_llm_config=lambda: _resolve_llm_config(),
-    get_llm_client=lambda config: _get_llm_client(config),
-)
-
-
-_prepare_llm_messages_with_tools = build_prepare_llm_messages_with_tools_adapter(
     prepare_llm_messages_with_tools=prepare_llm_messages_with_tools,
-    resolve_llm_config=lambda: _resolve_llm_config(),
-    get_llm_client=lambda config: _get_llm_client(config),
+    encode_thinking_delta=encode_thinking_delta,
+    thinking_delta_marker=THINKING_DELTA_MARKER,
 )
+
+_encode_thinking_delta = _CHAT_ROUTER_ADAPTERS["_encode_thinking_delta"]
+_stream_llm_events = _CHAT_ROUTER_ADAPTERS["_stream_llm_events"]
+_complete_llm_answer = _CHAT_ROUTER_ADAPTERS["_complete_llm_answer"]
+_complete_llm_answer_with_tools = _CHAT_ROUTER_ADAPTERS[
+    "_complete_llm_answer_with_tools"
+]
+_prepare_llm_messages_with_tools = _CHAT_ROUTER_ADAPTERS[
+    "_prepare_llm_messages_with_tools"
+]
 
 
 async def _prepare_messages(
