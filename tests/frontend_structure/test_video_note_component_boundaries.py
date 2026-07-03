@@ -3,6 +3,27 @@ import re
 from .helpers import get_project_root
 
 
+VIDEO_NOTE_STYLE_FILES = [
+    "video-notes/shell.css",
+    "video-notes/list.css",
+    "video-notes/tool-rail-export.css",
+    "video-notes/editor.css",
+    "video-notes/side-panels.css",
+    "video-notes/responsive.css",
+]
+
+
+def _video_note_style_source(project_root) -> str:
+    style_dir = project_root / "frontend/app/styles"
+    hub_path = style_dir / "video-notes.css"
+    sources = [hub_path.read_text(encoding="utf-8")]
+    for relative_path in VIDEO_NOTE_STYLE_FILES:
+        path = style_dir / relative_path
+        assert path.exists()
+        sources.append(path.read_text(encoding="utf-8"))
+    return "\n".join(sources)
+
+
 def test_video_note_workspace_is_owned_by_page_not_entry_panels():
     project_root = get_project_root()
     page_source = (project_root / "frontend/app/page.tsx").read_text(encoding="utf-8")
@@ -25,18 +46,68 @@ def test_video_note_feature_styles_stay_in_dedicated_file():
     globals_source = (project_root / "frontend/app/globals.css").read_text(
         encoding="utf-8"
     )
+    style_dir = project_root / "frontend/app/styles"
     style_path = project_root / "frontend/app/styles/video-notes.css"
 
     assert '@import "./styles/video-notes.css";' in globals_source
     assert style_path.exists()
-    assert ".video-note-workspace" in style_path.read_text(encoding="utf-8")
+    hub_source = style_path.read_text(encoding="utf-8")
+    for relative_path in VIDEO_NOTE_STYLE_FILES:
+        assert f'@import "./{relative_path}";' in hub_source
+        assert (style_dir / relative_path).exists()
+    assert ".video-note-workspace" in _video_note_style_source(project_root)
+
+
+def test_video_note_styles_are_split_by_surface():
+    project_root = get_project_root()
+    style_dir = project_root / "frontend/app/styles"
+    expected_tokens = {
+        "video-notes/shell.css": [
+            ".video-note-drawer",
+            ".video-note-workspace",
+            ".video-note-header",
+        ],
+        "video-notes/list.css": [
+            ".video-note-list-search",
+            ".video-note-list-item",
+            ".video-note-current-badge",
+        ],
+        "video-notes/tool-rail-export.css": [
+            ".video-note-tool-rail",
+            ".video-note-export-menu",
+            ".video-note-export-popover",
+        ],
+        "video-notes/editor.css": [
+            ".video-note-markdown-editor",
+            ".video-note-vditor",
+            ".video-note-template-grid",
+        ],
+        "video-notes/side-panels.css": [
+            ".video-note-ai-panel",
+            ".video-note-ai-expand",
+            ".video-note-export-result",
+        ],
+        "video-notes/responsive.css": [
+            "@media (max-width: 1024px)",
+            "@media (max-width: 640px)",
+            ".video-note-workspace .video-note-list-panel[hidden]",
+        ],
+    }
+
+    hub_source = (style_dir / "video-notes.css").read_text(encoding="utf-8")
+    assert hub_source.count("@import") == len(expected_tokens)
+    assert len(hub_source.splitlines()) <= 12
+
+    for relative_path, tokens in expected_tokens.items():
+        source = (style_dir / relative_path).read_text(encoding="utf-8")
+        assert len(source.splitlines()) <= 320
+        for token in tokens:
+            assert token in source
 
 
 def test_video_note_mobile_drawer_collapses_to_single_column_layout():
     project_root = get_project_root()
-    css = (project_root / "frontend/app/styles/video-notes.css").read_text(
-        encoding="utf-8"
-    )
+    css = _video_note_style_source(project_root)
 
     mobile_css = css.split("@media (max-width: 1024px)", maxsplit=1)[1]
 
@@ -53,9 +124,7 @@ def test_video_note_mobile_drawer_collapses_to_single_column_layout():
 
 def test_video_note_menu_polish_styles_guard_overlay_and_scroll_layout():
     project_root = get_project_root()
-    css = (project_root / "frontend/app/styles/video-notes.css").read_text(
-        encoding="utf-8"
-    )
+    css = _video_note_style_source(project_root)
     mobile_css = css.split("@media (max-width: 1024px)", maxsplit=1)[1]
 
     assert ".video-note-chooser-menu" in css
@@ -77,9 +146,7 @@ def test_video_note_menu_polish_styles_guard_overlay_and_scroll_layout():
 
 def test_video_note_export_menu_styles_keep_actions_readable():
     project_root = get_project_root()
-    css = (project_root / "frontend/app/styles/video-notes.css").read_text(
-        encoding="utf-8"
-    )
+    css = _video_note_style_source(project_root)
     action_override = re.search(
         r"\.video-note-tool-rail \.video-note-export-action\s*\{(?P<body>[^}]+)\}",
         css,
@@ -95,9 +162,7 @@ def test_video_note_export_menu_styles_keep_actions_readable():
 
 def test_video_note_editor_polish_styles_guard_tooltips_and_blocks():
     project_root = get_project_root()
-    css = (project_root / "frontend/app/styles/video-notes.css").read_text(
-        encoding="utf-8"
-    )
+    css = _video_note_style_source(project_root)
 
     assert ".video-note-vditor .vditor-tooltipped::after" in css
     assert ".video-note-vditor .vditor-toolbar .vditor-tooltipped::after" in css

@@ -1,0 +1,109 @@
+.video-note-ai-panel,
+.video-note-export-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.video-note-ai-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.video-note-ai-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.video-note-ai-status-wrap {
+  display: grid;
+  min-height: 116px;
+  padding: 18px 4px 10px;
+  place-items: center;
+}
+
+.video-note-ai-status {
+  margin: 0;
+  width: 100%;
+  max-width: 280px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--paper) 86%, var(--accent) 14%);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.video-note-ai-collapse,
+.video-note-ai-expand {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-note-ai-collapse {
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+}
+
+.video-note-ai-collapse svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.video-note-ai-collapse .chevron-left {
+  display: block;
+}
+
+.video-note-ai-collapse .chevron-down {
+  display: none;
+}
+
+.video-note-side-panel .video-note-ai-collapse::after {
+  right: calc(100% + 10px);
+  left: auto;
+  transform: translateY(-50%) translateX(4px);
+}
+
+.video-note-side-panel .video-note-ai-collapse:hover::after,
+.video-note-side-panel .video-note-ai-collapse:focus-visible::after {
+  transform: translateY(-50%) translateX(0);
+}
+
+.video-note-ai-expand {
+  width: 38px;
+  height: 100%;
+  min-height: 72px;
+  padding: 0;
+  writing-mode: vertical-rl;
+  letter-spacing: 0;
+  font-weight: 700;
+}
+
+.video-note-ai-panel.collapsed {
+  height: 100%;
+  margin-bottom: 0;
+  place-items: start center;
+}
+
+.video-note-export-result {
+  display: grid;
+  gap: 8px;
+}
+
+.video-note-export-result textarea {
+  min-height: 160px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}

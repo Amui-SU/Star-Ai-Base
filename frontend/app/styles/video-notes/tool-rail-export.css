@@ -1,0 +1,256 @@
+.video-note-editor-shell {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.video-note-tool-rail {
+  position: relative;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 8px;
+  overflow: visible;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--paper-2) 70%, transparent);
+}
+
+.video-note-tool-rail button {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.video-note-tool-menu-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.video-note-tool-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-soft);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.video-note-tool-button:hover:not(:disabled),
+.video-note-tool-button:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--paper-3);
+  color: var(--ink);
+  transform: translateX(1px);
+}
+
+.video-note-tool-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.video-note-tool-button svg,
+.video-note-export-action svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.video-note-tool-icon-text {
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.video-note-tool-button::after,
+.video-note-ai-collapse::after,
+.video-note-ai-expand::after {
+  position: absolute;
+  z-index: 220;
+  top: 50%;
+  left: calc(100% + 10px);
+  width: max-content;
+  max-width: 180px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--paper) 92%, var(--ink) 8%);
+  color: var(--ink);
+  content: attr(data-tooltip);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(-4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  white-space: nowrap;
+  box-shadow: 0 10px 25px var(--shadow);
+}
+
+.video-note-tool-button:hover::after,
+.video-note-tool-button:focus-visible::after,
+.video-note-ai-collapse:hover::after,
+.video-note-ai-collapse:focus-visible::after,
+.video-note-ai-expand:hover::after,
+.video-note-ai-expand:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+.video-note-tool-spacer {
+  flex: 1 1 auto;
+  min-height: 10px;
+}
+
+.video-note-export-menu {
+  position: absolute;
+  z-index: 180;
+  top: 0;
+  left: calc(100% + 10px);
+  display: grid;
+  width: min(286px, 72vw);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 18px 50px var(--shadow);
+}
+
+.video-note-export-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.video-note-export-template-input {
+  width: 100%;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--ink);
+  padding: 0 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.video-note-export-template-input:focus {
+  border-color: var(--accent);
+}
+
+.video-note-export-action {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  justify-content: start;
+  width: 100%;
+  height: auto;
+  min-height: 38px;
+  padding: 0 10px;
+  gap: 9px;
+  text-align: left;
+}
+
+.video-note-tool-rail .video-note-export-action {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  justify-content: stretch;
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 12px;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.video-note-export-action span {
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-note-export-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.video-note-export-popover {
+  position: absolute;
+  z-index: 180;
+  bottom: 12px;
+  left: calc(100% + 10px);
+  display: grid;
+  width: min(360px, 70vw);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 18px 50px var(--shadow);
+}
+
+.video-note-export-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.video-note-export-popover-head strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-note-export-popover-head button {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+}
+
+.video-note-export-popover textarea {
+  width: 100%;
+  min-height: 150px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--ink);
+  padding: 9px 10px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}

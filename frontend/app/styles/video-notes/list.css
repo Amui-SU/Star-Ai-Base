@@ -1,0 +1,115 @@
+.video-note-list-search {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.video-note-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.video-note-list-head strong {
+  display: block;
+  font-size: 14px;
+}
+
+.video-note-list-search input[type="text"],
+.video-note-list-search input[type="search"],
+.video-note-list-search input:not([type]) {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
+.video-note-list-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.video-note-list-filters button {
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.video-note-list-filters button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--paper-2));
+}
+
+.video-note-body-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.video-note-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.video-note-list-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
+  padding: 10px;
+  text-align: left;
+}
+
+.video-note-list-item.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper-2));
+}
+
+.video-note-list-title {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-note-list-meta {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-note-list-status,
+.video-note-current-badge {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.video-note-list-status.ready {
+  color: var(--accent);
+}
+
+.video-note-current-badge {
+  grid-column: 1 / -1;
+  width: fit-content;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.video-note-muted,
+.video-note-empty {
+  color: var(--muted);
+}

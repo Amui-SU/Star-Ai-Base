@@ -1,12 +1,21 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const videoNoteStyles = readFileSync(
-  resolve(process.cwd(), "app/styles/video-notes.css"),
-  "utf8",
-);
+const stylesRoot = resolve(process.cwd(), "app/styles");
+
+const readStylesheet = (relativePath: string, baseDir = stylesRoot): string => {
+  const filePath = resolve(baseDir, relativePath);
+  const source = readFileSync(filePath, "utf8");
+  return source.replace(
+    /^@import\s+"\.\/([^"]+)";/gm,
+    (_match, importPath: string) =>
+      readStylesheet(importPath, dirname(filePath)),
+  );
+};
+
+const videoNoteStyles = readStylesheet("video-notes.css");
 
 describe("video note styles", () => {
   it("hides the visible editor scrollbar while keeping Vditor content overflow external", () => {
