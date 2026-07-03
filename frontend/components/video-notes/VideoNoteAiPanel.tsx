@@ -7,6 +7,7 @@ interface VideoNoteAiPanelProps {
   loading: boolean;
   canUndoAiEdit: boolean;
   message: string | null;
+  onCollapse: () => void;
   onGenerateSummary: () => Promise<VideoNoteAiResponse | void>;
   onGenerateQuestions: () => Promise<VideoNoteAiResponse | void>;
   onUndoAiEdit: () => void;
@@ -17,6 +18,7 @@ export default function VideoNoteAiPanel({
   loading,
   canUndoAiEdit,
   message,
+  onCollapse,
   onGenerateSummary,
   onGenerateQuestions,
   onUndoAiEdit,
@@ -32,6 +34,17 @@ export default function VideoNoteAiPanel({
           <span className="video-note-kicker">AI</span>
           <h3>协作编辑</h3>
         </div>
+        <button
+          type="button"
+          className="video-note-ai-collapse"
+          aria-label="折叠 AI 工具"
+          data-tooltip="折叠 AI 工具"
+          onClick={onCollapse}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m9 6 6 6-6 6" />
+          </svg>
+        </button>
       </div>
       <div className="video-note-ai-actions">
         <button

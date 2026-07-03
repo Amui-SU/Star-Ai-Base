@@ -50,7 +50,7 @@ vi.mock("vditor", () => ({
     element: HTMLTextAreaElement;
     options: MockVditorOptions;
 
-    constructor(id: string, options: MockVditorOptions) {
+    constructor(target: string | HTMLElement, options: MockVditorOptions) {
       this.options = options;
       this.element = document.createElement("textarea");
       this.element.setAttribute("aria-label", "Vditor mock editor");
@@ -58,7 +58,9 @@ vi.mock("vditor", () => ({
       this.element.addEventListener("input", () => {
         options.input?.(this.element.value);
       });
-      document.getElementById(id)?.append(this.element);
+      const host =
+        typeof target === "string" ? document.getElementById(target) : target;
+      host?.append(this.element);
       vditorState.instances.push(this);
     }
 
@@ -480,10 +482,20 @@ describe("VideoNoteWorkspace", () => {
     await findMarkdownEditor();
 
     const sidePanel = container.querySelector(".video-note-side-panel");
+    const drawer = container.querySelector(".video-note-drawer");
+    expect(drawer).not.toHaveClass("ai-collapsed");
     expect(sidePanel).not.toHaveClass("collapsed");
     const toolRail = container.querySelector(
       ".video-note-tool-rail",
     ) as HTMLElement;
+    const sideCollapseButton = within(sidePanel as HTMLElement).getByRole(
+      "button",
+      {
+        name: "折叠 AI 工具",
+      },
+    );
+    expect(sideCollapseButton).toBeVisible();
+    expect(sideCollapseButton.querySelector("svg")).not.toBeNull();
     expect(
       within(toolRail).getByRole("button", { name: "折叠 AI 工具" }),
     ).toBeVisible();
@@ -495,8 +507,11 @@ describe("VideoNoteWorkspace", () => {
     );
 
     await user.click(
-      within(toolRail).getByRole("button", { name: "折叠 AI 工具" }),
+      within(sidePanel as HTMLElement).getByRole("button", {
+        name: "折叠 AI 工具",
+      }),
     );
+    expect(drawer).toHaveClass("ai-collapsed");
     expect(sidePanel).toHaveClass("collapsed");
     expect(screen.queryByRole("button", { name: "生成摘要" })).toBeNull();
     expect(within(toolRail).getAllByRole("button")[2]).toHaveAccessibleName(
@@ -507,6 +522,7 @@ describe("VideoNoteWorkspace", () => {
       within(toolRail).getByRole("button", { name: "展开 AI 工具" }),
     );
     expect(sidePanel).not.toHaveClass("collapsed");
+    expect(drawer).not.toHaveClass("ai-collapsed");
     expect(screen.getByRole("button", { name: "生成摘要" })).toBeVisible();
   });
 

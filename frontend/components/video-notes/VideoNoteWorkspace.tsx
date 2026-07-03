@@ -245,7 +245,7 @@ export default function VideoNoteWorkspace({
   };
 
   return (
-    <VideoNoteDrawer fullscreen={fullscreen}>
+    <VideoNoteDrawer fullscreen={fullscreen} aiCollapsed={aiPanelCollapsed}>
       <section
         className={`video-note-workspace ${fullscreen ? "fullscreen" : "drawer"} ${
           noteChooserOpen ? "chooser-open" : "chooser-collapsed"
@@ -324,6 +324,7 @@ export default function VideoNoteWorkspace({
             loading={aiLoading}
             canUndoAiEdit={aiEditing.canUndoAiEdit}
             message={aiMessage}
+            onCollapse={() => setAiPanelCollapsed(true)}
             onGenerateSummary={generateSummary}
             onGenerateQuestions={generateQuestions}
             onUndoAiEdit={aiEditing.undoAiEdit}

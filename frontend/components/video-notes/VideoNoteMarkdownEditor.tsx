@@ -40,6 +40,7 @@ export default function VideoNoteMarkdownEditor({
   const editorId = `video-note-vditor-${useId().replace(/:/g, "")}`;
   const markdown = useMemo(() => blocksToMarkdown(blocks), [blocks]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const vditorHostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<VditorInstance | null>(null);
   const blocksRef = useRef(blocks);
   const onChangeRef = useRef(onChange);
@@ -47,6 +48,11 @@ export default function VideoNoteMarkdownEditor({
   const undoStackRef = useRef<string[]>([]);
   const redoStackRef = useRef<string[]>([]);
   const applyingHistoryRef = useRef(false);
+  const pendingLocalChangeRef = useRef<{
+    blocks: VideoNoteBlock[];
+    echoMarkdown: string;
+    rawMarkdown: string;
+  } | null>(null);
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
@@ -57,26 +63,42 @@ export default function VideoNoteMarkdownEditor({
     onChangeRef.current = onChange;
   }, [onChange]);
 
-  const applyMarkdownValue = useCallback((value: string) => {
-    const editor = editorRef.current;
-    if (editor?.getValue() !== value) {
-      editor?.setValue(value);
-    }
-    lastMarkdownRef.current = value;
-    onChangeRef.current(markdownToVideoNoteBlocks(value, blocksRef.current));
+  const emitMarkdownChange = useCallback((value: string) => {
+    const nextBlocks = markdownToVideoNoteBlocks(value, blocksRef.current);
+    pendingLocalChangeRef.current = {
+      blocks: nextBlocks,
+      echoMarkdown: blocksToMarkdown(nextBlocks),
+      rawMarkdown: value,
+    };
+    onChangeRef.current(nextBlocks);
   }, []);
 
-  const recordMarkdownInput = useCallback((value: string) => {
-    if (!applyingHistoryRef.current && lastMarkdownRef.current !== value) {
-      undoStackRef.current.push(lastMarkdownRef.current);
-      if (undoStackRef.current.length > 100) {
-        undoStackRef.current.shift();
+  const applyMarkdownValue = useCallback(
+    (value: string) => {
+      const editor = editorRef.current;
+      if (editor?.getValue() !== value) {
+        editor?.setValue(value);
       }
-      redoStackRef.current = [];
-    }
-    lastMarkdownRef.current = value;
-    onChangeRef.current(markdownToVideoNoteBlocks(value, blocksRef.current));
-  }, []);
+      lastMarkdownRef.current = value;
+      emitMarkdownChange(value);
+    },
+    [emitMarkdownChange],
+  );
+
+  const recordMarkdownInput = useCallback(
+    (value: string) => {
+      if (!applyingHistoryRef.current && lastMarkdownRef.current !== value) {
+        undoStackRef.current.push(lastMarkdownRef.current);
+        if (undoStackRef.current.length > 100) {
+          undoStackRef.current.shift();
+        }
+        redoStackRef.current = [];
+      }
+      lastMarkdownRef.current = value;
+      emitMarkdownChange(value);
+    },
+    [emitMarkdownChange],
+  );
 
   const recordPendingEditorValue = useCallback(() => {
     const editor = editorRef.current;
@@ -162,15 +184,18 @@ export default function VideoNoteMarkdownEditor({
 
   useEffect(() => {
     let cancelled = false;
+    let mountedEditor: VditorInstance | null = null;
 
     async function mountEditor() {
       try {
         const { default: Vditor } = await import("vditor");
         if (cancelled) return;
+        const host = vditorHostRef.current;
+        if (!host) return;
 
-        editorRef.current = new Vditor(editorId, {
+        mountedEditor = new Vditor(host, {
           cache: { enable: false },
-          height: "100%",
+          height: "auto",
           minHeight: 420,
           mode: "ir",
           placeholder: "开始记录这段视频里的观点、问题和行动项...",
@@ -201,6 +226,7 @@ export default function VideoNoteMarkdownEditor({
             recordMarkdownInput(value);
           },
         });
+        editorRef.current = mountedEditor;
       } catch {
         if (!cancelled) setLoadError(true);
       }
@@ -210,10 +236,12 @@ export default function VideoNoteMarkdownEditor({
 
     return () => {
       cancelled = true;
-      editorRef.current?.destroy();
-      editorRef.current = null;
+      mountedEditor?.destroy();
+      if (editorRef.current === mountedEditor) {
+        editorRef.current = null;
+      }
     };
-  }, [editorId, recordMarkdownInput]);
+  }, [recordMarkdownInput]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -221,14 +249,26 @@ export default function VideoNoteMarkdownEditor({
       lastMarkdownRef.current = markdown;
       return;
     }
+    const pendingLocalChange = pendingLocalChangeRef.current;
+    const isLocalEcho =
+      pendingLocalChange !== null &&
+      (pendingLocalChange.blocks === blocks ||
+        pendingLocalChange.echoMarkdown === markdown ||
+        pendingLocalChange.rawMarkdown === markdown);
+    if (isLocalEcho) {
+      pendingLocalChangeRef.current = null;
+      lastMarkdownRef.current = editor.getValue();
+      return;
+    }
     if (lastMarkdownRef.current === markdown) return;
     if (editor.getValue() !== markdown) {
       editor.setValue(markdown, true);
     }
     lastMarkdownRef.current = markdown;
+    pendingLocalChangeRef.current = null;
     undoStackRef.current = [];
     redoStackRef.current = [];
-  }, [markdown]);
+  }, [blocks, markdown]);
 
   if (loadError) {
     return (
@@ -245,7 +285,7 @@ export default function VideoNoteMarkdownEditor({
       aria-label="Markdown 笔记编辑器"
       onKeyDown={handleKeyDown}
     >
-      <div id={editorId} className="video-note-vditor" />
+      <div ref={vditorHostRef} id={editorId} className="video-note-vditor" />
     </div>
   );
 }

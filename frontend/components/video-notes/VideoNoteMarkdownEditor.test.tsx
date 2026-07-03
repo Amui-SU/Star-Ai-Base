@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { VideoNoteBlock } from "@/lib/api";
@@ -12,6 +13,7 @@ import VideoNoteMarkdownEditor from "./VideoNoteMarkdownEditor";
 
 interface MockVditorOptions {
   after?: () => void;
+  height?: string;
   input?: (value: string) => void;
   mode?: string;
   value?: string;
@@ -24,7 +26,9 @@ const vditorState = vi.hoisted(() => ({
     getValue: () => string;
     nativeElement: HTMLDivElement;
     options: MockVditorOptions;
-    setValue: (value: string) => void;
+    setValue: (value: string, clearStack?: boolean) => void;
+    setValueCalls: Array<{ clearStack?: boolean; value: string }>;
+    target: string | HTMLElement;
   }>,
 }));
 
@@ -34,8 +38,12 @@ vi.mock("vditor", () => ({
     element: HTMLTextAreaElement;
     nativeElement: HTMLDivElement;
     options: MockVditorOptions;
+    setValueCalls: Array<{ clearStack?: boolean; value: string }> = [];
 
-    constructor(id: string, options: MockVditorOptions) {
+    target: string | HTMLElement;
+
+    constructor(target: string | HTMLElement, options: MockVditorOptions) {
+      this.target = target;
       this.options = options;
       this.element = document.createElement("textarea");
       this.element.setAttribute("aria-label", "Vditor mock editor");
@@ -45,7 +53,9 @@ vi.mock("vditor", () => ({
       this.element.addEventListener("input", () => {
         options.input?.(this.element.value);
       });
-      document.getElementById(id)?.append(this.element, this.nativeElement);
+      const host =
+        typeof target === "string" ? document.getElementById(target) : target;
+      host?.append(this.element, this.nativeElement);
       vditorState.instances.push(this);
       window.setTimeout(() => options.after?.(), 0);
     }
@@ -54,8 +64,10 @@ vi.mock("vditor", () => ({
       return this.element.value;
     }
 
-    setValue(value: string) {
+    setValue(value: string, clearStack?: boolean) {
+      this.setValueCalls.push({ clearStack, value });
       this.element.value = value;
+      this.element.scrollTop = 0;
     }
 
     destroy() {
@@ -70,6 +82,11 @@ const initialBlocks: VideoNoteBlock[] = [
   { id: "h1", type: "heading", level: 1, text: "Original title" },
   { id: "p1", type: "paragraph", text: "Original body" },
 ];
+
+function StatefulMarkdownEditor() {
+  const [blocks, setBlocks] = useState(initialBlocks);
+  return <VideoNoteMarkdownEditor blocks={blocks} onChange={setBlocks} />;
+}
 
 afterEach(() => {
   cleanup();
@@ -86,6 +103,8 @@ describe("VideoNoteMarkdownEditor", () => {
     await waitFor(() => expect(vditorState.instances).toHaveLength(1));
 
     expect(vditorState.instances[0].options.mode).toBe("ir");
+    expect(vditorState.instances[0].options.height).toBe("auto");
+    expect(vditorState.instances[0].target).toBeInstanceOf(HTMLElement);
     expect(editor).toHaveValue("# Original title\n\nOriginal body");
   });
 
@@ -156,6 +175,38 @@ describe("VideoNoteMarkdownEditor", () => {
       { id: "h1", type: "heading", level: 1, text: "Updated title" },
       { id: "p1", type: "paragraph", text: "Updated body" },
     ]);
+  });
+
+  it("does not reset scroll when parent state echoes normalized local input", async () => {
+    render(<StatefulMarkdownEditor />);
+
+    const editor = await screen.findByLabelText("Vditor mock editor");
+    const localMarkdown = "# Updated title   \n\nUpdated body\n\n";
+    editor.scrollTop = 160;
+
+    fireEvent.input(editor, { target: { value: localMarkdown } });
+
+    await waitFor(() => expect(editor).toHaveValue(localMarkdown));
+    expect(vditorState.instances[0].setValueCalls).toEqual([]);
+    expect(editor.scrollTop).toBe(160);
+  });
+
+  it("keeps keyboard undo and redo available after parent state echoes local input", async () => {
+    render(<StatefulMarkdownEditor />);
+
+    const editor = await screen.findByLabelText("Vditor mock editor");
+    const localMarkdown = "# Updated title   \n\nUpdated body\n\n";
+
+    fireEvent.input(editor, { target: { value: localMarkdown } });
+    await waitFor(() => expect(editor).toHaveValue(localMarkdown));
+
+    fireEvent.keyDown(editor, { key: "z", ctrlKey: true });
+    await waitFor(() =>
+      expect(editor).toHaveValue("# Original title\n\nOriginal body"),
+    );
+
+    fireEvent.keyDown(editor, { key: "y", ctrlKey: true });
+    await waitFor(() => expect(editor).toHaveValue(localMarkdown));
   });
 
   it("lets Vditor handle native undo when local history is empty", async () => {
