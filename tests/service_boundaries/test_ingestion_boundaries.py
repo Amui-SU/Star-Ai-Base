@@ -39,15 +39,24 @@ def test_ingestion_task_persistence_and_status_mapping_live_in_service():
 def test_import_router_delegates_import_task_runtime_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/import_tasks.py"
+    persistence_path = project_root / "app/services/import_persistence.py"
     imports_source = (project_root / "app/routers/imports.py").read_text(
         encoding="utf-8"
     )
 
     assert service_path.exists()
     service_source = service_path.read_text(encoding="utf-8")
+    assert persistence_path.exists()
+    persistence_source = persistence_path.read_text(encoding="utf-8")
     assert "async def run_bilibili_video_import" in service_source
     assert "async def run_local_video_import" in service_source
-    assert "async def store_imported_video_content" in service_source
+    assert "from app.services.import_persistence import" in service_source
+    assert "async def store_imported_video_content" not in service_source
+    assert "async def store_imported_video_content" in persistence_source
+    assert "select(VideoCache)" in persistence_source
+    assert "VideoCache(" in persistence_source
+    assert "FavoriteFolder(" in persistence_source
+    assert "FavoriteVideo(" in persistence_source
     assert "def delete_existing_import_vectors" in service_source
     assert "def cleanup_local_upload" in service_source
     assert "from app.services.import_tasks import" in imports_source
