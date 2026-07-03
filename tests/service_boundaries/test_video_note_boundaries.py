@@ -33,6 +33,10 @@ def test_video_note_domain_has_focused_service_modules():
             "render_video_note_filename",
         ],
         "app/services/video_note_ai.py": [
+            "build_summary_messages",
+            "generate_video_note_ai_json",
+        ],
+        "app/services/video_note_ai_suggestions.py": [
             "build_summary_suggestions",
             "build_ai_edit_suggestions",
         ],
@@ -44,6 +48,25 @@ def test_video_note_domain_has_focused_service_modules():
         source = path.read_text(encoding="utf-8")
         for symbol in symbols:
             assert f"def {symbol}" in source or f"async def {symbol}" in source
+
+
+def test_video_note_ai_suggestions_stay_out_of_prompt_runtime():
+    project_root = get_project_root()
+    ai_path = project_root / "app/services/video_note_ai.py"
+    suggestions_path = project_root / "app/services/video_note_ai_suggestions.py"
+
+    assert suggestions_path.exists()
+
+    ai_source = ai_path.read_text(encoding="utf-8")
+    suggestions_source = suggestions_path.read_text(encoding="utf-8")
+
+    assert "from app.services.video_note_ai_suggestions import" in ai_source
+    assert "def build_summary_suggestions" not in ai_source
+    assert "def build_ai_edit_suggestions" not in ai_source
+    assert "def _payload_strings" not in ai_source
+    assert "def _payload_timestamps" not in ai_source
+    assert "def build_summary_suggestions" in suggestions_source
+    assert "def build_ai_edit_suggestions" in suggestions_source
 
 
 def test_chat_and_sources_do_not_own_video_note_runtime():
