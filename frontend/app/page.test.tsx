@@ -213,7 +213,8 @@ describe("Home mobile shell", () => {
     });
   });
 
-  it("opens the notes panel from the collapsed toolstrip", async () => {
+  it("opens the video note workspace directly from the collapsed notes tool", async () => {
+    localStorage.setItem("active_kb_id", "7");
     const user = userEvent.setup();
     const { container } = render(<Home />);
 
@@ -223,11 +224,18 @@ describe("Home mobile shell", () => {
 
     await user.click(screen.getByRole("button", { name: "打开笔记" }));
 
-    expect(container.querySelector(".sidebar-shell")).toHaveClass("open");
-    expect(screen.getByRole("heading", { name: "笔记" })).toBeVisible();
+    expect(container.querySelector(".sidebar-shell")).toHaveClass("closed");
+    expect(screen.getByText("Video Note Workspace list")).toBeVisible();
+    expect(videoNoteWorkspaceMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        knowledgeBaseId: 7,
+        initialBvid: null,
+      }),
+    );
+    expect(screen.queryByRole("heading", { name: "笔记" })).toBeNull();
     expect(
-      screen.getByPlaceholderText("写下这次学习的要点"),
-    ).toBeInTheDocument();
+      screen.queryByPlaceholderText("写下这次学习的要点"),
+    ).not.toBeInTheDocument();
   });
 
   it("opens the video note workspace from chat callbacks with the active knowledge base", async () => {

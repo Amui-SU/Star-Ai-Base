@@ -17,12 +17,43 @@
 
 .video-note-workspace {
   display: grid;
-  grid-template-columns: minmax(180px, 0.9fr) minmax(320px, 1.7fr) minmax(220px, 0.9fr);
+  grid-template-columns: minmax(180px, 0.9fr) minmax(320px, 1.7fr) minmax(
+      220px,
+      0.9fr
+    );
   width: 100%;
   height: 100%;
   min-height: 0;
   background: var(--paper);
   color: var(--ink);
+}
+
+.video-note-workspace.drawer {
+  grid-template-columns: minmax(280px, 1fr) minmax(200px, 0.68fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.video-note-workspace.drawer .video-note-list-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  max-height: 176px;
+  overflow: hidden;
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.video-note-workspace.drawer .video-note-list-search {
+  border-right: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+.video-note-workspace.drawer .video-note-list {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 260px);
+  align-content: start;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .video-note-list-panel,
@@ -89,7 +120,8 @@
 .video-note-editor-actions button,
 .video-note-block-toolbar button,
 .video-note-template-grid button,
-.video-note-list button,
+.video-note-list-filters button,
+.video-note-list-item,
 .video-note-ai-panel button,
 .video-note-export-panel button,
 .video-note-tool-rail button {
@@ -125,7 +157,20 @@
   border-bottom: 1px solid var(--border);
 }
 
+.video-note-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.video-note-list-head strong {
+  display: block;
+  font-size: 14px;
+}
+
 .video-note-list-search input[type="text"],
+.video-note-list-search input[type="search"],
 .video-note-list-search input:not([type]) {
   width: 100%;
   border: 1px solid var(--border);
@@ -135,7 +180,23 @@
   padding: 8px 10px;
 }
 
-.video-note-list-search label {
+.video-note-list-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.video-note-list-filters button {
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.video-note-list-filters button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--paper-2));
+}
+
+.video-note-body-search {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -149,19 +210,57 @@
   padding: 12px;
 }
 
-.video-note-list button {
+.video-note-list-item {
+  position: relative;
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
   padding: 10px;
   text-align: left;
 }
 
-.video-note-list button.active {
+.video-note-list-item.active {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 18%, var(--paper-2));
 }
 
-.video-note-list small,
+.video-note-list-title {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-note-list-meta {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-note-list-status,
+.video-note-current-badge {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.video-note-list-status.ready {
+  color: var(--accent);
+}
+
+.video-note-current-badge {
+  grid-column: 1 / -1;
+  width: fit-content;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .video-note-muted,
 .video-note-empty {
   color: var(--muted);
@@ -301,6 +400,22 @@
   .video-note-workspace {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .video-note-workspace.drawer .video-note-list-panel {
+    display: block;
+    max-height: 28dvh;
+  }
+
+  .video-note-workspace.drawer .video-note-list-search {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .video-note-workspace.drawer .video-note-list {
+    display: grid;
+    grid-auto-flow: row;
+    overflow: auto;
   }
 
   .video-note-list-panel,

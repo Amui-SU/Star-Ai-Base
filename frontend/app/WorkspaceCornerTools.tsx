@@ -2,10 +2,12 @@ import type { SidebarMode } from "@/app/useWorkspaceState";
 
 interface WorkspaceCornerToolsProps {
   onOpenSidebarMode: (mode: SidebarMode) => void;
+  onOpenVideoNotes: () => void;
 }
 
 export default function WorkspaceCornerTools({
   onOpenSidebarMode,
+  onOpenVideoNotes,
 }: WorkspaceCornerToolsProps) {
   return (
     <div
@@ -36,7 +38,7 @@ export default function WorkspaceCornerTools({
         className="workspace-corner-tool"
         title="笔记"
         aria-label="打开笔记"
-        onClick={() => onOpenSidebarMode("notes")}
+        onClick={onOpenVideoNotes}
       >
         <NotesIcon />
       </button>

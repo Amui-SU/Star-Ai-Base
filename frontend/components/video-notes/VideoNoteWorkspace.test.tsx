@@ -55,6 +55,91 @@ afterEach(() => {
 });
 
 describe("VideoNoteWorkspace", () => {
+  it("opens directly into the first existing note when no video is preselected", async () => {
+    vi.mocked(videoNoteApi.list).mockResolvedValue({
+      knowledge_base_id: 7,
+      items: [
+        {
+          bvid: "BVEMPTY",
+          title: "还没有笔记的视频",
+          folder_title: "学习收藏夹",
+          has_note: false,
+          summary_status: "not_created",
+          tags: [],
+        },
+        {
+          bvid: "BVNOTE123",
+          title: "AI 视频学习法",
+          folder_title: "学习收藏夹",
+          has_note: true,
+          note_id: 9,
+          summary_status: "seeded",
+          tags: ["AI"],
+        },
+      ],
+    });
+    vi.mocked(videoNoteApi.detail).mockResolvedValue({
+      note: baseNote,
+      video,
+      can_create: false,
+    });
+
+    render(<VideoNoteWorkspace knowledgeBaseId={7} autosaveDelayMs={2000} />);
+
+    expect(await screen.findByDisplayValue("旧内容")).toBeVisible();
+    expect(videoNoteApi.detail).toHaveBeenCalledWith(7, "BVNOTE123");
+  });
+
+  it("filters selectable videos by note creation status", async () => {
+    const user = userEvent.setup();
+    vi.mocked(videoNoteApi.list).mockResolvedValue({
+      knowledge_base_id: 7,
+      items: [
+        {
+          bvid: "BVNOTE123",
+          title: "AI 视频学习法",
+          folder_title: "学习收藏夹",
+          has_note: true,
+          note_id: 9,
+          summary_status: "seeded",
+          tags: ["AI"],
+        },
+        {
+          bvid: "BVEMPTY",
+          title: "还没有笔记的视频",
+          folder_title: "学习收藏夹",
+          has_note: false,
+          summary_status: "not_created",
+          tags: [],
+        },
+      ],
+    });
+    vi.mocked(videoNoteApi.detail).mockResolvedValue({
+      note: baseNote,
+      video,
+      can_create: false,
+    });
+
+    render(
+      <VideoNoteWorkspace
+        knowledgeBaseId={7}
+        initialBvid="BVNOTE123"
+        autosaveDelayMs={2000}
+      />,
+    );
+
+    expect(await screen.findByText("AI 视频学习法")).toBeVisible();
+    expect(screen.getByText("还没有笔记的视频")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "未创建 1" }));
+    expect(screen.queryByText("AI 视频学习法")).toBeNull();
+    expect(screen.getByText("还没有笔记的视频")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "已有笔记 1" }));
+    expect(screen.getByText("AI 视频学习法")).toBeVisible();
+    expect(screen.queryByText("还没有笔记的视频")).toBeNull();
+  });
+
   it("loads the list and creates a standard template note", async () => {
     const user = userEvent.setup();
     vi.mocked(videoNoteApi.list).mockResolvedValue({

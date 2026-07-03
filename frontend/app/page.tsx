@@ -73,7 +73,10 @@ export default function Home() {
 
           <div className="workspace">
             {!isSidebarOpen && (
-              <WorkspaceCornerTools onOpenSidebarMode={openSidebarMode} />
+              <WorkspaceCornerTools
+                onOpenSidebarMode={openSidebarMode}
+                onOpenVideoNotes={() => openVideoNoteWorkspace(null)}
+              />
             )}
 
             {isSidebarOpen && sidebarMode !== "history" && (

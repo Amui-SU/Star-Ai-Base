@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   videoNoteApi,
@@ -11,10 +11,7 @@ import {
   type VideoNoteTemplateId,
   type VideoNoteVideo,
 } from "@/lib/api";
-import {
-  addVideoNoteBlock,
-  createVideoNoteBlock,
-} from "./videoNoteBlocks";
+import { addVideoNoteBlock, createVideoNoteBlock } from "./videoNoteBlocks";
 import { useVideoNoteAiEditing } from "./useVideoNoteAiEditing";
 import { useVideoNoteAutosave } from "./useVideoNoteAutosave";
 import VideoNoteAiPanel from "./VideoNoteAiPanel";
@@ -22,7 +19,9 @@ import VideoNoteBlockEditor from "./VideoNoteBlockEditor";
 import VideoNoteDrawer from "./VideoNoteDrawer";
 import VideoNoteExportPanel from "./VideoNoteExportPanel";
 import VideoNoteHeader from "./VideoNoteHeader";
-import VideoNoteListPanel from "./VideoNoteListPanel";
+import VideoNoteListPanel, {
+  type VideoNoteListFilter,
+} from "./VideoNoteListPanel";
 import VideoNoteTemplatePicker from "./VideoNoteTemplatePicker";
 import VideoNoteToolRail from "./VideoNoteToolRail";
 
@@ -48,6 +47,7 @@ export default function VideoNoteWorkspace({
   const [listLoading, setListLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [includeBodySearch, setIncludeBodySearch] = useState(false);
+  const [listFilter, setListFilter] = useState<VideoNoteListFilter>("all");
   const [selectedBvid, setSelectedBvid] = useState<string | null>(initialBvid);
   const [note, setNote] = useState<VideoNote | null>(null);
   const [video, setVideo] = useState<VideoNoteVideo | null>(null);
@@ -56,7 +56,9 @@ export default function VideoNoteWorkspace({
   const [tags, setTags] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [exported, setExported] = useState<VideoNoteExportResponse | null>(null);
+  const [exported, setExported] = useState<VideoNoteExportResponse | null>(
+    null,
+  );
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
 
@@ -82,10 +84,35 @@ export default function VideoNoteWorkspace({
         includeBodySearch,
       });
       setItems(response.items);
+      setSelectedBvid((current) => {
+        if (current || response.items.length === 0) return current;
+        const preferred =
+          response.items.find((item) => item.has_note) ?? response.items[0];
+        return preferred.bvid;
+      });
     } finally {
       setListLoading(false);
     }
   }, [includeBodySearch, knowledgeBaseId, query]);
+
+  const noteCounts = useMemo(
+    () => ({
+      all: items.length,
+      with_notes: items.filter((item) => item.has_note).length,
+      without_notes: items.filter((item) => !item.has_note).length,
+    }),
+    [items],
+  );
+
+  const visibleItems = useMemo(() => {
+    if (listFilter === "with_notes") {
+      return items.filter((item) => item.has_note);
+    }
+    if (listFilter === "without_notes") {
+      return items.filter((item) => !item.has_note);
+    }
+    return items;
+  }, [items, listFilter]);
 
   const loadDetail = useCallback(
     async (bvid: string) => {
@@ -124,6 +151,17 @@ export default function VideoNoteWorkspace({
     blocks,
     onBlocksChange: setBlocks,
   });
+
+  const selectVideo = useCallback(
+    (bvid: string) => {
+      setSelectedBvid(bvid);
+      setVideo(null);
+      syncNoteState(null);
+      setExported(null);
+      setAiMessage(null);
+    },
+    [syncNoteState],
+  );
 
   const createNote = async (templateId: VideoNoteTemplateId) => {
     if (!selectedBvid) return;
@@ -190,7 +228,9 @@ export default function VideoNoteWorkspace({
     );
   };
   const addTodo = () => {
-    setBlocks((current) => addVideoNoteBlock(current, createVideoNoteBlock("todo")));
+    setBlocks((current) =>
+      addVideoNoteBlock(current, createVideoNoteBlock("todo")),
+    );
   };
 
   return (
@@ -199,14 +239,18 @@ export default function VideoNoteWorkspace({
         className={`video-note-workspace ${fullscreen ? "fullscreen" : "drawer"}`}
       >
         <VideoNoteListPanel
-          items={items}
+          items={visibleItems}
+          counts={noteCounts}
+          filter={listFilter}
           loading={listLoading}
           query={query}
           includeBodySearch={includeBodySearch}
+          totalCount={items.length}
           selectedBvid={selectedBvid}
+          onFilterChange={setListFilter}
           onQueryChange={setQuery}
           onIncludeBodySearchChange={setIncludeBodySearch}
-          onSelectVideo={setSelectedBvid}
+          onSelectVideo={selectVideo}
         />
         <main className="video-note-main">
           <VideoNoteHeader
