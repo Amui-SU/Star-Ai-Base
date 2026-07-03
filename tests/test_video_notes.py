@@ -2,6 +2,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models import FavoriteFolder, FavoriteVideo, VideoCache, VideoNote
@@ -320,8 +321,16 @@ async def test_markdown_export_uses_frontmatter_blocks_timestamp_links_and_filen
 
 @pytest.mark.asyncio
 async def test_ai_endpoints_return_suggestions_without_mutating_note(
-    client, db_session_factory
+    client, db_session_factory, monkeypatch
 ):
+    async def missing_llm_credentials(*args, **kwargs):
+        raise HTTPException(status_code=400, detail="未配置 LLM API Key")
+
+    monkeypatch.setattr(
+        "app.services.video_note_route_runtime.resolve_user_llm_credentials",
+        missing_llm_credentials,
+    )
+
     _, headers, kb = await _setup_user_kb_video(
         client, db_session_factory, "ai-notes@example.com"
     )
