@@ -271,7 +271,52 @@ async def test_try_asr_with_local_audio_skips_tiny_downloaded_file():
 
 
 @pytest.mark.asyncio
-async def test_fetch_content_uses_available_ai_summary_first():
+async def test_fetch_content_prefers_full_subtitle_over_ai_summary():
+    subtitle = "这是字幕正文内容。" * 20
+    bili = FakeBilibili(
+        video_info={
+            "aid": 123,
+            "cid": 456,
+            "title": "Summary Video",
+            "subtitle": {
+                "subtitles": [
+                    {
+                        "lan": "zh-CN",
+                        "ai_status": 0,
+                        "subtitle_url": "https://example.test/subtitle.json",
+                    }
+                ]
+            },
+        },
+        summary={
+            "code": 0,
+            "model_result": {
+                "summary": "这是 AI 摘要内容。",
+                "outline": [
+                    {
+                        "title": "第一段",
+                        "timestamp": 12,
+                        "part_outline": [{"content": "要点 A", "timestamp": 18}],
+                    }
+                ],
+            },
+        },
+        subtitle_text=subtitle,
+        audio_url="https://example.test/audio.m4s",
+    )
+    asr = FakeASR(text="这是 ASR 内容。" * 20)
+
+    content = await ContentFetcher(bili, asr).fetch_content(
+        "BV1SUMMARY", cid=456, title="Summary Video"
+    )
+
+    assert content.source == ContentSource.SUBTITLE
+    assert content.content == subtitle
+    assert asr.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_fetch_content_uses_ai_summary_when_full_text_is_unavailable():
     bili = FakeBilibili(
         video_info={"aid": 123, "cid": 456, "title": "Summary Video"},
         summary={
@@ -287,10 +332,8 @@ async def test_fetch_content_uses_available_ai_summary_first():
                 ],
             },
         },
-        subtitle_text="这是字幕内容。" * 20,
-        audio_url="https://example.test/audio.m4s",
     )
-    asr = FakeASR(text="这是 ASR 内容。" * 20)
+    asr = FakeASR(text=None)
 
     content = await ContentFetcher(bili, asr).fetch_content(
         "BV1SUMMARY", cid=456, title="Summary Video"
@@ -299,7 +342,6 @@ async def test_fetch_content_uses_available_ai_summary_first():
     assert content.source == ContentSource.AI_SUMMARY
     assert "这是 AI 摘要内容。" in content.content
     assert "第一段" in content.content
-    assert asr.calls == 0
 
 
 @pytest.mark.asyncio

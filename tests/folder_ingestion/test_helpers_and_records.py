@@ -78,6 +78,13 @@ def test_folder_ingestion_content_helpers_select_cache_and_source_policy():
     assert extract_video_info(media) == ("BVHELPER123", "Helper Video", 456)
     assert is_better_source(ContentSource.ASR.value, ContentSource.SUBTITLE.value)
     assert not should_refresh_cache(cache)
+    summary_cache = VideoCache(
+        bvid="BVSUMMARY123",
+        title="Summary Video",
+        content="AI summary " * 12,
+        content_source=ContentSource.AI_SUMMARY.value,
+    )
+    assert should_refresh_cache(summary_cache)
 
     content = video_content_from_cache(cache, "BVHELPER123", "Helper Video")
 

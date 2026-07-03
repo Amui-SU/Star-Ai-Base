@@ -311,9 +311,9 @@ async def test_markdown_export_uses_frontmatter_blocks_timestamp_links_and_filen
     assert payload["filename"] == "AI学习复盘 - BVNOTE123.md"
     assert "bvid: BVNOTE123" in payload["markdown"]
     assert "tags: [AI, 课程]" in payload["markdown"]
-    assert "[03:24](https://www.bilibili.com/video/BVNOTE123?t=204)" in payload[
-        "markdown"
-    ]
+    assert (
+        "[03:24](https://www.bilibili.com/video/BVNOTE123?t=204)" in payload["markdown"]
+    )
     assert "- [ ] 复习这一段" in payload["markdown"]
 
 
@@ -354,9 +354,10 @@ async def test_ai_endpoints_return_suggestions_without_mutating_note(
     )
     assert edit.status_code == 200
     assert edit.json()["operations"][0]["kind"] == "insert_block"
+    question_items = edit.json()["operations"][0]["block"]["items"]
+    assert any("介绍学习目标" in item["text"] for item in question_items)
 
     async with db_session_factory() as session:
         note = await session.get(VideoNote, note_id)
         assert note.blocks_json == []
         assert note.summary_generated_at is None
-

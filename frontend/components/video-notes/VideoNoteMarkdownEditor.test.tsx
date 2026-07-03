@@ -22,6 +22,7 @@ const vditorState = vi.hoisted(() => ({
     destroyed: boolean;
     element: HTMLTextAreaElement;
     getValue: () => string;
+    nativeElement: HTMLDivElement;
     options: MockVditorOptions;
     setValue: (value: string) => void;
   }>,
@@ -31,6 +32,7 @@ vi.mock("vditor", () => ({
   default: class MockVditor {
     destroyed = false;
     element: HTMLTextAreaElement;
+    nativeElement: HTMLDivElement;
     options: MockVditorOptions;
 
     constructor(id: string, options: MockVditorOptions) {
@@ -38,10 +40,12 @@ vi.mock("vditor", () => ({
       this.element = document.createElement("textarea");
       this.element.setAttribute("aria-label", "Vditor mock editor");
       this.element.value = options.value ?? "";
+      this.nativeElement = document.createElement("div");
+      this.nativeElement.setAttribute("data-testid", "vditor-native-input");
       this.element.addEventListener("input", () => {
         options.input?.(this.element.value);
       });
-      document.getElementById(id)?.append(this.element);
+      document.getElementById(id)?.append(this.element, this.nativeElement);
       vditorState.instances.push(this);
       window.setTimeout(() => options.after?.(), 0);
     }
@@ -57,6 +61,7 @@ vi.mock("vditor", () => ({
     destroy() {
       this.destroyed = true;
       this.element.remove();
+      this.nativeElement.remove();
     }
   },
 }));
@@ -118,5 +123,104 @@ describe("VideoNoteMarkdownEditor", () => {
     );
 
     await waitFor(() => expect(editor).toHaveValue("AI summary text"));
+  });
+
+  it("supports keyboard undo and redo for user edits", async () => {
+    const onChange = vi.fn();
+    render(
+      <VideoNoteMarkdownEditor blocks={initialBlocks} onChange={onChange} />,
+    );
+
+    const editor = await screen.findByLabelText("Vditor mock editor");
+    fireEvent.input(editor, {
+      target: { value: "# Updated title\n\nUpdated body" },
+    });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith([
+        { id: "h1", type: "heading", level: 1, text: "Updated title" },
+        { id: "p1", type: "paragraph", text: "Updated body" },
+      ]),
+    );
+
+    fireEvent.keyDown(editor, { key: "z", ctrlKey: true });
+    await waitFor(() =>
+      expect(editor).toHaveValue("# Original title\n\nOriginal body"),
+    );
+    expect(onChange).toHaveBeenLastCalledWith(initialBlocks);
+
+    fireEvent.keyDown(editor, { key: "y", ctrlKey: true });
+    await waitFor(() =>
+      expect(editor).toHaveValue("# Updated title\n\nUpdated body"),
+    );
+    expect(onChange).toHaveBeenLastCalledWith([
+      { id: "h1", type: "heading", level: 1, text: "Updated title" },
+      { id: "p1", type: "paragraph", text: "Updated body" },
+    ]);
+  });
+
+  it("lets Vditor handle native undo when local history is empty", async () => {
+    render(
+      <VideoNoteMarkdownEditor blocks={initialBlocks} onChange={vi.fn()} />,
+    );
+
+    const editor = await screen.findByLabelText("Vditor mock editor");
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      key: "z",
+    });
+
+    editor.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("tracks native Vditor DOM input for keyboard undo", async () => {
+    const onChange = vi.fn();
+    render(
+      <VideoNoteMarkdownEditor blocks={initialBlocks} onChange={onChange} />,
+    );
+
+    await screen.findByLabelText("Vditor mock editor");
+    const instance = vditorState.instances[0];
+    instance.element.value = "# Native title\n\nNative body";
+    fireEvent.input(instance.nativeElement);
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith([
+        { id: "h1", type: "heading", level: 1, text: "Native title" },
+        { id: "p1", type: "paragraph", text: "Native body" },
+      ]),
+    );
+
+    fireEvent.keyDown(instance.nativeElement, { key: "z", ctrlKey: true });
+
+    await waitFor(() =>
+      expect(instance.element).toHaveValue("# Original title\n\nOriginal body"),
+    );
+    expect(onChange).toHaveBeenLastCalledWith(initialBlocks);
+  });
+
+  it("captures a pending Vditor value before keyboard undo", async () => {
+    const onChange = vi.fn();
+    render(
+      <VideoNoteMarkdownEditor blocks={initialBlocks} onChange={onChange} />,
+    );
+
+    await screen.findByLabelText("Vditor mock editor");
+    const instance = vditorState.instances[0];
+    instance.element.value = "# Pending title\n\nPending body";
+
+    fireEvent.keyDown(instance.nativeElement, { key: "z", ctrlKey: true });
+
+    await waitFor(() =>
+      expect(instance.element).toHaveValue("# Original title\n\nOriginal body"),
+    );
+    expect(onChange).toHaveBeenNthCalledWith(1, [
+      { id: "h1", type: "heading", level: 1, text: "Pending title" },
+      { id: "p1", type: "paragraph", text: "Pending body" },
+    ]);
+    expect(onChange).toHaveBeenLastCalledWith(initialBlocks);
   });
 });

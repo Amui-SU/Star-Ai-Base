@@ -35,7 +35,12 @@ def should_refresh_cache(cache: Optional[VideoCache]) -> bool:
     text = (cache.content or "").strip()
     if len(text) < 50:
         return True
-    if cache.content_source in (None, "", ContentSource.BASIC_INFO.value):
+    if cache.content_source in (
+        None,
+        "",
+        ContentSource.BASIC_INFO.value,
+        ContentSource.AI_SUMMARY.value,
+    ):
         return True
     return False
 

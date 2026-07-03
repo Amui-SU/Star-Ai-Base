@@ -69,9 +69,34 @@ def build_summary_suggestions(
     )
 
 
+def _question_items(source: VideoNoteSource | None, instruction: str) -> list[dict]:
+    items: list[dict] = []
+    if source:
+        for point in _key_points(source)[:3]:
+            text = str(point.get("text") or "").strip()
+            if text:
+                items.append(
+                    {"text": f"关于「{text}」，我能否用自己的话复述并举一个例子？"}
+                )
+        content = (source.content or "").strip()
+        if content and len(items) < 3:
+            excerpt = content.replace("\n", " ")[:80].strip()
+            if excerpt:
+                items.append({"text": f"这段内容「{excerpt}」解决了什么问题？"})
+    items.extend(
+        [
+            {"text": "这个视频最重要的一个观点是什么？"},
+            {"text": "我可以立刻实践的一步是什么？"},
+            {"text": instruction or "还有哪些内容需要回看确认？"},
+        ]
+    )
+    return items[:6]
+
+
 def build_ai_edit_suggestions(
     note: VideoNote,
     request: VideoNoteAiEditRequest,
+    source: VideoNoteSource | None = None,
 ) -> VideoNoteAiResponse:
     """Build non-mutating edit operations for the UI to apply with undo."""
 
@@ -87,11 +112,7 @@ def build_ai_edit_suggestions(
                     "block": {
                         "id": "ai-review-questions",
                         "type": "questions",
-                        "items": [
-                            {"text": "这个视频最重要的一个观点是什么？"},
-                            {"text": "我可以立刻实践的一步是什么？"},
-                            {"text": instruction or "还有哪些内容需要回看确认？"},
-                        ],
+                        "items": _question_items(source, instruction),
                     },
                 }
             ],

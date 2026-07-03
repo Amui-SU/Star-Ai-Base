@@ -72,11 +72,42 @@ class ContentFetcher:
 
         description = video_info.get("desc", "") if video_info else ""
 
-        # Level 1: B 站 AI 摘要
+        summary: Optional[dict] = None
+
+        # Level 1: 字幕正文。完整正文比平台摘要更适合知识库检索和后续笔记 AI 分析。
         if cid:
-            owner = (video_info or {}).get("owner") or {}
-            up_mid = owner.get("mid") or (video_info or {}).get("owner_mid")
-            summary = await self._try_ai_summary(bvid, cid, up_mid=up_mid)
+            subtitle_text = await self._try_subtitle(bvid, cid, video_info=video_info)
+            if subtitle_text:
+                logger.info(f"[{bvid}] 使用字幕文本")
+                summary = await self._try_ai_summary_for_outline(bvid, cid, video_info)
+                return VideoContent(
+                    bvid=bvid,
+                    title=title,
+                    content=subtitle_text,
+                    source=ContentSource.SUBTITLE,
+                    outline=summary.get("outline") if summary else None,
+                )
+
+        # Level 2: 音频 ASR
+        logger.info(f"[{bvid}] 尝试使用 ASR")
+
+        asr_text = await self._try_asr(bvid, cid)
+        if asr_text:
+            logger.info(f"[{bvid}] 使用 ASR 文本")
+            summary = await self._try_ai_summary_for_outline(bvid, cid, video_info)
+            return VideoContent(
+                bvid=bvid,
+                title=title,
+                content=asr_text,
+                source=ContentSource.ASR,
+                outline=summary.get("outline") if summary else None,
+            )
+
+        # Level 3: B 站 AI 摘要。仅在没有完整正文时作为兜底内容。
+        if cid:
+            summary = summary or await self._try_ai_summary_for_outline(
+                bvid, cid, video_info
+            )
             if summary:
                 logger.info(f"[{bvid}] 使用 AI 摘要")
                 return VideoContent(
@@ -86,28 +117,6 @@ class ContentFetcher:
                     source=ContentSource.AI_SUMMARY,
                     outline=summary.get("outline"),
                 )
-
-        # Level 2: 字幕
-        if cid:
-            subtitle_text = await self._try_subtitle(bvid, cid, video_info=video_info)
-            if subtitle_text:
-                logger.info(f"[{bvid}] 使用字幕文本")
-                return VideoContent(
-                    bvid=bvid,
-                    title=title,
-                    content=subtitle_text,
-                    source=ContentSource.SUBTITLE,
-                )
-
-        # Level 3: 音频 ASR
-        logger.info(f"[{bvid}] 尝试使用 ASR")
-
-        asr_text = await self._try_asr(bvid, cid)
-        if asr_text:
-            logger.info(f"[{bvid}] 使用 ASR 文本")
-            return VideoContent(
-                bvid=bvid, title=title, content=asr_text, source=ContentSource.ASR
-            )
 
         # ASR 失败时，补齐基础信息（避免遗漏简介）
         if not video_info:
@@ -171,6 +180,13 @@ class ContentFetcher:
         except Exception as e:
             logger.warning(f"[{bvid}] 获取 AI 摘要失败: {e}")
             return None
+
+    async def _try_ai_summary_for_outline(
+        self, bvid: str, cid: int, video_info: Optional[dict]
+    ) -> Optional[dict]:
+        owner = (video_info or {}).get("owner") or {}
+        up_mid = owner.get("mid") or (video_info or {}).get("owner_mid")
+        return await self._try_ai_summary(bvid, cid, up_mid=up_mid)
 
     async def _try_subtitle(
         self, bvid: str, cid: int, video_info: Optional[dict] = None

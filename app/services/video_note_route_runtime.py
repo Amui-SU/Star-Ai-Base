@@ -189,9 +189,7 @@ async def create_video_note_from_router(
         return VideoNoteResponse(**note_to_response(note, source))
 
     blocks = (
-        build_standard_note_blocks(source)
-        if payload.template_id == "standard"
-        else []
+        build_standard_note_blocks(source) if payload.template_id == "standard" else []
     )
     note = VideoNote(
         user_id=user.id,
@@ -215,7 +213,9 @@ async def create_video_note_from_router(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Video note already exists") from exc
+        raise HTTPException(
+            status_code=409, detail="Video note already exists"
+        ) from exc
     await db.refresh(note)
     return VideoNoteResponse(**note_to_response(note, source))
 
@@ -297,4 +297,10 @@ async def edit_video_note_with_ai_from_router(
     workspace: Workspace,
 ) -> VideoNoteAiResponse:
     note = await _get_user_note(db, user=user, workspace=workspace, note_id=note_id)
-    return build_ai_edit_suggestions(note, payload)
+    source = await resolve_video_note_source(
+        db,
+        workspace_id=workspace.id,
+        knowledge_base_id=note.knowledge_base_id,
+        bvid=note.bvid,
+    )
+    return build_ai_edit_suggestions(note, payload, source)
