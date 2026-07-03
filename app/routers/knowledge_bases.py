@@ -39,9 +39,6 @@ from app.services.knowledge_base_build_route_runtime import start_knowledge_base
 from app.services.knowledge_base_build_tasks import (
     run_scoped_build as _run_scoped_build,
 )
-from app.services.knowledge_base_answer_adapter import (
-    build_complete_knowledge_base_answer,
-)
 from app.services.knowledge_base_chat_runtime import (
     answer_knowledge_base_chat_from_router,
     stream_knowledge_base_chat_from_router,
@@ -76,11 +73,8 @@ from app.services.chat_completion import (
     stream_llm_events,
 )
 from app.services.chat_provider_catalog import _resolve_llm_config
-from app.services.knowledge_base_llm_runtime import (
-    build_complete_llm_answer_adapter,
-    build_prepare_llm_messages_with_tools_adapter,
-    build_stream_llm_events_adapter,
-    encode_web_search_progress as _encode_web_search_progress,
+from app.services.knowledge_base_router_adapters import (
+    build_knowledge_base_router_adapters,
 )
 from app.services.llm_client import get_llm_client as _get_llm_client
 from app.services.llm_tool_calls import (
@@ -113,9 +107,6 @@ from app.services.knowledge_web_search import (
     web_search_failed_status_from_exception as _web_search_failed_status_from_exception,
     web_search_status as _web_search_status,
 )
-from app.services.knowledge_base_web_search_compat import (
-    build_web_search_orchestration_compat,
-)
 from app.services.knowledge_base_web_search_api_key import (
     resolve_web_search_api_key as resolve_knowledge_base_web_search_api_key,
 )
@@ -126,73 +117,62 @@ from app.services.api_credentials import (
 )
 from app.services.web_search import fetch_web_page, search_web
 
-router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
-
-
-def _encode_thinking_delta(content: str) -> str:
-    return encode_thinking_delta(content)
-
-
-_stream_llm_events = build_stream_llm_events_adapter(
-    stream_llm_events=stream_llm_events,
-    resolve_llm_config=lambda: _resolve_llm_config(),
-    get_llm_client=lambda config: _get_llm_client(config),
-)
-
-_complete_llm_answer = build_complete_llm_answer_adapter(
-    complete_llm_answer=complete_llm_answer,
-    resolve_llm_config=lambda: _resolve_llm_config(),
-    get_llm_client=lambda config: _get_llm_client(config),
-)
-
-_prepare_llm_messages_with_tools = build_prepare_llm_messages_with_tools_adapter(
-    prepare_llm_messages_with_tools=prepare_llm_messages_with_tools,
-    resolve_llm_config=lambda: _resolve_llm_config(),
-    get_llm_client=lambda config: _get_llm_client(config),
-)
-
-
-_answer_from_documents = lambda question, documents: answer_from_documents(
-    question,
-    documents,
-    source_from_document=_source_from_document,
-)
-
-
-_build_knowledge_base_messages = lambda question, documents, web_results=None, *, enable_web_search=False, thinking_config=None: build_knowledge_base_messages(
-    question,
-    documents,
-    web_results,
-    enable_web_search=enable_web_search,
-    thinking_config=thinking_config,
-    format_web_search_context=_format_web_search_context,
-    enforce_markdown_output=_enforce_markdown_output,
-    apply_mode_instructions=_apply_mode_instructions,
-    resolve_llm_config=_resolve_llm_config,
-)
-
 
 def _knowledge_web_search_module():
     return sys.modules[__name__]
 
 
-_complete_knowledge_base_answer = build_complete_knowledge_base_answer(
-    complete_llm_answer_resolver=lambda: getattr(
-        _knowledge_web_search_module(),
-        "_complete_llm_answer",
-    ),
-    prepare_web_search_tool_run=lambda *args, **kwargs: getattr(
-        _knowledge_web_search_module(),
-        "_prepare_web_search_tool_run",
-    )(*args, **kwargs),
+router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
+
+
+_KNOWLEDGE_BASE_ROUTER_ADAPTERS = build_knowledge_base_router_adapters(
+    _knowledge_web_search_module(),
+    answer_from_documents=answer_from_documents,
+    build_knowledge_base_messages=build_knowledge_base_messages,
+    stream_llm_events=stream_llm_events,
+    complete_llm_answer=complete_llm_answer,
+    prepare_llm_messages_with_tools=prepare_llm_messages_with_tools,
+    encode_thinking_delta=encode_thinking_delta,
     status_from_web_search_state=_status_from_web_search_state,
     supports_keyword_argument=_supports_keyword_argument,
+    source_from_document=_source_from_document,
+    format_web_search_context=_format_web_search_context,
+    enforce_markdown_output=_enforce_markdown_output,
+    apply_mode_instructions=_apply_mode_instructions,
 )
 
+_encode_thinking_delta = _KNOWLEDGE_BASE_ROUTER_ADAPTERS["_encode_thinking_delta"]
+_encode_web_search_progress = _KNOWLEDGE_BASE_ROUTER_ADAPTERS[
+    "_encode_web_search_progress"
+]
+_stream_llm_events = _KNOWLEDGE_BASE_ROUTER_ADAPTERS["_stream_llm_events"]
+_complete_llm_answer = _KNOWLEDGE_BASE_ROUTER_ADAPTERS["_complete_llm_answer"]
+_prepare_llm_messages_with_tools = _KNOWLEDGE_BASE_ROUTER_ADAPTERS[
+    "_prepare_llm_messages_with_tools"
+]
+_answer_from_documents = _KNOWLEDGE_BASE_ROUTER_ADAPTERS["_answer_from_documents"]
+_build_knowledge_base_messages = _KNOWLEDGE_BASE_ROUTER_ADAPTERS[
+    "_build_knowledge_base_messages"
+]
+_complete_knowledge_base_answer = _KNOWLEDGE_BASE_ROUTER_ADAPTERS[
+    "_complete_knowledge_base_answer"
+]
 
-_WEB_SEARCH_ORCHESTRATION_COMPAT = build_web_search_orchestration_compat(
-    _knowledge_web_search_module()
-)
+_WEB_SEARCH_ORCHESTRATION_COMPAT = {
+    key: _KNOWLEDGE_BASE_ROUTER_ADAPTERS[key]
+    for key in {
+        "MAX_FETCH_WEB_PAGE_CALLS",
+        "FETCH_WEB_PAGE_CONTEXT_CHARS",
+        "WEB_SEARCH_HEARTBEAT_INTERVAL_SECONDS",
+        "WEB_SEARCH_TOOL_PREP_TIMEOUT_SECONDS",
+        "_execute_web_search_tool",
+        "_execute_fetch_web_page_tool",
+        "_run_initial_web_search",
+        "_prepare_web_search_tool_run",
+        "_prepare_knowledge_base_web_search",
+        "_prepare_knowledge_base_web_search_with_heartbeats",
+    }
+}
 
 
 def __getattr__(name: str):

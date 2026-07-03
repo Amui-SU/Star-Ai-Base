@@ -131,7 +131,12 @@ def test_knowledge_base_router_delegates_web_search_orchestration_to_service():
         "legacy_prepare_knowledge_base_web_search_with_heartbeats",
     }:
         assert f"def {name}" in compat_service_source
-    assert "from app.services.knowledge_base_web_search_compat import" in router_source
+    assert (
+        "from app.services.knowledge_base_web_search_compat import" not in router_source
+    )
+    assert "from app.services.knowledge_base_web_search_compat import" in (
+        project_root / "app/services/knowledge_base_router_adapters.py"
+    ).read_text(encoding="utf-8")
     assert "def _legacy_execute_web_search_tool" not in router_source
     assert "def _legacy_execute_fetch_web_page_tool" not in router_source
     assert "def _legacy_run_initial_web_search" not in router_source
@@ -143,6 +148,7 @@ def test_knowledge_base_router_delegates_web_search_orchestration_to_service():
 def test_knowledge_base_router_uses_services_for_shared_llm_runtime():
     project_root = get_project_root()
     service_path = project_root / "app/services/knowledge_base_llm_runtime.py"
+    adapter_path = project_root / "app/services/knowledge_base_router_adapters.py"
     router_source = (project_root / "app/routers/knowledge_bases.py").read_text(
         encoding="utf-8"
     )
@@ -158,14 +164,22 @@ def test_knowledge_base_router_uses_services_for_shared_llm_runtime():
         "encode_web_search_progress",
     }:
         assert f"def {name}" in service_source
-    assert "from app.services.knowledge_base_llm_runtime import" in router_source
     assert "from app.services.chat_provider_catalog import" in router_source
     assert "from app.services.llm_client import" in router_source
     assert "from app.services.llm_tool_calls import" in router_source
+    assert adapter_path.exists()
+    adapter_source = adapter_path.read_text(encoding="utf-8")
+    assert "def build_knowledge_base_router_adapters" in adapter_source
+    assert "from app.services.knowledge_base_llm_runtime import" in adapter_source
+    assert "from app.services.knowledge_base_llm_runtime import" not in router_source
+    assert "from app.services.knowledge_base_router_adapters import" in router_source
     assert "_get_llm_client" in router_source
     assert "complete_llm_answer(" not in router_source
     assert "stream_llm_events(" not in router_source
     assert "prepare_llm_messages_with_tools(" not in router_source
+    assert "build_stream_llm_events_adapter(" not in router_source
+    assert "build_complete_llm_answer_adapter(" not in router_source
+    assert "build_prepare_llm_messages_with_tools_adapter(" not in router_source
     assert "json.dumps(content" not in router_source
     assert declared_names.isdisjoint(
         {
@@ -187,9 +201,12 @@ def test_knowledge_base_router_delegates_answer_completion_adapter_to_service():
     assert service_path.exists()
     service_source = service_path.read_text(encoding="utf-8")
     assert "def build_complete_knowledge_base_answer" in service_source
-    assert "from app.services.knowledge_base_answer_adapter import" in router_source
+    adapter_path = project_root / "app/services/knowledge_base_router_adapters.py"
+    assert adapter_path.exists()
+    adapter_source = adapter_path.read_text(encoding="utf-8")
+    assert "from app.services.knowledge_base_answer_adapter import" in adapter_source
     assert "complete_llm_answer_resolver" in service_source
-    assert "complete_llm_answer_resolver=lambda" in router_source
+    assert "complete_llm_answer_resolver=lambda" not in router_source
     assert "_complete_knowledge_base_answer =" in router_source
     assert "async def _complete_knowledge_base_answer" not in router_source
     assert "def complete_llm_with_config" not in router_source
