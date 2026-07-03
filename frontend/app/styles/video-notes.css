@@ -82,8 +82,10 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 0.42fr);
   width: 100%;
+  min-width: 0;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   background: var(--paper);
   color: var(--ink);
 }
@@ -198,6 +200,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .video-note-header {
@@ -392,6 +395,8 @@
 .video-note-editor-shell {
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
   height: 100%;
   min-height: 0;
   flex: 1;
@@ -668,6 +673,8 @@
 .video-note-vditor {
   position: relative;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   height: auto;
   min-height: 100%;
   overflow: visible;
@@ -676,6 +683,8 @@
 .video-note-vditor.vditor {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
   overflow: visible !important;
   height: auto !important;
   min-height: 100%;
@@ -688,6 +697,8 @@
   flex: 0 0 auto;
   height: auto !important;
   max-height: none !important;
+  min-width: 0;
+  max-width: 100%;
   min-height: 0;
   overflow: visible !important;
 }
@@ -788,10 +799,32 @@
 .video-note-vditor .vditor-ir .vditor-reset {
   height: auto !important;
   min-height: 420px;
+  max-width: 100%;
   padding: 22px 28px;
   font-size: 15px;
   line-height: 1.72;
   overflow: visible !important;
+}
+
+.video-note-vditor .vditor-ir pre.vditor-reset,
+.video-note-vditor .vditor-ir .vditor-reset {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.video-note-vditor .vditor-ir h1,
+.video-note-vditor .vditor-ir h2,
+.video-note-vditor .vditor-ir h3,
+.video-note-vditor .vditor-ir h4,
+.video-note-vditor .vditor-ir h5,
+.video-note-vditor .vditor-ir h6,
+.video-note-vditor .vditor-ir p,
+.video-note-vditor .vditor-ir li,
+.video-note-vditor .vditor-ir blockquote {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .video-note-vditor .vditor-ir p {
@@ -934,11 +967,25 @@
   gap: 10px;
 }
 
+.video-note-ai-status-wrap {
+  display: grid;
+  min-height: 116px;
+  padding: 18px 4px 10px;
+  place-items: center;
+}
+
 .video-note-ai-status {
   margin: 0;
+  width: 100%;
+  max-width: 280px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--paper) 86%, var(--accent) 14%);
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+  text-align: center;
 }
 
 .video-note-ai-collapse,
@@ -1017,7 +1064,7 @@
     inset: 0;
     z-index: 180;
     flex: none;
-    width: 100vw;
+    width: 100%;
     min-width: 0;
     max-width: none;
     height: 100dvh;
@@ -1030,14 +1077,14 @@
   }
 
   .video-note-workspace {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) minmax(180px, 28dvh);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(184px, 22dvh);
   }
 
   .video-note-workspace.drawer,
   .video-note-workspace.drawer.chooser-collapsed {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(180px, 28dvh);
+    grid-template-rows: minmax(0, 1fr) minmax(184px, 22dvh);
   }
 
   .video-note-workspace.ai-collapsed,
@@ -1049,6 +1096,8 @@
   .video-note-workspace.drawer.chooser-collapsed .video-note-main {
     grid-column: 1;
     grid-row: 1;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .video-note-side-panel,
@@ -1060,7 +1109,135 @@
   .video-note-side-panel {
     border: 0;
     border-top: 1px solid var(--border);
+    width: 100%;
+    min-width: 0;
     max-height: none;
+    padding: 8px 10px;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    overflow: hidden;
+  }
+
+  .video-note-editor-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .video-note-tool-rail {
+    flex-direction: row;
+    justify-content: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    overflow-x: auto;
+    overflow-y: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    scrollbar-width: none;
+  }
+
+  .video-note-tool-rail::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .video-note-tool-spacer {
+    display: none;
+  }
+
+  .video-note-tool-button::after,
+  .video-note-ai-collapse::after,
+  .video-note-ai-expand::after {
+    display: none;
+  }
+
+  .video-note-markdown-editor {
+    width: 100%;
+    min-width: 0;
+    padding: 10px;
+    overflow-x: hidden;
+  }
+
+  .video-note-vditor,
+  .video-note-vditor.vditor {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .video-note-vditor .vditor-toolbar {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .video-note-vditor .vditor-toolbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .video-note-vditor .vditor-ir .vditor-reset {
+    min-height: 360px;
+    padding: 18px 16px;
+  }
+
+  .video-note-ai-panel {
+    width: min(100%, 340px);
+    min-width: 0;
+    max-width: 340px;
+    gap: 8px;
+    justify-items: center;
+    margin-bottom: 0;
+  }
+
+  .video-note-ai-panel-head {
+    position: relative;
+    justify-content: center;
+    width: 100%;
+    min-height: 32px;
+    text-align: center;
+  }
+
+  .video-note-ai-panel-head h3 {
+    margin: 2px 0 0;
+    font-size: 17px;
+  }
+
+  .video-note-ai-collapse {
+    position: static;
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+    margin-left: 8px;
+  }
+
+  .video-note-ai-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .video-note-ai-panel button {
+    min-width: 0;
+    min-height: 30px;
+    padding: 0 10px;
+  }
+
+  .video-note-ai-status-wrap {
+    width: 100%;
+    min-height: 50px;
+    padding: 6px 4px 0;
+  }
+
+  .video-note-ai-status {
+    max-width: 280px;
+    padding: 9px 12px;
   }
 
   .video-note-ai-collapse .chevron-left {
@@ -1079,7 +1256,7 @@
     position: fixed;
     inset: 0;
     z-index: 240;
-    width: 100vw;
+    width: 100%;
     height: 100dvh;
     max-height: none;
     overflow: hidden;
@@ -1098,8 +1275,13 @@
   }
 
   .video-note-export-menu {
-    left: 8px;
-    width: min(280px, calc(100vw - 72px));
+    position: fixed;
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-width: none;
   }
 }
 

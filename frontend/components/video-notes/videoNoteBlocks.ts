@@ -3,6 +3,11 @@ import type { VideoNoteAiOperation, VideoNoteBlock } from "@/lib/api";
 const createId = () =>
   `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+const replaceTargetAliases: Record<string, string[]> = {
+  questions: ["questions", "ai-review-questions"],
+  "ai-review-questions": ["questions", "ai-review-questions"],
+};
+
 export function createVideoNoteBlock(
   type: VideoNoteBlock["type"] = "paragraph",
   values: Partial<VideoNoteBlock> = {},
@@ -111,15 +116,17 @@ function replaceOrInsertBlock(
 ): VideoNoteBlock[] {
   if (!operation.block) return blocks;
   const targetId = operation.target_block_id ?? operation.block.id;
-  const index = blocks.findIndex((block) => block.id === targetId);
-  if (index === -1) return [...blocks, operation.block];
+  const targetIds = replaceTargetAliases[targetId] ?? [targetId];
+  const index = blocks.findIndex((block) => targetIds.includes(block.id));
+  const replacement = { ...operation.block, id: targetIds[0] };
+  if (index === -1) return [...blocks, replacement];
   return blocks.reduce<VideoNoteBlock[]>((nextBlocks, block, blockIndex) => {
-    if (block.id !== targetId) {
+    if (!targetIds.includes(block.id)) {
       nextBlocks.push(block);
       return nextBlocks;
     }
     if (blockIndex === index) {
-      nextBlocks.push({ ...operation.block!, id: targetId });
+      nextBlocks.push(replacement);
     }
     return nextBlocks;
   }, []);

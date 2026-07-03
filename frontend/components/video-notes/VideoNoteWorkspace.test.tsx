@@ -612,7 +612,9 @@ describe("VideoNoteWorkspace", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "生成摘要" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("已应用摘要");
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("已应用摘要");
+    expect(status.closest(".video-note-ai-status-wrap")).not.toBeNull();
     expect((await findMarkdownEditor()).value).toContain("AI 新摘要");
 
     await user.click(screen.getByRole("button", { name: "生成问题" }));

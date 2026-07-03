@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -354,7 +355,7 @@ async def test_ai_endpoints_return_suggestions_without_mutating_note(
     )
     assert edit.status_code == 200
     assert edit.json()["operations"][0]["kind"] == "replace_or_insert_block"
-    assert edit.json()["operations"][0]["target_block_id"] == "ai-review-questions"
+    assert edit.json()["operations"][0]["target_block_id"] == "questions"
     question_items = edit.json()["operations"][0]["block"]["items"]
     assert any("介绍学习目标" in item["text"] for item in question_items)
     assert all("生成复盘问题" not in item["text"] for item in question_items)
@@ -382,3 +383,118 @@ async def test_ai_endpoints_return_suggestions_without_mutating_note(
         note = await session.get(VideoNote, note_id)
         assert note.blocks_json == []
         assert note.summary_generated_at is None
+
+
+@pytest.mark.asyncio
+async def test_ai_endpoints_use_model_generated_structured_content(
+    client, db_session_factory, monkeypatch
+):
+    _, headers, kb = await _setup_user_kb_video(
+        client, db_session_factory, "ai-model-notes@example.com"
+    )
+    created = await client.post(
+        "/video-notes",
+        json={
+            "knowledge_base_id": kb["id"],
+            "bvid": "BVNOTE123",
+            "template_id": "blank",
+        },
+        headers=headers,
+    )
+    note_id = created.json()["id"]
+    calls: list[list[dict]] = []
+
+    async def fake_generate_video_note_ai_json(messages, llm_config, get_llm_client):
+        calls.append(messages)
+        user_prompt = messages[-1]["content"]
+        if "复盘问题" in user_prompt:
+            return {
+                "questions": [
+                    "AI 学习复盘如何形成闭环？",
+                    "视频中的学习目标可以怎样迁移到我的项目？",
+                ]
+            }
+        if "时间戳" in user_prompt:
+            return {
+                "timestamps": [
+                    {"time": 24, "text": "开场说明学习目标"},
+                    {"time": 86, "text": "拆解复盘流程"},
+                ]
+            }
+        return {
+            "summary": "模型生成的摘要强调先提炼目标，再用问题驱动复盘。",
+            "key_points": ["建立复盘闭环", "把结论转为下一步行动"],
+            "tags": ["AI", "复盘"],
+        }
+
+    async def fake_resolve_user_llm_credentials(*args, **kwargs):
+        return SimpleNamespace(
+            to_llm_config=lambda: {
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "api_key": "fake-key",
+                "base_url": "https://example.com/v1",
+                "thinking_config": {},
+            }
+        )
+
+    monkeypatch.setattr(
+        "app.services.video_note_route_runtime.resolve_user_llm_credentials",
+        fake_resolve_user_llm_credentials,
+    )
+    monkeypatch.setattr(
+        "app.services.video_note_route_runtime.generate_video_note_ai_json",
+        fake_generate_video_note_ai_json,
+    )
+
+    summary = await client.post(
+        f"/video-notes/{note_id}/generate-summary",
+        headers=headers,
+    )
+    assert summary.status_code == 200
+    summary_payload = summary.json()
+    assert summary_payload["operations"][0]["block"]["text"] == (
+        "模型生成的摘要强调先提炼目标，再用问题驱动复盘。"
+    )
+    assert summary_payload["operations"][1]["block"]["items"] == [
+        {"text": "建立复盘闭环"},
+        {"text": "把结论转为下一步行动"},
+    ]
+    assert summary_payload["tag_suggestions"] == ["AI", "复盘"]
+
+    questions = await client.post(
+        f"/video-notes/{note_id}/ai-edit",
+        json={
+            "action": "generate_questions",
+            "instruction": "生成复盘问题",
+            "selected_block_ids": [],
+        },
+        headers=headers,
+    )
+    assert questions.status_code == 200
+    assert questions.json()["operations"][0]["target_block_id"] == "questions"
+    question_items = questions.json()["operations"][0]["block"]["items"]
+    assert question_items == [
+        {"text": "AI 学习复盘如何形成闭环？"},
+        {"text": "视频中的学习目标可以怎样迁移到我的项目？"},
+    ]
+    assert all("生成复盘问题" not in item["text"] for item in question_items)
+
+    timestamps = await client.post(
+        f"/video-notes/{note_id}/ai-edit",
+        json={
+            "action": "generate_timestamps",
+            "instruction": "生成时间戳",
+            "selected_block_ids": [],
+        },
+        headers=headers,
+    )
+    assert timestamps.status_code == 200
+    timestamp_items = timestamps.json()["operations"][0]["block"]["items"]
+    assert timestamp_items == [
+        {"time": 24, "text": "开场说明学习目标"},
+        {"time": 86, "text": "拆解复盘流程"},
+    ]
+
+    assert len(calls) == 3
+    assert all(call[0]["role"] == "system" for call in calls)

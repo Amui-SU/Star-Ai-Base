@@ -77,10 +77,12 @@ export default function VideoNoteAiPanel({
           撤销 AI 编辑
         </button>
       </div>
-      {message && (
-        <p className="video-note-ai-status" role="status">
-          {message}
-        </p>
+      {(loading || message) && (
+        <div className="video-note-ai-status-wrap">
+          <p className="video-note-ai-status" role="status" aria-live="polite">
+            {message ?? "正在处理..."}
+          </p>
+        </div>
       )}
     </section>
   );

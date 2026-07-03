@@ -20,6 +20,7 @@ class VideoNoteSource:
     owner_name: str | None
     duration: int | None
     pic_url: str | None
+    description: str | None
     source_binding_id: int | None
     content: str | None
     outline: list | None
@@ -91,7 +92,11 @@ def build_standard_note_blocks(source: VideoNoteSource) -> list[dict]:
         _block("key-points-title", "heading", level=2, text="关键观点"),
         _block("key-points", "key_points", items=[]),
         _block("timestamp-title", "heading", level=2, text="时间戳提纲"),
-        _block("timestamp-outline", "timestamp_outline", items=_outline_items(source.outline)),
+        _block(
+            "timestamp-outline",
+            "timestamp_outline",
+            items=_outline_items(source.outline),
+        ),
         _block("my-notes-title", "heading", level=2, text="我的笔记"),
         _block("my-notes", "paragraph", text=""),
         _block("questions-title", "heading", level=2, text="问题与待办"),
@@ -171,13 +176,16 @@ async def resolve_video_note_source(
         owner_name=video_cache.owner_name,
         duration=video_cache.duration,
         pic_url=video_cache.pic_url,
+        description=video_cache.description,
         source_binding_id=source_binding_id,
         content=video_cache.content,
         outline=video_cache.outline_json,
     )
 
 
-def note_matches_query(note: VideoNote | None, source: VideoNoteSource, query: str) -> bool:
+def note_matches_query(
+    note: VideoNote | None, source: VideoNoteSource, query: str
+) -> bool:
     normalized = query.strip().lower()
     if not normalized:
         return True
@@ -241,12 +249,15 @@ async def list_video_note_sources(
             (
                 VideoNoteSource(
                     bvid=video_cache.bvid,
-                    title=(note.title if note else None) or video_cache.title or video_cache.bvid,
+                    title=(note.title if note else None)
+                    or video_cache.title
+                    or video_cache.bvid,
                     original_title=video_cache.title or video_cache.bvid,
                     folder_title=folder_title,
                     owner_name=video_cache.owner_name,
                     duration=video_cache.duration,
                     pic_url=video_cache.pic_url,
+                    description=video_cache.description,
                     source_binding_id=source_binding_id,
                     content=video_cache.content,
                     outline=video_cache.outline_json,
@@ -269,4 +280,3 @@ def list_item_response(source: VideoNoteSource, note: VideoNote | None) -> dict:
         "summary_status": note.summary_status if note else "not_created",
         "tags": _normalized_tags(note.tags_json if note else []),
     }
-

@@ -103,11 +103,39 @@ describe("video note block helpers", () => {
       },
     ]);
 
-    expect(next.map((block) => block.id)).toEqual([
-      "h1",
-      "ai-review-questions",
-      "p1",
-    ]);
+    expect(next.map((block) => block.id)).toEqual(["h1", "questions", "p1"]);
     expect(next[1].items).toEqual([{ text: "新问题" }]);
+  });
+
+  it("replaces the standard questions block and removes legacy AI question blocks", () => {
+    const mixedQuestionBlocks: VideoNoteBlock[] = [
+      blocks[0],
+      {
+        id: "questions",
+        type: "questions",
+        items: [{ text: "标准旧问题" }],
+      },
+      blocks[1],
+      {
+        id: "ai-review-questions",
+        type: "questions",
+        items: [{ text: "旧版 AI 问题" }],
+      },
+    ];
+
+    const next = applyVideoNoteAiOperations(mixedQuestionBlocks, [
+      {
+        kind: "replace_or_insert_block",
+        target_block_id: "questions",
+        block: {
+          id: "questions",
+          type: "questions",
+          items: [{ text: "新的复盘问题" }],
+        },
+      },
+    ]);
+
+    expect(next.map((block) => block.id)).toEqual(["h1", "questions", "p1"]);
+    expect(next[1].items).toEqual([{ text: "新的复盘问题" }]);
   });
 });
