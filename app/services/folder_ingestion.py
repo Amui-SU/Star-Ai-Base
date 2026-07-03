@@ -3,12 +3,17 @@
 from typing import Callable, Optional
 
 from loguru import logger
-from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import FavoriteVideo
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
+from app.services.folder_ingestion_associations import (
+    count_distinct_folder_videos as _count_distinct_folder_videos,
+    count_folder_video_rows as _count_folder_video_rows,
+    ensure_favorite_video as _ensure_favorite_video,
+    get_existing_folder_bvids as _get_existing_folder_bvids,
+    remove_stale_favorite_videos as _remove_stale_favorite_videos,
+)
 from app.services.folder_ingestion_content import (
     is_better_source as _is_better_source,
     should_refresh_cache as _should_refresh_cache,
@@ -73,10 +78,9 @@ async def sync_folder(
             )
             existing_count = 0
             if existing_folder is not None:
-                existing_count = await db.scalar(
-                    select(func.count(FavoriteVideo.bvid)).where(
-                        FavoriteVideo.folder_id == existing_folder.id
-                    )
+                existing_count = await _count_folder_video_rows(
+                    db,
+                    existing_folder.id,
                 )
             return {
                 "folder_id": folder_id,
@@ -120,10 +124,7 @@ async def sync_folder(
     if source_binding_id is not None:
         folder.source_binding_id = source_binding_id
 
-    existing_rows = await db.execute(
-        select(FavoriteVideo.bvid).where(FavoriteVideo.folder_id == folder.id)
-    )
-    existing_bvids = {row[0] for row in existing_rows.fetchall()}
+    existing_bvids = await _get_existing_folder_bvids(db, folder.id)
 
     added, removed = _diff_folder_videos(
         current_bvids=current_bvids,
@@ -203,25 +204,14 @@ async def sync_folder(
 
         # 无论向量是否添加成功，都写入 FavoriteVideo 记录
         try:
-            exists_row = await db.execute(
-                select(FavoriteVideo.id).where(
-                    FavoriteVideo.folder_id == folder.id,
-                    FavoriteVideo.bvid == bvid,
-                )
+            await _ensure_favorite_video(
+                db,
+                folder_id=folder.id,
+                bvid=bvid,
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                source_binding_id=source_binding_id,
             )
-            if exists_row.scalar_one_or_none() is None:
-                fav_kwargs: dict = {
-                    "folder_id": folder.id,
-                    "bvid": bvid,
-                    "is_selected": True,
-                }
-                if workspace_id is not None:
-                    fav_kwargs["workspace_id"] = workspace_id
-                if knowledge_base_id is not None:
-                    fav_kwargs["knowledge_base_id"] = knowledge_base_id
-                if source_binding_id is not None:
-                    fav_kwargs["source_binding_id"] = source_binding_id
-                db.add(FavoriteVideo(**fav_kwargs))
             processed_targets += 1
             if progress_callback:
                 progress_callback(meta["title"], processed_targets, total_targets)
@@ -230,57 +220,22 @@ async def sync_folder(
 
     # 删除无效向量
     if removed:
-        for bvid in removed:
-            other_count_stmt = (
-                select(func.count())
-                .select_from(FavoriteVideo)
-                .where(
-                    FavoriteVideo.bvid == bvid,
-                    FavoriteVideo.folder_id != folder.id,
-                )
-            )
-            if _has_cache_scope(workspace_id, knowledge_base_id):
-                other_count_stmt = (
-                    other_count_stmt.where(FavoriteVideo.workspace_id == workspace_id)
-                    .where(FavoriteVideo.knowledge_base_id == knowledge_base_id)
-                    .where(
-                        FavoriteVideo.source_binding_id.is_(None)
-                        if source_binding_id is None
-                        else FavoriteVideo.source_binding_id == source_binding_id
-                    )
-                )
-            else:
-                other_count_stmt = other_count_stmt.where(
-                    FavoriteVideo.workspace_id.is_(None)
-                ).where(FavoriteVideo.knowledge_base_id.is_(None))
-            other_count = await db.scalar(other_count_stmt)
-            if other_count == 0:
-                try:
-                    _delete_video_vectors_for_scope(
-                        rag,
-                        bvid,
-                        workspace_id=workspace_id,
-                        knowledge_base_id=knowledge_base_id,
-                    )
-                except Exception as e:
-                    logger.warning(f"删除向量失败 [{bvid}]: {e}")
-
-        await db.execute(
-            delete(FavoriteVideo).where(
-                FavoriteVideo.folder_id == folder.id,
-                FavoriteVideo.bvid.in_(removed),
-            )
+        await _remove_stale_favorite_videos(
+            db,
+            rag=rag,
+            folder_id=folder.id,
+            removed=removed,
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            source_binding_id=source_binding_id,
+            warn=logger.warning,
         )
 
     folder.last_sync_at = utc_now()
 
     await db.commit()
 
-    indexed_count = await db.scalar(
-        select(func.count(func.distinct(FavoriteVideo.bvid)))
-        .select_from(FavoriteVideo)
-        .where(FavoriteVideo.folder_id == folder.id)
-    )
+    indexed_count = await _count_distinct_folder_videos(db, folder.id)
 
     return {
         "folder_id": folder_id,
