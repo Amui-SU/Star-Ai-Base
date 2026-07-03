@@ -16,7 +16,6 @@ import { useVideoNoteAiEditing } from "./useVideoNoteAiEditing";
 import { useVideoNoteAutosave } from "./useVideoNoteAutosave";
 import VideoNoteAiPanel from "./VideoNoteAiPanel";
 import VideoNoteDrawer from "./VideoNoteDrawer";
-import VideoNoteExportPanel from "./VideoNoteExportPanel";
 import VideoNoteHeader from "./VideoNoteHeader";
 import VideoNoteListPanel, {
   type VideoNoteListFilter,
@@ -64,6 +63,7 @@ export default function VideoNoteWorkspace({
   );
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
+  const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
 
   const syncNoteState = useCallback((nextNote: VideoNote | null) => {
     setNote(nextNote);
@@ -243,7 +243,7 @@ export default function VideoNoteWorkspace({
       <section
         className={`video-note-workspace ${fullscreen ? "fullscreen" : "drawer"} ${
           noteChooserVisible ? "chooser-open" : "chooser-collapsed"
-        }`}
+        } ${aiPanelCollapsed ? "ai-collapsed" : ""}`}
       >
         <VideoNoteListPanel
           items={visibleItems}
@@ -277,8 +277,12 @@ export default function VideoNoteWorkspace({
           ) : note ? (
             <div className="video-note-editor-shell">
               <VideoNoteToolRail
+                canExport={Boolean(note)}
+                exported={exported}
+                exporting={exporting}
                 onAddParagraph={addParagraph}
                 onAddTodo={addTodo}
+                onExportMarkdown={exportMarkdown}
               />
               <VideoNoteMarkdownEditor blocks={blocks} onChange={setBlocks} />
             </div>
@@ -292,19 +296,20 @@ export default function VideoNoteWorkspace({
             <div className="video-note-empty">加载视频信息...</div>
           )}
         </main>
-        <aside className="video-note-side-panel">
+        <aside
+          className={`video-note-side-panel ${
+            aiPanelCollapsed ? "collapsed" : ""
+          }`}
+        >
           <VideoNoteAiPanel
+            collapsed={aiPanelCollapsed}
             loading={aiLoading}
             canUndoAiEdit={aiEditing.canUndoAiEdit}
             message={aiMessage}
             onGenerateSummary={generateSummary}
             onGenerateQuestions={generateQuestions}
+            onToggleCollapsed={() => setAiPanelCollapsed((value) => !value)}
             onUndoAiEdit={aiEditing.undoAiEdit}
-          />
-          <VideoNoteExportPanel
-            exported={exported}
-            exporting={exporting}
-            onExportMarkdown={exportMarkdown}
           />
         </aside>
       </section>

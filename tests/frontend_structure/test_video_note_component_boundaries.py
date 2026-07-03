@@ -47,3 +47,19 @@ def test_video_note_mobile_drawer_collapses_to_single_column_layout():
         ".video-note-workspace.drawer.chooser-collapsed .video-note-side-panel"
         in mobile_css
     )
+
+
+def test_video_note_editor_polish_styles_guard_tooltips_and_blocks():
+    project_root = get_project_root()
+    css = (project_root / "frontend/app/styles/video-notes.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert ".video-note-vditor .vditor-tooltipped::after" in css
+    assert ".video-note-vditor .vditor-toolbar .vditor-tooltipped::after" in css
+    assert "top: calc(100% + 8px);" in css
+    assert ".video-note-markdown-editor" in css
+    assert "overflow: visible;" in css
+    assert ".video-note-vditor .vditor-ir p" in css
+    assert '.video-note-vditor .vditor-ir input[type="checkbox"]' in css
+    assert ".video-note-side-panel.collapsed" in css

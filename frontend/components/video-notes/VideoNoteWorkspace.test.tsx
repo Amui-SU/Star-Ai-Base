@@ -3,6 +3,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -311,13 +312,73 @@ describe("VideoNoteWorkspace", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: "导出 Markdown" }));
+    const toolRail = container.querySelector(".video-note-tool-rail");
+    expect(toolRail).not.toBeNull();
+    expect(container.querySelector(".video-note-export-panel")).toBeNull();
+
+    await user.click(
+      within(toolRail as HTMLElement).getByRole("button", {
+        name: /Markdown/,
+      }),
+    );
     expect(await screen.findByText("AI 视频学习法.md")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "全屏" }));
+    expect(container.querySelector(".video-note-drawer")).toHaveClass(
+      "fullscreen",
+    );
     expect(container.querySelector(".video-note-workspace")).toHaveClass(
       "fullscreen",
     );
+  });
+
+  it("collapses and restores the right AI tools without removing editor tools", async () => {
+    const user = userEvent.setup();
+    vi.mocked(videoNoteApi.list).mockResolvedValue({
+      knowledge_base_id: 7,
+      items: [
+        {
+          bvid: "BVNOTE123",
+          title: "AI 视频学习法",
+          has_note: true,
+          note_id: 9,
+          summary_status: "seeded",
+          tags: ["AI"],
+        },
+      ],
+    });
+    vi.mocked(videoNoteApi.detail).mockResolvedValue({
+      note: baseNote,
+      video,
+      can_create: false,
+    });
+
+    const { container } = render(
+      <VideoNoteWorkspace
+        knowledgeBaseId={7}
+        initialBvid="BVNOTE123"
+        autosaveDelayMs={2000}
+      />,
+    );
+
+    await findMarkdownEditor();
+
+    const sidePanel = container.querySelector(".video-note-side-panel");
+    expect(sidePanel).not.toHaveClass("collapsed");
+    expect(screen.getByRole("button", { name: "折叠 AI 工具" })).toBeVisible();
+    expect(
+      within(
+        container.querySelector(".video-note-tool-rail") as HTMLElement,
+      ).getByRole("button", { name: /Markdown/ }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "折叠 AI 工具" }));
+    expect(sidePanel).toHaveClass("collapsed");
+    expect(screen.queryByRole("button", { name: "生成摘要" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "展开 AI 工具" }));
+    expect(sidePanel).not.toHaveClass("collapsed");
+    expect(screen.getByRole("button", { name: "生成摘要" })).toBeVisible();
   });
 
   it("applies AI summary suggestions and can undo them", async () => {
