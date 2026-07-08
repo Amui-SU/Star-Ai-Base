@@ -121,6 +121,41 @@ def test_content_summary_helpers_reject_unavailable_or_empty_summary():
     assert parse_ai_summary_result({"code": 0, "model_result": {"summary": ""}}) is None
 
 
+def test_content_summary_helpers_parse_common_timestamp_aliases():
+    summary = parse_ai_summary_result(
+        {
+            "code": 0,
+            "model_result": {
+                "summary": "Summary text",
+                "outline": [
+                    {
+                        "title": "Part one",
+                        "start_time": "01:04",
+                        "part_outline": [
+                            {"content": "Point A", "from": 118},
+                            {"content": "Point B", "time": "00:02:45"},
+                        ],
+                    }
+                ],
+            },
+        }
+    )
+
+    assert summary == {
+        "summary": "Summary text",
+        "outline": [
+            {
+                "title": "Part one",
+                "timestamp": 64,
+                "points": [
+                    {"content": "Point A", "timestamp": 118},
+                    {"content": "Point B", "timestamp": 165},
+                ],
+            }
+        ],
+    }
+
+
 def test_content_subtitle_helpers_prefer_manual_chinese_subtitle():
     subtitles = [
         {"lan": "en-US", "ai_status": 0, "url": "https://example.test/en.json"},

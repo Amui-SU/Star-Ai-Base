@@ -13,6 +13,15 @@ from app.services.video_note_ai_text import (
 from app.services.video_note_presenters import VideoNoteSource
 
 AiStatus = Literal["generated", "unavailable", "failed", "official"]
+TIMESTAMP_KEYS = (
+    "time",
+    "timestamp",
+    "start",
+    "from",
+    "start_time",
+    "startTime",
+    "seconds",
+)
 
 
 def _summary_text(source: VideoNoteSource) -> str:
@@ -82,6 +91,17 @@ def _payload_strings(payload: dict | None, *keys: str) -> list[dict]:
     return []
 
 
+def _first_present(mapping: dict, *keys: str) -> object:
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
+
+
+def _timestamp_from_mapping(mapping: dict, fallback: int = 0) -> int:
+    return _coerce_time(_first_present(mapping, *TIMESTAMP_KEYS), fallback)
+
+
 def _payload_timestamps(payload: dict | None) -> list[dict]:
     if not payload:
         return []
@@ -95,7 +115,7 @@ def _payload_timestamps(payload: dict | None) -> list[dict]:
         _append_unique(
             items,
             value.get("text") or value.get("title") or value.get("content"),
-            time=_coerce_time(value.get("time") or value.get("timestamp")),
+            time=_timestamp_from_mapping(value),
         )
     return items[:12]
 
@@ -215,7 +235,7 @@ def _timestamp_items(
             _append_unique(
                 items,
                 item.get("text") or item.get("content") or item.get("title"),
-                time=_coerce_time(item.get("time") or item.get("timestamp")),
+                time=_timestamp_from_mapping(item),
             )
         if items:
             return items[:12]
@@ -229,7 +249,7 @@ def _timestamp_items(
         for index, entry in enumerate(source.outline or []):
             if not isinstance(entry, dict):
                 continue
-            timestamp = _coerce_time(entry.get("timestamp"))
+            timestamp = _timestamp_from_mapping(entry)
             title = str(entry.get("title") or f"片段 {index + 1}").strip()
             _append_unique(items, title, time=timestamp)
             for point in entry.get("points") or []:
@@ -242,7 +262,7 @@ def _timestamp_items(
                     _append_unique(
                         items,
                         point_text,
-                        time=_coerce_time(point.get("timestamp"), timestamp),
+                        time=_timestamp_from_mapping(point, timestamp),
                     )
     if items:
         return items[:12]

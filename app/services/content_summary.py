@@ -2,6 +2,29 @@
 
 from typing import Optional
 
+from app.services.video_note_ai_text import _coerce_time
+
+TIMESTAMP_KEYS = (
+    "timestamp",
+    "time",
+    "start",
+    "from",
+    "start_time",
+    "startTime",
+    "seconds",
+)
+
+
+def _first_present(mapping: dict, *keys: str):
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
+
+
+def _timestamp_value(mapping: dict, fallback: int = 0) -> int:
+    return _coerce_time(_first_present(mapping, *TIMESTAMP_KEYS), fallback)
+
 
 def parse_ai_summary_result(result: Optional[dict]) -> Optional[dict]:
     if not result:
@@ -18,16 +41,17 @@ def parse_ai_summary_result(result: Optional[dict]) -> Optional[dict]:
 
     outline = []
     for item in model_result.get("outline", []):
+        item_timestamp = _timestamp_value(item)
         outline_item = {
             "title": item.get("title", ""),
-            "timestamp": item.get("timestamp", 0),
+            "timestamp": item_timestamp,
             "points": [],
         }
         for point in item.get("part_outline", []):
             outline_item["points"].append(
                 {
                     "content": point.get("content", ""),
-                    "timestamp": point.get("timestamp", 0),
+                    "timestamp": _timestamp_value(point, item_timestamp),
                 }
             )
         outline.append(outline_item)

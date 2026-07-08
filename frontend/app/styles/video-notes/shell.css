@@ -16,10 +16,6 @@
   box-shadow: none;
 }
 
-.video-note-drawer.ai-collapsed {
-  max-width: min(980px, 78vw);
-}
-
 .video-note-drawer.resizing {
   user-select: none;
 }

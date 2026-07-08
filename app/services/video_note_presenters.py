@@ -25,6 +25,7 @@ class VideoNoteSource:
     source_binding_id: int | None
     content: str | None
     outline: list | None
+    owner_mid: int | None = None
 
     @property
     def url(self) -> str:
@@ -176,6 +177,7 @@ async def resolve_video_note_source(
         original_title=video_cache.title or video_cache.bvid,
         folder_title=folder_title,
         owner_name=video_cache.owner_name,
+        owner_mid=video_cache.owner_mid,
         duration=video_cache.duration,
         pic_url=video_cache.pic_url,
         description=video_cache.description,
@@ -258,6 +260,7 @@ async def list_video_note_sources(
                     original_title=video_cache.title or video_cache.bvid,
                     folder_title=folder_title,
                     owner_name=video_cache.owner_name,
+                    owner_mid=video_cache.owner_mid,
                     duration=video_cache.duration,
                     pic_url=video_cache.pic_url,
                     description=video_cache.description,

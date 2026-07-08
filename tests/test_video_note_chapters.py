@@ -101,3 +101,67 @@ async def test_fetch_bilibili_view_point_timestamps_uses_video_cid_and_closes_se
     service = FakeBilibiliService.instances[0]
     assert service.calls == [("BVNOTE123", 456, None)]
     assert service.closed is True
+
+
+@pytest.mark.asyncio
+async def test_fetch_bilibili_timestamps_resolves_missing_cid_and_uses_summary_outline():
+    class FakeBilibiliService:
+        instances = []
+
+        def __init__(self):
+            self.closed = False
+            self.video_info_calls = []
+            self.player_info_calls = []
+            self.summary_calls = []
+            FakeBilibiliService.instances.append(self)
+
+        async def get_video_info(self, bvid):
+            self.video_info_calls.append(bvid)
+            return {
+                "aid": 123,
+                "cid": 789,
+                "owner": {"mid": 456},
+            }
+
+        async def get_player_info(self, bvid, cid, aid=None):
+            self.player_info_calls.append((bvid, cid, aid))
+            return {"view_points": []}
+
+        async def get_video_summary(self, bvid, cid, up_mid=None):
+            self.summary_calls.append((bvid, cid, up_mid))
+            return {
+                "code": 0,
+                "model_result": {
+                    "summary": "B 站 AI 总结",
+                    "outline": [
+                        {
+                            "title": "问题背景",
+                            "timestamp": 31,
+                            "part_outline": [
+                                {"content": "拆解操作步骤", "timestamp": 45}
+                            ],
+                        }
+                    ],
+                },
+            }
+
+        async def close(self):
+            self.closed = True
+
+    items = await fetch_bilibili_view_point_timestamps(
+        None,
+        user=None,
+        workspace=None,
+        source=_source(cid=None),
+        service_class=FakeBilibiliService,
+    )
+
+    assert items == [
+        {"time": 31, "text": "问题背景"},
+        {"time": 45, "text": "拆解操作步骤"},
+    ]
+    service = FakeBilibiliService.instances[0]
+    assert service.video_info_calls == ["BVNOTE123"]
+    assert service.player_info_calls == [("BVNOTE123", 789, 123)]
+    assert service.summary_calls == [("BVNOTE123", 789, 456)]
+    assert service.closed is True

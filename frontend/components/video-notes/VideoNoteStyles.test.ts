@@ -61,6 +61,14 @@ describe("video note styles", () => {
     );
   });
 
+  it("does not change the desktop drawer width limit when AI tools collapse", () => {
+    const desktopCss = videoNoteStyles.split("@media (max-width: 1024px)")[0];
+
+    expect(desktopCss).not.toMatch(
+      /\.video-note-drawer\.ai-collapsed\s*{[^}]*max-width:/s,
+    );
+  });
+
   it("centers AI operation status inside its own side-panel area", () => {
     expect(videoNoteStyles).toMatch(
       /\.video-note-ai-status-wrap\s*{[^}]*place-items:\s*center/s,

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SystemUser, Workspace
 from app.services.bilibili import BilibiliService
+from app.services.content_summary import parse_ai_summary_result
 from app.services.source_binding_services import get_bilibili_service_for_binding
 from app.services.video_note_ai_text import _append_unique, _clean_text, _coerce_time
 from app.services.video_note_presenters import VideoNoteSource
@@ -49,6 +50,46 @@ def extract_bilibili_view_point_timestamps(
     return items[:20]
 
 
+def _summary_outline_timestamps(summary_payload: dict[str, Any] | None) -> list[dict]:
+    summary = parse_ai_summary_result(summary_payload)
+    if not summary:
+        return []
+
+    items: list[dict] = []
+    for entry in summary.get("outline") or []:
+        if not isinstance(entry, dict):
+            continue
+        timestamp = _coerce_time(entry.get("timestamp"))
+        _append_unique(items, entry.get("title"), time=timestamp)
+        for point in entry.get("points") or []:
+            if not isinstance(point, dict):
+                continue
+            _append_unique(
+                items,
+                point.get("content") or point.get("text"),
+                time=_coerce_time(point.get("timestamp"), timestamp),
+            )
+    return items[:20]
+
+
+async def _resolve_video_identifiers(
+    service: BilibiliService,
+    source: VideoNoteSource,
+) -> tuple[int | None, int | None, int | None]:
+    cid = source.cid
+    aid = None
+    up_mid = getattr(source, "owner_mid", None)
+    if cid:
+        return cid, aid, up_mid
+
+    video_info = await service.get_video_info(source.bvid)
+    cid = video_info.get("cid")
+    aid = video_info.get("aid")
+    owner = video_info.get("owner") or {}
+    up_mid = up_mid or owner.get("mid") or video_info.get("owner_mid")
+    return cid, aid, up_mid
+
+
 async def _service_for_source(
     db: AsyncSession | None,
     *,
@@ -83,9 +124,6 @@ async def fetch_bilibili_view_point_timestamps(
 ) -> list[dict]:
     """Fetch official Bilibili chapter timestamps for a video source if available."""
 
-    if not source.cid:
-        return []
-
     service: BilibiliService | None = None
     try:
         service = await _service_for_source(
@@ -95,8 +133,19 @@ async def fetch_bilibili_view_point_timestamps(
             source=source,
             service_class=service_class,
         )
-        player_info = await service.get_player_info(source.bvid, int(source.cid))
-        return extract_bilibili_view_point_timestamps(player_info)
+        cid, aid, up_mid = await _resolve_video_identifiers(service, source)
+        if not cid:
+            return []
+        player_info = await service.get_player_info(source.bvid, int(cid), aid=aid)
+        view_point_items = extract_bilibili_view_point_timestamps(player_info)
+        if view_point_items:
+            return view_point_items
+        summary_payload = await service.get_video_summary(
+            source.bvid,
+            int(cid),
+            up_mid=up_mid,
+        )
+        return _summary_outline_timestamps(summary_payload)
     except Exception as exc:
         logger.info(
             "Bilibili view_points unavailable for video note %s: %s",

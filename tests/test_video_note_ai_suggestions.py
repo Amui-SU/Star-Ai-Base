@@ -118,3 +118,29 @@ def test_ai_edit_suggestions_prefer_bilibili_timestamps_for_timestamp_generation
         {"time": 32, "text": "官方章节开场"},
         {"time": 118, "text": "官方章节演示"},
     ]
+
+
+def test_ai_edit_suggestions_parse_common_timestamp_aliases_from_ai_payload():
+    response = build_ai_edit_suggestions(
+        VideoNote(blocks_json=[]),
+        VideoNoteAiEditRequest(
+            action="generate_timestamps",
+            instruction="生成时间戳",
+            selected_block_ids=[],
+        ),
+        _source(outline=[]),
+        ai_payload={
+            "timestamps": [
+                {"start": "01:04", "text": "拆解核心流程"},
+                {"from": 118, "title": "总结行动"},
+                {"start_time": "00:02:45", "content": "复盘问题"},
+            ]
+        },
+        ai_status="generated",
+    )
+
+    assert _operations(response)[0]["block"]["items"] == [
+        {"time": 64, "text": "拆解核心流程"},
+        {"time": 118, "text": "总结行动"},
+        {"time": 165, "text": "复盘问题"},
+    ]

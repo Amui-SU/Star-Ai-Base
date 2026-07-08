@@ -13,6 +13,7 @@ from app.services.folder_ingestion_content import (
     video_content_from_cache,
 )
 from app.services.folder_ingestion_records import get_video_cache_for_scope
+from app.services.folder_ingestion_records import upsert_video_cache
 
 
 def _unwrap_optional(annotation):
@@ -129,3 +130,32 @@ async def test_folder_ingestion_record_helpers_respect_scope(
 
     assert cache is not None
     assert cache.title == "Right scope"
+
+
+@pytest.mark.asyncio
+async def test_upsert_video_cache_persists_cid_for_later_timestamp_lookup(
+    db_session_factory,
+):
+    async with db_session_factory() as session:
+        await upsert_video_cache(
+            session,
+            "BVCIDHELPER",
+            {
+                "title": "CID Helper Video",
+                "cid": 456,
+                "intro": "用于测试时间戳生成",
+            },
+            workspace_id=7,
+            knowledge_base_id=11,
+        )
+        await session.commit()
+
+        cache = await get_video_cache_for_scope(
+            session,
+            "BVCIDHELPER",
+            workspace_id=7,
+            knowledge_base_id=11,
+        )
+
+    assert cache is not None
+    assert cache.cid == 456

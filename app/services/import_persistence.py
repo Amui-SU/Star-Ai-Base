@@ -16,6 +16,7 @@ async def store_imported_video_content(
     content: VideoContent,
     workspace_id: int,
     knowledge_base_id: int,
+    cid: int | None = None,
     description: str | None = None,
     owner_name: str | None = None,
     owner_mid: int | None = None,
@@ -43,6 +44,8 @@ async def store_imported_video_content(
                 is_processed=True,
             )
             db.add(cache)
+        if cid is not None:
+            cache.cid = cid
         cache.title = content.title
         cache.description = description
         cache.owner_name = owner_name

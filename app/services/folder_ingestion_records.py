@@ -175,6 +175,7 @@ async def upsert_video_cache(
     if cache is None:
         cache = VideoCache(
             bvid=bvid,
+            cid=meta.get("cid"),
             title=meta.get("title") or bvid,
             description=meta.get("intro"),
             owner_name=meta.get("owner_name"),
@@ -188,6 +189,8 @@ async def upsert_video_cache(
         return
 
     cache.title = meta.get("title") or cache.title
+    if meta.get("cid") is not None:
+        cache.cid = meta.get("cid")
     if meta.get("intro") is not None:
         cache.description = meta.get("intro")
     if meta.get("owner_name") is not None:

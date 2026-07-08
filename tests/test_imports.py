@@ -309,6 +309,7 @@ async def test_local_video_import_task_writes_transcript_into_scope(
     assert task.progress == 100
     assert task.processed_items == 1
     assert cache.title == "本地视频"
+    assert cache.cid is None
     assert cache.content.startswith("本地视频转写内容")
     assert cache.content_source == ContentSource.ASR.value
     assert cache.workspace_id == 3
@@ -329,6 +330,96 @@ async def test_local_video_import_task_writes_transcript_into_scope(
         "knowledge_base_id": 9,
         "source_binding_id": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_bilibili_video_import_task_persists_cid_for_timestamp_generation(
+    db_session_factory,
+    monkeypatch,
+):
+    import app.database as database
+    from app.services.import_tasks import run_bilibili_video_import
+
+    monkeypatch.setattr(database, "async_session_factory", db_session_factory)
+
+    class FakeBilibiliService:
+        async def get_video_info(self, bvid):
+            assert bvid == "BVCIDIMPORT"
+            return {
+                "cid": 456,
+                "title": "B 站导入视频",
+                "desc": "视频简介",
+                "owner": {"name": "UP 主", "mid": 9},
+                "duration": 360,
+                "pic": "https://example.test/cover.jpg",
+            }
+
+        async def close(self):
+            pass
+
+    class FakeASRService:
+        pass
+
+    class FakeContentFetcher:
+        def __init__(self, bili, asr):
+            pass
+
+        async def fetch_content(self, bvid, cid=None, title=None):
+            from app.schemas.content import VideoContent
+
+            assert (bvid, cid, title) == ("BVCIDIMPORT", 456, "B 站导入视频")
+            return VideoContent(
+                bvid=bvid,
+                title=title,
+                content="B 站视频字幕内容 " * 8,
+                source=ContentSource.SUBTITLE,
+                outline=[],
+            )
+
+    class FakeRAGService:
+        def delete_video_in_knowledge_base(self, **kwargs):
+            pass
+
+        def add_video_content(self, content, **kwargs):
+            return 1
+
+    async with db_session_factory() as session:
+        session.add(
+            IngestionTask(
+                task_id="bili-cid-task",
+                workspace_id=3,
+                knowledge_base_id=9,
+                source_binding_id=None,
+                created_by=5,
+                status="pending",
+                total_items=1,
+            )
+        )
+        await session.commit()
+
+    await run_bilibili_video_import(
+        task_id="bili-cid-task",
+        bvid="BVCIDIMPORT",
+        workspace_id=3,
+        knowledge_base_id=9,
+        bilibili_service_class=FakeBilibiliService,
+        asr_service_class=FakeASRService,
+        content_fetcher_class=FakeContentFetcher,
+        rag_factory=lambda: FakeRAGService(),
+    )
+
+    async with db_session_factory() as session:
+        cache = (
+            (
+                await session.execute(
+                    select(VideoCache).where(VideoCache.bvid == "BVCIDIMPORT")
+                )
+            )
+            .scalars()
+            .one()
+        )
+
+    assert cache.cid == 456
 
 
 @pytest.mark.asyncio

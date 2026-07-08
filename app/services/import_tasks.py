@@ -87,6 +87,7 @@ async def run_bilibili_video_import(
             content=content,
             workspace_id=workspace_id,
             knowledge_base_id=knowledge_base_id,
+            cid=cid,
             description=info.get("desc"),
             owner_name=(info.get("owner") or {}).get("name"),
             owner_mid=(info.get("owner") or {}).get("mid"),

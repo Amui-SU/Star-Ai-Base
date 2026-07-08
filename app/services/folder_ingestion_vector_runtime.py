@@ -104,6 +104,8 @@ async def process_vector_target(
             should_reindex = True
 
         if cache and should_update_cache:
+            if meta.get("cid") is not None:
+                cache.cid = meta.get("cid")
             cache.content = content.content
             cache.content_source = content.source.value
             cache.outline_json = content.outline
@@ -122,6 +124,8 @@ async def process_vector_target(
                     bvid, cid=meta["cid"], title=meta["title"]
                 )
                 if cache:
+                    if meta.get("cid") is not None:
+                        cache.cid = meta.get("cid")
                     cache.content = content.content
                     cache.content_source = content.source.value
                     cache.outline_json = content.outline
