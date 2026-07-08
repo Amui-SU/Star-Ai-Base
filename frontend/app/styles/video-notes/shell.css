@@ -1,13 +1,14 @@
 .video-note-drawer {
-  position: relative;
-  z-index: 70;
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 180;
   display: flex;
-  flex: 0 0 var(--video-note-drawer-width, min(50%, 860px));
+  flex: none;
   align-self: stretch;
   width: var(--video-note-drawer-width, min(50%, 860px));
   min-width: min(420px, 48vw);
   max-width: min(980px, 72vw);
-  height: 100%;
+  height: 100dvh;
   min-height: 0;
   overflow: visible;
   background: var(--paper);

@@ -18,6 +18,19 @@ const readStylesheet = (relativePath: string, baseDir = stylesRoot): string => {
 const videoNoteStyles = readStylesheet("video-notes.css");
 
 describe("video note styles", () => {
+  it("lets the desktop note drawer cover the app top bar for full viewport height", () => {
+    const desktopCss = videoNoteStyles.split("@media (max-width: 1024px)")[0];
+
+    expect(desktopCss).toMatch(
+      /\.video-note-drawer\s*{[^}]*position:\s*fixed/s,
+    );
+    expect(desktopCss).toMatch(
+      /\.video-note-drawer\s*{[^}]*inset:\s*0\s+auto\s+0\s+0/s,
+    );
+    expect(desktopCss).toMatch(/\.video-note-drawer\s*{[^}]*z-index:\s*180/s);
+    expect(desktopCss).toMatch(/\.video-note-drawer\s*{[^}]*height:\s*100dvh/s);
+  });
+
   it("hides the visible editor scrollbar while keeping Vditor content overflow external", () => {
     expect(videoNoteStyles).toMatch(
       /\.video-note-markdown-editor\s*{[^}]*scrollbar-width:\s*none/s,
