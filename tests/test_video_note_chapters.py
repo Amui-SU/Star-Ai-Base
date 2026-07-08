@@ -46,6 +46,24 @@ def test_extract_bilibili_view_point_timestamps_normalizes_player_view_points():
     ]
 
 
+def test_extract_bilibili_view_point_timestamps_parses_time_strings():
+    items = extract_bilibili_view_point_timestamps(
+        {
+            "view_points": [
+                {"from": "00:00", "content": "开场介绍"},
+                {"from": "01:04", "content": "拆解核心流程"},
+                {"from": "01:02:03", "content": "总结与行动"},
+            ]
+        }
+    )
+
+    assert items == [
+        {"time": 0, "text": "开场介绍"},
+        {"time": 64, "text": "拆解核心流程"},
+        {"time": 3723, "text": "总结与行动"},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_fetch_bilibili_view_point_timestamps_uses_video_cid_and_closes_service():
     class FakeBilibiliService:

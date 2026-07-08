@@ -107,6 +107,26 @@ function matchQuote(line: string): RegExpMatchArray | null {
   return line.match(/^>\s?(.*)$/);
 }
 
+function parseTimestampLiteral(value: string): number | null {
+  const parts = value.split(":");
+  if (parts.length < 2 || parts.length > 3) return null;
+  const numbers = parts.map((part) => Number(part));
+  if (numbers.some((part) => !Number.isFinite(part) || part < 0)) return null;
+  return numbers.reduce((total, part) => total * 60 + Math.floor(part), 0);
+}
+
+function parseTimestampItem(value: string): VideoNoteBlockItem | null {
+  const match = value.match(
+    /^\[([0-9]+:[0-9]{1,2}(?::[0-9]{1,2})?)\](?:\([^)]+\))?\s*(.*)$/,
+  );
+  if (!match) return null;
+  const time = parseTimestampLiteral(match[1]);
+  if (time === null) return null;
+  const text = match[2].trim();
+  if (!text) return null;
+  return { time, text };
+}
+
 export function markdownToVideoNoteBlocks(
   markdown: string,
   previousBlocks: VideoNoteBlock[] = [],
@@ -168,10 +188,21 @@ export function markdownToVideoNoteBlocks(
         items.push({ text: bulletMatch[1].trim() });
         index += 1;
       }
+      const timestampItems = items
+        .map((item) => parseTimestampItem(textValue(item.text)))
+        .filter((item): item is VideoNoteBlockItem => item !== null);
       parsedBlocks.push(
-        createParsedBlock(parsedBlocks, "bulleted_list", previousBlocks, {
-          items,
-        }),
+        createParsedBlock(
+          parsedBlocks,
+          timestampItems.length === items.length
+            ? "timestamp_outline"
+            : "bulleted_list",
+          previousBlocks,
+          {
+            items:
+              timestampItems.length === items.length ? timestampItems : items,
+          },
+        ),
       );
       continue;
     }

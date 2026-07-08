@@ -35,6 +35,18 @@ def _append_unique(items: list[dict], text: object, **extra: object) -> None:
 
 
 def _coerce_time(value: object, fallback: int = 0) -> int:
+    if isinstance(value, str):
+        stripped = value.strip()
+        if ":" in stripped:
+            parts = stripped.split(":")
+            if 2 <= len(parts) <= 3:
+                try:
+                    seconds = 0
+                    for part in parts:
+                        seconds = seconds * 60 + int(float(part))
+                    return max(0, seconds)
+                except ValueError:
+                    return fallback
     try:
         return max(0, int(value or fallback))
     except (TypeError, ValueError):

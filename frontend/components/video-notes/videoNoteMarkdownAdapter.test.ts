@@ -80,4 +80,25 @@ describe("video note markdown adapter", () => {
     ]);
     expect(parsed.every((block) => block.id)).toBe(true);
   });
+
+  it("parses timestamp Markdown lists without dropping item times", () => {
+    const parsed = markdownToVideoNoteBlocks(
+      [
+        "- [00:00] 开场介绍",
+        "- [01:04] 拆解核心流程",
+        "- [01:02:03] 总结与行动",
+      ].join("\n"),
+    );
+
+    expect(parsed).toMatchObject([
+      {
+        type: "timestamp_outline",
+        items: [
+          { time: 0, text: "开场介绍" },
+          { time: 64, text: "拆解核心流程" },
+          { time: 3723, text: "总结与行动" },
+        ],
+      },
+    ]);
+  });
 });
