@@ -13,7 +13,7 @@
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  padding: 18px;
+  padding: 0;
 }
 .workspace-card {
   flex: 1;
@@ -21,17 +21,17 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: 24px;
+  border: 0;
+  border-radius: 0;
   background: #1b1b19;
   color: var(--ink);
-  box-shadow: 0 18px 50px var(--shadow);
+  box-shadow: none;
 }
 html.light .workspace-card {
   background: rgba(250, 246, 239, 0.72);
-  border-color: var(--border);
-  box-shadow: 0 12px 35px rgba(55, 38, 22, 0.08);
-  backdrop-filter: blur(14px) saturate(115%);
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 .workspace-topbar {
   position: relative;
@@ -153,6 +153,14 @@ html.light .workspace-card {
   height: auto;
   align-items: stretch;
   min-height: 0;
+}
+.workspace.video-note-open .panel-chat-embedded {
+  margin-left: var(--video-note-drawer-width, 720px);
+  min-width: 0;
+}
+.workspace.video-note-open .sidebar-shell,
+.workspace.video-note-open .resizer {
+  display: none;
 }
 .resizer {
   width: 8px;

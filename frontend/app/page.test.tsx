@@ -260,6 +260,7 @@ describe("Home mobile shell", () => {
     expect(workspace).not.toBeNull();
     expect(drawer).not.toBeNull();
     expect(chat).not.toBeNull();
+    expect(workspace).toHaveClass("video-note-open");
     expect(drawer?.parentElement).toBe(workspace);
     expect(chat?.parentElement).toBe(workspace);
 

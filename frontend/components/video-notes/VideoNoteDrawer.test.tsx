@@ -18,6 +18,7 @@ const rect = (width: number) =>
 
 afterEach(() => {
   localStorage.clear();
+  document.documentElement.style.removeProperty("--video-note-drawer-width");
   document.body.style.cursor = "";
   document.body.style.userSelect = "";
 });
@@ -49,6 +50,33 @@ describe("VideoNoteDrawer", () => {
     expect(drawer.style.getPropertyValue("--video-note-drawer-width")).toBe(
       "760px",
     );
+    expect(
+      document.documentElement.style.getPropertyValue(
+        "--video-note-drawer-width",
+      ),
+    ).toBe("760px");
     expect(localStorage.getItem("video_note_drawer_width")).toBe("760");
+  });
+
+  it("clears the shared drawer width variable when closed", () => {
+    const { unmount } = render(
+      <VideoNoteDrawer fullscreen={false}>
+        <div>note body</div>
+      </VideoNoteDrawer>,
+    );
+
+    expect(
+      document.documentElement.style.getPropertyValue(
+        "--video-note-drawer-width",
+      ),
+    ).toBe("720px");
+
+    unmount();
+
+    expect(
+      document.documentElement.style.getPropertyValue(
+        "--video-note-drawer-width",
+      ),
+    ).toBe("");
   });
 });

@@ -1,6 +1,6 @@
 @media (max-width: 1024px) {
   .app-main {
-    padding: 10px;
+    padding: 0;
   }
 
   .resizer {
@@ -13,8 +13,8 @@
   }
 
   .workspace-card {
-    min-height: calc(100vh - 20px);
-    border-radius: 24px;
+    min-height: 100vh;
+    border-radius: 0;
   }
 
   .workspace-topbar {
@@ -28,6 +28,10 @@
 
   .workspace {
     position: relative;
+  }
+
+  .workspace.video-note-open .panel-chat-embedded {
+    margin-left: 0;
   }
 
   .sidebar-shell {
@@ -87,8 +91,8 @@
   }
 
   .workspace-card {
-    min-height: calc(100dvh - 20px);
-    max-height: calc(100dvh - 20px);
+    min-height: 100dvh;
+    max-height: 100dvh;
   }
 
   .workspace {
@@ -121,13 +125,13 @@
 }
 @media (max-width: 640px) {
   .app-main {
-    padding: 6px;
+    padding: 0;
   }
 
   .workspace-card {
-    min-height: calc(100dvh - 12px);
-    max-height: calc(100dvh - 12px);
-    border-radius: 18px;
+    min-height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
   }
 
   .workspace-topbar {

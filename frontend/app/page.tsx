@@ -71,7 +71,9 @@ export default function Home() {
             onUserChange={shell.setSystemUser}
           />
 
-          <div className="workspace">
+          <div
+            className={`workspace ${activeVideoNote ? "video-note-open" : ""}`}
+          >
             {!isSidebarOpen && (
               <WorkspaceCornerTools
                 onOpenSidebarMode={openSidebarMode}

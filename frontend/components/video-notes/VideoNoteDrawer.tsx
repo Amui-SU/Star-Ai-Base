@@ -100,6 +100,19 @@ export default function VideoNoteDrawer({
     };
   }, [isDragging, resizeToClientX]);
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.style.setProperty(
+      "--video-note-drawer-width",
+      `${Math.round(drawerWidth)}px`,
+    );
+    return () => {
+      document.documentElement.style.removeProperty(
+        "--video-note-drawer-width",
+      );
+    };
+  }, [drawerWidth]);
+
   const drawerStyle: CSSProperties &
     Record<"--video-note-drawer-width", string> = {
     "--video-note-drawer-width": `${Math.round(drawerWidth)}px`,
