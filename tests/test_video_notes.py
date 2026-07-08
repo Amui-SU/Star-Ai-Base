@@ -45,9 +45,19 @@ async def _seed_video(
     workspace_id: int,
     knowledge_base_id: int,
     bvid: str = "BVNOTE123",
+    cid: int | None = None,
     title: str = "AI 视频学习法",
     folder_title: str = "学习收藏夹",
+    outline_json: list | None = None,
 ):
+    if outline_json is None:
+        outline_json = [
+            {
+                "title": "开场",
+                "timestamp": 12,
+                "points": [{"content": "介绍学习目标", "timestamp": 24}],
+            }
+        ]
     async with db_session_factory() as session:
         folder = FavoriteFolder(
             session_id=f"note-session-{knowledge_base_id}",
@@ -72,6 +82,7 @@ async def _seed_video(
         session.add(
             VideoCache(
                 bvid=bvid,
+                cid=cid,
                 title=title,
                 description="介绍如何用 AI 做学习复盘",
                 owner_name="知识区 UP",
@@ -79,13 +90,7 @@ async def _seed_video(
                 pic_url="https://example.com/cover.jpg",
                 content="这是已有的视频摘要内容。",
                 content_source="ai_summary",
-                outline_json=[
-                    {
-                        "title": "开场",
-                        "timestamp": 12,
-                        "points": [{"content": "介绍学习目标", "timestamp": 24}],
-                    }
-                ],
+                outline_json=outline_json,
                 is_processed=True,
                 workspace_id=workspace_id,
                 knowledge_base_id=knowledge_base_id,
@@ -392,6 +397,72 @@ async def test_ai_endpoints_return_suggestions_without_mutating_note(
         note = await session.get(VideoNote, note_id)
         assert note.blocks_json == []
         assert note.summary_generated_at is None
+
+
+@pytest.mark.asyncio
+async def test_generate_timestamps_prefers_bilibili_view_points(
+    client, db_session_factory, monkeypatch
+):
+    async def missing_llm_credentials(*args, **kwargs):
+        raise AssertionError("official Bilibili chapters should skip LLM fallback")
+
+    async def fake_fetch_bilibili_timestamps(db, *, user, workspace, source):
+        assert source.bvid == "BVCHAPTER123"
+        assert source.cid == 456
+        return [
+            {"time": 34, "text": "官方章节：问题背景"},
+            {"time": 126, "text": "官方章节：操作步骤"},
+        ]
+
+    monkeypatch.setattr(
+        "app.services.video_note_route_ai_runtime.resolve_user_llm_credentials",
+        missing_llm_credentials,
+    )
+    monkeypatch.setattr(
+        "app.services.video_note_route_ai_runtime.fetch_bilibili_view_point_timestamps",
+        fake_fetch_bilibili_timestamps,
+    )
+
+    auth = await _register_user(client, "ai-bilibili-chapters@example.com", "Owner")
+    client.cookies.clear()
+    headers = {"Authorization": f"Bearer {auth['session_token']}"}
+    kb = await _create_knowledge_base(client, "章节笔记库", headers)
+    await _seed_video(
+        db_session_factory,
+        workspace_id=auth["workspace"]["id"],
+        knowledge_base_id=kb["id"],
+        bvid="BVCHAPTER123",
+        cid=456,
+        outline_json=[],
+    )
+    created = await client.post(
+        "/video-notes",
+        json={
+            "knowledge_base_id": kb["id"],
+            "bvid": "BVCHAPTER123",
+            "template_id": "blank",
+        },
+        headers=headers,
+    )
+    note_id = created.json()["id"]
+
+    timestamps = await client.post(
+        f"/video-notes/{note_id}/ai-edit",
+        json={
+            "action": "generate_timestamps",
+            "instruction": "生成时间戳",
+            "selected_block_ids": [],
+        },
+        headers=headers,
+    )
+
+    assert timestamps.status_code == 200
+    payload = timestamps.json()
+    assert payload["message"] == "已根据 B 站章节生成时间戳提纲"
+    assert payload["operations"][0]["block"]["items"] == [
+        {"time": 34, "text": "官方章节：问题背景"},
+        {"time": 126, "text": "官方章节：操作步骤"},
+    ]
 
 
 @pytest.mark.asyncio

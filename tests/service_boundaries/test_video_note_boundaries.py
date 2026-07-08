@@ -55,6 +55,10 @@ def test_video_note_domain_has_focused_service_modules():
             "build_summary_suggestions",
             "build_ai_edit_suggestions",
         ],
+        "app/services/video_note_chapters.py": [
+            "extract_bilibili_view_point_timestamps",
+            "fetch_bilibili_view_point_timestamps",
+        ],
     }
 
     for relative_path, symbols in expected.items():

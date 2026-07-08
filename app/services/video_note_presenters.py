@@ -14,6 +14,7 @@ from app.services.knowledge_base_presenters import nullable_equal
 @dataclass(frozen=True)
 class VideoNoteSource:
     bvid: str
+    cid: int | None
     title: str
     original_title: str
     folder_title: str | None
@@ -170,6 +171,7 @@ async def resolve_video_note_source(
     video_cache, folder_title, source_binding_id = row
     return VideoNoteSource(
         bvid=video_cache.bvid,
+        cid=video_cache.cid,
         title=video_cache.title or video_cache.bvid,
         original_title=video_cache.title or video_cache.bvid,
         folder_title=folder_title,
@@ -249,6 +251,7 @@ async def list_video_note_sources(
             (
                 VideoNoteSource(
                     bvid=video_cache.bvid,
+                    cid=video_cache.cid,
                     title=(note.title if note else None)
                     or video_cache.title
                     or video_cache.bvid,

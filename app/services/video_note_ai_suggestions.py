@@ -12,7 +12,7 @@ from app.services.video_note_ai_text import (
 )
 from app.services.video_note_presenters import VideoNoteSource
 
-AiStatus = Literal["generated", "unavailable", "failed"]
+AiStatus = Literal["generated", "unavailable", "failed", "official"]
 
 
 def _summary_text(source: VideoNoteSource) -> str:
@@ -101,6 +101,13 @@ def _payload_timestamps(payload: dict | None) -> list[dict]:
 
 
 def _message_for(action: str, status: AiStatus) -> str:
+    if status == "official":
+        return {
+            "summary": "已根据 B 站章节生成摘要建议",
+            "questions": "已根据 B 站章节生成复盘问题",
+            "timestamps": "已根据 B 站章节生成时间戳提纲",
+            "edit": "已根据 B 站章节生成编辑建议",
+        }[action]
     if status == "generated":
         return {
             "summary": "已由 AI 重新生成摘要",
@@ -198,7 +205,21 @@ def _question_items(
 def _timestamp_items(
     source: VideoNoteSource | None,
     ai_payload: dict | None = None,
+    bilibili_timestamps: list[dict] | None = None,
 ) -> list[dict]:
+    if bilibili_timestamps:
+        items: list[dict] = []
+        for item in bilibili_timestamps:
+            if not isinstance(item, dict):
+                continue
+            _append_unique(
+                items,
+                item.get("text") or item.get("content") or item.get("title"),
+                time=_coerce_time(item.get("time") or item.get("timestamp")),
+            )
+        if items:
+            return items[:12]
+
     ai_items = _payload_timestamps(ai_payload)
     if ai_items:
         return ai_items
@@ -237,6 +258,7 @@ def build_ai_edit_suggestions(
     *,
     ai_payload: dict | None = None,
     ai_status: AiStatus = "unavailable",
+    bilibili_timestamps: list[dict] | None = None,
 ) -> VideoNoteAiResponse:
     """Build non-mutating edit operations for the UI to apply with undo."""
 
@@ -269,7 +291,11 @@ def build_ai_edit_suggestions(
                     "block": {
                         "id": "timestamp-outline",
                         "type": "timestamp_outline",
-                        "items": _timestamp_items(source, ai_payload),
+                        "items": _timestamp_items(
+                            source,
+                            ai_payload,
+                            bilibili_timestamps,
+                        ),
                     },
                 }
             ],

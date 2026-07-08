@@ -10,6 +10,7 @@ from app.services.video_note_presenters import VideoNoteSource
 def _source(**overrides) -> VideoNoteSource:
     values = {
         "bvid": "BVNOTE123",
+        "cid": 456,
         "title": "AI 视频学习法",
         "original_title": "AI 视频学习法",
         "folder_title": "学习收藏夹",
@@ -93,4 +94,27 @@ def test_ai_edit_suggestions_fall_back_to_source_outline_for_timestamps():
                 ],
             },
         }
+    ]
+
+
+def test_ai_edit_suggestions_prefer_bilibili_timestamps_for_timestamp_generation():
+    response = build_ai_edit_suggestions(
+        VideoNote(blocks_json=[]),
+        VideoNoteAiEditRequest(
+            action="generate_timestamps",
+            instruction="生成时间戳",
+            selected_block_ids=[],
+        ),
+        _source(outline=None),
+        bilibili_timestamps=[
+            {"time": 32, "text": "官方章节开场"},
+            {"time": 118, "text": "官方章节演示"},
+        ],
+        ai_status="official",
+    )
+
+    assert response.message == "已根据 B 站章节生成时间戳提纲"
+    assert _operations(response)[0]["block"]["items"] == [
+        {"time": 32, "text": "官方章节开场"},
+        {"time": 118, "text": "官方章节演示"},
     ]

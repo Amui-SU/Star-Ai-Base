@@ -20,6 +20,7 @@ from app.services.video_note_ai import (
     build_summary_suggestions,
     generate_video_note_ai_json,
 )
+from app.services.video_note_chapters import fetch_bilibili_view_point_timestamps
 from app.services.video_note_presenters import resolve_video_note_source
 from app.services.video_note_route_access import get_user_video_note
 
@@ -103,6 +104,22 @@ async def edit_video_note_with_ai_from_router(
         knowledge_base_id=note.knowledge_base_id,
         bvid=note.bvid,
     )
+    action = payload.action.strip().lower()
+    if action == "generate_timestamps":
+        bilibili_timestamps = await fetch_bilibili_view_point_timestamps(
+            db,
+            user=user,
+            workspace=workspace,
+            source=source,
+        )
+        if bilibili_timestamps:
+            return build_ai_edit_suggestions(
+                note,
+                payload,
+                source,
+                ai_status="official",
+                bilibili_timestamps=bilibili_timestamps,
+            )
     messages = build_ai_edit_messages(note, payload, source)
     ai_payload = None
     ai_status = "unavailable"
