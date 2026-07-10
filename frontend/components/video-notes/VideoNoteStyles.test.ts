@@ -31,6 +31,48 @@ describe("video note styles", () => {
     expect(desktopCss).toMatch(/\.video-note-drawer\s*{[^}]*height:\s*100dvh/s);
   });
 
+  it("gives light-mode note shell surfaces their own visual weight", () => {
+    expect(videoNoteStyles).toMatch(
+      /html\.light \.video-note-list-panel,[\s\S]*?html\.light \.video-note-side-panel\s*{[\s\S]*?background:\s*#ded4c6/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /html\.light \.video-note-header\s*{[\s\S]*?background:\s*#ded4c6/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /html\.light \.video-note-header\s*{[\s\S]*?border-bottom-color:\s*#c8b89f/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /html\.light \.video-note-tool-rail\s*{[\s\S]*?background:\s*#ded4c6/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /html\.light \.video-note-side-panel\s*{[\s\S]*?border-left-color:\s*#c8b89f/s,
+    );
+  });
+
+  it("pins the Vditor toolbar while keeping note text and rail tooltips clear", () => {
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-tool-rail\s*{[\s\S]*?z-index:\s*40/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-vditor \.vditor-toolbar\s*{[\s\S]*?position:\s*sticky/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-vditor \.vditor-toolbar\s*{[\s\S]*?top:\s*0/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-vditor \.vditor-toolbar\s*{[\s\S]*?flex:\s*0 0 auto/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-vditor \.vditor-content\s*{[\s\S]*?margin-top:\s*8px/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-vditor \.vditor-toolbar \.vditor-tooltipped\s*{[\s\S]*?overflow:\s*visible/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-vditor \.vditor-toolbar \.vditor-tooltipped:hover::before,[\s\S]*?\.video-note-vditor \.vditor-toolbar \.vditor-tooltipped:focus::after\s*{[\s\S]*?opacity:\s*1\s*!important/s,
+    );
+  });
+
   it("hides the visible editor scrollbar while keeping Vditor content overflow external", () => {
     expect(videoNoteStyles).toMatch(
       /\.video-note-markdown-editor\s*{[^}]*scrollbar-width:\s*none/s,
@@ -61,11 +103,26 @@ describe("video note styles", () => {
     );
   });
 
-  it("does not change the desktop drawer width limit when AI tools collapse", () => {
+  it("removes the desktop AI panel column when AI tools collapse", () => {
     const desktopCss = videoNoteStyles.split("@media (max-width: 1024px)")[0];
 
     expect(desktopCss).not.toMatch(
       /\.video-note-drawer\.ai-collapsed\s*{[^}]*max-width:/s,
+    );
+    expect(desktopCss).toMatch(
+      /\.video-note-workspace\.ai-collapsed\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
+    );
+    expect(desktopCss).toMatch(
+      /\.video-note-side-panel\.collapsed\s*{[^}]*display:\s*none/s,
+    );
+  });
+
+  it("slightly deepens the light-mode editor surface", () => {
+    expect(videoNoteStyles).toMatch(
+      /html\.light \.video-note-markdown-editor,[\s\S]*?html\.light \.video-note-vditor\.vditor\s*{[\s\S]*?background:\s*#f1eadf/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /html\.light \.video-note-vditor \.vditor-toolbar,[\s\S]*?html\.light \.video-note-vditor \.vditor-ir \.vditor-reset\s*{[\s\S]*?background:\s*#f1eadf/s,
     );
   });
 
@@ -119,8 +176,21 @@ describe("video note styles", () => {
     expect(mobileCss).toMatch(
       /\.video-note-markdown-editor\s*{[\s\S]*?width:\s*100%/s,
     );
-    expect(mobileCss).toMatch(
-      /\.video-note-tool-button::after,[\s\S]*?\.video-note-ai-expand::after\s*{[\s\S]*?display:\s*none/s,
+    expect(mobileCss).not.toMatch(/\.video-note-tool-button::after/);
+  });
+
+  it("does not hide editor tooltips solely because the viewport is narrow", () => {
+    expect(videoNoteStyles).not.toMatch(
+      /@media \(max-width: 768px\)[\s\S]{0,600}\.video-note-vditor \.vditor-toolbar \.vditor-tooltipped:hover::after,[\s\S]{0,180}display:\s*none\s*!important/s,
+    );
+    expect(videoNoteStyles).not.toMatch(
+      /@media \(max-width: 768px\)[\s\S]{0,600}\.video-note-tool-button::after,[\s\S]{0,180}display:\s*none/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /@media \(hover: none\) and \(pointer: coarse\)[\s\S]*?\.video-note-vditor \.vditor-toolbar \.vditor-tooltipped:hover::after,[\s\S]*?display:\s*none\s*!important/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /@media \(hover: none\) and \(pointer: coarse\)[\s\S]*?\.video-note-tool-button::after,[\s\S]*?display:\s*none/s,
     );
   });
 

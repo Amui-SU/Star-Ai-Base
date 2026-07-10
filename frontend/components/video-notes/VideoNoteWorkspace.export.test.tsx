@@ -76,7 +76,7 @@ it("autosaves copied Markdown from the toolbar menu and toggles fullscreen", asy
   const toolButtons = within(toolRail as HTMLElement).getAllByRole("button");
   expect(
     toolButtons.map((button) => button.getAttribute("aria-label")),
-  ).toEqual(["添加段落", "添加待办", "折叠 AI 工具", "导出 Markdown"]);
+  ).toEqual(["笔记名称", "添加待办", "折叠 AI 工具", "导出 Markdown"]);
 
   await user.click(
     within(toolRail as HTMLElement).getByRole("button", {
@@ -100,7 +100,7 @@ it("autosaves copied Markdown from the toolbar menu and toggles fullscreen", asy
   await waitFor(() =>
     expect(writeText).toHaveBeenCalledWith("# AI 视频学习法\n"),
   );
-  expect(await screen.findByText("已复制 Markdown")).toBeVisible();
+  expect(await screen.findByText("✓ 已复制到剪贴板")).toBeVisible();
 
   await user.click(screen.getByRole("button", { name: "全屏" }));
   expect(container.querySelector(".video-note-drawer")).toHaveClass(
@@ -108,6 +108,65 @@ it("autosaves copied Markdown from the toolbar menu and toggles fullscreen", asy
   );
   expect(container.querySelector(".video-note-workspace")).toHaveClass(
     "fullscreen",
+  );
+});
+
+it("edits the note title from the toolbar popover", async () => {
+  const user = userEvent.setup();
+  vi.mocked(videoNoteApi.list).mockResolvedValue({
+    knowledge_base_id: 7,
+    items: [
+      {
+        bvid: "BVNOTE123",
+        title: "AI 视频学习法",
+        has_note: true,
+        note_id: 9,
+        summary_status: "seeded",
+        tags: ["AI"],
+      },
+    ],
+  });
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+  vi.mocked(videoNoteApi.save).mockResolvedValue({
+    ...baseNote,
+    title: "新的笔记名称",
+  });
+
+  const { container } = renderWorkspace({
+    initialBvid: "BVNOTE123",
+    autosaveDelayMs: 10,
+  });
+
+  await findMarkdownEditor();
+  const toolRail = container.querySelector(".video-note-tool-rail");
+  await user.click(
+    within(toolRail as HTMLElement).getByRole("button", {
+      name: "笔记名称",
+    }),
+  );
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "修改笔记名称",
+  });
+  const titleInput = within(dialog).getByLabelText("笔记名称");
+  expect(titleInput).toHaveValue("AI 视频学习法");
+
+  await user.clear(titleInput);
+  await user.type(titleInput, "新的笔记名称");
+  await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+  expect(screen.queryByRole("dialog", { name: "修改笔记名称" })).toBeNull();
+  await waitFor(() =>
+    expect(videoNoteApi.save).toHaveBeenLastCalledWith(
+      9,
+      expect.objectContaining({
+        title: "新的笔记名称",
+      }),
+    ),
   );
 });
 

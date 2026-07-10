@@ -238,6 +238,29 @@ without changing the saved block model.
 Manual text editing uses normal browser/editor undo and redo shortcuts. AI
 changes use separate visible undo actions.
 
+## Focused Workspace Editor Interactions
+
+The focused video-note workspace uses the Markdown editor as the primary writing
+surface. The left tool rail should expose commands that have immediate note-level
+value:
+
+- `笔记名称` opens a small dialog for editing the note title. Empty titles are not
+  saved.
+- `添加待办` inserts a todo block.
+- Export actions reuse the backend Markdown export response for copy and
+  download feedback.
+
+Editor toolbar tooltips remain available on hover-capable devices, including
+narrow desktop windows. Tooltip hiding should be based on coarse touch input,
+not only viewport width.
+
+Clickable note content is constrained to the visible clickable text:
+
+- Markdown links open only when the anchor text itself is clicked.
+- Plain `http://` and `https://` URLs open only when the click lands on the URL
+  text, not the rest of the containing line.
+- Timestamp links open only from the rendered timestamp span.
+
 ## Auto-Save
 
 `useVideoNoteAutosave` saves edited note state with debounce. It shows:

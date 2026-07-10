@@ -45,6 +45,7 @@ interface VideoNoteWorkspaceViewProps {
   aiLoading: boolean;
   aiMessage: string | null;
   canUndoAiEdit: boolean;
+  workspaceError: string | null;
   onClose?: () => void;
   onFilterChange: (filter: VideoNoteListFilter) => void;
   onQueryChange: (query: string) => void;
@@ -54,7 +55,6 @@ interface VideoNoteWorkspaceViewProps {
   onToggleNoteChooser: () => void;
   onTitleChange: (title: string) => void;
   onToggleFullscreen: () => void;
-  onAddParagraph: () => void;
   onAddTodo: () => void;
   onExportMarkdown: () => Promise<VideoNoteExportResponse | null>;
   onExportFilenameTemplateChange: (value: string) => void;
@@ -93,6 +93,7 @@ export default function VideoNoteWorkspaceView({
   aiLoading,
   aiMessage,
   canUndoAiEdit,
+  workspaceError,
   onClose,
   onFilterChange,
   onQueryChange,
@@ -102,7 +103,6 @@ export default function VideoNoteWorkspaceView({
   onToggleNoteChooser,
   onTitleChange,
   onToggleFullscreen,
-  onAddParagraph,
   onAddTodo,
   onExportMarkdown,
   onExportFilenameTemplateChange,
@@ -157,7 +157,11 @@ export default function VideoNoteWorkspaceView({
             onTitleChange={onTitleChange}
             onToggleFullscreen={onToggleFullscreen}
           />
-          {!selectedBvid ? (
+          {workspaceError ? (
+            <div className="video-note-error" role="alert">
+              {workspaceError}
+            </div>
+          ) : !selectedBvid ? (
             <div className="video-note-empty">选择一个视频开始记录</div>
           ) : note ? (
             <div className="video-note-editor-shell">
@@ -167,15 +171,18 @@ export default function VideoNoteWorkspaceView({
                 exported={exported}
                 exportFilenameTemplate={exportFilenameTemplate}
                 exporting={exporting}
-                onAddParagraph={onAddParagraph}
+                title={title}
                 onAddTodo={onAddTodo}
                 onExportMarkdown={onExportMarkdown}
                 onExportFilenameTemplateChange={onExportFilenameTemplateChange}
+                onTitleChange={onTitleChange}
                 onToggleAiPanel={onToggleAiPanel}
               />
               <VideoNoteMarkdownEditor
                 blocks={blocks}
                 onChange={onBlocksChange}
+                bvid={video?.bvid}
+                video={video}
               />
             </div>
           ) : video ? (

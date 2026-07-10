@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
-import type { VideoNoteBlock } from "@/lib/api";
+import type { VideoNoteBlock, VideoNoteVideo } from "@/lib/api";
 import {
   blocksToMarkdown,
   markdownToVideoNoteBlocks,
@@ -19,6 +19,9 @@ import {
 interface VideoNoteMarkdownEditorProps {
   blocks: VideoNoteBlock[];
   onChange: (blocks: VideoNoteBlock[]) => void;
+  onSeekTo?: (timeInSeconds: number) => void;
+  bvid?: string;
+  video?: VideoNoteVideo | null;
 }
 
 type VditorInstance = import("vditor").default;
@@ -33,9 +36,166 @@ type UndoRedoKeyboardEvent = Pick<
   | "shiftKey"
 >;
 
+export function buildBilibiliTimestampUrl(
+  bvid: string,
+  timeInSeconds: number,
+  video?: VideoNoteVideo | null,
+) {
+  const safeSeconds = Number.isFinite(timeInSeconds)
+    ? Math.max(0, Math.floor(timeInSeconds))
+    : 0;
+  const currentPart = video?.parts?.[0];
+  const page =
+    typeof currentPart?.page === "number" && Number.isFinite(currentPart.page)
+      ? Math.max(1, Math.floor(currentPart.page))
+      : null;
+
+  if (page !== null) {
+    return `https://www.bilibili.com/video/${bvid}?p=${page}&t=${safeSeconds}`;
+  }
+  return `https://www.bilibili.com/video/${bvid}?t=${safeSeconds}`;
+}
+
+interface CaretPositionAtPoint {
+  offset: number;
+  offsetNode: Node;
+}
+
+type DocumentWithCaretPoint = Document & {
+  caretPositionFromPoint?: (
+    x: number,
+    y: number,
+  ) => CaretPositionAtPoint | null;
+  caretRangeFromPoint?: (x: number, y: number) => Range | null;
+};
+
+interface PlainUrlMatch {
+  end: number;
+  start: number;
+  url: string;
+}
+
+function isHttpUrl(value: string | null): value is string {
+  return value !== null && /^https?:\/\//.test(value);
+}
+
+function findHttpAnchor(
+  target: EventTarget | null,
+  boundary: Element,
+): HTMLAnchorElement | null {
+  const start =
+    target instanceof Element
+      ? target
+      : target instanceof Node
+        ? target.parentElement
+        : null;
+  let element: Element | null = start;
+
+  while (element && element !== boundary) {
+    if (element.tagName === "A") {
+      const anchor = element as HTMLAnchorElement;
+      return isHttpUrl(anchor.getAttribute("href")) ? anchor : null;
+    }
+    element = element.parentElement;
+  }
+
+  return null;
+}
+
+function findPlainUrlAtOffset(
+  text: string,
+  offset: number,
+): PlainUrlMatch | null {
+  if (!Number.isFinite(offset) || offset < 0) return null;
+
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/g)) {
+    const rawUrl = match[0];
+    const url = rawUrl.replace(/[),.，。！？!?;；:：]+$/u, "");
+    if (url.length === 0) continue;
+
+    const start = match.index ?? 0;
+    const end = start + url.length;
+    if (offset >= start && offset <= end) {
+      return { end, start, url };
+    }
+  }
+
+  return null;
+}
+
+function getCaretRangeFromPoint(event: MouseEvent): Range | null {
+  const ownerDocument = event.view?.document ?? document;
+  const documentWithCaret = ownerDocument as DocumentWithCaretPoint;
+  const caretPosition = documentWithCaret.caretPositionFromPoint?.(
+    event.clientX,
+    event.clientY,
+  );
+
+  if (caretPosition) {
+    const range = ownerDocument.createRange();
+    range.setStart(caretPosition.offsetNode, caretPosition.offset);
+    range.collapse(true);
+    return range;
+  }
+
+  return (
+    documentWithCaret.caretRangeFromPoint?.(event.clientX, event.clientY) ??
+    null
+  );
+}
+
+function pointHitsTextRange(
+  event: MouseEvent,
+  textNode: Text,
+  match: PlainUrlMatch,
+  offset: number,
+) {
+  const range = textNode.ownerDocument.createRange();
+  range.setStart(textNode, match.start);
+  range.setEnd(textNode, match.end);
+  const rects = range.getClientRects ? Array.from(range.getClientRects()) : [];
+
+  if (rects.length === 0) {
+    return offset < match.end;
+  }
+
+  return rects.some(
+    (rect) =>
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY <= rect.bottom,
+  );
+}
+
+function findPlainHttpUrlAtClick(
+  event: MouseEvent,
+  boundary: Element,
+): string | null {
+  const range = getCaretRangeFromPoint(event);
+  if (!range || range.startContainer.nodeType !== Node.TEXT_NODE) {
+    return null;
+  }
+  const textNode = range.startContainer as Text;
+  if (!boundary.contains(textNode)) return null;
+
+  const match = findPlainUrlAtOffset(
+    textNode.textContent ?? "",
+    range.startOffset,
+  );
+  if (!match) return null;
+
+  return pointHitsTextRange(event, textNode, match, range.startOffset)
+    ? match.url
+    : null;
+}
+
 export default function VideoNoteMarkdownEditor({
   blocks,
   onChange,
+  onSeekTo,
+  bvid,
+  video,
 }: VideoNoteMarkdownEditorProps) {
   const editorId = `video-note-vditor-${useId().replace(/:/g, "")}`;
   const markdown = useMemo(() => blocksToMarkdown(blocks), [blocks]);
@@ -185,6 +345,7 @@ export default function VideoNoteMarkdownEditor({
   useEffect(() => {
     let cancelled = false;
     let mountedEditor: VditorInstance | null = null;
+    const cleanupEditorEnhancements: Array<() => void> = [];
 
     async function mountEditor() {
       try {
@@ -220,6 +381,8 @@ export default function VideoNoteMarkdownEditor({
             "code",
             "table",
             "|",
+            "link",
+            "|",
             "undo",
             "redo",
             "|",
@@ -229,6 +392,164 @@ export default function VideoNoteMarkdownEditor({
           value: lastMarkdownRef.current,
           input(value) {
             recordMarkdownInput(value);
+          },
+          after() {
+            // 监听编辑器内的点击事件，处理时间戳和链接
+            const editorContent = host.querySelector(".vditor-ir");
+            if (editorContent) {
+              const handleEditorClick = (event: Event) => {
+                if (!(event instanceof MouseEvent)) return;
+                const target =
+                  event.target instanceof HTMLElement
+                    ? event.target
+                    : event.target instanceof Node
+                      ? event.target.parentElement
+                      : null;
+                if (!target) return;
+
+                // 处理链接点击 - 向上查找<a>标签
+                const anchor = findHttpAnchor(target, editorContent);
+                if (anchor) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  window.open(anchor.href, "_blank", "noopener,noreferrer");
+                  return;
+                }
+
+                const plainUrl = findPlainHttpUrlAtClick(event, editorContent);
+                if (plainUrl) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  window.open(plainUrl, "_blank", "noopener,noreferrer");
+                  return;
+                }
+
+                // 处理时间戳点击 - 只处理标记为时间戳的元素
+                let tsElement: HTMLElement | null = target;
+                // 只查找最多3层父元素，避免找到包含多个时间戳的祖先元素
+                let depth = 0;
+                while (tsElement && tsElement !== editorContent && depth < 3) {
+                  if (tsElement.classList.contains("video-timestamp-link")) {
+                    const text = tsElement.textContent || "";
+                    // 匹配时间戳，支持1-3位数字的分钟/小时
+                    const timestampMatch = text.match(
+                      /^\[(\d{1,3}):(\d{2})(?::(\d{2}))?\]/,
+                    );
+
+                    if (timestampMatch) {
+                      event.preventDefault();
+                      event.stopPropagation();
+
+                      // 判断是 HH:MM:SS 还是 MM:SS 格式
+                      const hours = timestampMatch[3]
+                        ? parseInt(timestampMatch[1])
+                        : 0;
+                      const minutes = timestampMatch[3]
+                        ? parseInt(timestampMatch[2])
+                        : parseInt(timestampMatch[1]);
+                      const seconds = timestampMatch[3]
+                        ? parseInt(timestampMatch[3])
+                        : parseInt(timestampMatch[2]);
+                      const totalSeconds =
+                        hours * 3600 + minutes * 60 + seconds;
+
+                      if (bvid) {
+                        const videoUrl = buildBilibiliTimestampUrl(
+                          bvid,
+                          totalSeconds,
+                          video,
+                        );
+                        window.open(videoUrl, "_blank", "noopener,noreferrer");
+                      } else if (onSeekTo) {
+                        onSeekTo(totalSeconds);
+                      }
+                      return;
+                    }
+                  }
+                  tsElement = tsElement.parentElement;
+                  depth++;
+                }
+              };
+              editorContent.addEventListener("click", handleEditorClick);
+              cleanupEditorEnhancements.push(() => {
+                editorContent.removeEventListener("click", handleEditorClick);
+              });
+
+              // 为时间戳添加样式 - 只标记时间戳本身，不包括后面的文字
+              const styledElements = new WeakSet<Element>();
+
+              const styleTimestamps = () => {
+                if (!editorContent) return;
+
+                // 查找所有可能包含时间戳的元素
+                const allElements =
+                  editorContent.querySelectorAll("li, p, td, th");
+
+                allElements.forEach((elem) => {
+                  // 如果已经处理过，跳过
+                  if (styledElements.has(elem)) {
+                    return;
+                  }
+
+                  const htmlElem = elem as HTMLElement;
+
+                  // 检查是否已经有时间戳span
+                  if (htmlElem.querySelector(".video-timestamp-link")) {
+                    styledElements.add(elem);
+                    return;
+                  }
+
+                  // 检查第一个文本节点是否以时间戳开头
+                  const firstChild = htmlElem.firstChild;
+                  if (firstChild && firstChild.nodeType === Node.TEXT_NODE) {
+                    const text = firstChild.textContent || "";
+                    const timestampMatch = text.match(
+                      /^(\[\d{1,3}:\d{2}(?::\d{2})?\])/,
+                    );
+
+                    if (timestampMatch) {
+                      const timestamp = timestampMatch[1];
+                      const restText = text.substring(timestamp.length);
+
+                      // 创建可点击的时间戳span
+                      const timestampSpan = document.createElement("span");
+                      timestampSpan.textContent = timestamp;
+                      timestampSpan.className = "video-timestamp-link";
+                      timestampSpan.style.cursor = "pointer";
+
+                      // 替换文本节点
+                      const restTextNode = document.createTextNode(restText);
+                      htmlElem.replaceChild(restTextNode, firstChild);
+                      htmlElem.insertBefore(timestampSpan, restTextNode);
+
+                      styledElements.add(elem);
+                    }
+                  }
+                });
+              };
+
+              const timestampTimeouts: Array<ReturnType<typeof setTimeout>> =
+                [];
+              const scheduleStyleTimestamps = (delay: number) => {
+                const timeoutId = setTimeout(styleTimestamps, delay);
+                timestampTimeouts.push(timeoutId);
+              };
+
+              // 多次尝试标记时间戳，确保所有时间戳都被标记
+              [100, 300, 600, 1000, 2000].forEach(scheduleStyleTimestamps);
+
+              const observer = new MutationObserver(() => {
+                scheduleStyleTimestamps(50);
+              });
+              observer.observe(editorContent, {
+                childList: true,
+                subtree: true,
+              });
+              cleanupEditorEnhancements.push(() => {
+                observer.disconnect();
+                timestampTimeouts.forEach(clearTimeout);
+              });
+            }
           },
         });
         editorRef.current = mountedEditor;
@@ -241,12 +562,13 @@ export default function VideoNoteMarkdownEditor({
 
     return () => {
       cancelled = true;
+      cleanupEditorEnhancements.splice(0).forEach((cleanup) => cleanup());
       mountedEditor?.destroy();
       if (editorRef.current === mountedEditor) {
         editorRef.current = null;
       }
     };
-  }, [recordMarkdownInput]);
+  }, [bvid, onSeekTo, recordMarkdownInput, video]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -277,8 +599,23 @@ export default function VideoNoteMarkdownEditor({
 
   if (loadError) {
     return (
-      <div className="video-note-markdown-editor error">
-        编辑器加载失败，请稍后重试。
+      <div className="video-note-markdown-editor error" role="alert">
+        <p>编辑器加载失败，请稍后重试。</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          style={{
+            marginTop: "12px",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            border: "1px solid var(--border)",
+            background: "var(--paper-2)",
+            color: "var(--ink)",
+            cursor: "pointer",
+          }}
+        >
+          重新加载页面
+        </button>
       </div>
     );
   }

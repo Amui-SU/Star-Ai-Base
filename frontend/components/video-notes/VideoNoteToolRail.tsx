@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { FormEvent } from "react";
 
 import type { VideoNoteExportResponse } from "@/lib/api";
 
@@ -10,10 +11,11 @@ interface VideoNoteToolRailProps {
   exported: VideoNoteExportResponse | null;
   exportFilenameTemplate: string;
   exporting: boolean;
-  onAddParagraph: () => void;
+  title: string;
   onAddTodo: () => void;
   onExportMarkdown: () => Promise<VideoNoteExportResponse | null>;
   onExportFilenameTemplateChange: (value: string) => void;
+  onTitleChange: (value: string) => void;
   onToggleAiPanel: () => void;
 }
 
@@ -23,12 +25,15 @@ export default function VideoNoteToolRail({
   exported,
   exportFilenameTemplate,
   exporting,
-  onAddParagraph,
+  title,
   onAddTodo,
   onExportMarkdown,
   onExportFilenameTemplateChange,
+  onTitleChange,
   onToggleAiPanel,
 }: VideoNoteToolRailProps) {
+  const [titleMenuOpen, setTitleMenuOpen] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(title);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
 
@@ -37,15 +42,47 @@ export default function VideoNoteToolRail({
     return onExportMarkdown();
   };
 
+  const toggleTitleMenu = () => {
+    setExportMenuOpen(false);
+    setExportStatus(null);
+    setTitleMenuOpen((open) => {
+      const nextOpen = !open;
+      if (nextOpen) {
+        setTitleDraft(title);
+      }
+      return nextOpen;
+    });
+  };
+
+  const closeTitleMenu = () => {
+    setTitleDraft(title);
+    setTitleMenuOpen(false);
+  };
+
+  const handleTitleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle) return;
+    onTitleChange(nextTitle);
+    setTitleMenuOpen(false);
+  };
+
   const handleCopyMarkdown = async () => {
     setExportStatus("正在准备 Markdown");
-    const nextExport = await getExportedMarkdown();
-    if (!nextExport) {
-      setExportStatus("没有可导出的笔记");
-      return;
+    try {
+      const nextExport = await getExportedMarkdown();
+      if (!nextExport) {
+        setExportStatus("没有可导出的笔记");
+        setTimeout(() => setExportStatus(null), 2000);
+        return;
+      }
+      await navigator.clipboard.writeText(nextExport.markdown);
+      setExportStatus("✓ 已复制到剪贴板");
+      setTimeout(() => setExportStatus(null), 2000);
+    } catch {
+      setExportStatus("复制失败，请重试");
+      setTimeout(() => setExportStatus(null), 2000);
     }
-    await navigator.clipboard.writeText(nextExport.markdown);
-    setExportStatus("已复制 Markdown");
   };
 
   const handleDownloadMarkdown = async () => {
@@ -72,15 +109,63 @@ export default function VideoNoteToolRail({
 
   return (
     <nav className="video-note-tool-rail" aria-label="笔记工具">
-      <button
-        type="button"
-        className="video-note-tool-button"
-        onClick={onAddParagraph}
-        aria-label="添加段落"
-        data-tooltip="添加段落"
-      >
-        <span aria-hidden="true">¶</span>
-      </button>
+      <div className="video-note-tool-menu-anchor">
+        <button
+          type="button"
+          className="video-note-tool-button"
+          onClick={toggleTitleMenu}
+          aria-expanded={titleMenuOpen}
+          aria-label="笔记名称"
+          data-tooltip="笔记名称"
+        >
+          <TitleIcon />
+        </button>
+        {titleMenuOpen && (
+          <form
+            className="video-note-title-menu"
+            role="dialog"
+            aria-label="修改笔记名称"
+            onSubmit={handleTitleSubmit}
+          >
+            <div className="video-note-export-popover-head">
+              <strong>修改笔记名称</strong>
+              <button
+                type="button"
+                onClick={closeTitleMenu}
+                aria-label="关闭笔记名称弹窗"
+              >
+                ×
+              </button>
+            </div>
+            <label className="video-note-export-field">
+              <span>笔记名称</span>
+              <input
+                className="video-note-export-template-input"
+                type="text"
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                autoFocus
+              />
+            </label>
+            <div className="video-note-title-actions">
+              <button
+                type="button"
+                className="video-note-title-action"
+                onClick={closeTitleMenu}
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                className="video-note-title-action primary"
+                disabled={!titleDraft.trim()}
+              >
+                保存
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
       <button
         type="button"
         className="video-note-tool-button"
@@ -105,6 +190,7 @@ export default function VideoNoteToolRail({
           type="button"
           className="video-note-tool-button"
           onClick={() => {
+            setTitleMenuOpen(false);
             setExportMenuOpen((value) => !value);
             setExportStatus(null);
           }}
@@ -168,6 +254,14 @@ export default function VideoNoteToolRail({
         )}
       </div>
     </nav>
+  );
+}
+
+function TitleIcon() {
+  return (
+    <span className="video-note-tool-icon-text" aria-hidden="true">
+      T
+    </span>
   );
 }
 

@@ -26,7 +26,17 @@ export default function VideoNoteAiPanel({
   onUndoAiEdit,
 }: VideoNoteAiPanelProps) {
   if (collapsed) {
-    return null;
+    return (
+      <button
+        type="button"
+        className="video-note-ai-expand"
+        onClick={onCollapse}
+        aria-label="展开 AI 工具"
+        data-tooltip="展开 AI 工具"
+      >
+        <span>AI 协作</span>
+      </button>
+    );
   }
 
   return (
@@ -54,26 +64,38 @@ export default function VideoNoteAiPanel({
       <div className="video-note-ai-actions">
         <button
           type="button"
+          className="video-note-ai-action-button"
           onClick={() => void onGenerateSummary()}
           disabled={loading}
+          aria-busy={loading}
         >
-          生成摘要
+          {loading ? "处理中..." : "生成摘要"}
         </button>
         <button
           type="button"
+          className="video-note-ai-action-button"
           onClick={() => void onGenerateQuestions()}
           disabled={loading}
+          aria-busy={loading}
         >
-          生成问题
+          {loading ? "处理中..." : "生成问题"}
         </button>
         <button
           type="button"
+          className="video-note-ai-action-button"
           onClick={() => void onGenerateTimestamps()}
           disabled={loading}
+          aria-busy={loading}
         >
-          生成时间戳
+          {loading ? "处理中..." : "生成时间戳"}
         </button>
-        <button type="button" onClick={onUndoAiEdit} disabled={!canUndoAiEdit}>
+        <button
+          type="button"
+          className="video-note-ai-action-button video-note-ai-undo-button"
+          onClick={onUndoAiEdit}
+          disabled={!canUndoAiEdit}
+          title={canUndoAiEdit ? "撤销上一次 AI 编辑" : "没有可撤销的 AI 编辑"}
+        >
           撤销 AI 编辑
         </button>
       </div>

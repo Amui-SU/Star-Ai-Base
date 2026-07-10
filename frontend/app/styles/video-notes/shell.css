@@ -24,17 +24,18 @@
   position: absolute;
   z-index: 210;
   top: 0;
-  right: -4px;
-  width: 8px;
+  right: -8px;
+  width: 16px;
   height: 100%;
   cursor: col-resize;
   touch-action: none;
+  user-select: none;
 }
 
 .video-note-drawer-resizer::after {
   position: absolute;
   top: 50%;
-  right: 2px;
+  right: 6px;
   width: 4px;
   height: 40px;
   border-radius: 2px;
@@ -142,8 +143,33 @@
   padding: 14px;
 }
 
+html.light .video-note-list-panel,
+html.light .video-note-side-panel {
+  border-color: #c8b89f;
+  background: #ded4c6;
+}
+
+html.light .video-note-header {
+  border-bottom-color: #c8b89f;
+  background: #ded4c6;
+}
+
+html.light .video-note-side-panel {
+  border-left-color: #c8b89f;
+}
+
+html.light .video-note-workspace.drawer .video-note-list-panel {
+  border-bottom-color: #c8b89f;
+}
+
+html.light .video-note-workspace.drawer .video-note-list-search {
+  border-right-color: #c8b89f;
+}
+
 .video-note-side-panel.collapsed {
   display: none;
+  padding: 0;
+  overflow: hidden;
 }
 
 .video-note-main {
@@ -207,6 +233,7 @@
   gap: 12px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--paper-2) 78%, transparent);
 }
 
 .video-note-title-group {

@@ -113,3 +113,17 @@
 .video-note-empty {
   color: var(--muted);
 }
+
+.video-note-error {
+  align-self: center;
+  margin: 24px;
+  border: 1px solid color-mix(in srgb, #ef4444 50%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #ef4444 12%, var(--paper));
+  color: #fca5a5;
+  padding: 12px 14px;
+}
+
+html.light .video-note-error {
+  color: #991b1b;
+}

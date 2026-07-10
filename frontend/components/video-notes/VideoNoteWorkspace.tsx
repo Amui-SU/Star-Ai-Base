@@ -27,6 +27,11 @@ interface VideoNoteWorkspaceProps {
 
 type WorkspaceListFilter = "all" | "with_notes" | "without_notes";
 
+function formatWorkspaceError(prefix: string, error: unknown) {
+  const message = error instanceof Error ? error.message : "请稍后重试";
+  return `${prefix}：${message}`;
+}
+
 export default function VideoNoteWorkspace({
   knowledgeBaseId,
   knowledgeBaseName,
@@ -57,6 +62,7 @@ export default function VideoNoteWorkspace({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   const syncNoteState = useCallback((nextNote: VideoNote | null) => {
     setNote(nextNote);
@@ -81,6 +87,7 @@ export default function VideoNoteWorkspace({
         q: query || undefined,
         includeBodySearch,
       });
+      setWorkspaceError(null);
       setItems(response.items);
       setSelectedBvid((current) => {
         if (current || response.items.length === 0) return current;
@@ -88,6 +95,8 @@ export default function VideoNoteWorkspace({
           response.items.find((item) => item.has_note) ?? response.items[0];
         return preferred.bvid;
       });
+    } catch (error) {
+      setWorkspaceError(formatWorkspaceError("无法加载视频笔记列表", error));
     } finally {
       setListLoading(false);
     }
@@ -114,9 +123,16 @@ export default function VideoNoteWorkspace({
 
   const loadDetail = useCallback(
     async (bvid: string) => {
-      const detail = await videoNoteApi.detail(knowledgeBaseId, bvid);
-      setVideo(detail.video);
-      syncNoteState(detail.note);
+      try {
+        const detail = await videoNoteApi.detail(knowledgeBaseId, bvid);
+        setWorkspaceError(null);
+        setVideo(detail.video);
+        syncNoteState(detail.note);
+      } catch (error) {
+        setVideo(null);
+        syncNoteState(null);
+        setWorkspaceError(formatWorkspaceError("无法加载视频信息", error));
+      }
     },
     [knowledgeBaseId, syncNoteState],
   );
@@ -156,6 +172,7 @@ export default function VideoNoteWorkspace({
       syncNoteState(null);
       setExported(null);
       setAiMessage(null);
+      setWorkspaceError(null);
       setNoteChooserOpen(false);
     },
     [syncNoteState],
@@ -185,6 +202,9 @@ export default function VideoNoteWorkspace({
       const response = await videoNoteApi.exportMarkdown(note.id);
       setExported(response);
       return response;
+    } catch (error) {
+      console.error("导出 Markdown 失败:", error);
+      return null;
     } finally {
       setExporting(false);
     }
@@ -202,6 +222,9 @@ export default function VideoNoteWorkspace({
       );
       setAiMessage(response.message);
       return response;
+    } catch (error) {
+      setAiMessage("生成摘要失败，请检查网络连接或稍后重试");
+      console.error("生成摘要失败:", error);
     } finally {
       setAiLoading(false);
     }
@@ -220,6 +243,9 @@ export default function VideoNoteWorkspace({
       aiEditing.applyAiOperations(response.operations);
       setAiMessage(response.message);
       return response;
+    } catch (error) {
+      setAiMessage("生成问题失败，请检查网络连接或稍后重试");
+      console.error("生成问题失败:", error);
     } finally {
       setAiLoading(false);
     }
@@ -238,16 +264,14 @@ export default function VideoNoteWorkspace({
       aiEditing.applyAiOperations(response.operations);
       setAiMessage(response.message);
       return response;
+    } catch (error) {
+      setAiMessage("生成时间戳失败，请检查网络连接或稍后重试");
+      console.error("生成时间戳失败:", error);
     } finally {
       setAiLoading(false);
     }
   };
 
-  const addParagraph = () => {
-    setBlocks((current) =>
-      addVideoNoteBlock(current, createVideoNoteBlock("paragraph")),
-    );
-  };
   const addTodo = () => {
     setBlocks((current) =>
       addVideoNoteBlock(current, createVideoNoteBlock("todo")),
@@ -284,6 +308,7 @@ export default function VideoNoteWorkspace({
       aiLoading={aiLoading}
       aiMessage={aiMessage}
       canUndoAiEdit={aiEditing.canUndoAiEdit}
+      workspaceError={workspaceError}
       onClose={onClose}
       onFilterChange={setListFilter}
       onQueryChange={setQuery}
@@ -293,7 +318,6 @@ export default function VideoNoteWorkspace({
       onToggleNoteChooser={() => setNoteChooserOpen((value) => !value)}
       onTitleChange={setTitle}
       onToggleFullscreen={() => setFullscreen((value) => !value)}
-      onAddParagraph={addParagraph}
       onAddTodo={addTodo}
       onExportMarkdown={exportMarkdown}
       onExportFilenameTemplateChange={updateExportFilenameTemplate}

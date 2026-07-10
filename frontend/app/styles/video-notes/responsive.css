@@ -80,18 +80,22 @@
     scrollbar-width: none;
   }
 
+  .video-note-tool-rail button {
+    flex-shrink: 0;
+    min-width: 40px;
+    touch-action: manipulation;
+  }
+
+  .video-note-tool-menu-anchor {
+    flex-shrink: 0;
+  }
+
   .video-note-tool-rail::-webkit-scrollbar {
     width: 0;
     height: 0;
   }
 
   .video-note-tool-spacer {
-    display: none;
-  }
-
-  .video-note-tool-button::after,
-  .video-note-ai-collapse::after,
-  .video-note-ai-expand::after {
     display: none;
   }
 

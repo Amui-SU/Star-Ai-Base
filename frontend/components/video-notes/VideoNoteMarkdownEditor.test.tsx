@@ -8,8 +8,10 @@ import {
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { VideoNoteBlock } from "@/lib/api";
-import VideoNoteMarkdownEditor from "./VideoNoteMarkdownEditor";
+import type { VideoNoteBlock, VideoNoteVideo } from "@/lib/api";
+import VideoNoteMarkdownEditor, {
+  buildBilibiliTimestampUrl,
+} from "./VideoNoteMarkdownEditor";
 
 interface MockVditorOptions {
   after?: () => void;
@@ -21,11 +23,14 @@ interface MockVditorOptions {
 
 const vditorState = vi.hoisted(() => ({
   instances: [] as Array<{
+    afterRan: boolean;
     destroyed: boolean;
     element: HTMLTextAreaElement;
     getValue: () => string;
+    irElement: HTMLDivElement;
     nativeElement: HTMLDivElement;
     options: MockVditorOptions;
+    runAfter: () => void;
     setValue: (value: string, clearStack?: boolean) => void;
     setValueCalls: Array<{ clearStack?: boolean; value: string }>;
     target: string | HTMLElement;
@@ -34,8 +39,10 @@ const vditorState = vi.hoisted(() => ({
 
 vi.mock("vditor", () => ({
   default: class MockVditor {
+    afterRan = false;
     destroyed = false;
     element: HTMLTextAreaElement;
+    irElement: HTMLDivElement;
     nativeElement: HTMLDivElement;
     options: MockVditorOptions;
     setValueCalls: Array<{ clearStack?: boolean; value: string }> = [];
@@ -50,19 +57,28 @@ vi.mock("vditor", () => ({
       this.element.value = options.value ?? "";
       this.nativeElement = document.createElement("div");
       this.nativeElement.setAttribute("data-testid", "vditor-native-input");
+      this.irElement = document.createElement("div");
+      this.irElement.className = "vditor-ir";
+      this.irElement.setAttribute("data-testid", "vditor-ir");
       this.element.addEventListener("input", () => {
         options.input?.(this.element.value);
       });
       const host =
         typeof target === "string" ? document.getElementById(target) : target;
-      host?.append(this.element, this.nativeElement);
+      host?.append(this.element, this.nativeElement, this.irElement);
       vditorState.instances.push(this);
-      window.setTimeout(() => options.after?.(), 0);
+      window.setTimeout(this.runAfter, 0);
     }
 
     getValue() {
       return this.element.value;
     }
+
+    runAfter = () => {
+      if (this.afterRan) return;
+      this.afterRan = true;
+      this.options.after?.();
+    };
 
     setValue(value: string, clearStack?: boolean) {
       this.setValueCalls.push({ clearStack, value });
@@ -74,6 +90,7 @@ vi.mock("vditor", () => ({
       this.destroyed = true;
       this.element.remove();
       this.nativeElement.remove();
+      this.irElement.remove();
     }
   },
 }));
@@ -82,6 +99,22 @@ const initialBlocks: VideoNoteBlock[] = [
   { id: "h1", type: "heading", level: 1, text: "Original title" },
   { id: "p1", type: "paragraph", text: "Original body" },
 ];
+
+function mockCaretRangeFromPoint(range: Range) {
+  const documentWithCaret = document as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const originalCaretRangeFromPoint = documentWithCaret.caretRangeFromPoint;
+  documentWithCaret.caretRangeFromPoint = vi.fn(() => range);
+
+  return () => {
+    if (originalCaretRangeFromPoint) {
+      documentWithCaret.caretRangeFromPoint = originalCaretRangeFromPoint;
+    } else {
+      delete documentWithCaret.caretRangeFromPoint;
+    }
+  };
+}
 
 function StatefulMarkdownEditor() {
   const [blocks, setBlocks] = useState(initialBlocks);
@@ -94,6 +127,112 @@ afterEach(() => {
 });
 
 describe("VideoNoteMarkdownEditor", () => {
+  it("builds multipart timestamp URLs with the current page and part-relative seconds", () => {
+    const video: VideoNoteVideo = {
+      bvid: "BV1xx411x7xx",
+      title: "合集视频 P2/4",
+      url: "https://www.bilibili.com/video/BV1xx411x7xx",
+      parts: [{ page: 2, cid: 222, part: "第二讲", duration: 540 }],
+    };
+
+    expect(buildBilibiliTimestampUrl("BV1xx411x7xx", 83, video)).toBe(
+      "https://www.bilibili.com/video/BV1xx411x7xx?p=2&t=83",
+    );
+  });
+
+  it("does not open a bare URL when clicking blank space on its containing line", async () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    render(
+      <VideoNoteMarkdownEditor blocks={initialBlocks} onChange={vi.fn()} />,
+    );
+
+    await screen.findByLabelText("Vditor mock editor");
+    const instance = vditorState.instances[0];
+    const lineText = "查看 https://example.com/notes 后续文字";
+    const paragraph = document.createElement("p");
+    const textNode = document.createTextNode(lineText);
+    paragraph.append(textNode);
+    instance.irElement.append(paragraph);
+    instance.runAfter();
+
+    const range = document.createRange();
+    range.setStart(textNode, lineText.length);
+    range.setEnd(textNode, lineText.length);
+    const restoreCaretRangeFromPoint = mockCaretRangeFromPoint(range);
+
+    try {
+      fireEvent.click(paragraph, { clientX: 999, clientY: 12 });
+
+      expect(openSpy).not.toHaveBeenCalled();
+    } finally {
+      restoreCaretRangeFromPoint();
+      openSpy.mockRestore();
+    }
+  });
+
+  it("opens a bare URL when the click lands on the URL text", async () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    render(
+      <VideoNoteMarkdownEditor blocks={initialBlocks} onChange={vi.fn()} />,
+    );
+
+    await screen.findByLabelText("Vditor mock editor");
+    const instance = vditorState.instances[0];
+    const lineText = "查看 https://example.com/notes 后续文字";
+    const paragraph = document.createElement("p");
+    const textNode = document.createTextNode(lineText);
+    paragraph.append(textNode);
+    instance.irElement.append(paragraph);
+    instance.runAfter();
+
+    const range = document.createRange();
+    range.setStart(textNode, lineText.indexOf("example"));
+    range.setEnd(textNode, lineText.indexOf("example"));
+    const restoreCaretRangeFromPoint = mockCaretRangeFromPoint(range);
+
+    try {
+      fireEvent.click(paragraph, { clientX: 120, clientY: 12 });
+
+      expect(openSpy).toHaveBeenCalledWith(
+        "https://example.com/notes",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    } finally {
+      restoreCaretRangeFromPoint();
+      openSpy.mockRestore();
+    }
+  });
+
+  it("opens a hidden Markdown link only from the anchor text", async () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    render(
+      <VideoNoteMarkdownEditor blocks={initialBlocks} onChange={vi.fn()} />,
+    );
+
+    await screen.findByLabelText("Vditor mock editor");
+    const instance = vditorState.instances[0];
+    const paragraph = document.createElement("p");
+    const anchor = document.createElement("a");
+    anchor.href = "https://example.com/hidden";
+    anchor.textContent = "隐藏链接";
+    paragraph.append("前缀 ", anchor, " 后续空白");
+    instance.irElement.append(paragraph);
+    instance.runAfter();
+
+    fireEvent.click(paragraph);
+    expect(openSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(anchor);
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://example.com/hidden",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    openSpy.mockRestore();
+  });
+
   it("initializes Vditor in instant-render Markdown mode with block content", async () => {
     render(
       <VideoNoteMarkdownEditor blocks={initialBlocks} onChange={vi.fn()} />,

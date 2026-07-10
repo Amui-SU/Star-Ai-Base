@@ -143,3 +143,58 @@ it("loads the list and creates a standard template note", async () => {
   );
   expect((await findMarkdownEditor()).value).toContain("旧内容");
 });
+
+it("shows a workspace error when the note list cannot reach the backend", async () => {
+  const consoleError = vi
+    .spyOn(console, "error")
+    .mockImplementation(() => undefined);
+  vi.mocked(videoNoteApi.list).mockRejectedValue(
+    new Error(
+      "无法连接到后端服务（http://localhost:8000）。请确认后端已启动，且接口地址可访问。",
+    ),
+  );
+
+  try {
+    renderWorkspace();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "无法加载视频笔记列表：无法连接到后端服务（http://localhost:8000）。请确认后端已启动，且接口地址可访问。",
+    );
+    expect(videoNoteApi.detail).not.toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
+  } finally {
+    consoleError.mockRestore();
+  }
+});
+
+it("shows a workspace error when the selected note detail fails to load", async () => {
+  const consoleError = vi
+    .spyOn(console, "error")
+    .mockImplementation(() => undefined);
+  vi.mocked(videoNoteApi.list).mockResolvedValue({
+    knowledge_base_id: 7,
+    items: [
+      {
+        bvid: "BVNOTE123",
+        title: "AI 视频学习法",
+        folder_title: "学习收藏夹",
+        has_note: true,
+        note_id: 9,
+        summary_status: "seeded",
+        tags: ["AI"],
+      },
+    ],
+  });
+  vi.mocked(videoNoteApi.detail).mockRejectedValue(new Error("后端暂时不可用"));
+
+  try {
+    renderWorkspace({ initialBvid: "BVNOTE123" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "无法加载视频信息：后端暂时不可用",
+    );
+    expect(consoleError).not.toHaveBeenCalled();
+  } finally {
+    consoleError.mockRestore();
+  }
+});
