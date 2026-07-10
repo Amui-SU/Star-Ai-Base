@@ -40,6 +40,14 @@ class VideoCache(Base):
     duration = Column(Integer, nullable=True)  # 视频时长（秒）
     pic_url = Column(String(500), nullable=True)  # 封面URL
 
+    # 分P元信息（用于AI时间戳功能）
+    page_number = Column(Integer, nullable=True)  # 分P编号（1, 2, 3...）
+    part_title = Column(String(500), nullable=True)  # 分P原始标题
+    total_parts = Column(Integer, nullable=True)  # 总分P数
+
+    # 时间轴数据（用于AI时间戳精确定位）
+    subtitle_timeline_json = Column(JSON, nullable=True)  # 完整字幕时间轴
+
     # 处理状态
     is_processed = Column(Boolean, default=False)  # 是否已处理并加入向量库
     process_error = Column(Text, nullable=True)  # 处理错误信息

@@ -166,7 +166,7 @@ SESSION_COOKIE_SECURE=false
 
 这样邮箱验证码会直接在接口响应中返回，浏览器也能在 `http://localhost` 下保存会话 Cookie。准备给其他设备或生产环境使用时，再切回 `DEBUG=false`，并配置 `APP_ENCRYPTION_KEY`、SMTP/OAuth 等真实密钥。
 
-正式使用时，普通用户不需要修改全局 `.env.local` 模型 Key；登录后从右上角用户菜单进入 **AI 服务密钥**，添加自己的 DeepSeek、OpenAI、DashScope、Kimi、SiliconFlow、智谱或 Tavily Key。
+正式使用时，普通用户不需要修改全局 `.env.local` 模型 Key；登录后从右上角用户菜单进入 **AI 服务密钥**，添加自己的 DeepSeek、OpenAI、DashScope、Agnes、Claude、Kimi、SiliconFlow、智谱或 Tavily Key。
 
 ---
 
@@ -211,6 +211,8 @@ SESSION_COOKIE_SECURE=false
 
 - **DeepSeek**：`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`
 - **OpenAI**：`OPENAI_NATIVE_API_KEY`、`OPENAI_NATIVE_BASE_URL`、`OPENAI_NATIVE_MODEL`
+- **Agnes**：`AGNES_API_KEY`、`AGNES_BASE_URL`、`AGNES_MODEL`
+- **Claude**：`CLAUDE_API_KEY`、`CLAUDE_BASE_URL`、`CLAUDE_MODEL`
 - **Kimi（Moonshot）**：`KIMI_API_KEY`、`KIMI_BASE_URL`、`KIMI_MODEL`
 - **SiliconFlow**：`SILICONFLOW_API_KEY`、`SILICONFLOW_BASE_URL`、`SILICONFLOW_MODEL`
 - **智谱 GLM**：`ZHIPU_API_KEY`、`ZHIPU_BASE_URL`、`ZHIPU_MODEL`
@@ -359,6 +361,8 @@ APK 构建说明见 [frontend/APK-打包说明.md](frontend/APK-打包说明.md)
 | `dashscope`    | 阿里云 DashScope |
 | `deepseek`     | DeepSeek         |
 | `openai`       | OpenAI           |
+| `agnes`        | Agnes            |
+| `claude`       | Claude           |
 | `kimi`         | Moonshot Kimi    |
 | `siliconflow`  | SiliconFlow      |
 | `zhipu`        | 智谱 GLM         |

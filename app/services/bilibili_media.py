@@ -64,6 +64,39 @@ def subtitle_text_from_payload(data: Mapping[str, Any]) -> str:
     return "\n".join(texts)
 
 
+def subtitle_with_timeline_from_payload(
+    data: Mapping[str, Any]
+) -> tuple[str, list[dict[str, Any]]]:
+    """
+    提取字幕文本和完整时间轴数据
+
+    Args:
+        data: B站字幕API响应数据
+
+    Returns:
+        (text, timeline)
+        - text: 纯文本内容（用于向量检索）
+        - timeline: 完整时间轴数据（用于AI时间戳精确定位）
+          格式: [{"from": 0.0, "to": 3.5, "content": "文本"}, ...]
+    """
+    texts = []
+    timeline = []
+
+    for item in (data or {}).get("body", []):
+        content = item.get("content", "")
+        if content:
+            texts.append(content)
+            timeline.append(
+                {
+                    "from": item.get("from", 0),
+                    "to": item.get("to", 0),
+                    "content": content,
+                }
+            )
+
+    return "\n".join(texts), timeline
+
+
 async def download_bilibili_audio_to_file(
     client: Any,
     audio_url: str,

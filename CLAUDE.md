@@ -104,7 +104,7 @@ SystemUser → Workspace (1:1 via WorkspaceMember) → KnowledgeBase (1:N)
 
 **智能路由**（`chat.py` `_prepare_messages`）：LLM 路由优先（direct/db_list/db_content/vector），失败降级规则路由。`direct` — 闲聊；`db_list` — 清单只用标题；`db_content` — 总结用全量数据库内容；`vector` — 语义检索后 RAG。
 
-**多 LLM 提供方**：`chat.py` `PROVIDER_META` 管理 6 种（dashscope/deepseek/openai/kimi/siliconflow/zhipu），运行时可通过 API 切换，配置持久化到 `.env.local`。切换后重置 `knowledge.py` 全局 `_rag_service`。
+**多 LLM 提供方**：`chat_provider_catalog.py` `PROVIDER_META` 管理 8 种（dashscope/deepseek/openai/agnes/claude/kimi/siliconflow/zhipu），运行时可通过 API 切换，配置持久化到 `.env.local`。切换后重置 `knowledge.py` 全局 `_rag_service`。
 
 **Embedding**：`rag.py` 优先 `DashScopeEmbeddings`，导入失败回退 `OpenAIEmbeddings`。
 

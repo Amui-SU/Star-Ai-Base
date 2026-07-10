@@ -19,7 +19,10 @@ from app.services.content_summary import (
     format_ai_summary_content,
     parse_ai_summary_result,
 )
-from app.services.content_subtitles import try_bilibili_subtitle
+from app.services.content_subtitles import (
+    try_bilibili_subtitle,
+    try_bilibili_subtitle_with_timeline,
+)
 from app.services.content_asr import try_bilibili_asr
 
 
@@ -75,10 +78,14 @@ class ContentFetcher:
         summary: Optional[dict] = None
 
         # Level 1: 字幕正文。完整正文比平台摘要更适合知识库检索和后续笔记 AI 分析。
+        subtitle_timeline = None
         if cid:
-            subtitle_text = await self._try_subtitle(bvid, cid, video_info=video_info)
-            if subtitle_text:
-                logger.info(f"[{bvid}] 使用字幕文本")
+            subtitle_result = await self._try_subtitle_with_timeline(
+                bvid, cid, video_info=video_info
+            )
+            if subtitle_result:
+                subtitle_text, subtitle_timeline = subtitle_result
+                logger.info(f"[{bvid}] 使用字幕文本（含时间轴）")
                 summary = await self._try_ai_summary_for_outline(bvid, cid, video_info)
                 return VideoContent(
                     bvid=bvid,
@@ -86,6 +93,7 @@ class ContentFetcher:
                     content=subtitle_text,
                     source=ContentSource.SUBTITLE,
                     outline=summary.get("outline") if summary else None,
+                    subtitle_timeline=subtitle_timeline,
                 )
 
         # Level 2: 音频 ASR
@@ -193,6 +201,17 @@ class ContentFetcher:
     ) -> Optional[str]:
         """尝试获取字幕"""
         return await try_bilibili_subtitle(
+            self.bili,
+            bvid,
+            cid,
+            video_info=video_info,
+        )
+
+    async def _try_subtitle_with_timeline(
+        self, bvid: str, cid: int, video_info: Optional[dict] = None
+    ) -> Optional[tuple[str, list[dict]]]:
+        """尝试获取字幕和完整时间轴"""
+        return await try_bilibili_subtitle_with_timeline(
             self.bili,
             bvid,
             cid,

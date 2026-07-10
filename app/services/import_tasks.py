@@ -56,6 +56,12 @@ async def run_bilibili_video_import(
     bvid: str,
     workspace_id: int,
     knowledge_base_id: int,
+    cid: int | None = None,
+    # 分P元信息
+    page_number: int | None = None,
+    part_title: str | None = None,
+    total_parts: int | None = None,
+    part_duration: int | None = None,
     *,
     bilibili_service_class: type[BilibiliService] = BilibiliService,
     asr_service_class: type[ASRService] = ASRService,
@@ -78,7 +84,10 @@ async def run_bilibili_video_import(
         )
         info = await bili.get_video_info(bvid)
         title = info.get("title") or bvid
-        cid = info.get("cid")
+
+        # 如果没有指定cid，使用视频默认的cid
+        if cid is None:
+            cid = info.get("cid")
 
         await update_task(task_id, current_step="提取视频内容...", progress=36)
         content = await fetcher.fetch_content(bvid, cid=cid, title=title)
@@ -91,8 +100,14 @@ async def run_bilibili_video_import(
             description=info.get("desc"),
             owner_name=(info.get("owner") or {}).get("name"),
             owner_mid=(info.get("owner") or {}).get("mid"),
-            duration=info.get("duration"),
+            duration=(
+                part_duration if part_duration is not None else info.get("duration")
+            ),
             pic_url=info.get("pic"),
+            # 传递分P元信息
+            page_number=page_number,
+            part_title=part_title,
+            total_parts=total_parts,
         )
 
         await update_task(task_id, current_step="写入向量索引...", progress=76)

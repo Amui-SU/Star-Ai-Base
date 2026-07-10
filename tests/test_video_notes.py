@@ -48,7 +48,12 @@ async def _seed_video(
     cid: int | None = None,
     title: str = "AI 视频学习法",
     folder_title: str = "学习收藏夹",
+    duration: int | None = 360,
     outline_json: list | None = None,
+    subtitle_timeline_json: list | None = None,
+    page_number: int | None = None,
+    part_title: str | None = None,
+    total_parts: int | None = None,
 ):
     if outline_json is None:
         outline_json = [
@@ -86,11 +91,15 @@ async def _seed_video(
                 title=title,
                 description="介绍如何用 AI 做学习复盘",
                 owner_name="知识区 UP",
-                duration=360,
+                duration=duration,
                 pic_url="https://example.com/cover.jpg",
                 content="这是已有的视频摘要内容。",
                 content_source="ai_summary",
                 outline_json=outline_json,
+                subtitle_timeline_json=subtitle_timeline_json,
+                page_number=page_number,
+                part_title=part_title,
+                total_parts=total_parts,
                 is_processed=True,
                 workspace_id=workspace_id,
                 knowledge_base_id=knowledge_base_id,
@@ -325,6 +334,99 @@ async def test_markdown_export_uses_frontmatter_blocks_timestamp_links_and_filen
 
 
 @pytest.mark.asyncio
+async def test_markdown_export_links_multi_part_timestamps_with_page_and_seconds(
+    client, db_session_factory
+):
+    auth = await _register_user(client, "export-multipart-notes@example.com", "Owner")
+    client.cookies.clear()
+    headers = {"Authorization": f"Bearer {auth['session_token']}"}
+    kb = await _create_knowledge_base(client, "分P笔记库", headers)
+    await _seed_video(
+        db_session_factory,
+        workspace_id=auth["workspace"]["id"],
+        knowledge_base_id=kb["id"],
+        bvid="BV1xx411x7xx",
+        cid=222,
+        title="合集 P2",
+        page_number=2,
+        part_title="第二讲",
+        total_parts=4,
+    )
+    created = await client.post(
+        "/video-notes",
+        json={
+            "knowledge_base_id": kb["id"],
+            "bvid": "BV1xx411x7xx",
+            "template_id": "blank",
+        },
+        headers=headers,
+    )
+    note_id = created.json()["id"]
+    await client.put(
+        f"/video-notes/{note_id}",
+        json={
+            "title": "分P笔记",
+            "blocks": [
+                {
+                    "id": "ts1",
+                    "type": "timestamp_outline",
+                    "items": [{"time": 83, "text": "第二讲重点"}],
+                },
+            ],
+            "tags": [],
+        },
+        headers=headers,
+    )
+
+    exported = await client.post(
+        f"/video-notes/{note_id}/export/markdown",
+        headers=headers,
+    )
+
+    assert exported.status_code == 200
+    assert (
+        "[01:23](https://www.bilibili.com/video/BV1xx411x7xx?p=2&t=83)"
+        in exported.json()["markdown"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_video_detail_uses_subtitle_timeline_duration_for_legacy_multi_part(
+    client, db_session_factory
+):
+    auth = await _register_user(client, "legacy-part-duration@example.com", "Owner")
+    client.cookies.clear()
+    headers = {"Authorization": f"Bearer {auth['session_token']}"}
+    kb = await _create_knowledge_base(client, "旧分P笔记库", headers)
+    await _seed_video(
+        db_session_factory,
+        workspace_id=auth["workspace"]["id"],
+        knowledge_base_id=kb["id"],
+        bvid="BVLEGACYPART",
+        cid=222,
+        title="旧合集 P2",
+        duration=3600,
+        subtitle_timeline_json=[
+            {"from": 0, "to": 12.5, "content": "开场"},
+            {"from": 532, "to": 540.2, "content": "结尾"},
+        ],
+        page_number=2,
+        part_title="第二讲",
+        total_parts=4,
+    )
+
+    detail = await client.get(
+        f"/video-notes/{kb['id']}/BVLEGACYPART",
+        headers=headers,
+    )
+
+    assert detail.status_code == 200
+    assert detail.json()["video"]["parts"] == [
+        {"page": 2, "cid": 222, "part": "第二讲", "duration": 541}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ai_endpoints_return_suggestions_without_mutating_note(
     client, db_session_factory, monkeypatch
 ):
@@ -458,7 +560,7 @@ async def test_generate_timestamps_prefers_bilibili_view_points(
 
     assert timestamps.status_code == 200
     payload = timestamps.json()
-    assert payload["message"] == "已根据 B 站章节生成时间戳提纲"
+    assert payload["message"] == "✓ 已根据 B 站官方章节生成时间戳提纲"
     assert payload["operations"][0]["block"]["items"] == [
         {"time": 34, "text": "官方章节：问题背景"},
         {"time": 126, "text": "官方章节：操作步骤"},

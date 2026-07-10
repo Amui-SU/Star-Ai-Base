@@ -75,8 +75,34 @@ interface PlainUrlMatch {
   url: string;
 }
 
+const PLAIN_URL_CLASS = "video-plain-url-link";
+const PLAIN_URL_SELECTOR = `.${PLAIN_URL_CLASS}`;
+const PLAIN_URL_PATTERN = /https?:\/\/[^\s<>"'`]+/g;
+
 function isHttpUrl(value: string | null): value is string {
   return value !== null && /^https?:\/\//.test(value);
+}
+
+function trimPlainUrl(rawUrl: string) {
+  return rawUrl.replace(/[),.，。！？!?;；:：]+$/u, "");
+}
+
+function findPlainUrlMatches(text: string): PlainUrlMatch[] {
+  const matches: PlainUrlMatch[] = [];
+
+  for (const match of text.matchAll(PLAIN_URL_PATTERN)) {
+    const url = trimPlainUrl(match[0]);
+    if (url.length === 0) continue;
+
+    const start = match.index ?? 0;
+    matches.push({
+      end: start + url.length,
+      start,
+      url,
+    });
+  }
+
+  return matches;
 }
 
 function findHttpAnchor(
@@ -108,19 +134,109 @@ function findPlainUrlAtOffset(
 ): PlainUrlMatch | null {
   if (!Number.isFinite(offset) || offset < 0) return null;
 
-  for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/g)) {
-    const rawUrl = match[0];
-    const url = rawUrl.replace(/[),.，。！？!?;；:：]+$/u, "");
-    if (url.length === 0) continue;
-
-    const start = match.index ?? 0;
-    const end = start + url.length;
-    if (offset >= start && offset <= end) {
-      return { end, start, url };
+  for (const match of findPlainUrlMatches(text)) {
+    if (offset >= match.start && offset <= match.end) {
+      return match;
     }
   }
 
   return null;
+}
+
+function findMarkedPlainUrl(
+  target: EventTarget | null,
+  boundary: Element,
+): string | null {
+  const start =
+    target instanceof Element
+      ? target
+      : target instanceof Node
+        ? target.parentElement
+        : null;
+  let element: Element | null = start;
+
+  while (element && element !== boundary) {
+    if (
+      element instanceof HTMLElement &&
+      element.classList.contains(PLAIN_URL_CLASS)
+    ) {
+      const url = element.dataset.url ?? element.textContent;
+      return isHttpUrl(url) ? url : null;
+    }
+    element = element.parentElement;
+  }
+
+  return null;
+}
+
+function shouldSkipPlainUrlTextNode(textNode: Text) {
+  const parent = textNode.parentElement;
+  return (
+    parent === null ||
+    Boolean(parent.closest(`a, .video-timestamp-link, ${PLAIN_URL_SELECTOR}`))
+  );
+}
+
+function wrapPlainUrlsInTextNode(textNode: Text) {
+  if (shouldSkipPlainUrlTextNode(textNode)) return;
+
+  const text = textNode.textContent ?? "";
+  const matches = findPlainUrlMatches(text);
+  if (matches.length === 0) return;
+
+  const fragment = textNode.ownerDocument.createDocumentFragment();
+  let cursor = 0;
+
+  matches.forEach((match) => {
+    if (match.start < cursor) return;
+    if (match.start > cursor) {
+      fragment.append(text.slice(cursor, match.start));
+    }
+
+    const urlSpan = textNode.ownerDocument.createElement("span");
+    urlSpan.className = PLAIN_URL_CLASS;
+    urlSpan.dataset.url = match.url;
+    urlSpan.textContent = match.url;
+    urlSpan.style.cursor = "pointer";
+    fragment.append(urlSpan);
+    cursor = match.end;
+  });
+
+  if (cursor < text.length) {
+    fragment.append(text.slice(cursor));
+  }
+
+  textNode.replaceWith(fragment);
+}
+
+function markPlainUrlsInElement(element: HTMLElement) {
+  const nodeFilter = element.ownerDocument.defaultView?.NodeFilter;
+  if (!nodeFilter) return;
+
+  const textNodes: Text[] = [];
+  const walker = element.ownerDocument.createTreeWalker(
+    element,
+    nodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        if (
+          node.nodeType !== Node.TEXT_NODE ||
+          !node.textContent?.match(PLAIN_URL_PATTERN)
+        ) {
+          return nodeFilter.FILTER_REJECT;
+        }
+        return shouldSkipPlainUrlTextNode(node as Text)
+          ? nodeFilter.FILTER_REJECT
+          : nodeFilter.FILTER_ACCEPT;
+      },
+    },
+  );
+
+  while (walker.nextNode()) {
+    textNodes.push(walker.currentNode as Text);
+  }
+
+  textNodes.forEach(wrapPlainUrlsInTextNode);
 }
 
 function getCaretRangeFromPoint(event: MouseEvent): Range | null {
@@ -416,6 +532,17 @@ export default function VideoNoteMarkdownEditor({
                   return;
                 }
 
+                const markedPlainUrl = findMarkedPlainUrl(
+                  target,
+                  editorContent,
+                );
+                if (markedPlainUrl) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  window.open(markedPlainUrl, "_blank", "noopener,noreferrer");
+                  return;
+                }
+
                 const plainUrl = findPlainHttpUrlAtClick(event, editorContent);
                 if (plainUrl) {
                   event.preventDefault();
@@ -476,8 +603,6 @@ export default function VideoNoteMarkdownEditor({
               });
 
               // 为时间戳添加样式 - 只标记时间戳本身，不包括后面的文字
-              const styledElements = new WeakSet<Element>();
-
               const styleTimestamps = () => {
                 if (!editorContent) return;
 
@@ -486,45 +611,37 @@ export default function VideoNoteMarkdownEditor({
                   editorContent.querySelectorAll("li, p, td, th");
 
                 allElements.forEach((elem) => {
-                  // 如果已经处理过，跳过
-                  if (styledElements.has(elem)) {
-                    return;
-                  }
-
                   const htmlElem = elem as HTMLElement;
 
                   // 检查是否已经有时间戳span
-                  if (htmlElem.querySelector(".video-timestamp-link")) {
-                    styledElements.add(elem);
-                    return;
-                  }
+                  if (!htmlElem.querySelector(".video-timestamp-link")) {
+                    // 检查第一个文本节点是否以时间戳开头
+                    const firstChild = htmlElem.firstChild;
+                    if (firstChild && firstChild.nodeType === Node.TEXT_NODE) {
+                      const text = firstChild.textContent || "";
+                      const timestampMatch = text.match(
+                        /^(\[\d{1,3}:\d{2}(?::\d{2})?\])/,
+                      );
 
-                  // 检查第一个文本节点是否以时间戳开头
-                  const firstChild = htmlElem.firstChild;
-                  if (firstChild && firstChild.nodeType === Node.TEXT_NODE) {
-                    const text = firstChild.textContent || "";
-                    const timestampMatch = text.match(
-                      /^(\[\d{1,3}:\d{2}(?::\d{2})?\])/,
-                    );
+                      if (timestampMatch) {
+                        const timestamp = timestampMatch[1];
+                        const restText = text.substring(timestamp.length);
 
-                    if (timestampMatch) {
-                      const timestamp = timestampMatch[1];
-                      const restText = text.substring(timestamp.length);
+                        // 创建可点击的时间戳span
+                        const timestampSpan = document.createElement("span");
+                        timestampSpan.textContent = timestamp;
+                        timestampSpan.className = "video-timestamp-link";
+                        timestampSpan.style.cursor = "pointer";
 
-                      // 创建可点击的时间戳span
-                      const timestampSpan = document.createElement("span");
-                      timestampSpan.textContent = timestamp;
-                      timestampSpan.className = "video-timestamp-link";
-                      timestampSpan.style.cursor = "pointer";
-
-                      // 替换文本节点
-                      const restTextNode = document.createTextNode(restText);
-                      htmlElem.replaceChild(restTextNode, firstChild);
-                      htmlElem.insertBefore(timestampSpan, restTextNode);
-
-                      styledElements.add(elem);
+                        // 替换文本节点
+                        const restTextNode = document.createTextNode(restText);
+                        htmlElem.replaceChild(restTextNode, firstChild);
+                        htmlElem.insertBefore(timestampSpan, restTextNode);
+                      }
                     }
                   }
+
+                  markPlainUrlsInElement(htmlElem);
                 });
               };
 

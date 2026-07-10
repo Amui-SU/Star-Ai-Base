@@ -16,7 +16,16 @@ during maintenance.
 
 ## Worktree Flow
 
-Use an isolated worktree for every feature, refactor, or maintenance slice.
+Use an isolated worktree by default for feature, refactor, or maintenance
+slices, especially when touching production code, tests, migrations, build
+scripts, generated assets, or more than one subsystem.
+
+Small, low-risk changes may be made directly in the current checkout when a
+worktree would add process overhead without protecting meaningful state. This
+includes narrow documentation edits, typo fixes, comment-only changes, or small
+configuration/instruction updates that do not require running the full
+implementation workflow. For these changes, still inspect the working tree first
+and run the lightest relevant verification such as `git diff --check`.
 
 1. Create the branch under `.worktrees/<slice-name>`.
 2. Confirm the baseline with targeted tests before editing.

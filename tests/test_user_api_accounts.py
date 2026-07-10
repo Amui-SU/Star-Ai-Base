@@ -1,6 +1,15 @@
 import pytest
 
 
+def test_provider_defaults_include_agnes_and_claude():
+    from app.services.api_credentials import provider_defaults
+
+    assert provider_defaults("agnes").base_url == "https://apihub.agnes-ai.com/v1"
+    assert provider_defaults("agnes").model == "agnes-2.0-flash"
+    assert provider_defaults("claude").base_url == "https://api.anthropic.com/v1"
+    assert provider_defaults("claude").model == "claude-haiku-4-5"
+
+
 async def _send_code(client, email: str) -> str:
     response = await client.post("/system-auth/send-code", json={"email": email})
     assert response.status_code == 200

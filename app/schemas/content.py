@@ -36,6 +36,7 @@ class VideoContent(BaseModel):
     content: str
     source: ContentSource
     outline: Optional[list] = None
+    subtitle_timeline: Optional[list[dict]] = None  # 字幕时间轴数据
 
 
 class FavoriteFolderInfo(BaseModel):

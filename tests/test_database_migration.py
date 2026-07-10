@@ -151,3 +151,39 @@ async def test_init_db_adds_usage_event_source_columns_to_legacy_table(test_db_u
         "error_code",
         "created_at",
     } <= columns
+
+
+@pytest.mark.asyncio
+async def test_init_db_adds_video_cache_part_metadata_columns(test_db_url):
+    from app.database import _ensure_sqlite_legacy_columns
+
+    engine = create_async_engine(test_db_url, echo=False, future=True)
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE video_cache (
+                id INTEGER PRIMARY KEY,
+                bvid VARCHAR(20) NOT NULL,
+                title VARCHAR(500) NOT NULL,
+                content TEXT,
+                is_processed BOOLEAN,
+                workspace_id INTEGER,
+                knowledge_base_id INTEGER,
+                source_binding_id INTEGER
+            )
+            """
+        )
+
+        await _ensure_sqlite_legacy_columns(conn)
+
+        result = await conn.exec_driver_sql("PRAGMA table_info(video_cache)")
+        columns = {row[1] for row in result.fetchall()}
+
+    await engine.dispose()
+
+    assert {
+        "page_number",
+        "part_title",
+        "total_parts",
+        "subtitle_timeline_json",
+    } <= columns

@@ -8,6 +8,8 @@ VIDEO_NOTE_STYLE_FILES = [
     "video-notes/list.css",
     "video-notes/tool-rail-export.css",
     "video-notes/editor.css",
+    "video-notes/editor-toolbar.css",
+    "video-notes/editor-content.css",
     "video-notes/side-panels.css",
     "video-notes/responsive.css",
 ]
@@ -82,6 +84,15 @@ def test_video_note_styles_are_split_by_surface():
             ".video-note-vditor",
             ".video-note-template-grid",
         ],
+        "video-notes/editor-toolbar.css": [
+            ".video-note-vditor .vditor-toolbar",
+            ".video-note-vditor .vditor-toolbar .vditor-tooltipped::after",
+        ],
+        "video-notes/editor-content.css": [
+            ".video-note-vditor .vditor-ir p",
+            '.video-note-vditor .vditor-ir input[type="checkbox"]',
+            ".video-note-vditor .vditor-ir .video-plain-url-link",
+        ],
         "video-notes/side-panels.css": [
             ".video-note-ai-panel",
             ".video-note-ai-expand",
@@ -113,9 +124,12 @@ def test_video_note_workspace_tests_are_split_by_workflow():
             "opens directly into the first existing note",
             "opens selectable videos in a chooser menu",
             "loads the list and creates a standard template note",
+            "shows a workspace error when the note list cannot reach the backend",
+            "shows a workspace error when the selected note detail fails to load",
         ],
         "VideoNoteWorkspace.export.test.tsx": [
             "autosaves copied Markdown from the toolbar menu",
+            "edits the note title from the toolbar popover",
             "downloads exported Markdown from the toolbar export menu",
         ],
         "VideoNoteWorkspace.ai.test.tsx": [
@@ -142,7 +156,7 @@ def test_video_note_workspace_tests_are_split_by_workflow():
             assert expected_name in source
 
     assert not original_path.exists()
-    assert focused_source.count("it(") == 7
+    assert focused_source.count("it(") == 10
 
 
 def test_video_note_workspace_uses_focused_view_component():

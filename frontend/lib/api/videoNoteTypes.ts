@@ -31,6 +31,13 @@ export interface VideoNoteBlock {
   source?: string | null;
 }
 
+export interface VideoNotePart {
+  page: number; // 分P编号（从1开始）
+  cid: number; // B站的分P CID
+  part: string; // 分P标题
+  duration: number; // 这个分P的时长（秒）
+}
+
 export interface VideoNoteVideo {
   bvid: string;
   title: string;
@@ -41,6 +48,7 @@ export interface VideoNoteVideo {
   duration?: number | null;
   pic_url?: string | null;
   url: string;
+  parts?: VideoNotePart[] | null; // 分P信息数组
 }
 
 export interface VideoNote {

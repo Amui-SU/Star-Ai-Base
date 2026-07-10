@@ -18,6 +18,7 @@ from app.services.bilibili_media import (
     download_bilibili_audio_to_file,
     normalize_bilibili_media_url,
     subtitle_text_from_payload,
+    subtitle_with_timeline_from_payload,
 )
 from app.services.bilibili_video import (
     get_bilibili_audio_url,
@@ -161,6 +162,19 @@ class BilibiliMediaMixin:
         response = await self.client.get(normalize_bilibili_media_url(subtitle_url))
         data = response.json()
         return subtitle_text_from_payload(data)
+
+    async def download_subtitle_with_timeline(
+        self, subtitle_url: str
+    ) -> tuple[str, list[dict]]:
+        """
+        下载字幕并返回文本和完整时间轴
+
+        Returns:
+            (text, timeline) - 文本内容和时间轴数据
+        """
+        response = await self.client.get(normalize_bilibili_media_url(subtitle_url))
+        data = response.json()
+        return subtitle_with_timeline_from_payload(data)
 
     async def download_audio_to_file(self, audio_url: str, file_path: str) -> bool:
         return await download_bilibili_audio_to_file(

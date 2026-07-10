@@ -13,6 +13,7 @@ from app.services.video_note_ai_text import (
 from app.services.video_note_presenters import VideoNoteSource
 
 AiStatus = Literal["generated", "unavailable", "failed", "official"]
+EMPTY_TIMESTAMPS_MESSAGE = "ℹ 当前视频暂无可用时间点数据，已生成基础框架"
 TIMESTAMP_KEYS = (
     "time",
     "timestamp",
@@ -120,24 +121,28 @@ def _payload_timestamps(payload: dict | None) -> list[dict]:
     return items[:12]
 
 
+def _has_specific_timestamps(items: list[dict]) -> bool:
+    return any(_timestamp_from_mapping(item) > 0 for item in items)
+
+
 def _message_for(action: str, status: AiStatus) -> str:
     if status == "official":
         return {
-            "summary": "已根据 B 站章节生成摘要建议",
-            "questions": "已根据 B 站章节生成复盘问题",
-            "timestamps": "已根据 B 站章节生成时间戳提纲",
-            "edit": "已根据 B 站章节生成编辑建议",
+            "summary": "✓ 已根据 B 站官方章节生成摘要建议",
+            "questions": "✓ 已根据 B 站官方章节生成复盘问题",
+            "timestamps": "✓ 已根据 B 站官方章节生成时间戳提纲",
+            "edit": "✓ 已根据 B 站官方章节生成编辑建议",
         }[action]
     if status == "generated":
         return {
-            "summary": "已由 AI 重新生成摘要",
-            "questions": "已由 AI 重新生成复盘问题",
-            "timestamps": "已由 AI 重新生成时间戳提纲",
-            "edit": "已由 AI 生成编辑建议",
+            "summary": "✓ AI 已重新生成摘要和关键观点",
+            "questions": "✓ AI 已重新生成复盘问题",
+            "timestamps": "✓ AI 已重新生成时间戳提纲",
+            "edit": "✓ AI 已生成编辑建议",
         }[action]
     if status == "failed":
-        return "AI 生成失败，已根据入库内容提供基础建议；请稍后重试"
-    return "AI 模型未连接，已根据入库内容提供基础建议；配置模型后可重新生成"
+        return "⚠ AI 生成失败，已根据入库内容提供基础建议；请稍后重试或检查模型配置"
+    return "ℹ AI 模型未连接，已根据入库内容提供基础建议；配置模型后可获得更好效果"
 
 
 def build_summary_suggestions(
@@ -227,6 +232,7 @@ def _timestamp_items(
     ai_payload: dict | None = None,
     bilibili_timestamps: list[dict] | None = None,
 ) -> list[dict]:
+    # 优先使用 B 站官方章节
     if bilibili_timestamps:
         items: list[dict] = []
         for item in bilibili_timestamps:
@@ -237,13 +243,15 @@ def _timestamp_items(
                 item.get("text") or item.get("content") or item.get("title"),
                 time=_timestamp_from_mapping(item),
             )
-        if items:
+        if items and _has_specific_timestamps(items):
             return items[:12]
 
+    # 其次使用 AI 生成的时间戳
     ai_items = _payload_timestamps(ai_payload)
-    if ai_items:
+    if ai_items and _has_specific_timestamps(ai_items):
         return ai_items
 
+    # 再次尝试使用数据库中的 outline
     items: list[dict] = []
     if source:
         for index, entry in enumerate(source.outline or []):
@@ -264,10 +272,20 @@ def _timestamp_items(
                         point_text,
                         time=_timestamp_from_mapping(point, timestamp),
                     )
-    if items:
+    if items and _has_specific_timestamps(items):
         return items[:12]
-    if source and source.title:
-        return [{"time": 0, "text": f"围绕《{source.title}》梳理视频主线"}]
+
+    # 如果都没有具体时间戳，但有内容，生成基础框架时间戳
+    if items and source and source.duration:
+        # 根据视频时长智能分配时间戳
+        duration = source.duration
+        num_items = min(len(items), 8)
+        for i in range(num_items):
+            if items[i].get("time", 0) == 0:
+                # 均匀分布时间戳
+                items[i]["time"] = int((duration * i) / max(num_items - 1, 1))
+        return items[:num_items]
+
     return []
 
 
@@ -301,8 +319,17 @@ def build_ai_edit_suggestions(
             ],
         )
     if action == "generate_timestamps":
+        timestamp_items = _timestamp_items(
+            source,
+            ai_payload,
+            bilibili_timestamps,
+        )
         return VideoNoteAiResponse(
-            message=_message_for("timestamps", ai_status),
+            message=(
+                _message_for("timestamps", ai_status)
+                if timestamp_items
+                else EMPTY_TIMESTAMPS_MESSAGE
+            ),
             tag_suggestions=[],
             operations=[
                 {
@@ -311,11 +338,7 @@ def build_ai_edit_suggestions(
                     "block": {
                         "id": "timestamp-outline",
                         "type": "timestamp_outline",
-                        "items": _timestamp_items(
-                            source,
-                            ai_payload,
-                            bilibili_timestamps,
-                        ),
+                        "items": timestamp_items,
                     },
                 }
             ],

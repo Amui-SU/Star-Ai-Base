@@ -2,5 +2,7 @@
 @import "./video-notes/list.css";
 @import "./video-notes/tool-rail-export.css";
 @import "./video-notes/editor.css";
+@import "./video-notes/editor-toolbar.css";
+@import "./video-notes/editor-content.css";
 @import "./video-notes/side-panels.css";
 @import "./video-notes/responsive.css";

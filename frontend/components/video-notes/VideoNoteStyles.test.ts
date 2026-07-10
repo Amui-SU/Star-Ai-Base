@@ -73,6 +73,15 @@ describe("video note styles", () => {
     );
   });
 
+  it("shows clickable editor links with a pointer cursor", () => {
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-vditor \.vditor-ir \.video-plain-url-link\s*{[\s\S]*?cursor:\s*pointer\s*!important/s,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-vditor \.vditor-ir \.vditor-reset a,[\s\S]*?\.video-note-vditor \.vditor-ir \.vditor-reset a \*\s*{[\s\S]*?cursor:\s*pointer\s*!important/s,
+    );
+  });
+
   it("hides the visible editor scrollbar while keeping Vditor content overflow external", () => {
     expect(videoNoteStyles).toMatch(
       /\.video-note-markdown-editor\s*{[^}]*scrollbar-width:\s*none/s,

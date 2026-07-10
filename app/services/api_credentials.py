@@ -56,6 +56,16 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         base_url="https://api.openai.com/v1",
         model="gpt-4o-mini",
     ),
+    "agnes": ProviderDefaults(
+        label="Agnes",
+        base_url="https://apihub.agnes-ai.com/v1",
+        model="agnes-2.0-flash",
+    ),
+    "claude": ProviderDefaults(
+        label="Claude",
+        base_url="https://api.anthropic.com/v1",
+        model="claude-haiku-4-5",
+    ),
     "kimi": ProviderDefaults(
         label="Moonshot Kimi",
         base_url="https://api.moonshot.cn/v1",

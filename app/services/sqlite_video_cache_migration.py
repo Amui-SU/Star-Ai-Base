@@ -31,6 +31,10 @@ def sqlite_rebuild_video_cache_without_unique_bvid(sync_conn: Connection) -> Non
             outline_json JSON,
             duration INTEGER,
             pic_url VARCHAR(500),
+            page_number INTEGER,
+            part_title VARCHAR(500),
+            total_parts INTEGER,
+            subtitle_timeline_json JSON,
             is_processed BOOLEAN,
             process_error TEXT,
             workspace_id INTEGER,
@@ -55,6 +59,10 @@ def sqlite_rebuild_video_cache_without_unique_bvid(sync_conn: Connection) -> Non
         "outline_json",
         "duration",
         "pic_url",
+        "page_number",
+        "part_title",
+        "total_parts",
+        "subtitle_timeline_json",
         "is_processed",
         "process_error",
         "workspace_id",
@@ -76,6 +84,10 @@ def sqlite_rebuild_video_cache_without_unique_bvid(sync_conn: Connection) -> Non
         sqlite_select_expr(existing, "outline_json"),
         sqlite_select_expr(existing, "duration"),
         sqlite_select_expr(existing, "pic_url"),
+        sqlite_select_expr(existing, "page_number"),
+        sqlite_select_expr(existing, "part_title"),
+        sqlite_select_expr(existing, "total_parts"),
+        sqlite_select_expr(existing, "subtitle_timeline_json"),
         sqlite_select_expr(existing, "is_processed", "0"),
         sqlite_select_expr(existing, "process_error"),
         sqlite_select_expr(existing, "workspace_id"),
@@ -129,12 +141,32 @@ def sqlite_create_video_cache_indexes(sync_conn: Connection) -> None:
 
 
 def sqlite_clone_scoped_video_cache_rows(sync_conn: Connection) -> None:
-    if not sqlite_table_columns(sync_conn, "video_cache") or not sqlite_table_columns(
+    existing_video_cache_columns = sqlite_table_columns(sync_conn, "video_cache")
+    if not existing_video_cache_columns or not sqlite_table_columns(
         sync_conn, "favorite_videos"
     ):
         return
+    optional_part_columns = [
+        "page_number",
+        "part_title",
+        "total_parts",
+        "subtitle_timeline_json",
+    ]
+    available_part_columns = [
+        column
+        for column in optional_part_columns
+        if column in existing_video_cache_columns
+    ]
+    insert_part_columns = "".join(
+        f"            {quote_sqlite_identifier(column)},\n"
+        for column in available_part_columns
+    )
+    select_part_columns = "".join(
+        f"            src.{quote_sqlite_identifier(column)},\n"
+        for column in available_part_columns
+    )
     sync_conn.exec_driver_sql(
-        """
+        f"""
         WITH desired AS (
             SELECT
                 fv.bvid AS bvid,
@@ -189,7 +221,7 @@ def sqlite_clone_scoped_video_cache_rows(sync_conn: Connection) -> None:
             outline_json,
             duration,
             pic_url,
-            is_processed,
+{insert_part_columns}            is_processed,
             process_error,
             workspace_id,
             knowledge_base_id,
@@ -209,7 +241,7 @@ def sqlite_clone_scoped_video_cache_rows(sync_conn: Connection) -> None:
             src.outline_json,
             src.duration,
             src.pic_url,
-            src.is_processed,
+{select_part_columns}            src.is_processed,
             src.process_error,
             source.workspace_id,
             source.knowledge_base_id,

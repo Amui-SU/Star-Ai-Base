@@ -423,6 +423,104 @@ async def test_bilibili_video_import_task_persists_cid_for_timestamp_generation(
 
 
 @pytest.mark.asyncio
+async def test_bilibili_multi_part_import_uses_part_duration_for_timestamps(
+    db_session_factory,
+    monkeypatch,
+):
+    import app.database as database
+    from app.services.import_tasks import run_bilibili_video_import
+
+    monkeypatch.setattr(database, "async_session_factory", db_session_factory)
+
+    class FakeBilibiliService:
+        async def get_video_info(self, bvid):
+            assert bvid == "BVPARTIMPORT"
+            return {
+                "cid": 111,
+                "title": "合集视频",
+                "desc": "视频简介",
+                "owner": {"name": "UP 主", "mid": 9},
+                "duration": 3600,
+                "pic": "https://example.test/cover.jpg",
+            }
+
+        async def close(self):
+            pass
+
+    class FakeASRService:
+        pass
+
+    class FakeContentFetcher:
+        def __init__(self, bili, asr):
+            pass
+
+        async def fetch_content(self, bvid, cid=None, title=None):
+            from app.schemas.content import VideoContent
+
+            assert (bvid, cid, title) == ("BVPARTIMPORT", 222, "合集视频")
+            return VideoContent(
+                bvid=bvid,
+                title=title,
+                content="分 P 字幕内容 " * 8,
+                source=ContentSource.SUBTITLE,
+                outline=[],
+            )
+
+    class FakeRAGService:
+        def delete_video_in_knowledge_base(self, **kwargs):
+            pass
+
+        def add_video_content(self, content, **kwargs):
+            return 1
+
+    async with db_session_factory() as session:
+        session.add(
+            IngestionTask(
+                task_id="bili-part-duration-task",
+                workspace_id=3,
+                knowledge_base_id=9,
+                source_binding_id=None,
+                created_by=5,
+                status="pending",
+                total_items=1,
+            )
+        )
+        await session.commit()
+
+    await run_bilibili_video_import(
+        task_id="bili-part-duration-task",
+        bvid="BVPARTIMPORT",
+        workspace_id=3,
+        knowledge_base_id=9,
+        cid=222,
+        page_number=2,
+        part_title="第二讲",
+        total_parts=4,
+        part_duration=540,
+        bilibili_service_class=FakeBilibiliService,
+        asr_service_class=FakeASRService,
+        content_fetcher_class=FakeContentFetcher,
+        rag_factory=lambda: FakeRAGService(),
+    )
+
+    async with db_session_factory() as session:
+        cache = (
+            (
+                await session.execute(
+                    select(VideoCache).where(VideoCache.bvid == "BVPARTIMPORT")
+                )
+            )
+            .scalars()
+            .one()
+        )
+
+    assert cache.cid == 222
+    assert cache.page_number == 2
+    assert cache.total_parts == 4
+    assert cache.duration == 540
+
+
+@pytest.mark.asyncio
 async def test_local_video_import_task_cleans_upload_when_transcription_fails(
     db_session_factory,
     monkeypatch,

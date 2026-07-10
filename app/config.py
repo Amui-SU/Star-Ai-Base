@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     openai_native_base_url: str = Field(default="https://api.openai.com/v1")
     openai_native_model: str = Field(default="gpt-4o-mini")
     openai_native_thinking_config: str = Field(default="")
+    agnes_api_key: str = Field(default="")
+    agnes_base_url: str = Field(default="https://apihub.agnes-ai.com/v1")
+    agnes_model: str = Field(default="agnes-2.0-flash")
+    agnes_thinking_config: str = Field(default="")
+    claude_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("CLAUDE_API_KEY", "ANTHROPIC_API_KEY"),
+    )
+    claude_base_url: str = Field(default="https://api.anthropic.com/v1")
+    claude_model: str = Field(default="claude-haiku-4-5")
+    claude_thinking_config: str = Field(default="")
     kimi_api_key: str = Field(default="")
     kimi_base_url: str = Field(default="https://api.moonshot.cn/v1")
     kimi_model: str = Field(default="moonshot-v1-8k")

@@ -22,6 +22,10 @@ async def store_imported_video_content(
     owner_mid: int | None = None,
     duration: int | None = None,
     pic_url: str | None = None,
+    # 分P元信息（用于AI时间戳功能）
+    page_number: int | None = None,
+    part_title: str | None = None,
+    total_parts: int | None = None,
     folder_title: str = "单条视频导入",
     db_context_factory: Callable[[], Any] = get_db_context,
 ) -> None:
@@ -55,6 +59,11 @@ async def store_imported_video_content(
         cache.content = content.content
         cache.content_source = content.source.value
         cache.outline_json = content.outline
+        # 保存分P元信息和时间轴数据
+        cache.page_number = page_number
+        cache.part_title = part_title
+        cache.total_parts = total_parts
+        cache.subtitle_timeline_json = content.subtitle_timeline
         cache.is_processed = True
         cache.workspace_id = workspace_id
         cache.knowledge_base_id = knowledge_base_id

@@ -204,6 +204,29 @@ describe("VideoNoteMarkdownEditor", () => {
     }
   });
 
+  it("marks bare URL text as its own clickable cursor target", async () => {
+    render(
+      <VideoNoteMarkdownEditor blocks={initialBlocks} onChange={vi.fn()} />,
+    );
+
+    await screen.findByLabelText("Vditor mock editor");
+    const instance = vditorState.instances[0];
+    const lineText = "查看 https://example.com/notes 后续文字";
+    const paragraph = document.createElement("p");
+    paragraph.textContent = lineText;
+    instance.irElement.append(paragraph);
+    instance.runAfter();
+
+    await waitFor(() =>
+      expect(paragraph.querySelector(".video-plain-url-link")).not.toBeNull(),
+    );
+    const urlTarget = paragraph.querySelector(".video-plain-url-link");
+
+    expect(urlTarget).toHaveTextContent("https://example.com/notes");
+    expect(urlTarget).toHaveAttribute("data-url", "https://example.com/notes");
+    expect(paragraph.textContent).toBe(lineText);
+  });
+
   it("opens a hidden Markdown link only from the anchor text", async () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     render(

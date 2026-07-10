@@ -58,3 +58,17 @@ def test_write_env_values_to_path_updates_file_and_settings(tmp_path):
             "UNMAPPED_VALUE": "kept-on-disk",
         },
     )
+
+
+def test_settings_field_mapping_includes_agnes_and_claude():
+    assert importlib.util.find_spec("app.services.chat_config_env") is not None
+    from app.services.chat_config_env import SETTINGS_FIELD_BY_ENV
+
+    assert SETTINGS_FIELD_BY_ENV["AGNES_API_KEY"] == "agnes_api_key"
+    assert SETTINGS_FIELD_BY_ENV["AGNES_BASE_URL"] == "agnes_base_url"
+    assert SETTINGS_FIELD_BY_ENV["AGNES_MODEL"] == "agnes_model"
+    assert SETTINGS_FIELD_BY_ENV["AGNES_THINKING_CONFIG"] == "agnes_thinking_config"
+    assert SETTINGS_FIELD_BY_ENV["CLAUDE_API_KEY"] == "claude_api_key"
+    assert SETTINGS_FIELD_BY_ENV["CLAUDE_BASE_URL"] == "claude_base_url"
+    assert SETTINGS_FIELD_BY_ENV["CLAUDE_MODEL"] == "claude_model"
+    assert SETTINGS_FIELD_BY_ENV["CLAUDE_THINKING_CONFIG"] == "claude_thinking_config"

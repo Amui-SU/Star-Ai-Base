@@ -1,5 +1,6 @@
 """Video note presenter and source lookup helpers."""
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +27,10 @@ class VideoNoteSource:
     content: str | None
     outline: list | None
     owner_mid: int | None = None
+    # 分P元信息
+    page_number: int | None = None
+    part_title: str | None = None
+    total_parts: int | None = None
 
     @property
     def url(self) -> str:
@@ -42,6 +47,61 @@ def _video_cache_matches_favorite():
         ),
         nullable_equal(FavoriteVideo.source_binding_id, VideoCache.source_binding_id),
     )
+
+
+def _coerce_float(value: Any, *, allow_zero: bool = False) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number < 0 or (number == 0 and not allow_zero):
+        return None
+    return number
+
+
+def _first_present_value(mapping: dict, *keys: str) -> Any:
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
+
+
+def _subtitle_timeline_duration(timeline: Any) -> int | None:
+    if not isinstance(timeline, list):
+        return None
+
+    max_seconds = 0.0
+    for entry in timeline:
+        if not isinstance(entry, dict):
+            continue
+        end = _coerce_float(
+            _first_present_value(entry, "to", "end", "end_time", "endTime")
+        )
+        if end is None:
+            start = _coerce_float(
+                _first_present_value(entry, "from", "start", "start_time"),
+                allow_zero=True,
+            )
+            duration = _coerce_float(entry.get("duration"))
+            if start is not None and duration is not None:
+                end = start + duration
+        if end is not None:
+            max_seconds = max(max_seconds, end)
+
+    if max_seconds <= 0:
+        return None
+    return int(math.ceil(max_seconds))
+
+
+def _effective_video_duration(video_cache: VideoCache) -> int | None:
+    duration = video_cache.duration
+    if (video_cache.total_parts or 0) > 1:
+        timeline_duration = _subtitle_timeline_duration(
+            video_cache.subtitle_timeline_json
+        )
+        if timeline_duration and (duration is None or timeline_duration < duration):
+            return timeline_duration
+    return duration
 
 
 def _normalized_tags(tags: list[str] | None) -> list[str]:
@@ -129,6 +189,20 @@ def note_to_response(note: VideoNote, source: VideoNoteSource | None = None) -> 
 
 
 def video_to_response(source: VideoNoteSource) -> dict:
+    # 构建分P信息
+    parts = None
+    if source.total_parts and source.total_parts > 1:
+        # 如果是分P视频，构建parts数组
+        # 注意：当前只有当前分P的信息，如果需要完整的所有分P，需要额外查询
+        parts = [
+            {
+                "page": source.page_number or 1,
+                "cid": source.cid or 0,
+                "part": source.part_title or "",
+                "duration": source.duration or 0,
+            }
+        ]
+
     return {
         "bvid": source.bvid,
         "title": source.title,
@@ -139,6 +213,7 @@ def video_to_response(source: VideoNoteSource) -> dict:
         "duration": source.duration,
         "pic_url": source.pic_url,
         "url": source.url,
+        "parts": parts,
     }
 
 
@@ -178,12 +253,16 @@ async def resolve_video_note_source(
         folder_title=folder_title,
         owner_name=video_cache.owner_name,
         owner_mid=video_cache.owner_mid,
-        duration=video_cache.duration,
+        duration=_effective_video_duration(video_cache),
         pic_url=video_cache.pic_url,
         description=video_cache.description,
         source_binding_id=source_binding_id,
         content=video_cache.content,
         outline=video_cache.outline_json,
+        # 读取分P元信息
+        page_number=video_cache.page_number,
+        part_title=video_cache.part_title,
+        total_parts=video_cache.total_parts,
     )
 
 
@@ -261,12 +340,16 @@ async def list_video_note_sources(
                     folder_title=folder_title,
                     owner_name=video_cache.owner_name,
                     owner_mid=video_cache.owner_mid,
-                    duration=video_cache.duration,
+                    duration=_effective_video_duration(video_cache),
                     pic_url=video_cache.pic_url,
                     description=video_cache.description,
                     source_binding_id=source_binding_id,
                     content=video_cache.content,
                     outline=video_cache.outline_json,
+                    # 读取分P元信息
+                    page_number=video_cache.page_number,
+                    part_title=video_cache.part_title,
+                    total_parts=video_cache.total_parts,
                 ),
                 note,
             )

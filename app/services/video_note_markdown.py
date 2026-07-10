@@ -27,7 +27,11 @@ def _format_timestamp(seconds: Any) -> str:
 
 
 def _timestamp_url(source: VideoNoteSource, seconds: Any) -> str:
-    return f"{source.url}?t={max(int(seconds or 0), 0)}"
+    safe_seconds = max(int(seconds or 0), 0)
+    if (source.total_parts or 0) > 1 or (source.page_number or 0) > 1:
+        page_number = max(int(source.page_number or 1), 1)
+        return f"{source.url}?p={page_number}&t={safe_seconds}"
+    return f"{source.url}?t={safe_seconds}"
 
 
 def _clean_filename(value: str) -> str:

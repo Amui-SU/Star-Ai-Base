@@ -18,6 +18,13 @@ class VideoNoteBlock(BaseModel):
     source: str | None = None
 
 
+class VideoNotePart(BaseModel):
+    page: int
+    cid: int
+    part: str
+    duration: int
+
+
 class VideoNoteVideoResponse(BaseModel):
     bvid: str
     title: str
@@ -28,6 +35,7 @@ class VideoNoteVideoResponse(BaseModel):
     duration: int | None = None
     pic_url: str | None = None
     url: str
+    parts: list[VideoNotePart] | None = None
 
 
 class VideoNoteResponse(BaseModel):
@@ -115,4 +123,3 @@ class VideoNoteAiResponse(BaseModel):
     operations: list[VideoNoteAiOperation]
     tag_suggestions: list[str] = Field(default_factory=list)
     message: str
-

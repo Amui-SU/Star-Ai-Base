@@ -55,7 +55,7 @@ def test_summary_suggestions_clean_ai_payload_and_keep_generated_message():
         ai_status="generated",
     )
 
-    assert response.message == "已由 AI 重新生成摘要"
+    assert response.message == "✓ AI 已重新生成摘要和关键观点"
     assert response.tag_suggestions == ["AI", "复盘"]
     operations = _operations(response)
     assert operations[0]["block"]["text"] == (
@@ -79,7 +79,7 @@ def test_ai_edit_suggestions_fall_back_to_source_outline_for_timestamps():
     )
 
     assert response.message == (
-        "AI 模型未连接，已根据入库内容提供基础建议；配置模型后可重新生成"
+        "ℹ AI 模型未连接，已根据入库内容提供基础建议；配置模型后可获得更好效果"
     )
     assert _operations(response) == [
         {
@@ -113,7 +113,7 @@ def test_ai_edit_suggestions_prefer_bilibili_timestamps_for_timestamp_generation
         ai_status="official",
     )
 
-    assert response.message == "已根据 B 站章节生成时间戳提纲"
+    assert response.message == "✓ 已根据 B 站官方章节生成时间戳提纲"
     assert _operations(response)[0]["block"]["items"] == [
         {"time": 32, "text": "官方章节开场"},
         {"time": 118, "text": "官方章节演示"},
@@ -144,3 +144,27 @@ def test_ai_edit_suggestions_parse_common_timestamp_aliases_from_ai_payload():
         {"time": 118, "text": "总结行动"},
         {"time": 165, "text": "复盘问题"},
     ]
+
+
+def test_ai_edit_suggestions_reject_single_zero_second_timestamp_summary():
+    response = build_ai_edit_suggestions(
+        VideoNote(blocks_json=[]),
+        VideoNoteAiEditRequest(
+            action="generate_timestamps",
+            instruction="生成时间戳",
+            selected_block_ids=[],
+        ),
+        _source(outline=[]),
+        ai_payload={
+            "timestamps": [
+                {
+                    "time": 0,
+                    "text": "本视频围绕 CAD 零基础教学梳理核心学习路径",
+                }
+            ]
+        },
+        ai_status="generated",
+    )
+
+    assert response.message == "ℹ 当前视频暂无可用时间点数据，已生成基础框架"
+    assert _operations(response)[0]["block"]["items"] == []
