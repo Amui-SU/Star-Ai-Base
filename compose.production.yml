@@ -1,0 +1,54 @@
+name: zhiku-cloud
+
+services:
+  backend:
+    image: "${ACR_REGISTRY:?set ACR_REGISTRY}/${ACR_NAMESPACE:?set ACR_NAMESPACE}/zhiku-backend:${IMAGE_TAG:?set IMAGE_TAG}"
+    restart: unless-stopped
+    env_file: ./deploy/.env.production
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      DATABASE_URL: sqlite+aiosqlite:///./data/bilibili_rag.db
+      CHROMA_PERSIST_DIRECTORY: ./data/chroma_db
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  frontend:
+    image: "${ACR_REGISTRY:?set ACR_REGISTRY}/${ACR_NAMESPACE:?set ACR_NAMESPACE}/zhiku-frontend:${IMAGE_TAG:?set IMAGE_TAG}"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:80"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget --no-verbose --tries=1 --spider http://127.0.0.1/ || exit 1
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
