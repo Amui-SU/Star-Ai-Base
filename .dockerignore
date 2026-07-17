@@ -18,3 +18,9 @@ frontend/android/**/build/
 .git/
 .worktrees/
 .superpowers/
+
+.env.production
+deploy/.env.deploy
+deploy/current-version
+deploy/previous-version
+backups/
