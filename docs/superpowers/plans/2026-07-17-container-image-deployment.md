@@ -816,7 +816,7 @@ The runbook must tell the operator to preserve the certificate paths from the ac
 
 Create `docs/deployment/container-production.md` with these complete sections and commands:
 
-```markdown
+````markdown
 # 容器镜像生产部署
 
 ## 一次性准备
@@ -835,6 +835,7 @@ sudo cp .env.example /opt/zhiku-cloud/deploy/.env.production
 sudo install -m 0750 scripts/deploy.sh /opt/zhiku-cloud/deploy/deploy.sh
 sudo chmod 0600 /opt/zhiku-cloud/deploy/.env.deploy /opt/zhiku-cloud/deploy/.env.production
 ```
+````
 
 编辑 `.env.production` 写入 SMTP、OAuth、管理员邮箱和 `APP_ENCRYPTION_KEY`。编辑 `.env.deploy`，确保 ACR namespace 与控制台一致。不要把两个生产文件提交到 Git。
 
@@ -893,7 +894,8 @@ curl -fsS https://zhiku-cloud.cn/health
 ## 故障排查
 
 镜像拉取失败时重新执行 `docker login`，并检查 ACR registry、namespace 和仓库名称。接口返回静态 404 时运行 `sudo nginx -T`，确认 `/video-notes` 等 API location 位于 `location /` 前且代理到 8000。容器不健康时使用 `docker compose logs` 查看启动错误，并确认 `/opt/zhiku-cloud/data` 与 `/opt/zhiku-cloud/logs` 可写。
-```
+
+````
 
 - [ ] **Step 5: Link the runbook from README**
 
@@ -901,7 +903,7 @@ Immediately after the existing `docker compose up --build` example in `README.md
 
 ```markdown
 生产服务器推荐使用 ACR 版本镜像和一键部署脚本，不在 ECS 上重复构建。完整步骤见 [容器镜像生产部署](docs/deployment/container-production.md)。
-```
+````
 
 - [ ] **Step 6: Run documentation and deployment contract tests**
 
