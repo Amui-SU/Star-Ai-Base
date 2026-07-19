@@ -1,0 +1,162 @@
+name: Publish Images
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  publish:
+    name: Publish container images
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+      ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Check out tested commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+
+      - name: Log in to ACR
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ env.ACR_USERNAME }}
+          password: ${{ env.ACR_PASSWORD }}
+
+      - name: Inspect immutable SHA tags
+        id: sha_tags
+        shell: bash
+        env:
+          BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend
+          FRONTEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend
+        run: |
+          set -euo pipefail
+
+          inspect_tag() {
+            local image="$1"
+            local output
+            if output="$(docker buildx imagetools inspect "${image}:${IMAGE_TAG}" 2>&1)"; then
+              printf 'present\n'
+              return 0
+            fi
+            if grep -Eiq 'manifest unknown|not found|no such manifest' <<<"$output"; then
+              printf 'absent\n'
+              return 0
+            fi
+            printf '%s\n' "$output" >&2
+            echo "unable to determine immutable SHA tag state for $image" >&2
+            return 1
+          }
+
+          backend_state="$(inspect_tag "$BACKEND_IMAGE")"
+          frontend_state="$(inspect_tag "$FRONTEND_IMAGE")"
+          state_to_build() {
+            [[ "$1" == absent ]] && printf 'true\n' || printf 'false\n'
+          }
+          echo "backend_build=$(state_to_build "$backend_state")" >> "$GITHUB_OUTPUT"
+          echo "frontend_build=$(state_to_build "$frontend_state")" >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish backend image
+        if: steps.sha_tags.outputs.backend_build == 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        with:
+          context: .
+          file: Dockerfile.backend
+          push: true
+          tags: |
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend:${{ env.IMAGE_TAG }}
+          annotations: |
+            index:org.opencontainers.image.revision=${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build and publish frontend image
+        if: steps.sha_tags.outputs.frontend_build == 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        with:
+          context: ./frontend
+          file: frontend/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://zhiku-cloud.cn
+          tags: |
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend:${{ env.IMAGE_TAG }}
+          annotations: |
+            index:org.opencontainers.image.revision=${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Verify immutable SHA image revisions
+        shell: bash
+        env:
+          BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend
+          FRONTEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend
+        run: |
+          set -euo pipefail
+          command -v jq >/dev/null 2>&1 || {
+            echo "jq is required to verify OCI image annotations" >&2
+            exit 1
+          }
+
+          verify_revision() {
+            local image="$1"
+            docker buildx imagetools inspect --raw "${image}:${IMAGE_TAG}" |
+              jq -e --arg revision "$IMAGE_TAG" \
+                '.annotations["org.opencontainers.image.revision"] == $revision' \
+                >/dev/null
+          }
+
+          verify_revision "$BACKEND_IMAGE"
+          verify_revision "$FRONTEND_IMAGE"
+
+      - name: Verify tested commit is still current
+        id: freshness
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force origin \
+            refs/heads/main:refs/remotes/origin/main
+          remote_main_sha="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$remote_main_sha" != "$IMAGE_TAG" ]]; then
+            echo "origin/main advanced; latest tags will not be updated."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "promote=true" >> "$GITHUB_OUTPUT"
+
+      - name: Promote tested images to latest
+        if: steps.freshness.outputs.promote == 'true'
+        shell: bash
+        env:
+          BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend
+          FRONTEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${BACKEND_IMAGE}:latest" \
+            "${BACKEND_IMAGE}:${IMAGE_TAG}"
+          docker buildx imagetools create \
+            --tag "${FRONTEND_IMAGE}:latest" \
+            "${FRONTEND_IMAGE}:${IMAGE_TAG}"

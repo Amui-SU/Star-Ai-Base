@@ -1,0 +1,116 @@
+# This directive belongs in the nginx.conf http {} context. If sites-enabled
+# files are included from http {}, keeping it at the top of this file is valid.
+limit_req_zone $binary_remote_addr zone=send_code_per_ip:10m rate=3r/m;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name zhiku-cloud.cn www.zhiku-cloud.cn;
+
+    return 301 https://zhiku-cloud.cn$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name www.zhiku-cloud.cn;
+
+    # The active certificate must cover both zhiku-cloud.cn and www.
+    ssl_certificate /etc/letsencrypt/live/REPLACE_WITH_ACTIVE_CERTIFICATE/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/REPLACE_WITH_ACTIVE_CERTIFICATE/privkey.pem;
+
+    return 301 https://zhiku-cloud.cn$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name zhiku-cloud.cn;
+
+    # Preserve the certificate paths already active on the ECS host when
+    # merging this example. The certificate must cover both domain names.
+    ssl_certificate /etc/letsencrypt/live/REPLACE_WITH_ACTIVE_CERTIFICATE/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/REPLACE_WITH_ACTIVE_CERTIFICATE/privkey.pem;
+
+    client_max_body_size 10m;
+
+    location = /system-auth/send-code {
+        limit_req zone=send_code_per_ip burst=2 nodelay;
+        limit_req_status 429;
+
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location ~ ^/imports/local-video/?$ {
+        client_max_body_size 1g;
+
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 900s;
+        proxy_read_timeout 900s;
+        proxy_request_buffering off;
+    }
+
+    location ~ ^/chat(?:/|$) {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+    }
+
+    location ~ ^/knowledge-bases/[0-9]+/chat/stream(?:/|$) {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+    }
+
+    location ~ ^/(?:health|docs|redoc|openapi\.json|system-auth|api-accounts|knowledge-bases|local-connection|source-bindings|imports|auth|favorites|knowledge|video-notes)(?:/|$) {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
