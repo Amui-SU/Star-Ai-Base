@@ -15,6 +15,10 @@
 
 在阿里云容器镜像服务 ACR 的北京地域创建一个私有命名空间，并创建 `zhiku-backend`、`zhiku-frontend` 两个私有仓库。不要使用阿里云主账号凭据，并严格分开两类身份：
 
+**强制前置条件：两个仓库都必须开启镜像版本不可变。** 分别进入 `zhiku-backend` 和 `zhiku-frontend` 的仓库管理页面，选择“基本信息 > 编辑 > 不可变”，确认两个仓库均已启用。操作路径和验证方法见[阿里云官方说明](https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version)。未完成这一步不得启用生产发布工作流。
+
+`Publish Images` 会在登录后检查两个 SHA 标签：都不存在才构建并推送；都存在时说明是工作流重新运行，不会覆盖已有 SHA 标签，直接继续 `latest` 新鲜度判断；只存在一个时立即失败并要求人工排查。ACR 的不可变设置是防止控制台或其他凭据绕过工作流覆盖标签的最终保护。生产始终部署精确 SHA，`latest` 仍只用于浏览和排查。
+
 - GitHub Actions 使用推送专用凭据，仅允许向这两个仓库推送镜像。
 - ECS 使用单独的拉取专用凭据，仅允许读取生产所需仓库，不能推送或删除镜像。
 
@@ -32,7 +36,7 @@
 
 ## 首次初始化 ECS
 
-先安装 Docker Engine、Docker Compose 插件、Nginx 和 Python 3。选择一个固定的部署账号；Docker 登录、发布和恢复必须使用同一账号，否则脚本读取不到该账号保存的 ACR 凭据。下面固定使用 root，不要在日常操作中混用其他账号：
+先安装 Docker Engine、Docker Compose 2.30 或更高版本、Nginx 和 Python 3。`compose.production.yml` 使用 `env_file.format: raw`，以保证 SMTP 密码和 API Key 中的 `$` 保持原样；低于 2.30 的 Compose 不支持这一契约，部署、恢复和中断恢复脚本都会在任何运行时变更前拒绝执行。选择一个固定的部署账号；Docker 登录、发布和恢复必须使用同一账号，否则脚本读取不到该账号保存的 ACR 凭据。下面固定使用 root，不要在日常操作中混用其他账号：
 
 ```bash
 sudo -i
@@ -50,6 +54,8 @@ deploy/.env.production.example
 deploy/nginx/zhiku-cloud.conf.example
 scripts/deploy.sh
 scripts/restore-data.sh
+scripts/recover-interrupted.sh
+scripts/inspect-restore-archive.py
 ```
 
 将两个模板复制为宿主机配置。`deploy/.env.deploy` 填写北京 ACR 地址、命名空间和正式域名；`deploy/.env.production` 填写应用配置：
@@ -59,7 +65,8 @@ cd /opt/zhiku-cloud
 cp deploy/.env.deploy.example deploy/.env.deploy
 cp deploy/.env.production.example deploy/.env.production
 chmod 600 deploy/.env.deploy deploy/.env.production
-chmod 0750 scripts/deploy.sh scripts/restore-data.sh
+chmod 0750 scripts/deploy.sh scripts/restore-data.sh scripts/recover-interrupted.sh
+chmod 0750 scripts/inspect-restore-archive.py
 ```
 
 `deploy/.env.production` 至少要替换管理员邮箱、Fernet 加密密钥、SMTP 和 Google OAuth 占位值。其他模型供应商或 API Key 参考根目录 `.env.example` 按需加入。生产值和秘密始终留在宿主机；禁止提交到 Git、Dockerfile、Compose 文件或镜像层。
@@ -74,7 +81,7 @@ printf '%s' "$ACR_PULL_PASSWORD" | docker login registry.cn-beijing.aliyuncs.com
 unset ACR_PULL_PASSWORD
 ```
 
-以后如果部署基础设施有变更，需要再次同步 `compose.production.yml`、`scripts/deploy.sh`、`scripts/restore-data.sh`、`deploy/nginx/zhiku-cloud.conf.example`、`.env.deploy.example` 和 `deploy/.env.production.example` 的结构变化。同步示例文件时不要覆盖服务器上的 `.env.deploy`、`.env.production` 或实际证书路径。
+以后如果部署基础设施有变更，需要再次同步 `compose.production.yml`、`scripts/deploy.sh`、`scripts/restore-data.sh`、`scripts/recover-interrupted.sh`、`scripts/inspect-restore-archive.py`、`deploy/nginx/zhiku-cloud.conf.example`、`.env.deploy.example` 和 `deploy/.env.production.example` 的结构变化。同步示例文件时不要覆盖服务器上的 `.env.deploy`、`.env.production` 或实际证书路径。
 
 ## 合并 Nginx 配置
 
@@ -98,7 +105,7 @@ cd /opt/zhiku-cloud
 ./scripts/deploy.sh 0123456789abcdef0123456789abcdef01234567
 ```
 
-脚本会拉取前后端同一 SHA、停止后端、备份 `data`、依次启动并执行本机及公网健康检查。常用检查命令：
+脚本会拉取前后端同一 SHA、停止后端、备份 `data`、依次启动并执行本机及公网健康检查。停止后端前，脚本要求备份所在文件系统的可用空间至少为当前 `data` 大小加 2 GiB；可通过 `ZHIKU_DEPLOY_DISK_RESERVE_BYTES` 提高预留量。备份先写入唯一的 `.partial` 文件，只有 `tar` 成功后才原子改名；失败时只删除该已知临时文件和已确认为空的本次备份目录。常用检查命令：
 
 镜像拉取和停机前会先执行 `.env.production` 生产预检。至少一种登录方式必须完整可用：SMTP 需要 `SMTP_HOST`、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM`，Google 需要 client ID、secret 和规范域名的 HTTPS callback。预检失败不会调用 Docker，也不会改变当前服务。
 
@@ -133,9 +140,27 @@ cd /opt/zhiku-cloud
 ./scripts/restore-data.sh /opt/zhiku-cloud/backups/REPLACE_WITH_BACKUP/data.tar.gz
 ```
 
-脚本会先取得与发布相同的 `deploy.lock`，再读取版本与环境状态。它拒绝备份目录之外的路径、符号链接、危险归档成员，以及超过成员数或解压总量限制的归档；默认限制可通过 `ZHIKU_RESTORE_MAX_MEMBERS`、`ZHIKU_RESTORE_MAX_BYTES` 调整。停机前脚本会验证应用 SQLite 的完整性及核心表，并验证 `chroma_db/chroma.sqlite3` 的完整性和非空 schema。随后脚本停止后端，把原数据保存在权限受限且名称唯一的 `data.safety.*` 安全副本中，切换已验证数据，并使用 `current-version` 中的精确 SHA 和 `--pull never` 重启。只有本机和公网健康检查都成功，恢复才算完成。
+脚本会先取得与发布相同的 `deploy.lock`，再读取版本与环境状态。它拒绝备份目录之外的路径、符号链接、危险归档成员，以及超过成员数或解压总量限制的归档；默认解压总量上限为 20 GiB，可通过 `ZHIKU_RESTORE_MAX_MEMBERS`、`ZHIKU_RESTORE_MAX_BYTES` 调低或在评估后调整。真正解压前，可用空间必须至少为归档展开大小加 2 GiB；可用 `ZHIKU_RESTORE_DISK_RESERVE_BYTES` 提高预留量。停机前脚本会验证应用 SQLite 的完整性及核心表，并验证 `chroma_db/chroma.sqlite3` 的完整性和非空 schema。随后脚本停止后端，把原数据保存在权限受限且名称唯一的 `data.safety.*` 安全副本中，切换已验证数据，并使用 `current-version` 中的精确 SHA 和 `--pull never` 重启。只有本机和公网健康检查都成功，恢复才算完成。
 
-交换开始后若复制、移动、启动、健康检查失败，或收到 HUP、INT、TERM，脚本会先停止后端、恢复安全副本，再决定是否重启原 SHA。若旧数据无法确认已经回到活动路径，后端会保持停止，脚本会打印旧数据、失败数据和活动目录的精确人工恢复路径。未使用但非空的暂存/安全目录会明确保留并打印位置，不会递归删除。操作结束后检查这些路径；确认数据正常前不要删除安全副本。整个流程不删除 Compose volume，也不批量清理 Docker 数据。
+交换开始后若复制、移动、启动、健康检查失败，或收到 HUP、INT、TERM，脚本会先停止后端、恢复安全副本，再决定是否重启原 SHA。若旧数据无法确认已经回到活动路径，后端会保持停止，脚本会打印旧数据、失败数据和活动目录的精确人工恢复路径。生产数据变更前会原子写入 `deploy/transaction`；只有发布、恢复或自动回退完整成功后才删除。未进入数据交换的失败只清理本次已知 `data.restore.*` 暂存目录；交换开始后的暂存、安全副本和失败数据会保留以便审计。整个流程不删除 Compose volume，也不批量清理 Docker 数据。
+
+## 断电或强制终止后的恢复
+
+主机启动后、任何发布或数据恢复前，先检查事务标记：
+
+```bash
+cd /opt/zhiku-cloud
+test ! -e deploy/transaction || ./scripts/recover-interrupted.sh
+```
+
+`deploy.sh` 和 `restore-data.sh` 发现已有 `deploy/transaction` 会拒绝继续并指向该命令。恢复脚本取得同一个锁，严格解析 marker，不执行其中内容；对于中断发布，它恢复精确的旧 SHA 和原版本记录；对于中断数据恢复，它根据活动 `data`、`data.restore.*` 和 `data.safety.*` 的实际状态处理交换前、两次重命名之间以及新数据已生效三种现场。无法无歧义恢复时，后端保持停止，marker 与精确目录路径会保留，禁止删除后直接重跑。
+
+## 备份保留与磁盘监控
+
+- ECS 本地只保留最新 10 份已确认完整的发布备份；至少一份满足业务恢复点要求的长期备份必须加密复制到 OSS 或另一台主机，形成异机副本。
+- 每次发布前和每日监控 `df -h /opt/zhiku-cloud`、`du -sh /opt/zhiku-cloud/{data,backups,logs}`。可用空间低于“当前数据大小 + 2 GiB”时先停止发布并扩容或清理。
+- 仅在确认没有 `deploy/transaction`、没有发布或恢复进程、异机副本可用且目标归档不再需要后，按完整备份目录逐个删除第 11 份及更旧备份。不要使用通配符删除 `data`、`data.safety.*` 或未知暂存目录。
+- `data.safety.*` 不是普通轮换备份。恢复成功并完成业务验收后才能手工删除对应安全副本；失败现场必须保留到故障关闭。
 
 ## 故障排查
 
