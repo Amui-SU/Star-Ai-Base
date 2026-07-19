@@ -1,6 +1,8 @@
 import os
 import shutil
 import subprocess
+import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,7 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY_SCRIPT = PROJECT_ROOT / "scripts" / "deploy.sh"
+RESTORE_SCRIPT = PROJECT_ROOT / "scripts" / "restore-data.sh"
 TARGET_TAG = "1" * 40
 PREVIOUS_TAG = "2" * 40
 
@@ -119,6 +122,7 @@ def test_production_compose_exposes_only_loopback_ports_and_persists_backend_dat
         "./data:/app/data",
         "./logs:/app/logs",
     ]
+    assert services["backend"]["environment"]["FORWARDED_ALLOW_IPS"] == "*"
 
 
 def test_production_compose_waits_for_backend_health_and_limits_logs():
@@ -147,6 +151,7 @@ def test_production_compose_defines_runtime_and_healthcheck_contracts():
         "APP_PORT": 8000,
         "DATABASE_URL": "sqlite+aiosqlite:///./data/bilibili_rag.db",
         "CHROMA_PERSIST_DIRECTORY": "./data/chroma_db",
+        "FORWARDED_ALLOW_IPS": "*",
     }
     assert services["backend"]["healthcheck"] == {
         "test": [
@@ -775,20 +780,361 @@ def test_deploy_script_backup_directory_failure_rolls_back_once(tmp_path):
     assert commands.count(f"{PREVIOUS_TAG}|up -d --pull never backend") == 1
 
 
+def make_restore_archive(path: Path, *, unsafe_symlink: bool = False) -> None:
+    source = path.parent / "archive-source"
+    chroma = source / "chroma_db"
+    chroma.mkdir(parents=True, exist_ok=True)
+    (source / "bilibili_rag.db").write_text("new database", encoding="utf-8")
+    (chroma / "chroma.sqlite3").write_text("new vectors", encoding="utf-8")
+
+    with tarfile.open(path, "w:gz") as archive:
+        archive.add(source / "bilibili_rag.db", arcname="./bilibili_rag.db")
+        archive.add(chroma, arcname="./chroma_db")
+        if unsafe_symlink:
+            link = tarfile.TarInfo("./chroma_db/unsafe-link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../../outside"
+            archive.addfile(link)
+
+
+def restore_fixture(tmp_path: Path) -> dict[str, object]:
+    root = tmp_path / "restore-root"
+    deploy_dir = root / "deploy"
+    data_dir = root / "data"
+    backups_dir = root / "backups"
+    backup_dir = backups_dir / "20260719T000000Z-test"
+    bin_dir = tmp_path / "restore-bin"
+    for directory in [deploy_dir, data_dir / "chroma_db", backup_dir, bin_dir]:
+        directory.mkdir(parents=True, exist_ok=True)
+
+    (root / "compose.production.yml").write_text("services: {}\n", encoding="utf-8")
+    (deploy_dir / ".env.deploy").write_text(
+        "ACR_REGISTRY=registry.example.test\n"
+        "ACR_NAMESPACE=zhiku\n"
+        "PUBLIC_BASE_URL=https://public.example.test\n",
+        encoding="utf-8",
+    )
+    (deploy_dir / ".env.production").write_text("APP_ENV=test\n", encoding="utf-8")
+    (deploy_dir / "current-version").write_text(TARGET_TAG + "\n", encoding="utf-8")
+    (data_dir / "bilibili_rag.db").write_text("old database", encoding="utf-8")
+    (data_dir / "chroma_db" / "chroma.sqlite3").write_text(
+        "old vectors", encoding="utf-8"
+    )
+    archive = backup_dir / "data.tar.gz"
+    make_restore_archive(archive)
+
+    operation_log = tmp_path / "restore-operations.log"
+    docker_counter = tmp_path / "restore-docker-counter"
+    curl_counter = tmp_path / "restore-curl-counter"
+    mv_counter = tmp_path / "restore-mv-counter"
+
+    write_fake_tool(
+        bin_dir,
+        "docker",
+        """#!/usr/bin/env bash
+set -u
+[[ "${1:-}" == compose ]] || exit 90
+shift
+project_name=""
+while (( $# > 0 )); do
+  case "$1" in
+    --project-name) project_name="$2"; shift 2 ;;
+    --project-directory|--env-file|-f) shift 2 ;;
+    *) break ;;
+  esac
+done
+[[ "$project_name" == zhiku-cloud ]] || exit 92
+command_line="$*"
+printf 'docker|%s|%s\n' "${IMAGE_TAG:-unset}" "$command_line" >> "$FAKE_OPERATION_LOG"
+case "$command_line" in
+  "stop backend") exit "${FAKE_STOP_EXIT:-0}" ;;
+  "ps --all --format {{.State}} backend") printf '%s\n' "${FAKE_POST_STOP_STATES:-exited}" ;;
+  "up -d --pull never backend")
+    count=0
+    [[ -f "$FAKE_DOCKER_COUNTER" ]] && count="$(cat "$FAKE_DOCKER_COUNTER")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$FAKE_DOCKER_COUNTER"
+    if (( count <= ${FAKE_START_FAILURES:-0} )); then exit 71; fi
+    ;;
+  *) exit 93 ;;
+esac
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "curl",
+        """#!/usr/bin/env bash
+set -u
+url="${!#}"
+count=0
+[[ -f "$FAKE_CURL_COUNTER" ]] && count="$(cat "$FAKE_CURL_COUNTER")"
+count=$((count + 1))
+printf '%s' "$count" > "$FAKE_CURL_COUNTER"
+printf 'curl|%s|%s\n' "${IMAGE_TAG:-unset}" "$url" >> "$FAKE_OPERATION_LOG"
+if (( count <= ${FAKE_CURL_FAILURES:-0} )); then exit 22; fi
+printf '{"status":"healthy"}\n200'
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "cp",
+        """#!/usr/bin/env bash
+printf 'cp|%s\n' "$*" >> "$FAKE_OPERATION_LOG"
+[[ -z "${FAKE_CP_EXIT:-}" ]] || exit "$FAKE_CP_EXIT"
+exec /usr/bin/cp "$@"
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "chown",
+        """#!/usr/bin/env bash
+printf 'chown|%s\n' "$*" >> "$FAKE_OPERATION_LOG"
+[[ -z "${FAKE_CHOWN_EXIT:-}" ]] || exit "$FAKE_CHOWN_EXIT"
+exit 0
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "mv",
+        """#!/usr/bin/env bash
+count=0
+[[ -f "$FAKE_MV_COUNTER" ]] && count="$(cat "$FAKE_MV_COUNTER")"
+count=$((count + 1))
+printf '%s' "$count" > "$FAKE_MV_COUNTER"
+printf 'mv|%s\n' "$*" >> "$FAKE_OPERATION_LOG"
+if [[ "$count" == "${FAKE_MV_FAIL_AT:-}" ]]; then exit 72; fi
+/usr/bin/mv "$@" || exit $?
+if [[ "$count" == "${FAKE_MV_SIGNAL_AT:-}" ]]; then
+  kill -s "${FAKE_MV_SIGNAL:-HUP}" "$PPID"
+  sleep 1
+fi
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "flock",
+        """#!/usr/bin/env bash
+[[ "${FAKE_LOCK_HELD:-0}" == 1 ]] && exit 1
+exit 0
+""",
+    )
+    write_fake_tool(bin_dir, "sleep", "#!/usr/bin/env bash\nexit 0\n")
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "ZHIKU_DEPLOY_ROOT": bash_path(root),
+            "ZHIKU_RESTORE_PYTHON": bash_path(Path(sys.executable)),
+            "ZHIKU_RESTORE_HTTP_ATTEMPTS": "2",
+            "ZHIKU_RESTORE_HTTP_DELAY_SECONDS": "0",
+            "FAKE_OPERATION_LOG": bash_path(operation_log),
+            "FAKE_DOCKER_COUNTER": bash_path(docker_counter),
+            "FAKE_CURL_COUNTER": bash_path(curl_counter),
+            "FAKE_MV_COUNTER": bash_path(mv_counter),
+        }
+    )
+    return {
+        "root": root,
+        "deploy_dir": deploy_dir,
+        "data_dir": data_dir,
+        "backups_dir": backups_dir,
+        "archive": archive,
+        "bin_dir": bin_dir,
+        "operation_log": operation_log,
+        "env": env,
+    }
+
+
+def run_restore(
+    fixture: dict[str, object],
+    archive: Path | None = None,
+    *,
+    include_argument: bool = True,
+    **env_updates: str,
+) -> subprocess.CompletedProcess:
+    env = dict(fixture["env"])
+    env.update(env_updates)
+    command = [
+        bash_executable(),
+        "-c",
+        'PATH="$1:$PATH"; export PATH; shift; exec bash "$@"',
+        "restore-test",
+        bash_path(Path(fixture["bin_dir"])),
+        bash_path(RESTORE_SCRIPT),
+    ]
+    if include_argument:
+        command.append(bash_path(archive or Path(fixture["archive"])))
+    return subprocess.run(
+        command,
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=20,
+        check=False,
+    )
+
+
+def restore_operations(fixture: dict[str, object]) -> list[str]:
+    return log_lines(fixture["operation_log"])
+
+
+def assert_old_restore_data_is_active(fixture: dict[str, object]) -> None:
+    data_dir = Path(fixture["data_dir"])
+    assert (data_dir / "bilibili_rag.db").read_text(encoding="utf-8") == (
+        "old database"
+    )
+    assert (data_dir / "chroma_db" / "chroma.sqlite3").read_text(
+        encoding="utf-8"
+    ) == "old vectors"
+
+
+def test_restore_script_rejects_missing_and_outside_backup_paths(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    outside = tmp_path / "outside.tar.gz"
+    shutil.copy2(fixture["archive"], outside)
+
+    missing = run_restore(fixture, include_argument=False)
+    outside_result = run_restore(fixture, outside)
+
+    assert missing.returncode == 2
+    assert outside_result.returncode != 0
+    assert "must resolve inside" in outside_result.stderr
+    assert restore_operations(fixture) == []
+
+
+def test_restore_script_rejects_invalid_and_symlink_archives_before_downtime(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    archive = Path(fixture["archive"])
+    archive.write_bytes(b"not a tar archive")
+
+    invalid = run_restore(fixture)
+    make_restore_archive(archive, unsafe_symlink=True)
+    unsafe = run_restore(fixture)
+
+    assert invalid.returncode != 0
+    assert unsafe.returncode != 0
+    assert "unsafe archive" in unsafe.stderr
+    assert not any("docker|" in line for line in restore_operations(fixture))
+
+
+def test_restore_script_rejects_invalid_current_sha_before_downtime(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    (Path(fixture["deploy_dir"]) / "current-version").write_text(
+        "latest\n", encoding="utf-8"
+    )
+
+    result = run_restore(fixture)
+
+    assert result.returncode != 0
+    assert "40-character SHA" in result.stderr
+    assert restore_operations(fixture) == []
+
+
+@pytest.mark.parametrize(
+    ("failure_env", "failure_value"),
+    [("FAKE_CP_EXIT", "73"), ("FAKE_CHOWN_EXIT", "74")],
+)
+def test_restore_script_preparation_failures_do_not_stop_backend(
+    tmp_path, failure_env, failure_value
+):
+    fixture = restore_fixture(tmp_path)
+
+    result = run_restore(fixture, **{failure_env: failure_value})
+
+    assert result.returncode != 0
+    assert_old_restore_data_is_active(fixture)
+    assert not any("docker|" in line for line in restore_operations(fixture))
+
+
+@pytest.mark.parametrize(
+    ("failure_env", "expected_start_count"),
+    [
+        ({"FAKE_MV_FAIL_AT": "2"}, 1),
+        ({"FAKE_START_FAILURES": "1"}, 2),
+        ({"FAKE_CURL_FAILURES": "2"}, 2),
+    ],
+)
+def test_restore_script_mutation_failures_restore_old_data_and_backend(
+    tmp_path, failure_env, expected_start_count
+):
+    fixture = restore_fixture(tmp_path)
+
+    result = run_restore(fixture, **failure_env)
+
+    assert result.returncode != 0
+    assert_old_restore_data_is_active(fixture)
+    operations = restore_operations(fixture)
+    assert f"docker|{TARGET_TAG}|stop backend" in operations
+    assert (
+        operations.count(f"docker|{TARGET_TAG}|up -d --pull never backend")
+        == expected_start_count
+    )
+    assert f"curl|{TARGET_TAG}|https://public.example.test/health" in operations
+
+
+def test_restore_script_hup_after_swap_recovers_once(tmp_path):
+    fixture = restore_fixture(tmp_path)
+
+    result = run_restore(fixture, FAKE_MV_SIGNAL_AT="2", FAKE_MV_SIGNAL="HUP")
+
+    assert result.returncode == 129
+    assert_old_restore_data_is_active(fixture)
+    operations = restore_operations(fixture)
+    assert operations.count(f"docker|{TARGET_TAG}|up -d --pull never backend") == 1
+
+
+def test_restore_script_hup_immediately_after_preserving_data_recovers(tmp_path):
+    fixture = restore_fixture(tmp_path)
+
+    result = run_restore(fixture, FAKE_MV_SIGNAL_AT="1", FAKE_MV_SIGNAL="HUP")
+
+    assert result.returncode == 129
+    assert_old_restore_data_is_active(fixture)
+    operations = restore_operations(fixture)
+    assert operations.count(f"docker|{TARGET_TAG}|up -d --pull never backend") == 1
+
+
+def test_restore_script_success_swaps_data_and_keeps_unique_safety_copy(tmp_path):
+    fixture = restore_fixture(tmp_path)
+
+    result = run_restore(fixture)
+
+    assert result.returncode == 0, result.stderr
+    data_dir = Path(fixture["data_dir"])
+    assert (data_dir / "bilibili_rag.db").read_text(encoding="utf-8") == (
+        "new database"
+    )
+    safety_dirs = list(Path(fixture["root"]).glob("data.safety.*"))
+    assert len(safety_dirs) == 1
+    assert (safety_dirs[0] / "data" / "bilibili_rag.db").read_text(
+        encoding="utf-8"
+    ) == "old database"
+    operations = restore_operations(fixture)
+    assert operations.count(f"docker|{TARGET_TAG}|up -d --pull never backend") == 1
+    assert f"curl|{TARGET_TAG}|https://public.example.test/health" in operations
+
+
 def test_nginx_example_routes_tls_traffic_to_loopback_services():
     content = read("deploy/nginx/zhiku-cloud.conf.example")
 
     assert "limit_req_zone" in content
     assert "http {}" in content
     assert "listen 80;" in content
-    assert "server_name zhiku-cloud.cn www.zhiku-cloud.cn;" in content
+    assert content.count("server_name zhiku-cloud.cn www.zhiku-cloud.cn;") == 1
+    assert content.count("server_name zhiku-cloud.cn;") == 1
+    assert content.count("server_name www.zhiku-cloud.cn;") == 1
     assert "return 301 https://zhiku-cloud.cn$request_uri;" in content
-    assert "listen 443 ssl" in content
+    assert content.count("listen 443 ssl") == 2
     assert "ssl_certificate" in content
     assert "ssl_certificate_key" in content
-    assert "client_max_body_size" in content
+    assert "certificate must cover both" in content
     assert "proxy_pass http://127.0.0.1:8000;" in content
     assert "proxy_pass http://127.0.0.1:3000;" in content
+    assert "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;" not in content
+    assert "proxy_set_header X-Forwarded-For $remote_addr;" in content
 
 
 def test_nginx_example_limits_send_code_and_covers_every_backend_prefix():
@@ -796,19 +1142,17 @@ def test_nginx_example_limits_send_code_and_covers_every_backend_prefix():
     send_code_block = content.split("location = /system-auth/send-code {", maxsplit=1)[
         1
     ].split("}", maxsplit=1)[0]
-    backend_route = next(
+    backend_locations = "\n".join(
         line.strip()
         for line in content.splitlines()
-        if line.strip().startswith("location ~ ^/")
+        if line.strip().startswith(("location = /", "location ~ ^/"))
     )
 
     assert "limit_req_zone $binary_remote_addr zone=send_code_per_ip" in content
     assert "limit_req zone=send_code_per_ip" in send_code_block
+    assert "limit_req_status 429;" in send_code_block
     assert "proxy_pass http://127.0.0.1:8000;" in send_code_block
-    assert (
-        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;"
-        in send_code_block
-    )
+    assert "proxy_set_header X-Forwarded-For $remote_addr;" in send_code_block
 
     for prefix in [
         "health",
@@ -828,7 +1172,83 @@ def test_nginx_example_limits_send_code_and_covers_every_backend_prefix():
         "video-notes",
     ]:
         nginx_pattern = prefix.replace(".", r"\.")
-        assert nginx_pattern in backend_route
+        assert nginx_pattern in backend_locations
+
+
+def test_nginx_example_scopes_upload_and_streaming_settings():
+    content = read("deploy/nginx/zhiku-cloud.conf.example")
+    upload_block = content.split("location = /imports/local-video {", maxsplit=1)[
+        1
+    ].split("}", maxsplit=1)[0]
+    chat_block = content.split("location ~ ^/chat(?:/|$) {", maxsplit=1)[1].split(
+        "}", maxsplit=1
+    )[0]
+    ordinary_api_block = content.split("location ~ ^/(?:", maxsplit=1)[1].split(
+        "}", maxsplit=1
+    )[0]
+
+    assert "client_max_body_size 10m;" in content
+    assert "client_max_body_size 1g;" in upload_block
+    assert "proxy_request_buffering off;" in upload_block
+    assert "proxy_read_timeout 900s;" in upload_block
+    assert "proxy_buffering off;" in chat_block
+    assert "proxy_buffering off;" not in ordinary_api_block
+    assert "client_max_body_size 1g;" not in ordinary_api_block
+
+
+def test_production_environment_example_has_safe_minimum_login_configuration():
+    content = read("deploy/.env.production.example")
+
+    for expected in [
+        "DEBUG=false",
+        "SESSION_COOKIE_SECURE=true",
+        "DATABASE_URL=sqlite+aiosqlite:///./data/bilibili_rag.db",
+        "CHROMA_PERSIST_DIRECTORY=./data/chroma_db",
+        "ADMIN_EMAILS=admin@example.com",
+        "APP_ENCRYPTION_KEY=REPLACE_WITH_GENERATED_FERNET_KEY",
+        "SMTP_HOST=",
+        "SMTP_PORT=587",
+        "SMTP_USER=",
+        "SMTP_PASSWORD=",
+        "SMTP_FROM=",
+        "SMTP_USE_TLS=true",
+        "GOOGLE_CLIENT_ID=",
+        "GOOGLE_CLIENT_SECRET=",
+        "GOOGLE_REDIRECT_URI=https://zhiku-cloud.cn/system-auth/google/callback",
+    ]:
+        assert expected in content
+
+    assert "Fernet.generate_key" in content
+    assert "root .env.example" in content
+    assert "REAL_SECRET" not in content
+
+
+def test_restore_script_has_strict_safe_contract_and_linux_mode():
+    content = read("scripts/restore-data.sh")
+
+    assert "set -Eeuo pipefail" in content
+    assert "umask 077" in content
+    assert "(( $# != 1 ))" in content
+    assert 'DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"' in content
+    assert "^[0-9a-f]{40}$" in content
+    assert "deploy.lock" in content
+    assert "--project-name zhiku-cloud" in content
+    assert "--pull never backend" in content
+    assert "trap 'on_signal 129' HUP" in content
+    assert "trap 'on_signal 130' INT" in content
+    assert "trap 'on_signal 143' TERM" in content
+    assert "compose down" not in content
+    assert "down -v" not in content
+    assert "rm -rf" not in content
+    assert "\r\n" not in content
+    index_entry = subprocess.run(
+        ["git", "ls-files", "--stage", "scripts/restore-data.sh"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert index_entry.startswith("100755 ")
 
 
 def test_container_production_runbook_documents_safe_exact_sha_operations():
@@ -854,6 +1274,13 @@ def test_container_production_runbook_documents_safe_exact_sha_operations():
         "latest",
         "不具备原子性",
         "不自动 SSH",
+        "拉取专用",
+        "FORWARDED_ALLOW_IPS=*",
+        "仅绑定 `127.0.0.1:8000`",
+        "API 文档",
+        "scripts/restore-data.sh",
+        "deploy/.env.production.example",
+        "0700",
     ]:
         assert required in content
 
@@ -868,8 +1295,10 @@ def test_container_production_runbook_documents_safe_exact_sha_operations():
         assert command_fragment in content
 
     assert "镜像回滚不会恢复数据" in content
-    assert "单独的临时目录" in content
+    assert "./scripts/restore-data.sh" in content
     assert "安全副本" in content
+    assert "tar -xzf" not in content
+    assert "mv /opt/zhiku-cloud/data" not in content
     assert "down -v" not in content
 
 

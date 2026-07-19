@@ -10,6 +10,7 @@ services:
       APP_PORT: 8000
       DATABASE_URL: sqlite+aiosqlite:///./data/bilibili_rag.db
       CHROMA_PERSIST_DIRECTORY: ./data/chroma_db
+      FORWARDED_ALLOW_IPS: "*"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
