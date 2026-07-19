@@ -72,18 +72,14 @@ jobs:
 
           backend_state="$(inspect_tag "$BACKEND_IMAGE")"
           frontend_state="$(inspect_tag "$FRONTEND_IMAGE")"
-          if [[ "$backend_state" == absent && "$frontend_state" == absent ]]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          elif [[ "$backend_state" == present && "$frontend_state" == present ]]; then
-            echo "Both immutable SHA tags already exist; skipping rebuild."
-            echo "build=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "only one immutable SHA tag exists; refusing a partial publication" >&2
-            exit 1
-          fi
+          state_to_build() {
+            [[ "$1" == absent ]] && printf 'true\n' || printf 'false\n'
+          }
+          echo "backend_build=$(state_to_build "$backend_state")" >> "$GITHUB_OUTPUT"
+          echo "frontend_build=$(state_to_build "$frontend_state")" >> "$GITHUB_OUTPUT"
 
       - name: Build and publish backend image
-        if: steps.sha_tags.outputs.build == 'true'
+        if: steps.sha_tags.outputs.backend_build == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: .
@@ -91,11 +87,13 @@ jobs:
           push: true
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend:${{ env.IMAGE_TAG }}
+          annotations: |
+            index:org.opencontainers.image.revision=${{ env.IMAGE_TAG }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Build and publish frontend image
-        if: steps.sha_tags.outputs.build == 'true'
+        if: steps.sha_tags.outputs.frontend_build == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: ./frontend
@@ -105,8 +103,33 @@ jobs:
             NEXT_PUBLIC_API_URL=https://zhiku-cloud.cn
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend:${{ env.IMAGE_TAG }}
+          annotations: |
+            index:org.opencontainers.image.revision=${{ env.IMAGE_TAG }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Verify immutable SHA image revisions
+        shell: bash
+        env:
+          BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend
+          FRONTEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend
+        run: |
+          set -euo pipefail
+          command -v jq >/dev/null 2>&1 || {
+            echo "jq is required to verify OCI image annotations" >&2
+            exit 1
+          }
+
+          verify_revision() {
+            local image="$1"
+            docker buildx imagetools inspect --raw "${image}:${IMAGE_TAG}" |
+              jq -e --arg revision "$IMAGE_TAG" \
+                '.annotations["org.opencontainers.image.revision"] == $revision' \
+                >/dev/null
+          }
+
+          verify_revision "$BACKEND_IMAGE"
+          verify_revision "$FRONTEND_IMAGE"
 
       - name: Verify tested commit is still current
         id: freshness

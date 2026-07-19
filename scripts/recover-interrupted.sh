@@ -82,7 +82,7 @@ case "${marker[operation]:-}" in
     }
     ;;
   deploy)
-    [[ "${#marker[@]}" == 6 ]] || {
+    [[ "${#marker[@]}" == 7 ]] || {
       echo "deploy transaction marker has unexpected keys" >&2
       exit 6
     }
@@ -165,6 +165,24 @@ validate_runtime_path() {
   [[ "$suffix" =~ ^[A-Za-z0-9]+$ ]]
 }
 
+validate_backup_dir() {
+  local path="$1"
+  local prefix="$DEPLOY_ROOT/backups/"
+  local name
+  [[ "$path" == "$prefix"* ]] || return 1
+  name="${path#"$prefix"}"
+  [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{40}\.[A-Za-z0-9]+$ ]]
+}
+
+cleanup_partial_backup() {
+  local path="$1"
+  validate_backup_dir "$path" || return 1
+  [[ ! -e "$path" ]] && return 0
+  [[ -d "$path" && ! -L "$path" ]] || return 1
+  rm -f -- "$path/data.tar.gz.partial"
+  rmdir -- "$path" 2>/dev/null || true
+}
+
 safe_remove_staging() {
   local path="$1"
   validate_runtime_path "$path" data.restore || return 1
@@ -173,12 +191,15 @@ safe_remove_staging() {
 }
 
 manual_failure() {
+  compose stop backend >/dev/null 2>&1 || true
   echo "automatic reconciliation failed; backend left stopped" >&2
   echo "active data path: $DATA_DIR" >&2
   [[ -n "${marker[safety_parent]:-}" ]] &&
     echo "old data path: ${marker[safety_parent]}/data" >&2
   [[ -n "${marker[staged_data]:-}" ]] &&
     echo "staged data path: ${marker[staged_data]}" >&2
+  [[ -n "${marker[backup_dir]:-}" ]] &&
+    echo "deployment backup path: ${marker[backup_dir]}" >&2
   echo "transaction marker retained: $TRANSACTION_FILE" >&2
   exit 8
 }
@@ -213,6 +234,8 @@ recover_restore() {
     mv -- "$safety_parent/data" "$DATA_DIR" || manual_failure
   elif [[ -d "$DATA_DIR" && -d "$staged_data" ]]; then
     : # The old data is still active; the first rename never completed.
+  elif [[ -d "$DATA_DIR" && ! -e "$staged_data" && -d "$safety_parent/failed-restored-data" ]]; then
+    : # A previous recovery restored old data but was interrupted while restarting.
   else
     manual_failure
   fi
@@ -233,15 +256,31 @@ recover_restore() {
 recover_deploy() {
   local previous_tag="${marker[previous_tag]:-}"
   local original_previous_tag="${marker[original_previous_tag]:-}"
-  validate_tag_or_none "$previous_tag" || manual_failure
-  validate_tag_or_none "$original_previous_tag" || manual_failure
+  local backup_dir="${marker[backup_dir]:-}"
+  validate_tag_or_none "$previous_tag" || {
+    echo "invalid deploy previous tag; transaction marker retained" >&2
+    exit 6
+  }
+  validate_tag_or_none "$original_previous_tag" || {
+    echo "invalid deploy original previous tag; transaction marker retained" >&2
+    exit 6
+  }
+  validate_backup_dir "$backup_dir" || {
+    echo "invalid deploy backup path; transaction marker retained" >&2
+    exit 6
+  }
 
+  if [[ "$previous_tag" == none ]]; then
+    IMAGE_TAG="${marker[target_tag]}"
+  else
+    IMAGE_TAG="$previous_tag"
+  fi
+  export IMAGE_TAG
   compose stop backend frontend || manual_failure
+  cleanup_partial_backup "$backup_dir" || manual_failure
   if [[ "$previous_tag" == none ]]; then
     rm -f -- "$CURRENT_FILE"
   else
-    IMAGE_TAG="$previous_tag"
-    export IMAGE_TAG
     compose up -d --pull never backend || manual_failure
     wait_http "http://127.0.0.1:8000/health" '{"status":"healthy"}' || manual_failure
     compose up -d --pull never frontend || manual_failure

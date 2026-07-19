@@ -85,8 +85,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   esac
 done < "$DEPLOY_ENV"
 
-[[ "$seen_registry" == true && "$ACR_REGISTRY" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?$ ]] ||
-  invalid_deploy_env "ACR_REGISTRY has an unsafe value"
+[[ "$seen_registry" == true && "$ACR_REGISTRY" =~ ^[a-z0-9][a-z0-9-]*-registry\.cn-beijing\.cr\.aliyuncs\.com$ ]] ||
+  invalid_deploy_env "ACR_REGISTRY must be a Beijing ACR Enterprise Edition public endpoint"
+[[ "$ACR_REGISTRY" != "your-instance-registry.cn-beijing.cr.aliyuncs.com" ]] ||
+  invalid_deploy_env "ACR_REGISTRY still contains the Enterprise Edition example placeholder"
 [[ "$seen_namespace" == true && "$ACR_NAMESPACE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]] ||
   invalid_deploy_env "ACR_NAMESPACE has an unsafe value"
 [[ "$seen_public_url" == true ]] || invalid_deploy_env "PUBLIC_BASE_URL is required"
@@ -146,13 +148,11 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   key="${line%%=*}"
   value="${line#*=}"
   [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || invalid_app_env "invalid key: $key"
-  if (( ${#value} >= 2 )); then
-    first_character="${value:0:1}"
-    last_character="${value: -1}"
-    if [[ "$first_character" == \" || "$first_character" == "'" ]]; then
-      [[ "$last_character" == "$first_character" ]] || invalid_app_env "unmatched quote for $key"
-      value="${value:1:${#value}-2}"
-    fi
+  first_character="${value:0:1}"
+  last_character="${value: -1}"
+  if [[ "$first_character" == \" || "$first_character" == "'" ||
+    "$last_character" == \" || "$last_character" == "'" ]]; then
+    invalid_app_env "quoted values are not allowed for $key; Compose raw env values must be exact"
   fi
   [[ "$value" != REPLACE_* ]] || invalid_app_env "placeholder remains for $key"
 
@@ -183,7 +183,8 @@ done < "$APP_ENV"
 [[ -n "$ADMIN_EMAILS_VALUE" ]] || invalid_app_env "ADMIN_EMAILS is required"
 [[ "${ADMIN_EMAILS_VALUE,,}" != *"admin@example"* && "${ADMIN_EMAILS_VALUE,,}" != *"@example."* ]] ||
   invalid_app_env "ADMIN_EMAILS must not use an example administrator"
-(( ${#APP_ENCRYPTION_KEY_VALUE} >= 32 )) || invalid_app_env "APP_ENCRYPTION_KEY must be at least 32 characters"
+[[ "$APP_ENCRYPTION_KEY_VALUE" =~ ^[A-Za-z0-9_-]{43}=$ ]] ||
+  invalid_app_env "APP_ENCRYPTION_KEY must be a 44-character URL-safe base64 Fernet key"
 
 smtp_any=false
 smtp_complete=false
@@ -316,33 +317,10 @@ if [[ "$HAS_PREVIOUS" == false ]] && grep -Eqx '(backend|frontend)' <<<"$existin
   exit 6
 fi
 
-if ! read -r DATA_SIZE_KIB _ < <(du -sk -- "$DATA_DIR"); then
-  echo "failed to measure current data size" >&2
-  exit 7
-fi
-if [[ ! "$DATA_SIZE_KIB" =~ ^[0-9]+$ ]]; then
-  echo "invalid data size reported by du" >&2
-  exit 7
-fi
-if ! AVAILABLE_KIB="$(df -Pk -- "$BACKUPS_DIR" | awk 'NR > 1 { available = $4 } END { print available }')"; then
-  echo "failed to measure backup filesystem free space" >&2
-  exit 7
-fi
-if [[ ! "$AVAILABLE_KIB" =~ ^[0-9]+$ ]]; then
-  echo "invalid free space reported by df" >&2
-  exit 7
-fi
-RESERVE_KIB=$(( (DISK_RESERVE_BYTES + 1023) / 1024 ))
-REQUIRED_KIB=$(( DATA_SIZE_KIB + RESERVE_KIB ))
-if (( AVAILABLE_KIB < REQUIRED_KIB )); then
-  echo "insufficient free space for backup: need ${REQUIRED_KIB} KiB, have ${AVAILABLE_KIB} KiB" >&2
-  exit 7
-fi
-readonly DATA_SIZE_KIB AVAILABLE_KIB RESERVE_KIB REQUIRED_KIB
-
 DEPLOY_STARTED=false
 BACKEND_STARTED=false
 FRONTEND_STARTED=false
+BACKUP_DIR=""
 
 rollback() {
   [[ "$HAS_PREVIOUS" == true ]] || return 1
@@ -400,20 +378,45 @@ recover_images() {
   fi
 }
 
+validate_backup_dir() {
+  local path="$1"
+  local prefix="$BACKUPS_DIR/"
+  local name
+  [[ "$path" == "$prefix"* ]] || return 1
+  name="${path#"$prefix"}"
+  [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{40}\.[A-Za-z0-9]+$ ]]
+}
+
+cleanup_partial_backup() {
+  [[ -n "$BACKUP_DIR" ]] || return 0
+  validate_backup_dir "$BACKUP_DIR" || return 1
+  [[ ! -e "$BACKUP_DIR" ]] && return 0
+  [[ -d "$BACKUP_DIR" && ! -L "$BACKUP_DIR" ]] || return 1
+  rm -f -- "$BACKUP_DIR/data.tar.gz.partial"
+  rmdir -- "$BACKUP_DIR" 2>/dev/null || true
+}
+
 disable_failure_traps() {
   trap - ERR HUP INT TERM
 }
 
 on_error() {
   local original_exit_code="$?"
+  local recovery_ok=true
+  local cleanup_ok=true
   disable_failure_traps
 
   if [[ "$DEPLOY_STARTED" == true ]]; then
-    if recover_images; then
-      rm -f -- "$TRANSACTION_FILE"
-    else
+    if ! recover_images; then
+      recovery_ok=false
       echo "automatic image recovery failed; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
     fi
+  fi
+  cleanup_partial_backup || cleanup_ok=false
+  [[ "$cleanup_ok" == true ]] ||
+    echo "partial backup cleanup failed; transaction marker retained" >&2
+  if [[ "$recovery_ok" == true && "$cleanup_ok" == true ]]; then
+    rm -f -- "$TRANSACTION_FILE"
   fi
 
   exit "$original_exit_code"
@@ -421,14 +424,21 @@ on_error() {
 
 on_signal() {
   local signal_exit_code="$1"
+  local recovery_ok=true
+  local cleanup_ok=true
   disable_failure_traps
 
   if [[ "$DEPLOY_STARTED" == true ]]; then
-    if recover_images; then
-      rm -f -- "$TRANSACTION_FILE"
-    else
+    if ! recover_images; then
+      recovery_ok=false
       echo "automatic image recovery failed after signal; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
     fi
+  fi
+  cleanup_partial_backup || cleanup_ok=false
+  [[ "$cleanup_ok" == true ]] ||
+    echo "partial backup cleanup failed after signal; transaction marker retained" >&2
+  if [[ "$recovery_ok" == true && "$cleanup_ok" == true ]]; then
+    rm -f -- "$TRANSACTION_FILE"
   fi
 
   exit "$signal_exit_code"
@@ -455,13 +465,44 @@ if [[ "$ORIGINAL_PREVIOUS_EXISTS" == true ]]; then
   original_previous_tag="$(printf '%s' "$ORIGINAL_PREVIOUS_CONTENT" | tr -d '[:space:]')"
   [[ "$original_previous_tag" =~ ^[0-9a-f]{40}$ ]] || invalid_app_env "deploy/previous-version is invalid"
 fi
+
+if ! read -r DATA_SIZE_KIB _ < <(du -sk -- "$DATA_DIR"); then
+  echo "failed to measure current data size" >&2
+  exit 7
+fi
+if [[ ! "$DATA_SIZE_KIB" =~ ^[0-9]+$ ]]; then
+  echo "invalid data size reported by du" >&2
+  exit 7
+fi
+if ! AVAILABLE_KIB="$(df -Pk -- "$BACKUPS_DIR" | awk 'NR > 1 { available = $4 } END { print available }')"; then
+  echo "failed to measure backup filesystem free space" >&2
+  exit 7
+fi
+if [[ ! "$AVAILABLE_KIB" =~ ^[0-9]+$ ]]; then
+  echo "invalid free space reported by df" >&2
+  exit 7
+fi
+RESERVE_KIB=$(( (DISK_RESERVE_BYTES + 1023) / 1024 ))
+REQUIRED_KIB=$(( DATA_SIZE_KIB + RESERVE_KIB ))
+if (( AVAILABLE_KIB < REQUIRED_KIB )); then
+  echo "insufficient free space for backup: need ${REQUIRED_KIB} KiB, have ${AVAILABLE_KIB} KiB" >&2
+  exit 7
+fi
+readonly DATA_SIZE_KIB AVAILABLE_KIB RESERVE_KIB REQUIRED_KIB
+
+if ! BACKUP_DIR="$(mktemp -d "$BACKUPS_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$TARGET_TAG.XXXXXX")"; then
+  echo "failed to create the deployment backup directory" >&2
+  false
+fi
+
 transaction_previous_tag="${PREVIOUS_TAG:-none}"
 atomic_write "version=1
 operation=deploy
 phase=runtime
 target_tag=$TARGET_TAG
 previous_tag=$transaction_previous_tag
-original_previous_tag=$original_previous_tag" "$TRANSACTION_FILE"
+original_previous_tag=$original_previous_tag
+backup_dir=$BACKUP_DIR" "$TRANSACTION_FILE"
 
 DEPLOY_STARTED=true
 compose stop backend
@@ -474,15 +515,8 @@ if [[ -n "$backend_states" ]] && grep -Evqx '(exited|dead)' <<<"$backend_states"
   false
 fi
 
-if ! BACKUP_DIR="$(mktemp -d "$BACKUPS_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$TARGET_TAG.XXXXXX")"; then
-  echo "failed to create the deployment backup directory" >&2
-  false
-fi
-readonly BACKUP_DIR
 PARTIAL_ARCHIVE="$BACKUP_DIR/data.tar.gz.partial"
 if ! tar -C "$DATA_DIR" -czf "$PARTIAL_ARCHIVE" .; then
-  rm -f -- "$PARTIAL_ARCHIVE"
-  rmdir -- "$BACKUP_DIR" 2>/dev/null || true
   false
 fi
 mv -- "$PARTIAL_ARCHIVE" "$BACKUP_DIR/data.tar.gz"

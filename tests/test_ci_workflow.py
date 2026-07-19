@@ -103,7 +103,7 @@ def test_publish_images_uses_tested_commit_and_acr_configuration():
     )
 
 
-def test_publish_images_never_overwrites_existing_sha_tags():
+def test_publish_images_repairs_missing_sha_tags_without_overwriting_existing_ones():
     content = read_publish_workflow()
 
     inspect_index = content.index("- name: Inspect immutable SHA tags")
@@ -116,17 +116,39 @@ def test_publish_images_never_overwrites_existing_sha_tags():
     assert 'backend_state="$(inspect_tag "$BACKEND_IMAGE")"' in inspect_step
     assert 'frontend_state="$(inspect_tag "$FRONTEND_IMAGE")"' in inspect_step
     assert "manifest unknown|not found|no such manifest" in inspect_step
-    assert 'echo "build=true" >> "$GITHUB_OUTPUT"' in inspect_step
-    assert 'echo "build=false" >> "$GITHUB_OUTPUT"' in inspect_step
-    assert "only one immutable SHA tag exists" in inspect_step
+    assert 'echo "backend_build=$(state_to_build "$backend_state")"' in inspect_step
+    assert 'echo "frontend_build=$(state_to_build "$frontend_state")"' in inspect_step
+    assert "only one immutable SHA tag exists" not in inspect_step
 
     backend_header = content[backend_build_index:frontend_build_index].split(
         "with:", 1
     )[0]
     frontend_header = content[frontend_build_index:].split("with:", 1)[0]
-    expected_gate = "if: steps.sha_tags.outputs.build == 'true'"
-    assert expected_gate in backend_header
-    assert expected_gate in frontend_header
+    assert "if: steps.sha_tags.outputs.backend_build == 'true'" in backend_header
+    assert "if: steps.sha_tags.outputs.frontend_build == 'true'" in frontend_header
+
+
+def test_publish_images_annotates_and_verifies_both_sha_manifests_before_freshness():
+    content = read_publish_workflow()
+    backend_build_index = content.index("- name: Build and publish backend image")
+    frontend_build_index = content.index("- name: Build and publish frontend image")
+    verify_index = content.index("- name: Verify immutable SHA image revisions")
+    freshness_index = content.index("- name: Verify tested commit is still current")
+
+    backend_build = content[backend_build_index:frontend_build_index]
+    frontend_build = content[frontend_build_index:verify_index]
+    annotation = "index:org.opencontainers.image.revision=${{ env.IMAGE_TAG }}"
+    assert annotation in backend_build
+    assert annotation in frontend_build
+
+    verify_step = content[verify_index:freshness_index]
+    assert "command -v jq" in verify_step
+    assert verify_step.count("docker buildx imagetools inspect --raw") == 1
+    assert 'verify_revision "$BACKEND_IMAGE"' in verify_step
+    assert 'verify_revision "$FRONTEND_IMAGE"' in verify_step
+    assert "org.opencontainers.image.revision" in verify_step
+    assert 'jq -e --arg revision "$IMAGE_TAG"' in verify_step
+    assert verify_index < freshness_index
 
 
 def test_publish_images_builds_sha_only_then_promotes_both_images_when_current():
@@ -156,7 +178,7 @@ def test_publish_images_builds_sha_only_then_promotes_both_images_when_current()
     ].split("- name: Build and publish frontend image", 1)[0]
     frontend_build = content.split("- name: Build and publish frontend image", 1)[
         1
-    ].split("- name: Verify tested commit is still current", 1)[0]
+    ].split("- name: Verify immutable SHA image revisions", 1)[0]
     assert ":latest" not in backend_build
     assert ":latest" not in frontend_build
 
@@ -171,7 +193,9 @@ def test_publish_images_builds_sha_only_then_promotes_both_images_when_current()
         backend_promotion_index + 1,
     )
 
-    assert content.index("- name: Build and publish frontend image") < freshness_index
+    revision_index = content.index("- name: Verify immutable SHA image revisions")
+    assert content.index("- name: Build and publish frontend image") < revision_index
+    assert revision_index < freshness_index
     assert freshness_index < remote_head_index < backend_promotion_index
     assert "id: freshness" in content[freshness_index:backend_promotion_index]
     assert '[[ "$remote_main_sha" != "$IMAGE_TAG" ]]' in content

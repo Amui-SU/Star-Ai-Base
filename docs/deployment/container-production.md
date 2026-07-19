@@ -13,18 +13,18 @@
 
 ## 配置 ACR 和 GitHub
 
-在阿里云容器镜像服务 ACR 的北京地域创建一个私有命名空间，并创建 `zhiku-backend`、`zhiku-frontend` 两个私有仓库。不要使用阿里云主账号凭据，并严格分开两类身份：
+生产环境强制使用阿里云容器镜像服务 **ACR 企业版**，实例地域固定为华北 2（北京）。在该企业版实例中创建一个私有命名空间，并创建 `zhiku-backend`、`zhiku-frontend` 两个私有仓库。ACR 个人版仅面向开发测试、无 SLA 承诺，因此本方案不支持生产使用个人版；版本和 SLA 差异见[阿里云官方规格说明](https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances)。不要使用阿里云主账号凭据，并严格分开两类身份：
 
 **强制前置条件：两个仓库都必须开启镜像版本不可变。** 分别进入 `zhiku-backend` 和 `zhiku-frontend` 的仓库管理页面，选择“基本信息 > 编辑 > 不可变”，确认两个仓库均已启用。操作路径和验证方法见[阿里云官方说明](https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version)。未完成这一步不得启用生产发布工作流。
 
-`Publish Images` 会在登录后检查两个 SHA 标签：都不存在才构建并推送；都存在时说明是工作流重新运行，不会覆盖已有 SHA 标签，直接继续 `latest` 新鲜度判断；只存在一个时立即失败并要求人工排查。ACR 的不可变设置是防止控制台或其他凭据绕过工作流覆盖标签的最终保护。生产始终部署精确 SHA，`latest` 仍只用于浏览和排查。
+`Publish Images` 会在登录后分别检查两个 SHA 标签：缺少哪个镜像就只构建并推送哪个，已存在的不可变 SHA 不会覆盖，因此工作流重新运行时可修复单侧推送失败。两个镜像都存在后，工作流读取原始 OCI index，并确认 `org.opencontainers.image.revision` 等于本次受测 SHA；错误或缺失 annotation 会阻止 `latest` 提升。ACR 的不可变设置是防止控制台或其他凭据绕过工作流覆盖标签的最终保护。生产始终部署精确 SHA，`latest` 仍只用于浏览和排查。
 
 - GitHub Actions 使用推送专用凭据，仅允许向这两个仓库推送镜像。
 - ECS 使用单独的拉取专用凭据，仅允许读取生产所需仓库，不能推送或删除镜像。
 
 在 GitHub 仓库中配置以下 Actions Secrets：
 
-- `ACR_REGISTRY`：例如 `registry.cn-beijing.aliyuncs.com`
+- `ACR_REGISTRY`：企业版北京公网默认域名，例如 `your-instance-registry.cn-beijing.cr.aliyuncs.com`；必须替换 `your-instance`，个人版/旧版兼容域名会被部署预检拒绝。企业版与个人版默认域名格式见[阿里云官方域名说明](https://help.aliyun.com/zh/acr/user-guide/use-an-image-domain-name-of-a-personal-edition-instance-to-access-an-enterprise-edition-instance)。
 - `ACR_USERNAME`：ACR 登录用户名
 - `ACR_PASSWORD`：ACR 登录密码或专用访问凭据
 
@@ -77,7 +77,7 @@ chmod 0750 scripts/inspect-restore-archive.py
 
 ```bash
 read -rsp 'ACR pull-only password: ' ACR_PULL_PASSWORD && echo
-printf '%s' "$ACR_PULL_PASSWORD" | docker login registry.cn-beijing.aliyuncs.com --username 'YOUR_ECS_PULL_ONLY_USERNAME' --password-stdin
+printf '%s' "$ACR_PULL_PASSWORD" | docker login your-instance-registry.cn-beijing.cr.aliyuncs.com --username 'YOUR_ECS_PULL_ONLY_USERNAME' --password-stdin
 unset ACR_PULL_PASSWORD
 ```
 
@@ -105,7 +105,7 @@ cd /opt/zhiku-cloud
 ./scripts/deploy.sh 0123456789abcdef0123456789abcdef01234567
 ```
 
-脚本会拉取前后端同一 SHA、停止后端、备份 `data`、依次启动并执行本机及公网健康检查。停止后端前，脚本要求备份所在文件系统的可用空间至少为当前 `data` 大小加 2 GiB；可通过 `ZHIKU_DEPLOY_DISK_RESERVE_BYTES` 提高预留量。备份先写入唯一的 `.partial` 文件，只有 `tar` 成功后才原子改名；失败时只删除该已知临时文件和已确认为空的本次备份目录。常用检查命令：
+脚本会拉取前后端同一 SHA、停止后端、备份 `data`、依次启动并执行本机及公网健康检查。所有目标和回滚镜像拉取完成后、停止后端之前，脚本重新检查磁盘，要求备份所在文件系统的可用空间至少为当前 `data` 大小加 2 GiB；可通过 `ZHIKU_DEPLOY_DISK_RESERVE_BYTES` 提高预留量。备份先写入唯一的 `.partial` 文件，只有 `tar` 成功后才原子改名；失败时只删除该已知临时文件和已确认为空的本次备份目录。常用检查命令：
 
 镜像拉取和停机前会先执行 `.env.production` 生产预检。至少一种登录方式必须完整可用：SMTP 需要 `SMTP_HOST`、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM`，Google 需要 client ID、secret 和规范域名的 HTTPS callback。预检失败不会调用 Docker，也不会改变当前服务。
 

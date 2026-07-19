@@ -17,6 +17,8 @@ RESTORE_SCRIPT = PROJECT_ROOT / "scripts" / "restore-data.sh"
 RECOVER_SCRIPT = PROJECT_ROOT / "scripts" / "recover-interrupted.sh"
 TARGET_TAG = "1" * 40
 PREVIOUS_TAG = "2" * 40
+VALID_FERNET_KEY = "A" * 43 + "="
+ENTERPRISE_ACR = "test-instance-registry.cn-beijing.cr.aliyuncs.com"
 
 
 def read(relative_path: str) -> str:
@@ -167,7 +169,7 @@ def test_compose_config_preserves_literal_dollar_sign_secrets(tmp_path):
     deploy_dir.mkdir(parents=True)
     shutil.copy2(PROJECT_ROOT / "compose.production.yml", root)
     (deploy_dir / ".env.deploy").write_text(
-        "ACR_REGISTRY=registry.example.test\nACR_NAMESPACE=zhiku\n",
+        f"ACR_REGISTRY={ENTERPRISE_ACR}\nACR_NAMESPACE=zhiku\n",
         encoding="utf-8",
     )
     secret = "smtp-$literal-$$-value"
@@ -264,7 +266,7 @@ def test_deploy_environment_example_contains_only_public_deployment_metadata():
     content = read("deploy/.env.deploy.example")
 
     assert content.splitlines() == [
-        "ACR_REGISTRY=registry.cn-beijing.aliyuncs.com",
+        "ACR_REGISTRY=your-instance-registry.cn-beijing.cr.aliyuncs.com",
         "ACR_NAMESPACE=zhiku-cloud",
         "PUBLIC_BASE_URL=https://zhiku-cloud.cn",
     ]
@@ -329,6 +331,20 @@ def test_deploy_script_enforces_disk_compose_cookie_and_transaction_preflights()
     assert "== true" in content
     assert 'TRANSACTION_FILE="$DEPLOY_DIR/transaction"' in content
     assert "recover-interrupted.sh" in content
+    pull_index = content.index("compose pull backend frontend")
+    disk_index = content.index('du -sk -- "$DATA_DIR"')
+    backup_dir_index = content.index('mktemp -d "$BACKUPS_DIR/')
+    stop_index = content.index("compose stop backend", pull_index)
+    assert pull_index < disk_index < backup_dir_index < stop_index
+    assert "backup_dir=$BACKUP_DIR" in content
+
+
+def test_deploy_script_requires_beijing_enterprise_acr_endpoint():
+    content = read("scripts/deploy.sh")
+
+    assert "cn-beijing\\.cr\\.aliyuncs\\.com" in content
+    assert "your-instance-registry.cn-beijing.cr.aliyuncs.com" in content
+    assert "Enterprise Edition" in content
 
 
 def test_restore_script_enforces_20_gib_limit_disk_budget_and_transaction_marker():
@@ -339,7 +355,7 @@ def test_restore_script_enforces_20_gib_limit_disk_budget_and_transaction_marker
     assert 'df -Pk -- "$DEPLOY_ROOT"' in content
     assert 'TRANSACTION_FILE="$DEPLOY_DIR/transaction"' in content
     assert "recover-interrupted.sh" in content
-    assert 'rm -f -- "$PARTIAL_ARCHIVE"' in read("scripts/deploy.sh")
+    assert 'rm -f -- "$BACKUP_DIR/data.tar.gz.partial"' in read("scripts/deploy.sh")
 
 
 def test_recovery_script_has_strict_transaction_contract():
@@ -355,6 +371,8 @@ def test_recovery_script_has_strict_transaction_contract():
     assert "--pull never backend" in content
     assert "--pull never frontend" in content
     assert "backend left stopped" in content
+    assert "backup_dir" in content
+    assert "data.tar.gz.partial" in content
 
 
 def test_deploy_script_backs_up_before_rollout_and_tracks_successful_versions():
@@ -376,7 +394,7 @@ def test_deploy_script_has_image_only_rollback_and_all_health_checks():
 
     assert "DEPLOY_STARTED=false" in content
     assert "trap on_error ERR" in content
-    assert "if recover_images; then" in content
+    assert "if ! recover_images; then" in content
     assert "tar " not in rollback
     assert "compose up -d --pull never backend" in rollback
     assert "compose up -d --pull never frontend" in rollback
@@ -429,10 +447,10 @@ def valid_production_environment() -> str:
         "DEBUG=false\n"
         "SESSION_COOKIE_SECURE=true\n"
         "ADMIN_EMAILS=admin@zhiku-cloud.cn\n"
-        "APP_ENCRYPTION_KEY=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH\n"
+        f"APP_ENCRYPTION_KEY={VALID_FERNET_KEY}\n"
         "SMTP_HOST=smtp.example.net\n"
         "SMTP_USER=mailer@zhiku-cloud.cn\n"
-        "SMTP_PASSWORD=password=with=equals\n"
+        "SMTP_PASSWORD=password=$literal=with=equals\n"
         "SMTP_FROM=mailer@zhiku-cloud.cn\n"
         "OPTIONAL_PROVIDER_VALUE=kept=with=equals\n"
     )
@@ -449,7 +467,7 @@ def deployment_fixture(tmp_path: Path) -> dict[str, object]:
 
     (root / "compose.production.yml").write_text("services: {}\n", encoding="utf-8")
     (deploy_dir / ".env.deploy").write_text(
-        "ACR_REGISTRY=registry.example.test\n"
+        f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
         "ACR_NAMESPACE=zhiku\n"
         "PUBLIC_BASE_URL=https://public.example.test\n",
         encoding="utf-8",
@@ -491,6 +509,9 @@ case "$command_line" in
     printf '%s\n' "${FAKE_EXISTING_SERVICES:-}"
     ;;
   "pull backend frontend")
+    if [[ -n "${FAKE_PULL_MARKER:-}" ]]; then
+      : > "$FAKE_PULL_MARKER"
+    fi
     exit "${FAKE_PULL_EXIT:-0}"
     ;;
   "stop backend")
@@ -585,7 +606,11 @@ printf '%s\t%s\n' "${FAKE_DATA_KIB:-4}" "${!#}"
         "df",
         """#!/usr/bin/env bash
 printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
-printf 'fake 8388608 0 %s 0%% /\n' "${FAKE_AVAILABLE_KIB:-4194304}"
+available="${FAKE_AVAILABLE_KIB:-4194304}"
+if [[ -n "${FAKE_PULL_MARKER:-}" && -e "$FAKE_PULL_MARKER" ]]; then
+  available="${FAKE_AFTER_PULL_AVAILABLE_KIB:-$available}"
+fi
+printf 'fake 8388608 0 %s 0%% /\n' "$available"
 """,
     )
     write_fake_tool(
@@ -611,6 +636,7 @@ fi
             "FAKE_CURL_LOG": bash_path(curl_log),
             "FAKE_TAR_LOG": bash_path(tar_log),
             "FAKE_SIGNAL_MARKER": bash_path(tmp_path / "signal.marker"),
+            "FAKE_PULL_MARKER": bash_path(tmp_path / "pull.marker"),
             "ZHIKU_DEPLOY_HTTP_ATTEMPTS": "2",
             "ZHIKU_DEPLOY_HTTP_DELAY_SECONDS": "0",
         }
@@ -805,7 +831,7 @@ def test_deploy_script_rejects_env_command_and_unknown_project_override(tmp_path
     deploy_dir = Path(fixture["deploy_dir"])
     marker = Path(fixture["marker"])
     (deploy_dir / ".env.deploy").write_text(
-        "ACR_REGISTRY=registry.example.test\n"
+        f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
         f"ACR_NAMESPACE=$(touch {bash_path(marker)})\n"
         "PUBLIC_BASE_URL=https://public.example.test\n"
         "COMPOSE_PROJECT_NAME=attacker-project\n",
@@ -868,7 +894,27 @@ def test_deploy_script_safely_preflights_production_login_configuration():
         ),
         (
             valid_production_environment().replace(
-                "APP_ENCRYPTION_KEY=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+                "SESSION_COOKIE_SECURE=true", 'SESSION_COOKIE_SECURE="true"'
+            ),
+            "quoted",
+        ),
+        (
+            valid_production_environment().replace(
+                "SMTP_PASSWORD=password=$literal=with=equals",
+                "SMTP_PASSWORD='password=$literal=with=equals'",
+            ),
+            "quoted",
+        ),
+        (
+            valid_production_environment().replace(
+                f"APP_ENCRYPTION_KEY={VALID_FERNET_KEY}",
+                "APP_ENCRYPTION_KEY=                                            ",
+            ),
+            "Fernet",
+        ),
+        (
+            valid_production_environment().replace(
+                f"APP_ENCRYPTION_KEY={VALID_FERNET_KEY}",
                 "APP_ENCRYPTION_KEY=REPLACE_WITH_KEY",
             ),
             "placeholder",
@@ -882,7 +928,7 @@ def test_deploy_script_safely_preflights_production_login_configuration():
         ),
         (
             valid_production_environment().replace(
-                "APP_ENCRYPTION_KEY=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+                f"APP_ENCRYPTION_KEY={VALID_FERNET_KEY}",
                 "APP_ENCRYPTION_KEY=short",
             ),
             "APP_ENCRYPTION_KEY",
@@ -891,12 +937,12 @@ def test_deploy_script_safely_preflights_production_login_configuration():
             "DEBUG=false\n"
             "SESSION_COOKIE_SECURE=true\n"
             "ADMIN_EMAILS=admin@zhiku-cloud.cn\n"
-            "APP_ENCRYPTION_KEY=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH\n",
+            f"APP_ENCRYPTION_KEY={VALID_FERNET_KEY}\n",
             "login method",
         ),
         (
             valid_production_environment().replace(
-                "SMTP_PASSWORD=password=with=equals", "SMTP_PASSWORD="
+                "SMTP_PASSWORD=password=$literal=with=equals", "SMTP_PASSWORD="
             ),
             "SMTP",
         ),
@@ -937,7 +983,7 @@ def test_deploy_script_accepts_complete_google_login_and_optional_equals(tmp_pat
         "DEBUG=false\n"
         "SESSION_COOKIE_SECURE=true\n"
         "ADMIN_EMAILS=owner@zhiku-cloud.cn\n"
-        "APP_ENCRYPTION_KEY=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH\n"
+        f"APP_ENCRYPTION_KEY={VALID_FERNET_KEY}\n"
         "GOOGLE_CLIENT_ID=client-id.apps.googleusercontent.com\n"
         "GOOGLE_CLIENT_SECRET=secret=with=equals\n"
         "GOOGLE_REDIRECT_URI=https://zhiku-cloud.cn/system-auth/google/callback\n"
@@ -950,6 +996,35 @@ def test_deploy_script_accepts_complete_google_login_and_optional_equals(tmp_pat
     result = run_deploy(fixture)
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "registry",
+    [
+        "registry.cn-beijing.aliyuncs.com",
+        "registry-vpc.cn-beijing.aliyuncs.com",
+        "registry.cn-beijing.cr.aliyuncs.com",
+        "test-instance-registry.cn-hangzhou.cr.aliyuncs.com",
+        "your-instance-registry.cn-beijing.cr.aliyuncs.com",
+    ],
+)
+def test_deploy_script_rejects_non_enterprise_or_placeholder_acr_before_docker(
+    tmp_path, registry
+):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / ".env.deploy").write_text(
+        f"ACR_REGISTRY={registry}\n"
+        "ACR_NAMESPACE=zhiku\n"
+        "PUBLIC_BASE_URL=https://public.example.test\n",
+        encoding="utf-8",
+    )
+
+    result = run_deploy(fixture)
+
+    assert result.returncode != 0
+    assert "Enterprise Edition" in result.stderr
+    assert log_lines(fixture["docker_log"]) == []
 
 
 def test_deploy_script_rejects_unknown_existing_frontend_before_mutation(tmp_path):
@@ -972,6 +1047,23 @@ def test_deploy_script_rejects_insufficient_backup_space_before_downtime(tmp_pat
     commands = log_lines(fixture["docker_log"])
     assert not any("stop backend" in command for command in commands)
     assert log_lines(fixture["tar_log"]) == []
+
+
+def test_deploy_script_rechecks_space_after_image_pulls_before_downtime(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+
+    result = run_deploy(
+        fixture,
+        FAKE_AVAILABLE_KIB="4194304",
+        FAKE_AFTER_PULL_AVAILABLE_KIB="1024",
+    )
+
+    assert result.returncode != 0
+    assert "insufficient free space" in result.stderr
+    commands = log_lines(fixture["docker_log"])
+    assert f"{TARGET_TAG}|pull backend frontend" in commands
+    assert not any("stop backend" in command for command in commands)
+    assert list((Path(fixture["root"]) / "backups").iterdir()) == []
 
 
 def test_deploy_script_refuses_existing_transaction_before_runtime_mutation(tmp_path):
@@ -1001,7 +1093,7 @@ def test_deploy_script_rejects_unsafe_public_base_urls(tmp_path, public_url):
     fixture = deployment_fixture(tmp_path)
     deploy_dir = Path(fixture["deploy_dir"])
     (deploy_dir / ".env.deploy").write_text(
-        "ACR_REGISTRY=registry.example.test\n"
+        f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
         "ACR_NAMESPACE=zhiku\n"
         f"PUBLIC_BASE_URL={public_url}\n",
         encoding="utf-8",
@@ -1089,7 +1181,9 @@ def test_deploy_script_signal_after_version_commit_restores_prior_state(tmp_path
     assert (deploy_dir / "previous-version").read_text().strip() == older_tag
 
 
-def test_deploy_script_backup_directory_failure_rolls_back_once(tmp_path):
+def test_deploy_script_backup_directory_failure_happens_before_runtime_mutation(
+    tmp_path,
+):
     fixture = deployment_fixture(tmp_path)
     deploy_dir = Path(fixture["deploy_dir"])
     (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
@@ -1103,7 +1197,8 @@ def test_deploy_script_backup_directory_failure_rolls_back_once(tmp_path):
 
     assert result.returncode != 0
     commands = log_lines(fixture["docker_log"])
-    assert commands.count(f"{PREVIOUS_TAG}|up -d --pull never backend") == 1
+    assert f"{TARGET_TAG}|stop backend" not in commands
+    assert not any("|up -d " in command for command in commands)
 
 
 def test_deploy_script_failed_tar_removes_only_partial_backup(tmp_path):
@@ -1207,7 +1302,7 @@ def restore_fixture(tmp_path: Path) -> dict[str, object]:
 
     (root / "compose.production.yml").write_text("services: {}\n", encoding="utf-8")
     (deploy_dir / ".env.deploy").write_text(
-        "ACR_REGISTRY=registry.example.test\n"
+        f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
         "ACR_NAMESPACE=zhiku\n"
         "PUBLIC_BASE_URL=https://public.example.test\n",
         encoding="utf-8",
@@ -1749,6 +1844,31 @@ def test_recovery_reconciles_restore_after_new_data_is_active(tmp_path):
     assert not (Path(fixture["deploy_dir"]) / "transaction").exists()
 
 
+def test_recovery_restore_is_idempotent_after_rollback_then_restart_failure(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    root = Path(fixture["root"])
+    staged = root / "data.restore.test"
+    safety = root / "data.safety.test"
+    create_restore_data_tree(staged, "new")
+    safety.mkdir()
+    Path(fixture["data_dir"]).rename(safety / "data")
+    staged.rename(Path(fixture["data_dir"]))
+    write_restore_transaction(fixture, staged, safety, "new_active")
+
+    first = run_recover(fixture, FAKE_START_FAILURES="1")
+
+    assert first.returncode != 0
+    assert_old_restore_data_is_active(fixture)
+    assert (safety / "failed-restored-data").is_dir()
+    assert (Path(fixture["deploy_dir"]) / "transaction").exists()
+
+    second = run_recover(fixture)
+
+    assert second.returncode == 0, second.stderr
+    assert_old_restore_data_is_active(fixture)
+    assert not (Path(fixture["deploy_dir"]) / "transaction").exists()
+
+
 def test_recovery_restores_previous_images_and_version_after_interrupted_deploy(
     tmp_path,
 ):
@@ -1757,13 +1877,16 @@ def test_recovery_restores_previous_images_and_version_after_interrupted_deploy(
     older_tag = "3" * 40
     (deploy_dir / "current-version").write_text(TARGET_TAG + "\n", encoding="utf-8")
     (deploy_dir / "previous-version").write_text(PREVIOUS_TAG + "\n", encoding="utf-8")
+    backup_dir = Path(fixture["backups_dir"]) / f"20260719T010203Z-{TARGET_TAG}.test"
+    backup_dir.mkdir()
     (deploy_dir / "transaction").write_text(
         "version=1\n"
         "operation=deploy\n"
         "phase=runtime\n"
         f"target_tag={TARGET_TAG}\n"
         f"previous_tag={PREVIOUS_TAG}\n"
-        f"original_previous_tag={older_tag}\n",
+        f"original_previous_tag={older_tag}\n"
+        f"backup_dir={bash_path(backup_dir)}\n",
         encoding="utf-8",
     )
 
@@ -1775,6 +1898,62 @@ def test_recovery_restores_previous_images_and_version_after_interrupted_deploy(
     assert f"docker|{PREVIOUS_TAG}|up -d --pull never frontend" in operations
     assert (deploy_dir / "current-version").read_text().strip() == PREVIOUS_TAG
     assert (deploy_dir / "previous-version").read_text().strip() == older_tag
+    assert not backup_dir.exists()
+    assert not (deploy_dir / "transaction").exists()
+
+
+def test_recovery_deploy_cleans_only_known_partial_backup_after_hard_interrupt(
+    tmp_path,
+):
+    fixture = restore_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    backup_dir = Path(fixture["backups_dir"]) / f"20260719T010203Z-{TARGET_TAG}.deadbe"
+    backup_dir.mkdir()
+    (backup_dir / "data.tar.gz.partial").write_text("partial", encoding="utf-8")
+    (deploy_dir / "transaction").write_text(
+        "version=1\n"
+        "operation=deploy\n"
+        "phase=runtime\n"
+        f"target_tag={TARGET_TAG}\n"
+        f"previous_tag={PREVIOUS_TAG}\n"
+        "original_previous_tag=none\n"
+        f"backup_dir={bash_path(backup_dir)}\n",
+        encoding="utf-8",
+    )
+
+    result = run_recover(fixture)
+
+    assert result.returncode == 0, result.stderr
+    assert not backup_dir.exists()
+    assert (Path(fixture["backups_dir"]) / "20260719T000000Z-test").is_dir()
+    assert not (deploy_dir / "transaction").exists()
+
+
+def test_recovery_deploy_retains_completed_backup(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    backup_dir = (
+        Path(fixture["backups_dir"]) / f"20260719T010203Z-{TARGET_TAG}.complete"
+    )
+    backup_dir.mkdir()
+    (backup_dir / "data.tar.gz").write_text("complete", encoding="utf-8")
+    (backup_dir / "previous-image-tag").write_text(PREVIOUS_TAG, encoding="utf-8")
+    (deploy_dir / "transaction").write_text(
+        "version=1\n"
+        "operation=deploy\n"
+        "phase=runtime\n"
+        f"target_tag={TARGET_TAG}\n"
+        f"previous_tag={PREVIOUS_TAG}\n"
+        "original_previous_tag=none\n"
+        f"backup_dir={bash_path(backup_dir)}\n",
+        encoding="utf-8",
+    )
+
+    result = run_recover(fixture)
+
+    assert result.returncode == 0, result.stderr
+    assert (backup_dir / "data.tar.gz").is_file()
+    assert (backup_dir / "previous-image-tag").is_file()
     assert not (deploy_dir / "transaction").exists()
 
 
@@ -2032,6 +2211,21 @@ def test_container_runbook_requires_immutable_acr_and_operational_disk_safety():
     assert "recover-interrupted.sh" in content
     assert "transaction" in content
     assert "down -v" not in content
+
+
+def test_container_runbook_requires_beijing_acr_enterprise_edition():
+    content = read("docs/deployment/container-production.md")
+
+    assert "ACR 企业版" in content
+    assert "华北 2（北京）" in content
+    assert "your-instance-registry.cn-beijing.cr.aliyuncs.com" in content
+    assert "个人版" in content
+    assert "不支持生产" in content
+    assert "无 SLA" in content
+    assert (
+        "https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances"
+        in content
+    )
 
 
 def test_readme_links_the_production_runbook_next_to_docker_section():
