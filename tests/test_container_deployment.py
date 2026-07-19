@@ -773,3 +773,110 @@ def test_deploy_script_backup_directory_failure_rolls_back_once(tmp_path):
     assert result.returncode != 0
     commands = log_lines(fixture["docker_log"])
     assert commands.count(f"{PREVIOUS_TAG}|up -d --pull never backend") == 1
+
+
+def test_nginx_example_routes_tls_traffic_to_loopback_services():
+    content = read("deploy/nginx/zhiku-cloud.conf.example")
+
+    assert "limit_req_zone" in content
+    assert "http {}" in content
+    assert "listen 80;" in content
+    assert "server_name zhiku-cloud.cn www.zhiku-cloud.cn;" in content
+    assert "return 301 https://zhiku-cloud.cn$request_uri;" in content
+    assert "listen 443 ssl" in content
+    assert "ssl_certificate" in content
+    assert "ssl_certificate_key" in content
+    assert "client_max_body_size" in content
+    assert "proxy_pass http://127.0.0.1:8000;" in content
+    assert "proxy_pass http://127.0.0.1:3000;" in content
+
+
+def test_nginx_example_limits_send_code_and_covers_every_backend_prefix():
+    content = read("deploy/nginx/zhiku-cloud.conf.example")
+    send_code_block = content.split("location = /system-auth/send-code {", maxsplit=1)[
+        1
+    ].split("}", maxsplit=1)[0]
+    backend_route = next(
+        line.strip()
+        for line in content.splitlines()
+        if line.strip().startswith("location ~ ^/")
+    )
+
+    assert "limit_req_zone $binary_remote_addr zone=send_code_per_ip" in content
+    assert "limit_req zone=send_code_per_ip" in send_code_block
+    assert "proxy_pass http://127.0.0.1:8000;" in send_code_block
+    assert (
+        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;"
+        in send_code_block
+    )
+
+    for prefix in [
+        "health",
+        "docs",
+        "redoc",
+        "openapi.json",
+        "system-auth",
+        "api-accounts",
+        "chat",
+        "knowledge-bases",
+        "local-connection",
+        "source-bindings",
+        "imports",
+        "auth",
+        "favorites",
+        "knowledge",
+        "video-notes",
+    ]:
+        nginx_pattern = prefix.replace(".", r"\.")
+        assert nginx_pattern in backend_route
+
+
+def test_container_production_runbook_documents_safe_exact_sha_operations():
+    content = read("docs/deployment/container-production.md")
+
+    for required in [
+        "北京",
+        "ACR_REGISTRY",
+        "ACR_USERNAME",
+        "ACR_PASSWORD",
+        "ACR_NAMESPACE",
+        "分支保护",
+        "CI",
+        "Publish Images",
+        "/opt/zhiku-cloud",
+        ".env.production",
+        "chmod 600",
+        "docker login",
+        "40 位",
+        "previous-version",
+        "data.tar.gz",
+        "/video-notes",
+        "latest",
+        "不具备原子性",
+        "不自动 SSH",
+    ]:
+        assert required in content
+
+    for command_fragment in [
+        "scripts/deploy.sh",
+        "docker compose",
+        "nginx -t",
+        "systemctl reload nginx",
+        "127.0.0.1:8000",
+        "127.0.0.1:3000",
+    ]:
+        assert command_fragment in content
+
+    assert "镜像回滚不会恢复数据" in content
+    assert "单独的临时目录" in content
+    assert "安全副本" in content
+    assert "down -v" not in content
+
+
+def test_readme_links_the_production_runbook_next_to_docker_section():
+    content = read("README.md")
+    docker_index = content.index("**Docker Compose**")
+    runbook_link = "[容器化生产部署手册](docs/deployment/container-production.md)"
+    link_index = content.index(runbook_link)
+
+    assert docker_index < link_index < content.index("---", docker_index)
