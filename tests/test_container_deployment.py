@@ -1,13 +1,24 @@
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEPLOY_SCRIPT = PROJECT_ROOT / "scripts" / "deploy.sh"
+TARGET_TAG = "1" * 40
+PREVIOUS_TAG = "2" * 40
 
 
 def read(relative_path: str) -> str:
     return (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+
+
+def test_shell_scripts_keep_linux_line_endings():
+    assert "*.sh text eol=lf" in read(".gitattributes")
 
 
 def active_dockerfile_lines(relative_path: str) -> list[str]:
@@ -186,8 +197,8 @@ def test_deploy_script_validates_versions_and_never_deletes_runtime_state():
     assert "compose()" in content
     assert "docker compose \\" in content
     assert "compose pull backend frontend" in content
-    assert "compose up -d backend" in content
-    assert "compose up -d frontend" in content
+    assert "compose up -d --pull never backend" in content
+    assert "compose up -d --pull never frontend" in content
     assert "compose down" not in content
     assert "docker compose down -v" not in content
     assert "ACR_PASSWORD" not in content
@@ -210,31 +221,28 @@ def test_deploy_script_uses_rooted_files_and_public_deployment_metadata():
     ]:
         assert path in content
 
-    assert "for command_name in docker curl tar; do" in content
+    assert "for command_name in docker curl tar flock mktemp; do" in content
     assert 'command -v "$command_name"' in content
-    assert 'source "$DEPLOY_ENV"' in content
+    assert 'source "$DEPLOY_ENV"' not in content
     assert 'source "$APP_ENV"' not in content
     for variable in ["ACR_REGISTRY", "ACR_NAMESPACE", "PUBLIC_BASE_URL"]:
-        assert f"${{{variable}:?" in content
-    assert "export ACR_REGISTRY ACR_NAMESPACE IMAGE_TAG" in content
+        assert f"{variable})" in content
+    assert "readonly ACR_REGISTRY ACR_NAMESPACE PUBLIC_BASE_URL" in content
+    assert "--project-name zhiku-cloud" in content
+    assert "umask 077" in content
     assert 'mkdir -p "$DEPLOY_DIR" "$DATA_DIR" "$LOG_DIR" "$BACKUPS_DIR"' in content
 
 
 def test_deploy_script_backs_up_before_rollout_and_tracks_successful_versions():
     content = read("scripts/deploy.sh")
 
-    pull = content.index("compose pull backend frontend")
-    stop = content.index("compose stop backend")
-    backup = content.index('tar -C "$DATA_DIR" -czf "$BACKUP_DIR/data.tar.gz" .')
-    backend = content.index("compose up -d backend", backup)
-    frontend = content.index("compose up -d frontend", backend)
-
-    assert pull < stop < backup < backend < frontend
+    assert 'tar -C "$DATA_DIR" -czf "$BACKUP_DIR/data.tar.gz" .' in content
     assert "date -u +%Y%m%dT%H%M%SZ" in content
+    assert 'mktemp -d "$BACKUPS_DIR/' in content
     assert '"$BACKUP_DIR/previous-image-tag"' in content
-    assert 'printf \'%s\\n\' "$PREVIOUS_TAG" > "$PREVIOUS_FILE"' in content
-    assert 'printf \'%s\\n\' "$TARGET_TAG" > "$CURRENT_FILE.tmp"' in content
-    assert 'mv "$CURRENT_FILE.tmp" "$CURRENT_FILE"' in content
+    assert 'mktemp "${destination}.tmp.XXXXXX"' in content
+    assert 'atomic_write "$PREVIOUS_TAG" "$PREVIOUS_FILE"' in content
+    assert 'atomic_write "$TARGET_TAG" "$CURRENT_FILE"' in content
 
 
 def test_deploy_script_has_image_only_rollback_and_all_health_checks():
@@ -243,13 +251,16 @@ def test_deploy_script_has_image_only_rollback_and_all_health_checks():
 
     assert "DEPLOY_STARTED=false" in content
     assert "trap on_error ERR" in content
-    assert "rollback ||" in content
+    assert "recover_images ||" in content
     assert "tar " not in rollback
-    assert "compose up -d backend" in rollback
-    assert "compose up -d frontend" in rollback
+    assert "compose up -d --pull never backend" in rollback
+    assert "compose up -d --pull never frontend" in rollback
     assert 'wait_http "http://127.0.0.1:8000/health"' in rollback
     assert 'wait_http "http://127.0.0.1:3000/"' in rollback
+    assert 'wait_http "${PUBLIC_BASE_URL%/}/"' in rollback
     assert 'wait_http "${PUBLIC_BASE_URL%/}/health"' in rollback
+    assert "trap 'on_signal 130' INT" in content
+    assert "trap 'on_signal 143' TERM" in content
 
     for url in [
         "http://127.0.0.1:8000/health",
@@ -258,4 +269,417 @@ def test_deploy_script_has_image_only_rollback_and_all_health_checks():
         "${PUBLIC_BASE_URL%/}/health",
     ]:
         assert f'wait_http "{url}"' in content
-    assert "curl --fail --silent --show-error --max-time 5" in content
+    for option in ["--fail", "--silent", "--show-error", "--max-time 5"]:
+        assert option in content
+    assert "--max-redirs 0" in content
+
+
+def write_fake_tool(bin_dir: Path, name: str, content: str) -> None:
+    path = bin_dir / name
+    path.write_text(content, encoding="utf-8", newline="\n")
+    path.chmod(0o755)
+
+
+def bash_executable() -> str:
+    git_bash = Path("C:/Program Files/Git/bin/bash.exe")
+    if git_bash.exists():
+        return str(git_bash)
+
+    bash = shutil.which("bash")
+    assert bash is not None, "bash is required for deployment behavior tests"
+    return bash
+
+
+def bash_path(path: Path) -> str:
+    absolute = path.resolve().as_posix()
+    if os.name == "nt":
+        drive, remainder = absolute.split(":", 1)
+        return f"/{drive.lower()}{remainder}"
+    return absolute
+
+
+def deployment_fixture(tmp_path: Path) -> dict[str, object]:
+    root = tmp_path / "deploy-root"
+    deploy_dir = root / "deploy"
+    data_dir = root / "data"
+    bin_dir = tmp_path / "bin"
+    deploy_dir.mkdir(parents=True)
+    data_dir.mkdir()
+    bin_dir.mkdir()
+
+    (root / "compose.production.yml").write_text("services: {}\n", encoding="utf-8")
+    (deploy_dir / ".env.deploy").write_text(
+        "ACR_REGISTRY=registry.example.test\n"
+        "ACR_NAMESPACE=zhiku\n"
+        "PUBLIC_BASE_URL=https://public.example.test\n",
+        encoding="utf-8",
+    )
+    (deploy_dir / ".env.production").write_text("APP_ENV=test\n", encoding="utf-8")
+    (data_dir / "database.sqlite").write_text("data", encoding="utf-8")
+
+    marker = tmp_path / "env-command-ran"
+    docker_log = tmp_path / "docker.log"
+    curl_log = tmp_path / "curl.log"
+    tar_log = tmp_path / "tar.log"
+
+    write_fake_tool(
+        bin_dir,
+        "docker",
+        """#!/usr/bin/env bash
+set -u
+[[ "${1:-}" == compose ]] || exit 90
+shift
+project_name=""
+while (( $# > 0 )); do
+  case "$1" in
+    --project-name) project_name="$2"; shift 2 ;;
+    --project-directory|--env-file|-f) shift 2 ;;
+    *) break ;;
+  esac
+done
+[[ "$project_name" == zhiku-cloud ]] || exit 92
+command_line="$*"
+printf '%s|%s\n' "${IMAGE_TAG:-unset}" "$command_line" >> "$FAKE_DOCKER_LOG"
+case "$command_line" in
+  "ps --all --services backend")
+    printf '%s\n' "${FAKE_EXISTING_SERVICES:-}"
+    ;;
+  "pull backend frontend")
+    exit "${FAKE_PULL_EXIT:-0}"
+    ;;
+  "stop backend")
+    exit "${FAKE_STOP_EXIT:-0}"
+    ;;
+  "ps --all --format {{.State}} backend")
+    printf '%s\n' "${FAKE_POST_STOP_STATES:-}"
+    ;;
+esac
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "curl",
+        """#!/usr/bin/env bash
+set -u
+url="${!#}"
+printf '%s|%s\n' "${IMAGE_TAG:-unset}" "$url" >> "$FAKE_CURL_LOG"
+if [[ -n "${FAKE_CURL_FAIL_TAG:-}" && "${IMAGE_TAG:-}" == "$FAKE_CURL_FAIL_TAG" ]]; then
+  exit 22
+fi
+status=200
+body=ok
+if [[ "$url" == */health ]]; then
+  body='{"status":"healthy"}'
+fi
+if [[ "$url" == https://public.example.test/health && "${IMAGE_TAG:-}" == "${FAKE_STRICT_TAG:-}" ]]; then
+  status="${FAKE_PUBLIC_HEALTH_STATUS:-$status}"
+  body="${FAKE_PUBLIC_HEALTH_BODY:-$body}"
+fi
+printf '%s\n%s' "$body" "$status"
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "tar",
+        """#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "$FAKE_TAR_LOG"
+archive=""
+while (( $# > 0 )); do
+  if [[ "$1" == -czf ]]; then
+    archive="$2"
+    break
+  fi
+  shift
+done
+[[ -n "$archive" ]] || exit 91
+printf 'fake archive\n' > "$archive"
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "flock",
+        """#!/usr/bin/env bash
+if [[ "${FAKE_LOCK_HELD:-0}" == 1 ]]; then
+  exit 1
+fi
+""",
+    )
+    write_fake_tool(bin_dir, "sleep", "#!/usr/bin/env bash\nexit 0\n")
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "ZHIKU_DEPLOY_ROOT": root.as_posix(),
+            "FAKE_DOCKER_LOG": bash_path(docker_log),
+            "FAKE_CURL_LOG": bash_path(curl_log),
+            "FAKE_TAR_LOG": bash_path(tar_log),
+            "ZHIKU_DEPLOY_HTTP_ATTEMPTS": "2",
+            "ZHIKU_DEPLOY_HTTP_DELAY_SECONDS": "0",
+        }
+    )
+    env["ZHIKU_DEPLOY_ROOT"] = bash_path(root)
+    return {
+        "root": root,
+        "deploy_dir": deploy_dir,
+        "bin_dir": bin_dir,
+        "marker": marker,
+        "env": env,
+        "docker_log": docker_log,
+        "curl_log": curl_log,
+        "tar_log": tar_log,
+    }
+
+
+def run_deploy(
+    fixture: dict[str, object], **env_updates: str
+) -> subprocess.CompletedProcess:
+    env = dict(fixture["env"])
+    env.update(env_updates)
+    return subprocess.run(
+        [
+            bash_executable(),
+            "-c",
+            'PATH="$1:$PATH"; export PATH; exec bash "$2" "$3"',
+            "deploy-test",
+            bash_path(Path(fixture["bin_dir"])),
+            bash_path(DEPLOY_SCRIPT),
+            TARGET_TAG,
+        ],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+
+def log_lines(path: object) -> list[str]:
+    log_path = Path(path)
+    if not log_path.exists():
+        return []
+    return log_path.read_text(encoding="utf-8").splitlines()
+
+
+def test_deploy_script_allows_fresh_first_deployment(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "previous-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(fixture)
+
+    assert result.returncode == 0, result.stderr
+    commands = log_lines(fixture["docker_log"])
+    assert f"{TARGET_TAG}|pull backend frontend" in commands
+    assert f"{TARGET_TAG}|stop backend" in commands
+    assert f"{TARGET_TAG}|up -d --pull never backend" in commands
+    assert f"{TARGET_TAG}|up -d --pull never frontend" in commands
+    assert (deploy_dir / "current-version").read_text().strip() == TARGET_TAG
+    assert not (deploy_dir / "previous-version").exists()
+
+
+def test_deploy_script_rejects_unknown_existing_backend_before_mutation(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+
+    result = run_deploy(fixture, FAKE_EXISTING_SERVICES="backend")
+
+    assert result.returncode != 0
+    assert "valid current SHA" in result.stderr
+    commands = log_lines(fixture["docker_log"])
+    assert commands == [f"{TARGET_TAG}|ps --all --services backend"]
+    assert log_lines(fixture["tar_log"]) == []
+
+
+def test_deploy_script_pull_failure_does_not_mutate_runtime(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_PULL_EXIT="17",
+    )
+
+    assert result.returncode == 17
+    commands = log_lines(fixture["docker_log"])
+    assert f"{TARGET_TAG}|stop backend" not in commands
+    assert not any("|up -d " in command for command in commands)
+    assert log_lines(fixture["tar_log"]) == []
+
+
+def test_deploy_script_stop_failure_attempts_image_rollback(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_STOP_EXIT="18",
+    )
+
+    assert result.returncode == 18
+    commands = log_lines(fixture["docker_log"])
+    assert f"{TARGET_TAG}|stop backend" in commands
+    assert f"{PREVIOUS_TAG}|up -d --pull never backend" in commands
+    assert f"{PREVIOUS_TAG}|up -d --pull never frontend" in commands
+    assert log_lines(fixture["tar_log"]) == []
+
+
+def test_deploy_script_restarting_backend_after_stop_triggers_rollback(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="restarting",
+    )
+
+    assert result.returncode != 0
+    assert "backend did not stop" in result.stderr
+    assert f"{PREVIOUS_TAG}|up -d --pull never backend" in log_lines(
+        fixture["docker_log"]
+    )
+    assert log_lines(fixture["tar_log"]) == []
+
+
+def test_deploy_script_health_failure_completes_public_rollback_checks(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_CURL_FAIL_TAG=TARGET_TAG,
+    )
+
+    assert result.returncode != 0
+    commands = log_lines(fixture["docker_log"])
+    assert f"{TARGET_TAG}|up -d --pull never backend" in commands
+    assert f"{PREVIOUS_TAG}|up -d --pull never backend" in commands
+    curl_calls = log_lines(fixture["curl_log"])
+    assert f"{PREVIOUS_TAG}|https://public.example.test/" in curl_calls
+    assert f"{PREVIOUS_TAG}|https://public.example.test/health" in curl_calls
+
+
+def test_deploy_script_success_tracks_versions_and_complete_backup(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+    )
+
+    assert result.returncode == 0, result.stderr
+    commands = log_lines(fixture["docker_log"])
+    previous_pull = commands.index(f"{PREVIOUS_TAG}|pull backend frontend")
+    stop = commands.index(f"{TARGET_TAG}|stop backend")
+    assert previous_pull < stop
+    assert (deploy_dir / "current-version").read_text().strip() == TARGET_TAG
+    assert (deploy_dir / "previous-version").read_text().strip() == PREVIOUS_TAG
+    assert list(deploy_dir.glob("*.tmp.*")) == []
+    backup_dirs = list((Path(fixture["root"]) / "backups").iterdir())
+    assert len(backup_dirs) == 1
+    assert (backup_dirs[0] / "data.tar.gz").is_file()
+    assert (backup_dirs[0] / "previous-image-tag").read_text().strip() == PREVIOUS_TAG
+
+
+def test_deploy_script_fails_clearly_when_deployment_lock_is_held(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+
+    result = run_deploy(fixture, FAKE_LOCK_HELD="1")
+
+    assert result.returncode != 0
+    assert "another deployment is already in progress" in result.stderr
+    assert log_lines(fixture["docker_log"]) == []
+
+
+def test_deploy_script_rejects_env_command_and_unknown_project_override(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    marker = Path(fixture["marker"])
+    (deploy_dir / ".env.deploy").write_text(
+        "ACR_REGISTRY=registry.example.test\n"
+        f"ACR_NAMESPACE=$(touch {bash_path(marker)})\n"
+        "PUBLIC_BASE_URL=https://public.example.test\n"
+        "COMPOSE_PROJECT_NAME=attacker-project\n",
+        encoding="utf-8",
+    )
+
+    result = run_deploy(fixture, COMPOSE_PROJECT_NAME="attacker-project")
+
+    assert result.returncode != 0
+    assert "invalid deployment environment" in result.stderr
+    assert not marker.exists()
+    assert log_lines(fixture["docker_log"]) == []
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "http://public.example.test",
+        "https://user:pass@public.example.test",
+        "https://public.example.test/?query=1",
+        "https://public.example.test/#fragment",
+    ],
+)
+def test_deploy_script_rejects_unsafe_public_base_urls(tmp_path, public_url):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / ".env.deploy").write_text(
+        "ACR_REGISTRY=registry.example.test\n"
+        "ACR_NAMESPACE=zhiku\n"
+        f"PUBLIC_BASE_URL={public_url}\n",
+        encoding="utf-8",
+    )
+
+    result = run_deploy(fixture)
+
+    assert result.returncode != 0
+    assert "valid HTTPS URL" in result.stderr
+    assert log_lines(fixture["docker_log"]) == []
+
+
+def test_deploy_script_first_failure_stops_only_started_target_services(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+
+    result = run_deploy(fixture, FAKE_CURL_FAIL_TAG=TARGET_TAG)
+
+    assert result.returncode != 0
+    commands = log_lines(fixture["docker_log"])
+    assert commands.count(f"{TARGET_TAG}|stop backend") == 2
+    assert f"{TARGET_TAG}|stop frontend" not in commands
+    assert not any(command.startswith(f"{PREVIOUS_TAG}|") for command in commands)
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [("302", '{"status":"healthy"}'), ("200", '{"status":"degraded"}')],
+)
+def test_deploy_script_strict_public_health_triggers_rollback(tmp_path, status, body):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_STRICT_TAG=TARGET_TAG,
+        FAKE_PUBLIC_HEALTH_STATUS=status,
+        FAKE_PUBLIC_HEALTH_BODY=body,
+    )
+
+    assert result.returncode != 0
+    assert f"{PREVIOUS_TAG}|up -d --pull never backend" in log_lines(
+        fixture["docker_log"]
+    )
