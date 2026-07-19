@@ -2,7 +2,6 @@ import configparser
 import re
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -102,6 +101,32 @@ def test_publish_images_uses_tested_commit_and_acr_configuration():
     assert content.index("docker/setup-buildx-action@") < content.index(
         "docker/build-push-action@"
     )
+
+
+def test_publish_images_never_overwrites_existing_sha_tags():
+    content = read_publish_workflow()
+
+    inspect_index = content.index("- name: Inspect immutable SHA tags")
+    backend_build_index = content.index("- name: Build and publish backend image")
+    frontend_build_index = content.index("- name: Build and publish frontend image")
+    inspect_step = content[inspect_index:backend_build_index]
+
+    assert "id: sha_tags" in inspect_step
+    assert "docker buildx imagetools inspect" in inspect_step
+    assert 'backend_state="$(inspect_tag "$BACKEND_IMAGE")"' in inspect_step
+    assert 'frontend_state="$(inspect_tag "$FRONTEND_IMAGE")"' in inspect_step
+    assert "manifest unknown|not found|no such manifest" in inspect_step
+    assert 'echo "build=true" >> "$GITHUB_OUTPUT"' in inspect_step
+    assert 'echo "build=false" >> "$GITHUB_OUTPUT"' in inspect_step
+    assert "only one immutable SHA tag exists" in inspect_step
+
+    backend_header = content[backend_build_index:frontend_build_index].split(
+        "with:", 1
+    )[0]
+    frontend_header = content[frontend_build_index:].split("with:", 1)[0]
+    expected_gate = "if: steps.sha_tags.outputs.build == 'true'"
+    assert expected_gate in backend_header
+    assert expected_gate in frontend_header
 
 
 def test_publish_images_builds_sha_only_then_promotes_both_images_when_current():

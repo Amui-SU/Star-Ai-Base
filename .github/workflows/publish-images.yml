@@ -45,7 +45,45 @@ jobs:
           username: ${{ env.ACR_USERNAME }}
           password: ${{ env.ACR_PASSWORD }}
 
+      - name: Inspect immutable SHA tags
+        id: sha_tags
+        shell: bash
+        env:
+          BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend
+          FRONTEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend
+        run: |
+          set -euo pipefail
+
+          inspect_tag() {
+            local image="$1"
+            local output
+            if output="$(docker buildx imagetools inspect "${image}:${IMAGE_TAG}" 2>&1)"; then
+              printf 'present\n'
+              return 0
+            fi
+            if grep -Eiq 'manifest unknown|not found|no such manifest' <<<"$output"; then
+              printf 'absent\n'
+              return 0
+            fi
+            printf '%s\n' "$output" >&2
+            echo "unable to determine immutable SHA tag state for $image" >&2
+            return 1
+          }
+
+          backend_state="$(inspect_tag "$BACKEND_IMAGE")"
+          frontend_state="$(inspect_tag "$FRONTEND_IMAGE")"
+          if [[ "$backend_state" == absent && "$frontend_state" == absent ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$backend_state" == present && "$frontend_state" == present ]]; then
+            echo "Both immutable SHA tags already exist; skipping rebuild."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "only one immutable SHA tag exists; refusing a partial publication" >&2
+            exit 1
+          fi
+
       - name: Build and publish backend image
+        if: steps.sha_tags.outputs.build == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: .
@@ -57,6 +95,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Build and publish frontend image
+        if: steps.sha_tags.outputs.build == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: ./frontend

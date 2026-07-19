@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sqlite3
@@ -13,6 +14,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY_SCRIPT = PROJECT_ROOT / "scripts" / "deploy.sh"
 RESTORE_SCRIPT = PROJECT_ROOT / "scripts" / "restore-data.sh"
+RECOVER_SCRIPT = PROJECT_ROOT / "scripts" / "recover-interrupted.sh"
 TARGET_TAG = "1" * 40
 PREVIOUS_TAG = "2" * 40
 
@@ -72,6 +74,16 @@ def test_frontend_image_defines_api_url_and_healthcheck_contracts():
     assert lines[healthcheck_index + 1] == command
 
 
+def test_frontend_runtime_uses_pinned_supported_nginx_image():
+    lines = active_dockerfile_lines("frontend/Dockerfile")
+
+    assert (
+        "FROM nginx:1.30.4-alpine@"
+        "sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46"
+        in lines
+    )
+
+
 def test_root_dockerignore_excludes_runtime_and_production_files():
     rules = active_dockerignore_rules(".dockerignore")
 
@@ -118,12 +130,78 @@ def test_production_compose_exposes_only_loopback_ports_and_persists_backend_dat
 
     assert services["backend"]["ports"] == ["127.0.0.1:8000:8000"]
     assert services["frontend"]["ports"] == ["127.0.0.1:3000:80"]
-    assert services["backend"]["env_file"] == "./deploy/.env.production"
+    assert services["backend"]["env_file"] == [
+        {"path": "./deploy/.env.production", "format": "raw"}
+    ]
     assert services["backend"]["volumes"] == [
         "./data:/app/data",
         "./logs:/app/logs",
     ]
     assert services["backend"]["environment"]["FORWARDED_ALLOW_IPS"] == "*"
+
+
+def test_production_compose_preserves_dollar_sign_secrets_by_contract():
+    backend = production_compose()["services"]["backend"]
+
+    assert backend["env_file"] == [
+        {"path": "./deploy/.env.production", "format": "raw"}
+    ]
+    assert "format: raw" in read("compose.production.yml")
+
+
+def test_compose_config_preserves_literal_dollar_sign_secrets(tmp_path):
+    docker = shutil.which("docker")
+    if docker is None:
+        pytest.skip("Docker Compose CLI is unavailable")
+    version = subprocess.run(
+        [docker, "compose", "version", "--short"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if version.returncode != 0:
+        pytest.skip("Docker Compose CLI is unavailable")
+
+    root = tmp_path / "compose-contract"
+    deploy_dir = root / "deploy"
+    deploy_dir.mkdir(parents=True)
+    shutil.copy2(PROJECT_ROOT / "compose.production.yml", root)
+    (deploy_dir / ".env.deploy").write_text(
+        "ACR_REGISTRY=registry.example.test\nACR_NAMESPACE=zhiku\n",
+        encoding="utf-8",
+    )
+    secret = "smtp-$literal-$$-value"
+    (deploy_dir / ".env.production").write_text(
+        f"SMTP_PASSWORD={secret}\nAPI_SECRET=$provider$key\n", encoding="utf-8"
+    )
+    environment = os.environ.copy()
+    environment["IMAGE_TAG"] = TARGET_TAG
+    result = subprocess.run(
+        [
+            docker,
+            "compose",
+            "--project-directory",
+            str(root),
+            "--env-file",
+            str(deploy_dir / ".env.deploy"),
+            "-f",
+            str(root / "compose.production.yml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    backend_env = json.loads(result.stdout)["services"]["backend"]["environment"]
+    # Compose config escapes literal dollars as $$ in its serialized model; the
+    # container receives the original single-dollar values.
+    assert backend_env["SMTP_PASSWORD"] == secret.replace("$", "$$")
+    assert backend_env["API_SECRET"] == "$$provider$$key"
 
 
 def test_production_compose_waits_for_backend_health_and_limits_logs():
@@ -227,7 +305,8 @@ def test_deploy_script_uses_rooted_files_and_public_deployment_metadata():
     ]:
         assert path in content
 
-    assert "for command_name in docker curl tar flock mktemp; do" in content
+    for command_name in ["docker", "curl", "tar", "flock", "mktemp", "du", "df"]:
+        assert command_name in content
     assert 'command -v "$command_name"' in content
     assert 'source "$DEPLOY_ENV"' not in content
     assert 'source "$APP_ENV"' not in content
@@ -239,10 +318,50 @@ def test_deploy_script_uses_rooted_files_and_public_deployment_metadata():
     assert 'mkdir -p "$DEPLOY_DIR" "$DATA_DIR" "$LOG_DIR" "$BACKUPS_DIR"' in content
 
 
+def test_deploy_script_enforces_disk_compose_cookie_and_transaction_preflights():
+    content = read("scripts/deploy.sh")
+
+    assert "ZHIKU_DEPLOY_DISK_RESERVE_BYTES:-2147483648" in content
+    assert 'du -sk -- "$DATA_DIR"' in content
+    assert 'df -Pk -- "$BACKUPS_DIR"' in content
+    assert "Docker Compose >= 2.30" in content
+    assert "${SESSION_COOKIE_SECURE_VALUE,,}" in content
+    assert "== true" in content
+    assert 'TRANSACTION_FILE="$DEPLOY_DIR/transaction"' in content
+    assert "recover-interrupted.sh" in content
+
+
+def test_restore_script_enforces_20_gib_limit_disk_budget_and_transaction_marker():
+    content = read("scripts/restore-data.sh")
+
+    assert "ZHIKU_RESTORE_MAX_BYTES:-21474836480" in content
+    assert "ZHIKU_RESTORE_DISK_RESERVE_BYTES:-2147483648" in content
+    assert 'df -Pk -- "$DEPLOY_ROOT"' in content
+    assert 'TRANSACTION_FILE="$DEPLOY_DIR/transaction"' in content
+    assert "recover-interrupted.sh" in content
+    assert 'rm -f -- "$PARTIAL_ARCHIVE"' in read("scripts/deploy.sh")
+
+
+def test_recovery_script_has_strict_transaction_contract():
+    content = read("scripts/recover-interrupted.sh")
+
+    assert "set -Eeuo pipefail" in content
+    assert 'TRANSACTION_FILE="$DEPLOY_DIR/transaction"' in content
+    assert 'source "$TRANSACTION_FILE"' not in content
+    assert "eval " not in content
+    assert "flock -n 9" in content
+    assert "operation=deploy" in content
+    assert "operation=restore" in content
+    assert "--pull never backend" in content
+    assert "--pull never frontend" in content
+    assert "backend left stopped" in content
+
+
 def test_deploy_script_backs_up_before_rollout_and_tracks_successful_versions():
     content = read("scripts/deploy.sh")
 
-    assert 'tar -C "$DATA_DIR" -czf "$BACKUP_DIR/data.tar.gz" .' in content
+    assert 'tar -C "$DATA_DIR" -czf "$PARTIAL_ARCHIVE" .' in content
+    assert 'mv -- "$PARTIAL_ARCHIVE" "$BACKUP_DIR/data.tar.gz"' in content
     assert "date -u +%Y%m%dT%H%M%SZ" in content
     assert 'mktemp -d "$BACKUPS_DIR/' in content
     assert '"$BACKUP_DIR/previous-image-tag"' in content
@@ -257,7 +376,7 @@ def test_deploy_script_has_image_only_rollback_and_all_health_checks():
 
     assert "DEPLOY_STARTED=false" in content
     assert "trap on_error ERR" in content
-    assert "recover_images ||" in content
+    assert "if recover_images; then" in content
     assert "tar " not in rollback
     assert "compose up -d --pull never backend" in rollback
     assert "compose up -d --pull never frontend" in rollback
@@ -350,6 +469,10 @@ def deployment_fixture(tmp_path: Path) -> dict[str, object]:
         "docker",
         """#!/usr/bin/env bash
 set -u
+if [[ "$*" == "compose version --short" ]]; then
+  printf '%s\n' "${FAKE_COMPOSE_VERSION:-2.30.0}"
+  exit 0
+fi
 [[ "${1:-}" == compose ]] || exit 90
 shift
 project_name=""
@@ -364,7 +487,7 @@ done
 command_line="$*"
 printf '%s|%s\n' "${IMAGE_TAG:-unset}" "$command_line" >> "$FAKE_DOCKER_LOG"
 case "$command_line" in
-  "ps --all --services backend")
+  "ps --all --services backend frontend")
     printf '%s\n' "${FAKE_EXISTING_SERVICES:-}"
     ;;
   "pull backend frontend")
@@ -426,6 +549,9 @@ if [[ -n "${FAKE_TAR_SIGNAL:-}" ]]; then
   sleep 1
 fi
 printf 'fake archive\n' > "$archive"
+if [[ -n "${FAKE_TAR_EXIT:-}" ]]; then
+  exit "$FAKE_TAR_EXIT"
+fi
 """,
     )
     write_fake_tool(
@@ -445,6 +571,21 @@ if [[ "${1:-}" == -d && -n "${FAKE_MKTEMP_DIR_EXIT:-}" ]]; then
   exit "$FAKE_MKTEMP_DIR_EXIT"
 fi
 exec /usr/bin/mktemp "$@"
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "du",
+        """#!/usr/bin/env bash
+printf '%s\t%s\n' "${FAKE_DATA_KIB:-4}" "${!#}"
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "df",
+        """#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf 'fake 8388608 0 %s 0%% /\n' "${FAKE_AVAILABLE_KIB:-4194304}"
 """,
     )
     write_fake_tool(
@@ -543,7 +684,7 @@ def test_deploy_script_rejects_unknown_existing_backend_before_mutation(tmp_path
     assert result.returncode != 0
     assert "valid current SHA" in result.stderr
     commands = log_lines(fixture["docker_log"])
-    assert commands == [f"{TARGET_TAG}|ps --all --services backend"]
+    assert commands == [f"{TARGET_TAG}|ps --all --services backend frontend"]
     assert log_lines(fixture["tar_log"]) == []
 
 
@@ -703,6 +844,30 @@ def test_deploy_script_safely_preflights_production_login_configuration():
         ),
         (
             valid_production_environment().replace(
+                "SESSION_COOKIE_SECURE=true", "SESSION_COOKIE_SECURE=0"
+            ),
+            "SESSION_COOKIE_SECURE",
+        ),
+        (
+            valid_production_environment().replace(
+                "SESSION_COOKIE_SECURE=true", "SESSION_COOKIE_SECURE=no"
+            ),
+            "SESSION_COOKIE_SECURE",
+        ),
+        (
+            valid_production_environment().replace(
+                "SESSION_COOKIE_SECURE=true", "SESSION_COOKIE_SECURE=off"
+            ),
+            "SESSION_COOKIE_SECURE",
+        ),
+        (
+            valid_production_environment().replace(
+                "SESSION_COOKIE_SECURE=true", "SESSION_COOKIE_SECURE="
+            ),
+            "SESSION_COOKIE_SECURE",
+        ),
+        (
+            valid_production_environment().replace(
                 "APP_ENCRYPTION_KEY=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
                 "APP_ENCRYPTION_KEY=REPLACE_WITH_KEY",
             ),
@@ -785,6 +950,42 @@ def test_deploy_script_accepts_complete_google_login_and_optional_equals(tmp_pat
     result = run_deploy(fixture)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_deploy_script_rejects_unknown_existing_frontend_before_mutation(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+
+    result = run_deploy(fixture, FAKE_EXISTING_SERVICES="frontend")
+
+    assert result.returncode != 0
+    assert "valid current SHA" in result.stderr
+    assert log_lines(fixture["tar_log"]) == []
+
+
+def test_deploy_script_rejects_insufficient_backup_space_before_downtime(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+
+    result = run_deploy(fixture, FAKE_AVAILABLE_KIB="1024")
+
+    assert result.returncode != 0
+    assert "insufficient free space" in result.stderr
+    commands = log_lines(fixture["docker_log"])
+    assert not any("stop backend" in command for command in commands)
+    assert log_lines(fixture["tar_log"]) == []
+
+
+def test_deploy_script_refuses_existing_transaction_before_runtime_mutation(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "transaction").write_text(
+        "version=1\noperation=deploy\nphase=runtime\n", encoding="utf-8"
+    )
+
+    result = run_deploy(fixture)
+
+    assert result.returncode != 0
+    assert "recover-interrupted.sh" in result.stderr
+    assert log_lines(fixture["docker_log"]) == []
 
 
 @pytest.mark.parametrize(
@@ -905,6 +1106,34 @@ def test_deploy_script_backup_directory_failure_rolls_back_once(tmp_path):
     assert commands.count(f"{PREVIOUS_TAG}|up -d --pull never backend") == 1
 
 
+def test_deploy_script_failed_tar_removes_only_partial_backup(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_TAR_EXIT="75",
+    )
+
+    assert result.returncode != 0
+    backups_dir = Path(fixture["root"]) / "backups"
+    assert list(backups_dir.iterdir()) == []
+    assert (Path(fixture["root"]) / "data" / "database.sqlite").is_file()
+
+
+def test_deploy_script_rejects_old_compose_before_runtime_mutation(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+
+    result = run_deploy(fixture, FAKE_COMPOSE_VERSION="2.29.9")
+
+    assert result.returncode != 0
+    assert "Docker Compose >= 2.30" in result.stderr
+    assert log_lines(fixture["docker_log"]) == []
+
+
 def create_application_sqlite(path: Path, marker: str) -> None:
     connection = sqlite3.connect(path)
     try:
@@ -1000,6 +1229,10 @@ def restore_fixture(tmp_path: Path) -> dict[str, object]:
         "docker",
         """#!/usr/bin/env bash
 set -u
+if [[ "$*" == "compose version --short" ]]; then
+  printf '%s\n' "${FAKE_COMPOSE_VERSION:-2.30.0}"
+  exit 0
+fi
 [[ "${1:-}" == compose ]] || exit 90
 shift
 project_name=""
@@ -1014,9 +1247,9 @@ done
 command_line="$*"
 printf 'docker|%s|%s\n' "${IMAGE_TAG:-unset}" "$command_line" >> "$FAKE_OPERATION_LOG"
 case "$command_line" in
-  "stop backend") exit "${FAKE_STOP_EXIT:-0}" ;;
+  "stop backend"|"stop backend frontend") exit "${FAKE_STOP_EXIT:-0}" ;;
   "ps --all --format {{.State}} backend") printf '%s\n' "${FAKE_POST_STOP_STATES:-exited}" ;;
-  "up -d --pull never backend")
+  "up -d --pull never backend"|"up -d --pull never frontend")
     count=0
     [[ -f "$FAKE_DOCKER_COUNTER" ]] && count="$(cat "$FAKE_DOCKER_COUNTER")"
     count=$((count + 1))
@@ -1064,6 +1297,10 @@ exit 0
         bin_dir,
         "mv",
         """#!/usr/bin/env bash
+destination="${!#}"
+if [[ "$destination" == */transaction ]]; then
+  exec /usr/bin/mv "$@"
+fi
 count=0
 [[ -f "$FAKE_MV_COUNTER" ]] && count="$(cat "$FAKE_MV_COUNTER")"
 count=$((count + 1))
@@ -1083,6 +1320,14 @@ fi
         """#!/usr/bin/env bash
 [[ "${FAKE_LOCK_HELD:-0}" == 1 ]] && exit 1
 exit 0
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "df",
+        """#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf 'fake 8388608 0 %s 0%% /\n' "${FAKE_AVAILABLE_KIB:-4194304}"
 """,
     )
     write_fake_tool(bin_dir, "sleep", "#!/usr/bin/env bash\nexit 0\n")
@@ -1144,6 +1389,31 @@ def run_restore(
     )
 
 
+def run_recover(
+    fixture: dict[str, object], **env_updates: str
+) -> subprocess.CompletedProcess:
+    env = dict(fixture["env"])
+    env.update(env_updates)
+    return subprocess.run(
+        [
+            bash_executable(),
+            "-c",
+            'PATH="$1:$PATH"; export PATH; exec bash "$2"',
+            "recover-test",
+            bash_path(Path(fixture["bin_dir"])),
+            bash_path(RECOVER_SCRIPT),
+        ],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+        check=False,
+    )
+
+
 def restore_operations(fixture: dict[str, object]) -> list[str]:
     return log_lines(fixture["operation_log"])
 
@@ -1184,7 +1454,7 @@ def test_restore_script_rejects_invalid_and_symlink_archives_before_downtime(tmp
     assert invalid.returncode != 0
     assert unsafe.returncode != 0
     assert "unsafe archive" in unsafe.stderr
-    assert "retained restore staging directory" in invalid.stderr
+    assert list(Path(fixture["root"]).glob("data.restore.*")) == []
     assert not any("docker|" in line for line in restore_operations(fixture))
 
 
@@ -1219,6 +1489,32 @@ def test_restore_script_rejects_archives_over_resource_limits_before_downtime(
     assert not any("docker|" in line for line in restore_operations(fixture))
 
 
+def test_restore_script_rejects_insufficient_space_before_extraction_or_downtime(
+    tmp_path,
+):
+    fixture = restore_fixture(tmp_path)
+
+    result = run_restore(fixture, FAKE_AVAILABLE_KIB="1024")
+
+    assert result.returncode != 0
+    assert "insufficient free space" in result.stderr
+    assert list(Path(fixture["root"]).glob("data.restore.*")) == []
+    assert not any("docker|" in line for line in restore_operations(fixture))
+
+
+def test_restore_script_refuses_existing_transaction_before_staging(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    (Path(fixture["deploy_dir"]) / "transaction").write_text(
+        "version=1\noperation=restore\nphase=prepared\n", encoding="utf-8"
+    )
+
+    result = run_restore(fixture)
+
+    assert result.returncode != 0
+    assert "recover-interrupted.sh" in result.stderr
+    assert list(Path(fixture["root"]).glob("data.restore.*")) == []
+
+
 def test_restore_script_rejects_invalid_current_sha_before_downtime(tmp_path):
     fixture = restore_fixture(tmp_path)
     (Path(fixture["deploy_dir"]) / "current-version").write_text(
@@ -1246,6 +1542,8 @@ def test_restore_script_preparation_failures_do_not_stop_backend(
     assert result.returncode != 0
     assert_old_restore_data_is_active(fixture)
     assert not any("docker|" in line for line in restore_operations(fixture))
+    assert list(Path(fixture["root"]).glob("data.restore.*")) == []
+    assert list(Path(fixture["root"]).glob("data.safety.*")) == []
 
 
 @pytest.mark.parametrize(
@@ -1372,6 +1670,139 @@ def test_restore_script_real_flock_blocks_concurrent_restore(tmp_path):
         holder.wait(timeout=3)
 
 
+def create_restore_data_tree(path: Path, marker: str) -> None:
+    (path / "chroma_db").mkdir(parents=True)
+    create_application_sqlite(path / "bilibili_rag.db", marker)
+    create_chroma_sqlite(path / "chroma_db" / "chroma.sqlite3")
+
+
+def write_restore_transaction(
+    fixture: dict[str, object], staged_data: Path, safety_parent: Path, phase: str
+) -> None:
+    (Path(fixture["deploy_dir"]) / "transaction").write_text(
+        "version=1\n"
+        "operation=restore\n"
+        f"phase={phase}\n"
+        f"current_tag={TARGET_TAG}\n"
+        f"staged_data={bash_path(staged_data)}\n"
+        f"safety_parent={bash_path(safety_parent)}\n",
+        encoding="utf-8",
+    )
+
+
+def test_recovery_reconciles_restore_before_data_swap(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    root = Path(fixture["root"])
+    staged = root / "data.restore.test"
+    safety = root / "data.safety.test"
+    create_restore_data_tree(staged, "new")
+    safety.mkdir()
+    write_restore_transaction(fixture, staged, safety, "prepared")
+
+    result = run_recover(fixture)
+
+    assert result.returncode == 0, result.stderr
+    assert_old_restore_data_is_active(fixture)
+    assert not staged.exists()
+    assert not safety.exists()
+    assert not (Path(fixture["deploy_dir"]) / "transaction").exists()
+
+
+def test_recovery_reconciles_restore_between_data_renames(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    root = Path(fixture["root"])
+    staged = root / "data.restore.test"
+    safety = root / "data.safety.test"
+    create_restore_data_tree(staged, "new")
+    safety.mkdir()
+    Path(fixture["data_dir"]).rename(safety / "data")
+    write_restore_transaction(fixture, staged, safety, "prepared")
+
+    result = run_recover(fixture)
+
+    assert result.returncode == 0, result.stderr
+    assert_old_restore_data_is_active(fixture)
+    assert not staged.exists()
+    assert not safety.exists()
+    assert not (Path(fixture["deploy_dir"]) / "transaction").exists()
+
+
+def test_recovery_reconciles_restore_after_new_data_is_active(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    root = Path(fixture["root"])
+    staged = root / "data.restore.test"
+    safety = root / "data.safety.test"
+    create_restore_data_tree(staged, "new")
+    safety.mkdir()
+    Path(fixture["data_dir"]).rename(safety / "data")
+    staged.rename(Path(fixture["data_dir"]))
+    write_restore_transaction(fixture, staged, safety, "new_active")
+
+    result = run_recover(fixture)
+
+    assert result.returncode == 0, result.stderr
+    assert_old_restore_data_is_active(fixture)
+    assert (
+        sqlite_restore_marker(safety / "failed-restored-data" / "bilibili_rag.db")
+        == "new"
+    )
+    assert not (Path(fixture["deploy_dir"]) / "transaction").exists()
+
+
+def test_recovery_restores_previous_images_and_version_after_interrupted_deploy(
+    tmp_path,
+):
+    fixture = restore_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    older_tag = "3" * 40
+    (deploy_dir / "current-version").write_text(TARGET_TAG + "\n", encoding="utf-8")
+    (deploy_dir / "previous-version").write_text(PREVIOUS_TAG + "\n", encoding="utf-8")
+    (deploy_dir / "transaction").write_text(
+        "version=1\n"
+        "operation=deploy\n"
+        "phase=runtime\n"
+        f"target_tag={TARGET_TAG}\n"
+        f"previous_tag={PREVIOUS_TAG}\n"
+        f"original_previous_tag={older_tag}\n",
+        encoding="utf-8",
+    )
+
+    result = run_recover(fixture)
+
+    assert result.returncode == 0, result.stderr
+    operations = restore_operations(fixture)
+    assert f"docker|{PREVIOUS_TAG}|up -d --pull never backend" in operations
+    assert f"docker|{PREVIOUS_TAG}|up -d --pull never frontend" in operations
+    assert (deploy_dir / "current-version").read_text().strip() == PREVIOUS_TAG
+    assert (deploy_dir / "previous-version").read_text().strip() == older_tag
+    assert not (deploy_dir / "transaction").exists()
+
+
+def test_recovery_rejects_traversal_marker_without_deleting_active_data(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    root = Path(fixture["root"])
+    (root / "data.restore.attacker").mkdir()
+    safety = root / "data.safety.test"
+    safety.mkdir()
+    traversal = f"{bash_path(root)}/data.restore.attacker/../data"
+    (Path(fixture["deploy_dir"]) / "transaction").write_text(
+        "version=1\n"
+        "operation=restore\n"
+        "phase=prepared\n"
+        f"current_tag={TARGET_TAG}\n"
+        f"staged_data={traversal}\n"
+        f"safety_parent={bash_path(safety)}\n",
+        encoding="utf-8",
+    )
+
+    result = run_recover(fixture)
+
+    assert result.returncode != 0
+    assert_old_restore_data_is_active(fixture)
+    assert (Path(fixture["deploy_dir"]) / "transaction").exists()
+    assert restore_operations(fixture) == []
+
+
 def test_nginx_example_routes_tls_traffic_to_loopback_services():
     content = read("deploy/nginx/zhiku-cloud.conf.example")
 
@@ -1432,7 +1863,7 @@ def test_nginx_example_limits_send_code_and_covers_every_backend_prefix():
 
 def test_nginx_example_scopes_upload_and_streaming_settings():
     content = read("deploy/nginx/zhiku-cloud.conf.example")
-    upload_block = content.split("location = /imports/local-video {", maxsplit=1)[
+    upload_block = content.split("location ~ ^/imports/local-video/?$ {", maxsplit=1)[
         1
     ].split("}", maxsplit=1)[0]
     chat_block = content.split("location ~ ^/chat(?:/|$) {", maxsplit=1)[1].split(
@@ -1506,7 +1937,10 @@ def test_restore_script_has_strict_safe_contract_and_linux_mode():
     assert "trap 'on_signal 143' TERM" in content
     assert "compose down" not in content
     assert "down -v" not in content
-    assert "rm -rf" not in content
+    assert 'rm -rf -- "$path"' in content
+    assert '"$DEPLOY_ROOT"/data.restore.*)' in content
+    assert 'rm -rf -- "$DEPLOY_ROOT"' not in content
+    assert 'rm -rf -- "$DATA_DIR"' not in content
     assert "\r\n" not in content
     assert "ZHIKU_RESTORE_MAX_MEMBERS" in content
     assert "ZHIKU_RESTORE_MAX_BYTES" in content
@@ -1578,6 +2012,25 @@ def test_container_production_runbook_documents_safe_exact_sha_operations():
     assert "安全副本" in content
     assert "tar -xzf" not in content
     assert "mv /opt/zhiku-cloud/data" not in content
+    assert "down -v" not in content
+
+
+def test_container_runbook_requires_immutable_acr_and_operational_disk_safety():
+    content = read("docs/deployment/container-production.md")
+
+    assert (
+        "https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version"
+        in content
+    )
+    assert "zhiku-backend" in content and "zhiku-frontend" in content
+    assert "不可变" in content
+    assert "重新运行" in content and "不会覆盖" in content
+    assert "Docker Compose 2.30" in content
+    assert "最新 10" in content
+    assert "异机" in content
+    assert "df -h" in content
+    assert "recover-interrupted.sh" in content
+    assert "transaction" in content
     assert "down -v" not in content
 
 

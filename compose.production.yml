@@ -4,7 +4,9 @@ services:
   backend:
     image: "${ACR_REGISTRY:?set ACR_REGISTRY}/${ACR_NAMESPACE:?set ACR_NAMESPACE}/zhiku-backend:${IMAGE_TAG:?set IMAGE_TAG}"
     restart: unless-stopped
-    env_file: ./deploy/.env.production
+    env_file:
+      - path: ./deploy/.env.production
+        format: raw
     environment:
       APP_HOST: 0.0.0.0
       APP_PORT: 8000

@@ -18,15 +18,19 @@ readonly LOG_DIR="$DEPLOY_ROOT/logs"
 readonly BACKUPS_DIR="$DEPLOY_ROOT/backups"
 readonly CURRENT_FILE="$DEPLOY_DIR/current-version"
 readonly PREVIOUS_FILE="$DEPLOY_DIR/previous-version"
+readonly TRANSACTION_FILE="$DEPLOY_DIR/transaction"
 readonly HTTP_ATTEMPTS="${ZHIKU_DEPLOY_HTTP_ATTEMPTS:-30}"
 readonly HTTP_DELAY_SECONDS="${ZHIKU_DEPLOY_HTTP_DELAY_SECONDS:-2}"
+readonly DISK_RESERVE_BYTES="${ZHIKU_DEPLOY_DISK_RESERVE_BYTES:-2147483648}"
 
-if [[ ! "$HTTP_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || [[ ! "$HTTP_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
+if [[ ! "$HTTP_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] ||
+  [[ ! "$HTTP_DELAY_SECONDS" =~ ^[0-9]+$ ]] ||
+  [[ ! "$DISK_RESERVE_BYTES" =~ ^[0-9]+$ ]]; then
   echo "invalid deployment health retry configuration" >&2
   exit 2
 fi
 
-for command_name in docker curl tar flock mktemp; do
+for command_name in docker curl tar flock mktemp du df awk; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "missing required command: $command_name" >&2
     exit 3
@@ -98,6 +102,23 @@ if ! flock -n 9; then
   echo "another deployment is already in progress" >&2
   exit 5
 fi
+if [[ -e "$TRANSACTION_FILE" ]]; then
+  echo "an interrupted transaction exists; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
+  exit 5
+fi
+
+if ! COMPOSE_VERSION="$(docker compose version --short 2>/dev/null)"; then
+  echo "Docker Compose >= 2.30 is required" >&2
+  exit 3
+fi
+COMPOSE_VERSION="${COMPOSE_VERSION#v}"
+IFS=. read -r COMPOSE_MAJOR COMPOSE_MINOR _ <<<"$COMPOSE_VERSION"
+if [[ ! "$COMPOSE_MAJOR" =~ ^[0-9]+$ || ! "$COMPOSE_MINOR" =~ ^[0-9]+$ ]] ||
+  (( COMPOSE_MAJOR < 2 || (COMPOSE_MAJOR == 2 && COMPOSE_MINOR < 30) )); then
+  echo "Docker Compose >= 2.30 is required; found $COMPOSE_VERSION" >&2
+  exit 3
+fi
+readonly COMPOSE_VERSION
 
 invalid_app_env() {
   echo "invalid production application environment: $1" >&2
@@ -158,7 +179,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$APP_ENV"
 
 [[ "$DEBUG_VALUE" == false ]] || invalid_app_env "DEBUG must be false"
-[[ "${SESSION_COOKIE_SECURE_VALUE,,}" != false ]] || invalid_app_env "SESSION_COOKIE_SECURE must not be false"
+[[ "${SESSION_COOKIE_SECURE_VALUE,,}" == true ]] || invalid_app_env "SESSION_COOKIE_SECURE must be true"
 [[ -n "$ADMIN_EMAILS_VALUE" ]] || invalid_app_env "ADMIN_EMAILS is required"
 [[ "${ADMIN_EMAILS_VALUE,,}" != *"admin@example"* && "${ADMIN_EMAILS_VALUE,,}" != *"@example."* ]] ||
   invalid_app_env "ADMIN_EMAILS must not use an example administrator"
@@ -286,14 +307,38 @@ readonly PREVIOUS_TAG
 IMAGE_TAG="$TARGET_TAG"
 export IMAGE_TAG
 
-if ! existing_backend="$(compose ps --all --services backend)"; then
-  echo "failed to inspect the existing backend service" >&2
+if ! existing_services="$(compose ps --all --services backend frontend)"; then
+  echo "failed to inspect the existing application services" >&2
   exit 7
 fi
-if [[ "$HAS_PREVIOUS" == false ]] && grep -Fxq backend <<<"$existing_backend"; then
-  echo "existing backend has no valid current SHA; establish deploy/current-version before deploying" >&2
+if [[ "$HAS_PREVIOUS" == false ]] && grep -Eqx '(backend|frontend)' <<<"$existing_services"; then
+  echo "existing backend or frontend has no valid current SHA; establish deploy/current-version before deploying" >&2
   exit 6
 fi
+
+if ! read -r DATA_SIZE_KIB _ < <(du -sk -- "$DATA_DIR"); then
+  echo "failed to measure current data size" >&2
+  exit 7
+fi
+if [[ ! "$DATA_SIZE_KIB" =~ ^[0-9]+$ ]]; then
+  echo "invalid data size reported by du" >&2
+  exit 7
+fi
+if ! AVAILABLE_KIB="$(df -Pk -- "$BACKUPS_DIR" | awk 'NR > 1 { available = $4 } END { print available }')"; then
+  echo "failed to measure backup filesystem free space" >&2
+  exit 7
+fi
+if [[ ! "$AVAILABLE_KIB" =~ ^[0-9]+$ ]]; then
+  echo "invalid free space reported by df" >&2
+  exit 7
+fi
+RESERVE_KIB=$(( (DISK_RESERVE_BYTES + 1023) / 1024 ))
+REQUIRED_KIB=$(( DATA_SIZE_KIB + RESERVE_KIB ))
+if (( AVAILABLE_KIB < REQUIRED_KIB )); then
+  echo "insufficient free space for backup: need ${REQUIRED_KIB} KiB, have ${AVAILABLE_KIB} KiB" >&2
+  exit 7
+fi
+readonly DATA_SIZE_KIB AVAILABLE_KIB RESERVE_KIB REQUIRED_KIB
 
 DEPLOY_STARTED=false
 BACKEND_STARTED=false
@@ -364,7 +409,11 @@ on_error() {
   disable_failure_traps
 
   if [[ "$DEPLOY_STARTED" == true ]]; then
-    recover_images || echo "automatic image recovery failed; inspect docker compose logs" >&2
+    if recover_images; then
+      rm -f -- "$TRANSACTION_FILE"
+    else
+      echo "automatic image recovery failed; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
+    fi
   fi
 
   exit "$original_exit_code"
@@ -375,7 +424,11 @@ on_signal() {
   disable_failure_traps
 
   if [[ "$DEPLOY_STARTED" == true ]]; then
-    recover_images || echo "automatic image recovery failed after signal; inspect docker compose logs" >&2
+    if recover_images; then
+      rm -f -- "$TRANSACTION_FILE"
+    else
+      echo "automatic image recovery failed after signal; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
+    fi
   fi
 
   exit "$signal_exit_code"
@@ -397,6 +450,19 @@ if [[ "$HAS_PREVIOUS" == true ]]; then
   export IMAGE_TAG
 fi
 
+original_previous_tag="none"
+if [[ "$ORIGINAL_PREVIOUS_EXISTS" == true ]]; then
+  original_previous_tag="$(printf '%s' "$ORIGINAL_PREVIOUS_CONTENT" | tr -d '[:space:]')"
+  [[ "$original_previous_tag" =~ ^[0-9a-f]{40}$ ]] || invalid_app_env "deploy/previous-version is invalid"
+fi
+transaction_previous_tag="${PREVIOUS_TAG:-none}"
+atomic_write "version=1
+operation=deploy
+phase=runtime
+target_tag=$TARGET_TAG
+previous_tag=$transaction_previous_tag
+original_previous_tag=$original_previous_tag" "$TRANSACTION_FILE"
+
 DEPLOY_STARTED=true
 compose stop backend
 if ! backend_states="$(compose ps --all --format '{{.State}}' backend)"; then
@@ -413,7 +479,13 @@ if ! BACKUP_DIR="$(mktemp -d "$BACKUPS_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$TARGET_TA
   false
 fi
 readonly BACKUP_DIR
-tar -C "$DATA_DIR" -czf "$BACKUP_DIR/data.tar.gz" .
+PARTIAL_ARCHIVE="$BACKUP_DIR/data.tar.gz.partial"
+if ! tar -C "$DATA_DIR" -czf "$PARTIAL_ARCHIVE" .; then
+  rm -f -- "$PARTIAL_ARCHIVE"
+  rmdir -- "$BACKUP_DIR" 2>/dev/null || true
+  false
+fi
+mv -- "$PARTIAL_ARCHIVE" "$BACKUP_DIR/data.tar.gz"
 printf '%s\n' "$PREVIOUS_TAG" > "$BACKUP_DIR/previous-image-tag"
 
 IMAGE_TAG="$TARGET_TAG"
@@ -436,5 +508,6 @@ fi
 atomic_write "$TARGET_TAG" "$CURRENT_FILE"
 
 DEPLOY_STARTED=false
+rm -f -- "$TRANSACTION_FILE"
 disable_failure_traps
 echo "deployment succeeded: $TARGET_TAG"

@@ -8,34 +8,43 @@ if (( $# != 1 )); then
 fi
 
 readonly DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly ARCHIVE_INSPECTOR="$SCRIPT_DIR/inspect-restore-archive.py"
 readonly COMPOSE_FILE="$DEPLOY_ROOT/compose.production.yml"
 readonly DEPLOY_DIR="$DEPLOY_ROOT/deploy"
 readonly DEPLOY_ENV="$DEPLOY_DIR/.env.deploy"
 readonly APP_ENV="$DEPLOY_DIR/.env.production"
 readonly CURRENT_FILE="$DEPLOY_DIR/current-version"
+readonly TRANSACTION_FILE="$DEPLOY_DIR/transaction"
 readonly DATA_DIR="$DEPLOY_ROOT/data"
 readonly BACKUPS_DIR="$DEPLOY_ROOT/backups"
 readonly PYTHON_BIN="${ZHIKU_RESTORE_PYTHON:-python3}"
 readonly HTTP_ATTEMPTS="${ZHIKU_RESTORE_HTTP_ATTEMPTS:-30}"
 readonly HTTP_DELAY_SECONDS="${ZHIKU_RESTORE_HTTP_DELAY_SECONDS:-2}"
 readonly MAX_ARCHIVE_MEMBERS="${ZHIKU_RESTORE_MAX_MEMBERS:-100000}"
-readonly MAX_ARCHIVE_BYTES="${ZHIKU_RESTORE_MAX_BYTES:-53687091200}"
+readonly MAX_ARCHIVE_BYTES="${ZHIKU_RESTORE_MAX_BYTES:-21474836480}"
+readonly DISK_RESERVE_BYTES="${ZHIKU_RESTORE_DISK_RESERVE_BYTES:-2147483648}"
 readonly BACKUP_INPUT="$1"
 
 if [[ ! "$HTTP_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] ||
   [[ ! "$HTTP_DELAY_SECONDS" =~ ^[0-9]+$ ]] ||
   [[ ! "$MAX_ARCHIVE_MEMBERS" =~ ^[1-9][0-9]*$ ]] ||
-  [[ ! "$MAX_ARCHIVE_BYTES" =~ ^[1-9][0-9]*$ ]]; then
+  [[ ! "$MAX_ARCHIVE_BYTES" =~ ^[1-9][0-9]*$ ]] ||
+  [[ ! "$DISK_RESERVE_BYTES" =~ ^[0-9]+$ ]]; then
   echo "invalid restore retry or archive limit configuration" >&2
   exit 2
 fi
 
-for command_name in docker curl flock mktemp realpath cp mv chown chmod find grep tr sleep "$PYTHON_BIN"; do
+for command_name in docker curl flock mktemp realpath cp mv chown chmod find grep tr sleep df awk rm rmdir "$PYTHON_BIN"; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "missing required command: $command_name" >&2
     exit 3
   }
 done
+[[ -f "$ARCHIVE_INSPECTOR" ]] || {
+  echo "missing archive inspector: $ARCHIVE_INSPECTOR" >&2
+  exit 3
+}
 
 for required_file in "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV" "$CURRENT_FILE"; do
   [[ -f "$required_file" ]] || {
@@ -80,6 +89,23 @@ if ! flock -n 9; then
   echo "another deployment or restore is already in progress" >&2
   exit 7
 fi
+if [[ -e "$TRANSACTION_FILE" ]]; then
+  echo "an interrupted transaction exists; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
+  exit 7
+fi
+
+if ! COMPOSE_VERSION="$(docker compose version --short 2>/dev/null)"; then
+  echo "Docker Compose >= 2.30 is required" >&2
+  exit 3
+fi
+COMPOSE_VERSION="${COMPOSE_VERSION#v}"
+IFS=. read -r COMPOSE_MAJOR COMPOSE_MINOR _ <<<"$COMPOSE_VERSION"
+if [[ ! "$COMPOSE_MAJOR" =~ ^[0-9]+$ || ! "$COMPOSE_MINOR" =~ ^[0-9]+$ ]] ||
+  (( COMPOSE_MAJOR < 2 || (COMPOSE_MAJOR == 2 && COMPOSE_MINOR < 30) )); then
+  echo "Docker Compose >= 2.30 is required; found $COMPOSE_VERSION" >&2
+  exit 3
+fi
+readonly COMPOSE_VERSION
 
 CURRENT_TAG="$(tr -d '[:space:]' < "$CURRENT_FILE")"
 [[ "$CURRENT_TAG" =~ ^[0-9a-f]{40}$ ]] || {
@@ -115,6 +141,34 @@ done < "$DEPLOY_ENV"
   exit 6
 }
 readonly PUBLIC_BASE_URL
+
+if ! UNCOMPRESSED_BYTES="$(
+  "$PYTHON_BIN" "$ARCHIVE_INSPECTOR" \
+    "$BACKUP_REAL" "$MAX_ARCHIVE_MEMBERS" "$MAX_ARCHIVE_BYTES"
+)"; then
+  echo "backup inspection failed" >&2
+  exit 8
+fi
+[[ "$UNCOMPRESSED_BYTES" =~ ^[0-9]+$ ]] || {
+  echo "archive inspector returned an invalid size" >&2
+  exit 8
+}
+if ! AVAILABLE_KIB="$(df -Pk -- "$DEPLOY_ROOT" | awk 'NR > 1 { available = $4 } END { print available }')"; then
+  echo "failed to measure restore filesystem free space" >&2
+  exit 7
+fi
+[[ "$AVAILABLE_KIB" =~ ^[0-9]+$ ]] || {
+  echo "invalid free space reported by df" >&2
+  exit 7
+}
+ARCHIVE_KIB=$(( (UNCOMPRESSED_BYTES + 1023) / 1024 ))
+RESERVE_KIB=$(( (DISK_RESERVE_BYTES + 1023) / 1024 ))
+REQUIRED_KIB=$(( ARCHIVE_KIB + RESERVE_KIB ))
+if (( AVAILABLE_KIB < REQUIRED_KIB )); then
+  echo "insufficient free space for restore: need ${REQUIRED_KIB} KiB, have ${AVAILABLE_KIB} KiB" >&2
+  exit 7
+fi
+readonly UNCOMPRESSED_BYTES AVAILABLE_KIB ARCHIVE_KIB RESERVE_KIB REQUIRED_KIB
 
 compose() {
   docker compose \
@@ -162,14 +216,54 @@ wait_http() {
 STAGED_DATA=""
 SAFETY_PARENT=""
 RESTORE_SUCCEEDED=false
+MUTATION_STARTED=false
+
+safe_remove_staging() {
+  local path="$1"
+  case "$path" in
+    "$DEPLOY_ROOT"/data.restore.*)
+      [[ ! -L "$path" ]] || return 1
+      rm -rf -- "$path"
+      ;;
+    *)
+      echo "refusing to remove unexpected staging path: $path" >&2
+      return 1
+      ;;
+  esac
+}
+
+safe_remove_pre_mutation_safety() {
+  local path="$1"
+  case "$path" in
+    "$DEPLOY_ROOT"/data.safety.*)
+      [[ ! -L "$path" && ! -e "$path/data" && ! -e "$path/failed-restored-data" ]] || return 1
+      rm -f -- "$path/current-version"
+      rmdir -- "$path"
+      ;;
+    *)
+      echo "refusing to remove unexpected safety path: $path" >&2
+      return 1
+      ;;
+  esac
+}
 
 report_retained_directories() {
   local original_exit_code="$?"
   if [[ -n "$STAGED_DATA" && -d "$STAGED_DATA" ]]; then
-    echo "retained restore staging directory for inspection: $STAGED_DATA" >&2
+    if [[ "$MUTATION_STARTED" == false ]]; then
+      safe_remove_staging "$STAGED_DATA" ||
+        echo "failed to clean restore staging directory: $STAGED_DATA" >&2
+    else
+      echo "retained restore staging directory for inspection: $STAGED_DATA" >&2
+    fi
   fi
   if [[ "$RESTORE_SUCCEEDED" == false && -n "$SAFETY_PARENT" && -d "$SAFETY_PARENT" ]]; then
-    echo "retained restore safety directory for inspection: $SAFETY_PARENT" >&2
+    if [[ "$MUTATION_STARTED" == false ]]; then
+      safe_remove_pre_mutation_safety "$SAFETY_PARENT" ||
+        echo "retained restore safety directory for inspection: $SAFETY_PARENT" >&2
+    else
+      echo "retained restore safety directory for inspection: $SAFETY_PARENT" >&2
+    fi
   fi
   return "$original_exit_code"
 }
@@ -316,8 +410,33 @@ cp -a "$CURRENT_FILE" "$SAFETY_PARENT/current-version"
 chown -R --reference="$DATA_DIR" "$STAGED_DATA"
 chmod --reference="$DATA_DIR" "$STAGED_DATA"
 
-MUTATION_STARTED=false
 DATA_SWAP_BEGUN=false
+
+atomic_write() {
+  local value="$1"
+  local destination="$2"
+  local temporary
+
+  temporary="$(mktemp "${destination}.tmp.XXXXXX")" || return 1
+  if ! printf '%s\n' "$value" > "$temporary"; then
+    rm -f -- "$temporary"
+    return 1
+  fi
+  if ! mv -- "$temporary" "$destination"; then
+    rm -f -- "$temporary"
+    return 1
+  fi
+}
+
+write_restore_marker() {
+  local phase="$1"
+  atomic_write "version=1
+operation=restore
+phase=$phase
+current_tag=$CURRENT_TAG
+staged_data=$STAGED_DATA
+safety_parent=$SAFETY_PARENT" "$TRANSACTION_FILE"
+}
 
 disable_failure_traps() {
   trap - ERR HUP INT TERM
@@ -377,7 +496,11 @@ on_error() {
   local original_exit_code="$?"
   disable_failure_traps
   if [[ "$MUTATION_STARTED" == true ]]; then
-    recover_data_and_backend || echo "automatic restore recovery failed; inspect the safety directory" >&2
+    if recover_data_and_backend; then
+      rm -f -- "$TRANSACTION_FILE"
+    else
+      echo "automatic restore recovery failed; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
+    fi
   fi
   exit "$original_exit_code"
 }
@@ -386,7 +509,11 @@ on_signal() {
   local signal_exit_code="$1"
   disable_failure_traps
   if [[ "$MUTATION_STARTED" == true ]]; then
-    recover_data_and_backend || echo "automatic restore recovery failed after signal" >&2
+    if recover_data_and_backend; then
+      rm -f -- "$TRANSACTION_FILE"
+    else
+      echo "automatic restore recovery failed after signal; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
+    fi
   fi
   exit "$signal_exit_code"
 }
@@ -396,6 +523,7 @@ trap 'on_signal 129' HUP
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
+write_restore_marker prepared
 MUTATION_STARTED=true
 compose stop backend
 if ! backend_states="$(compose ps --all --format '{{.State}}' backend)"; then
@@ -409,7 +537,9 @@ fi
 
 DATA_SWAP_BEGUN=true
 mv "$DATA_DIR" "$SAFETY_PARENT/data"
+write_restore_marker old_moved
 mv "$STAGED_DATA" "$DATA_DIR"
+write_restore_marker new_active
 
 IMAGE_TAG="$CURRENT_TAG"
 export IMAGE_TAG
@@ -419,5 +549,6 @@ wait_http "${PUBLIC_BASE_URL%/}/health"
 
 MUTATION_STARTED=false
 RESTORE_SUCCEEDED=true
+rm -f -- "$TRANSACTION_FILE"
 disable_failure_traps
 echo "data restore succeeded from $BACKUP_REAL; safety copy: $SAFETY_PARENT/data"
