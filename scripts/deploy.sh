@@ -9,6 +9,8 @@ fi
 readonly TARGET_TAG="$1"
 
 readonly DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly PRODUCTION_PREFLIGHT="$SCRIPT_DIR/production-preflight.sh"
 readonly COMPOSE_FILE="$DEPLOY_ROOT/compose.production.yml"
 readonly DEPLOY_DIR="$DEPLOY_ROOT/deploy"
 readonly DEPLOY_ENV="$DEPLOY_DIR/.env.deploy"
@@ -37,66 +39,17 @@ for command_name in docker curl tar flock mktemp du df awk; do
   }
 done
 
-for required_file in "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV"; do
+for required_file in "$PRODUCTION_PREFLIGHT" "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV"; do
   [[ -f "$required_file" ]] || {
     echo "missing required deployment file: $required_file" >&2
     exit 4
   }
 done
 
-invalid_deploy_env() {
-  echo "invalid deployment environment: $1" >&2
-  exit 4
-}
-
-ACR_REGISTRY=""
-ACR_NAMESPACE=""
-PUBLIC_BASE_URL=""
-seen_registry=false
-seen_namespace=false
-seen_public_url=false
-
-while IFS= read -r line || [[ -n "$line" ]]; do
-  line="${line%$'\r'}"
-  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-  [[ "$line" == *=* ]] || invalid_deploy_env "expected KEY=VALUE"
-
-  key="${line%%=*}"
-  value="${line#*=}"
-  case "$key" in
-    ACR_REGISTRY)
-      [[ "$seen_registry" == false ]] || invalid_deploy_env "duplicate ACR_REGISTRY"
-      ACR_REGISTRY="$value"
-      seen_registry=true
-      ;;
-    ACR_NAMESPACE)
-      [[ "$seen_namespace" == false ]] || invalid_deploy_env "duplicate ACR_NAMESPACE"
-      ACR_NAMESPACE="$value"
-      seen_namespace=true
-      ;;
-    PUBLIC_BASE_URL)
-      [[ "$seen_public_url" == false ]] || invalid_deploy_env "duplicate PUBLIC_BASE_URL"
-      PUBLIC_BASE_URL="$value"
-      seen_public_url=true
-      ;;
-    *)
-      invalid_deploy_env "unknown key: $key"
-      ;;
-  esac
-done < "$DEPLOY_ENV"
-
-[[ "$seen_registry" == true && "$ACR_REGISTRY" =~ ^[a-z0-9][a-z0-9-]*-registry\.cn-beijing\.cr\.aliyuncs\.com$ ]] ||
-  invalid_deploy_env "ACR_REGISTRY must be a Beijing ACR Enterprise Edition public endpoint"
-[[ "$ACR_REGISTRY" != "your-instance-registry.cn-beijing.cr.aliyuncs.com" ]] ||
-  invalid_deploy_env "ACR_REGISTRY still contains the Enterprise Edition example placeholder"
-[[ "$seen_namespace" == true && "$ACR_NAMESPACE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]] ||
-  invalid_deploy_env "ACR_NAMESPACE has an unsafe value"
-[[ "$seen_public_url" == true ]] || invalid_deploy_env "PUBLIC_BASE_URL is required"
-[[ "$PUBLIC_BASE_URL" =~ ^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?(/[^[:space:]?#]*)?$ ]] ||
-  invalid_deploy_env "PUBLIC_BASE_URL must be a valid HTTPS URL without credentials, query, or fragment"
-
+# shellcheck source=production-preflight.sh
+source "$PRODUCTION_PREFLIGHT"
+production_preflight "$DEPLOY_ENV" "$APP_ENV"
 readonly ACR_REGISTRY ACR_NAMESPACE PUBLIC_BASE_URL
-export ACR_REGISTRY ACR_NAMESPACE
 
 mkdir -p "$DEPLOY_DIR" "$DATA_DIR" "$LOG_DIR" "$BACKUPS_DIR"
 exec 9>"$DEPLOY_DIR/deploy.lock"
@@ -121,98 +74,6 @@ if [[ ! "$COMPOSE_MAJOR" =~ ^[0-9]+$ || ! "$COMPOSE_MINOR" =~ ^[0-9]+$ ]] ||
   exit 3
 fi
 readonly COMPOSE_VERSION
-
-invalid_app_env() {
-  echo "invalid production application environment: $1" >&2
-  exit 6
-}
-
-DEBUG_VALUE=""
-SESSION_COOKIE_SECURE_VALUE=""
-ADMIN_EMAILS_VALUE=""
-APP_ENCRYPTION_KEY_VALUE=""
-SMTP_HOST_VALUE=""
-SMTP_USER_VALUE=""
-SMTP_PASSWORD_VALUE=""
-SMTP_FROM_VALUE=""
-GOOGLE_CLIENT_ID_VALUE=""
-GOOGLE_CLIENT_SECRET_VALUE=""
-GOOGLE_REDIRECT_URI_VALUE=""
-declare -A seen_app_keys=()
-
-while IFS= read -r line || [[ -n "$line" ]]; do
-  line="${line%$'\r'}"
-  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-  [[ "$line" == *=* ]] || invalid_app_env "expected KEY=VALUE"
-
-  key="${line%%=*}"
-  value="${line#*=}"
-  [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || invalid_app_env "invalid key: $key"
-  first_character="${value:0:1}"
-  last_character="${value: -1}"
-  if [[ "$first_character" == \" || "$first_character" == "'" ||
-    "$last_character" == \" || "$last_character" == "'" ]]; then
-    invalid_app_env "quoted values are not allowed for $key; Compose raw env values must be exact"
-  fi
-  [[ "$value" != REPLACE_* ]] || invalid_app_env "placeholder remains for $key"
-
-  case "$key" in
-    DEBUG|SESSION_COOKIE_SECURE|ADMIN_EMAILS|APP_ENCRYPTION_KEY|SMTP_HOST|SMTP_USER|SMTP_PASSWORD|SMTP_FROM|GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GOOGLE_REDIRECT_URI)
-      [[ -z "${seen_app_keys[$key]+x}" ]] || invalid_app_env "duplicate key: $key"
-      seen_app_keys[$key]=true
-      ;;
-  esac
-
-  case "$key" in
-    DEBUG) DEBUG_VALUE="$value" ;;
-    SESSION_COOKIE_SECURE) SESSION_COOKIE_SECURE_VALUE="$value" ;;
-    ADMIN_EMAILS) ADMIN_EMAILS_VALUE="$value" ;;
-    APP_ENCRYPTION_KEY) APP_ENCRYPTION_KEY_VALUE="$value" ;;
-    SMTP_HOST) SMTP_HOST_VALUE="$value" ;;
-    SMTP_USER) SMTP_USER_VALUE="$value" ;;
-    SMTP_PASSWORD) SMTP_PASSWORD_VALUE="$value" ;;
-    SMTP_FROM) SMTP_FROM_VALUE="$value" ;;
-    GOOGLE_CLIENT_ID) GOOGLE_CLIENT_ID_VALUE="$value" ;;
-    GOOGLE_CLIENT_SECRET) GOOGLE_CLIENT_SECRET_VALUE="$value" ;;
-    GOOGLE_REDIRECT_URI) GOOGLE_REDIRECT_URI_VALUE="$value" ;;
-  esac
-done < "$APP_ENV"
-
-[[ "$DEBUG_VALUE" == false ]] || invalid_app_env "DEBUG must be false"
-[[ "${SESSION_COOKIE_SECURE_VALUE,,}" == true ]] || invalid_app_env "SESSION_COOKIE_SECURE must be true"
-[[ -n "$ADMIN_EMAILS_VALUE" ]] || invalid_app_env "ADMIN_EMAILS is required"
-[[ "${ADMIN_EMAILS_VALUE,,}" != *"admin@example"* && "${ADMIN_EMAILS_VALUE,,}" != *"@example."* ]] ||
-  invalid_app_env "ADMIN_EMAILS must not use an example administrator"
-[[ "$APP_ENCRYPTION_KEY_VALUE" =~ ^[A-Za-z0-9_-]{43}=$ ]] ||
-  invalid_app_env "APP_ENCRYPTION_KEY must be a 44-character URL-safe base64 Fernet key"
-
-smtp_any=false
-smtp_complete=false
-if [[ -n "$SMTP_HOST_VALUE" || -n "$SMTP_USER_VALUE" || -n "$SMTP_PASSWORD_VALUE" || -n "$SMTP_FROM_VALUE" ]]; then
-  smtp_any=true
-  if [[ -n "$SMTP_HOST_VALUE" && -n "$SMTP_USER_VALUE" && -n "$SMTP_PASSWORD_VALUE" && -n "$SMTP_FROM_VALUE" ]]; then
-    smtp_complete=true
-  else
-    invalid_app_env "SMTP login is partial; configure HOST, USER, PASSWORD, and FROM"
-  fi
-fi
-
-google_any=false
-google_complete=false
-if [[ -n "$GOOGLE_CLIENT_ID_VALUE" || -n "$GOOGLE_CLIENT_SECRET_VALUE" ]]; then
-  google_any=true
-  if [[ -n "$GOOGLE_CLIENT_ID_VALUE" && -n "$GOOGLE_CLIENT_SECRET_VALUE" ]]; then
-    [[ "$GOOGLE_REDIRECT_URI_VALUE" == "https://zhiku-cloud.cn/system-auth/google/callback" ]] ||
-      invalid_app_env "GOOGLE_REDIRECT_URI must use the canonical HTTPS callback"
-    google_complete=true
-  else
-    invalid_app_env "Google login is partial; configure both client ID and secret"
-  fi
-fi
-
-[[ "$smtp_any" == false || "$smtp_complete" == true ]] || invalid_app_env "SMTP login is incomplete"
-[[ "$google_any" == false || "$google_complete" == true ]] || invalid_app_env "Google login is incomplete"
-[[ "$smtp_complete" == true || "$google_complete" == true ]] || invalid_app_env "at least one usable login method is required"
 
 compose() {
   docker compose \
@@ -463,7 +324,7 @@ fi
 original_previous_tag="none"
 if [[ "$ORIGINAL_PREVIOUS_EXISTS" == true ]]; then
   original_previous_tag="$(printf '%s' "$ORIGINAL_PREVIOUS_CONTENT" | tr -d '[:space:]')"
-  [[ "$original_previous_tag" =~ ^[0-9a-f]{40}$ ]] || invalid_app_env "deploy/previous-version is invalid"
+  [[ "$original_previous_tag" =~ ^[0-9a-f]{40}$ ]] || production_preflight_invalid_app "deploy/previous-version is invalid"
 fi
 
 if ! read -r DATA_SIZE_KIB _ < <(du -sk -- "$DATA_DIR"); then

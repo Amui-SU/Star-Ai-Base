@@ -76,7 +76,7 @@ case "${marker[operation]:-}" in
       echo "restore transaction marker has unexpected keys" >&2
       exit 6
     }
-    [[ "${marker[phase]:-}" =~ ^(prepared|old_moved|new_active)$ ]] || {
+    [[ "${marker[phase]:-}" =~ ^(prepared|old_moved|new_active|rollback_started|rollback_ready)$ ]] || {
       echo "invalid restore transaction phase" >&2
       exit 6
     }
@@ -151,6 +151,17 @@ atomic_write() {
   fi
 }
 
+write_restore_marker_phase() {
+  local phase="$1"
+  atomic_write "version=1
+operation=restore
+phase=$phase
+current_tag=${marker[current_tag]}
+staged_data=${marker[staged_data]}
+safety_parent=${marker[safety_parent]}" "$TRANSACTION_FILE" || return 1
+  marker[phase]="$phase"
+}
+
 validate_tag_or_none() {
   [[ "$1" == none || "$1" =~ ^[0-9a-f]{40}$ ]]
 }
@@ -208,6 +219,7 @@ recover_restore() {
   local current_tag="${marker[current_tag]:-}"
   local staged_data="${marker[staged_data]:-}"
   local safety_parent="${marker[safety_parent]:-}"
+  local phase="${marker[phase]}"
 
   [[ "$current_tag" =~ ^[0-9a-f]{40}$ ]] || {
     echo "invalid restore current tag; transaction marker retained" >&2
@@ -226,31 +238,77 @@ recover_restore() {
   export IMAGE_TAG
   compose stop backend || manual_failure
 
-  if [[ -d "$safety_parent/data" ]]; then
-    if [[ -e "$DATA_DIR" ]]; then
-      [[ ! -e "$safety_parent/failed-restored-data" ]] || manual_failure
-      mv -- "$DATA_DIR" "$safety_parent/failed-restored-data" || manual_failure
+  case "$phase" in
+    prepared)
+      if [[ -d "$DATA_DIR" && -d "$staged_data" && ! -e "$safety_parent/data" && ! -e "$safety_parent/failed-restored-data" ]]; then
+        : # The original data is still active before the first rename.
+      elif [[ ! -e "$DATA_DIR" && -d "$staged_data" && -d "$safety_parent/data" && ! -e "$safety_parent/failed-restored-data" ]]; then
+        : # The first rename completed before its phase update.
+      else
+        manual_failure
+      fi
+      ;;
+    old_moved)
+      if [[ ! -e "$DATA_DIR" && -d "$staged_data" && -d "$safety_parent/data" && ! -e "$safety_parent/failed-restored-data" ]]; then
+        : # The original data is preserved and the replacement is still staged.
+      elif [[ -d "$DATA_DIR" && ! -e "$staged_data" && -d "$safety_parent/data" && ! -e "$safety_parent/failed-restored-data" ]]; then
+        : # The replacement became active before its phase update.
+      else
+        manual_failure
+      fi
+      ;;
+    new_active)
+      [[ -d "$DATA_DIR" && ! -e "$staged_data" && -d "$safety_parent/data" && ! -e "$safety_parent/failed-restored-data" ]] || manual_failure
+      ;;
+    rollback_started)
+      if [[ -d "$safety_parent/data" ]]; then
+        [[ ! -e "$safety_parent/failed-restored-data" || ! -e "$DATA_DIR" ]] || manual_failure
+      elif [[ -d "$DATA_DIR" && -d "$staged_data" && ! -e "$safety_parent/failed-restored-data" ]]; then
+        : # Pre-swap rollback was recorded before staging cleanup.
+      elif [[ -d "$DATA_DIR" && ! -e "$staged_data" && -d "$safety_parent/failed-restored-data" ]]; then
+        : # The original data rename completed before the ready phase update.
+      else
+        manual_failure
+      fi
+      ;;
+    rollback_ready)
+      [[ -d "$DATA_DIR" && ! -e "$safety_parent/data" ]] || manual_failure
+      ;;
+  esac
+
+  if [[ "$phase" != rollback_ready ]]; then
+    write_restore_marker_phase rollback_started || manual_failure
+    if [[ -d "$safety_parent/data" ]]; then
+      if [[ -e "$DATA_DIR" ]]; then
+        [[ ! -e "$safety_parent/failed-restored-data" ]] || manual_failure
+        mv -- "$DATA_DIR" "$safety_parent/failed-restored-data" || manual_failure
+      fi
+      mv -- "$safety_parent/data" "$DATA_DIR" || manual_failure
+    elif [[ -d "$DATA_DIR" && -d "$staged_data" && ! -e "$safety_parent/failed-restored-data" ]]; then
+      : # The original data was never moved.
+    elif [[ -d "$DATA_DIR" && ! -e "$staged_data" && -d "$safety_parent/failed-restored-data" ]]; then
+      : # Rollback completed before the ready phase update.
+    else
+      manual_failure
     fi
-    mv -- "$safety_parent/data" "$DATA_DIR" || manual_failure
-  elif [[ -d "$DATA_DIR" && -d "$staged_data" ]]; then
-    : # The old data is still active; the first rename never completed.
-  elif [[ -d "$DATA_DIR" && ! -e "$staged_data" && -d "$safety_parent/failed-restored-data" ]]; then
-    : # A previous recovery restored old data but was interrupted while restarting.
-  else
-    manual_failure
+    [[ -d "$DATA_DIR" && ! -e "$safety_parent/data" ]] || manual_failure
+    write_restore_marker_phase rollback_ready || manual_failure
   fi
 
   if [[ -d "$staged_data" ]]; then
     safe_remove_staging "$staged_data" || manual_failure
   fi
-  if [[ ! -e "$safety_parent/data" && ! -e "$safety_parent/failed-restored-data" ]]; then
-    rm -f -- "$safety_parent/current-version"
-    rmdir -- "$safety_parent" 2>/dev/null || true
-  fi
+  [[ ! -e "$staged_data" ]] || manual_failure
 
   compose up -d --pull never backend || manual_failure
   wait_http "http://127.0.0.1:8000/health" '{"status":"healthy"}' || manual_failure
   wait_http "${PUBLIC_BASE_URL%/}/health" '{"status":"healthy"}' || manual_failure
+  if [[ -d "$safety_parent" && ! -L "$safety_parent" ]]; then
+    rm -f -- "$safety_parent/current-version"
+    rmdir -- "$safety_parent" 2>/dev/null || true
+  elif [[ -e "$safety_parent" ]]; then
+    manual_failure
+  fi
 }
 
 recover_deploy() {

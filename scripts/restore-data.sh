@@ -9,6 +9,7 @@ fi
 
 readonly DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly PRODUCTION_PREFLIGHT="$SCRIPT_DIR/production-preflight.sh"
 readonly ARCHIVE_INSPECTOR="$SCRIPT_DIR/inspect-restore-archive.py"
 readonly COMPOSE_FILE="$DEPLOY_ROOT/compose.production.yml"
 readonly DEPLOY_DIR="$DEPLOY_ROOT/deploy"
@@ -46,12 +47,13 @@ done
   exit 3
 }
 
-for required_file in "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV" "$CURRENT_FILE"; do
+for required_file in "$PRODUCTION_PREFLIGHT" "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV" "$CURRENT_FILE"; do
   [[ -f "$required_file" ]] || {
     echo "missing required restore file: $required_file" >&2
     exit 4
   }
 done
+
 for required_directory in "$DATA_DIR" "$BACKUPS_DIR"; do
   [[ -d "$required_directory" ]] || {
     echo "missing required restore directory: $required_directory" >&2
@@ -94,6 +96,11 @@ if [[ -e "$TRANSACTION_FILE" ]]; then
   exit 7
 fi
 
+# shellcheck source=production-preflight.sh
+source "$PRODUCTION_PREFLIGHT"
+production_preflight "$DEPLOY_ENV" "$APP_ENV"
+readonly ACR_REGISTRY ACR_NAMESPACE PUBLIC_BASE_URL
+
 if ! COMPOSE_VERSION="$(docker compose version --short 2>/dev/null)"; then
   echo "Docker Compose >= 2.30 is required" >&2
   exit 3
@@ -115,32 +122,6 @@ CURRENT_TAG="$(tr -d '[:space:]' < "$CURRENT_FILE")"
 readonly CURRENT_TAG
 IMAGE_TAG="$CURRENT_TAG"
 export IMAGE_TAG
-
-PUBLIC_BASE_URL=""
-seen_public_url=false
-while IFS= read -r line || [[ -n "$line" ]]; do
-  line="${line%$'\r'}"
-  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-  [[ "$line" == *=* ]] || {
-    echo "invalid deployment environment" >&2
-    exit 6
-  }
-  key="${line%%=*}"
-  value="${line#*=}"
-  if [[ "$key" == PUBLIC_BASE_URL ]]; then
-    [[ "$seen_public_url" == false ]] || {
-      echo "duplicate PUBLIC_BASE_URL" >&2
-      exit 6
-    }
-    PUBLIC_BASE_URL="$value"
-    seen_public_url=true
-  fi
-done < "$DEPLOY_ENV"
-[[ "$seen_public_url" == true && "$PUBLIC_BASE_URL" =~ ^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?(/[^[:space:]?#]*)?$ ]] || {
-  echo "PUBLIC_BASE_URL must be a valid HTTPS URL" >&2
-  exit 6
-}
-readonly PUBLIC_BASE_URL
 
 if ! UNCOMPRESSED_BYTES="$(
   "$PYTHON_BIN" "$ARCHIVE_INSPECTOR" \
@@ -477,6 +458,7 @@ recover_data_and_backend() {
     print_manual_recovery_instructions
     return 1
   fi
+  write_restore_marker rollback_ready || return 1
   IMAGE_TAG="$CURRENT_TAG"
   export IMAGE_TAG
   compose up -d --pull never backend || return 1

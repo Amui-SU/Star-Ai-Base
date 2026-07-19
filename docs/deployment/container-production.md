@@ -55,6 +55,7 @@ deploy/nginx/zhiku-cloud.conf.example
 scripts/deploy.sh
 scripts/restore-data.sh
 scripts/recover-interrupted.sh
+scripts/production-preflight.sh
 scripts/inspect-restore-archive.py
 ```
 
@@ -65,6 +66,7 @@ cd /opt/zhiku-cloud
 cp deploy/.env.deploy.example deploy/.env.deploy
 cp deploy/.env.production.example deploy/.env.production
 chmod 600 deploy/.env.deploy deploy/.env.production
+chmod 0640 scripts/production-preflight.sh
 chmod 0750 scripts/deploy.sh scripts/restore-data.sh scripts/recover-interrupted.sh
 chmod 0750 scripts/inspect-restore-archive.py
 ```
@@ -81,7 +83,7 @@ printf '%s' "$ACR_PULL_PASSWORD" | docker login your-instance-registry.cn-beijin
 unset ACR_PULL_PASSWORD
 ```
 
-以后如果部署基础设施有变更，需要再次同步 `compose.production.yml`、`scripts/deploy.sh`、`scripts/restore-data.sh`、`scripts/recover-interrupted.sh`、`scripts/inspect-restore-archive.py`、`deploy/nginx/zhiku-cloud.conf.example`、`.env.deploy.example` 和 `deploy/.env.production.example` 的结构变化。同步示例文件时不要覆盖服务器上的 `.env.deploy`、`.env.production` 或实际证书路径。
+以后如果部署基础设施有变更，需要再次同步 `compose.production.yml`、`scripts/deploy.sh`、`scripts/restore-data.sh`、`scripts/recover-interrupted.sh`、`scripts/production-preflight.sh`、`scripts/inspect-restore-archive.py`、`deploy/nginx/zhiku-cloud.conf.example`、`.env.deploy.example` 和 `deploy/.env.production.example` 的结构变化。同步示例文件时不要覆盖服务器上的 `.env.deploy`、`.env.production` 或实际证书路径。
 
 ## 合并 Nginx 配置
 
@@ -140,7 +142,7 @@ cd /opt/zhiku-cloud
 ./scripts/restore-data.sh /opt/zhiku-cloud/backups/REPLACE_WITH_BACKUP/data.tar.gz
 ```
 
-脚本会先取得与发布相同的 `deploy.lock`，再读取版本与环境状态。它拒绝备份目录之外的路径、符号链接、危险归档成员，以及超过成员数或解压总量限制的归档；默认解压总量上限为 20 GiB，可通过 `ZHIKU_RESTORE_MAX_MEMBERS`、`ZHIKU_RESTORE_MAX_BYTES` 调低或在评估后调整。真正解压前，可用空间必须至少为归档展开大小加 2 GiB；可用 `ZHIKU_RESTORE_DISK_RESERVE_BYTES` 提高预留量。停机前脚本会验证应用 SQLite 的完整性及核心表，并验证 `chroma_db/chroma.sqlite3` 的完整性和非空 schema。随后脚本停止后端，把原数据保存在权限受限且名称唯一的 `data.safety.*` 安全副本中，切换已验证数据，并使用 `current-version` 中的精确 SHA 和 `--pull never` 重启。只有本机和公网健康检查都成功，恢复才算完成。
+脚本会先取得与发布相同的 `deploy.lock`，再通过 `production-preflight.sh` 执行与发布完全相同的只读生产预检；企业版 ACR、Compose raw 值、Fernet、Cookie、管理员和登录配置任一无效时，不会展开归档、创建事务 marker 或停止后端。它拒绝备份目录之外的路径、符号链接、危险归档成员，以及超过成员数或解压总量限制的归档；默认解压总量上限为 20 GiB，可通过 `ZHIKU_RESTORE_MAX_MEMBERS`、`ZHIKU_RESTORE_MAX_BYTES` 调低或在评估后调整。真正解压前，可用空间必须至少为归档展开大小加 2 GiB；可用 `ZHIKU_RESTORE_DISK_RESERVE_BYTES` 提高预留量。停机前脚本会验证应用 SQLite 的完整性及核心表，并验证 `chroma_db/chroma.sqlite3` 的完整性和非空 schema。随后脚本停止后端，把原数据保存在权限受限且名称唯一的 `data.safety.*` 安全副本中，切换已验证数据，并使用 `current-version` 中的精确 SHA 和 `--pull never` 重启。只有本机和公网健康检查都成功，恢复才算完成。
 
 交换开始后若复制、移动、启动、健康检查失败，或收到 HUP、INT、TERM，脚本会先停止后端、恢复安全副本，再决定是否重启原 SHA。若旧数据无法确认已经回到活动路径，后端会保持停止，脚本会打印旧数据、失败数据和活动目录的精确人工恢复路径。生产数据变更前会原子写入 `deploy/transaction`；只有发布、恢复或自动回退完整成功后才删除。未进入数据交换的失败只清理本次已知 `data.restore.*` 暂存目录；交换开始后的暂存、安全副本和失败数据会保留以便审计。整个流程不删除 Compose volume，也不批量清理 Docker 数据。
 
@@ -153,7 +155,7 @@ cd /opt/zhiku-cloud
 test ! -e deploy/transaction || ./scripts/recover-interrupted.sh
 ```
 
-`deploy.sh` 和 `restore-data.sh` 发现已有 `deploy/transaction` 会拒绝继续并指向该命令。恢复脚本取得同一个锁，严格解析 marker，不执行其中内容；对于中断发布，它恢复精确的旧 SHA 和原版本记录；对于中断数据恢复，它根据活动 `data`、`data.restore.*` 和 `data.safety.*` 的实际状态处理交换前、两次重命名之间以及新数据已生效三种现场。无法无歧义恢复时，后端保持停止，marker 与精确目录路径会保留，禁止删除后直接重跑。
+`deploy.sh` 和 `restore-data.sh` 发现已有 `deploy/transaction` 会拒绝继续并指向该命令。恢复脚本取得同一个锁，严格解析 marker，不执行其中内容；对于中断发布，它恢复精确的旧 SHA 和原版本记录；对于中断数据恢复，它根据 marker 阶段以及活动 `data`、`data.restore.*` 和 `data.safety.*` 的实际状态处理交换前、两次重命名之间、新数据已生效和回滚后重启再次失败的现场。回滚会先原子记录 `rollback_started`，确认旧数据恢复后再记录 `rollback_ready`；只有后者可重入 active-only 现场。无法无歧义恢复时，后端保持停止，marker 与精确目录路径会保留，禁止删除后直接重跑。
 
 ## 备份保留与磁盘监控
 

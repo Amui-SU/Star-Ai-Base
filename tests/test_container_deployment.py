@@ -292,6 +292,7 @@ def test_deploy_script_validates_versions_and_never_deletes_runtime_state():
 
 def test_deploy_script_uses_rooted_files_and_public_deployment_metadata():
     content = read("scripts/deploy.sh")
+    preflight = read("scripts/production-preflight.sh")
 
     assert 'DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"' in content
     for path in [
@@ -313,7 +314,7 @@ def test_deploy_script_uses_rooted_files_and_public_deployment_metadata():
     assert 'source "$DEPLOY_ENV"' not in content
     assert 'source "$APP_ENV"' not in content
     for variable in ["ACR_REGISTRY", "ACR_NAMESPACE", "PUBLIC_BASE_URL"]:
-        assert f"{variable})" in content
+        assert f"{variable})" in preflight
     assert "readonly ACR_REGISTRY ACR_NAMESPACE PUBLIC_BASE_URL" in content
     assert "--project-name zhiku-cloud" in content
     assert "umask 077" in content
@@ -322,13 +323,16 @@ def test_deploy_script_uses_rooted_files_and_public_deployment_metadata():
 
 def test_deploy_script_enforces_disk_compose_cookie_and_transaction_preflights():
     content = read("scripts/deploy.sh")
+    preflight = read("scripts/production-preflight.sh")
 
     assert "ZHIKU_DEPLOY_DISK_RESERVE_BYTES:-2147483648" in content
     assert 'du -sk -- "$DATA_DIR"' in content
     assert 'df -Pk -- "$BACKUPS_DIR"' in content
     assert "Docker Compose >= 2.30" in content
-    assert "${SESSION_COOKIE_SECURE_VALUE,,}" in content
-    assert "== true" in content
+    assert 'source "$PRODUCTION_PREFLIGHT"' in content
+    assert 'production_preflight "$DEPLOY_ENV" "$APP_ENV"' in content
+    assert "${SESSION_COOKIE_SECURE_VALUE,,}" in preflight
+    assert "== true" in preflight
     assert 'TRANSACTION_FILE="$DEPLOY_DIR/transaction"' in content
     assert "recover-interrupted.sh" in content
     pull_index = content.index("compose pull backend frontend")
@@ -340,7 +344,7 @@ def test_deploy_script_enforces_disk_compose_cookie_and_transaction_preflights()
 
 
 def test_deploy_script_requires_beijing_enterprise_acr_endpoint():
-    content = read("scripts/deploy.sh")
+    content = read("scripts/production-preflight.sh")
 
     assert "cn-beijing\\.cr\\.aliyuncs\\.com" in content
     assert "your-instance-registry.cn-beijing.cr.aliyuncs.com" in content
@@ -355,7 +359,23 @@ def test_restore_script_enforces_20_gib_limit_disk_budget_and_transaction_marker
     assert 'df -Pk -- "$DEPLOY_ROOT"' in content
     assert 'TRANSACTION_FILE="$DEPLOY_DIR/transaction"' in content
     assert "recover-interrupted.sh" in content
+    assert 'source "$PRODUCTION_PREFLIGHT"' in content
+    assert 'production_preflight "$DEPLOY_ENV" "$APP_ENV"' in content
     assert 'rm -f -- "$BACKUP_DIR/data.tar.gz.partial"' in read("scripts/deploy.sh")
+
+
+def test_deploy_and_restore_share_one_read_only_production_preflight():
+    helper = read("scripts/production-preflight.sh")
+
+    assert "source " not in helper
+    assert "eval " not in helper
+    assert "docker " not in helper
+    assert "production_preflight()" in helper
+    for script in ["scripts/deploy.sh", "scripts/restore-data.sh"]:
+        content = read(script)
+        assert 'PRODUCTION_PREFLIGHT="$SCRIPT_DIR/production-preflight.sh"' in content
+        assert 'source "$PRODUCTION_PREFLIGHT"' in content
+        assert content.count('production_preflight "$DEPLOY_ENV" "$APP_ENV"') == 1
 
 
 def test_recovery_script_has_strict_transaction_contract():
@@ -848,14 +868,15 @@ def test_deploy_script_rejects_env_command_and_unknown_project_override(tmp_path
 
 def test_deploy_script_safely_preflights_production_login_configuration():
     content = read("scripts/deploy.sh")
+    preflight = read("scripts/production-preflight.sh")
 
     assert 'source "$APP_ENV"' not in content
-    assert 'done < "$APP_ENV"' in content
-    assert "SESSION_COOKIE_SECURE" in content
-    assert "APP_ENCRYPTION_KEY" in content
-    assert "GOOGLE_REDIRECT_URI" in content
-    assert "SMTP_PASSWORD" in content
-    assert "REPLACE_" in content
+    assert 'done < "$app_env"' in preflight
+    assert "SESSION_COOKIE_SECURE" in preflight
+    assert "APP_ENCRYPTION_KEY" in preflight
+    assert "GOOGLE_REDIRECT_URI" in preflight
+    assert "SMTP_PASSWORD" in preflight
+    assert "REPLACE_" in preflight
 
 
 @pytest.mark.parametrize(
@@ -1307,7 +1328,9 @@ def restore_fixture(tmp_path: Path) -> dict[str, object]:
         "PUBLIC_BASE_URL=https://public.example.test\n",
         encoding="utf-8",
     )
-    (deploy_dir / ".env.production").write_text("APP_ENV=test\n", encoding="utf-8")
+    (deploy_dir / ".env.production").write_text(
+        valid_production_environment(), encoding="utf-8"
+    )
     (deploy_dir / "current-version").write_text(TARGET_TAG + "\n", encoding="utf-8")
     create_application_sqlite(data_dir / "bilibili_rag.db", "old")
     create_chroma_sqlite(data_dir / "chroma_db" / "chroma.sqlite3")
@@ -1624,6 +1647,74 @@ def test_restore_script_rejects_invalid_current_sha_before_downtime(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("file_name", "invalid_content", "error_fragment"),
+    [
+        (
+            ".env.deploy",
+            "ACR_REGISTRY=registry.cn-beijing.aliyuncs.com\n"
+            "ACR_NAMESPACE=zhiku\n"
+            "PUBLIC_BASE_URL=https://public.example.test\n",
+            "Enterprise Edition",
+        ),
+        (
+            ".env.production",
+            valid_production_environment().replace(
+                "SESSION_COOKIE_SECURE=true", 'SESSION_COOKIE_SECURE="true"'
+            ),
+            "quoted",
+        ),
+        (
+            ".env.production",
+            valid_production_environment().replace(
+                "SMTP_PASSWORD=password=$literal=with=equals",
+                "SMTP_PASSWORD='password=$literal=with=equals'",
+            ),
+            "quoted",
+        ),
+        (
+            ".env.production",
+            valid_production_environment().replace(
+                f"APP_ENCRYPTION_KEY={VALID_FERNET_KEY}",
+                "APP_ENCRYPTION_KEY=short",
+            ),
+            "Fernet",
+        ),
+        (
+            ".env.production",
+            valid_production_environment().replace(
+                "ADMIN_EMAILS=admin@zhiku-cloud.cn",
+                "ADMIN_EMAILS=admin@example.com",
+            ),
+            "ADMIN_EMAILS",
+        ),
+        (
+            ".env.production",
+            "DEBUG=false\n"
+            "SESSION_COOKIE_SECURE=true\n"
+            "ADMIN_EMAILS=admin@zhiku-cloud.cn\n"
+            f"APP_ENCRYPTION_KEY={VALID_FERNET_KEY}\n",
+            "login method",
+        ),
+    ],
+)
+def test_restore_script_reuses_production_preflight_before_staging_or_downtime(
+    tmp_path, file_name, invalid_content, error_fragment
+):
+    fixture = restore_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / file_name).write_text(invalid_content, encoding="utf-8")
+
+    result = run_restore(fixture)
+
+    assert result.returncode != 0
+    assert error_fragment in result.stderr
+    assert list(Path(fixture["root"]).glob("data.restore.*")) == []
+    assert list(Path(fixture["root"]).glob("data.safety.*")) == []
+    assert not (deploy_dir / "transaction").exists()
+    assert restore_operations(fixture) == []
+
+
+@pytest.mark.parametrize(
     ("failure_env", "failure_value"),
     [("FAKE_CP_EXIT", "73"), ("FAKE_CHOWN_EXIT", "74")],
 )
@@ -1853,6 +1944,7 @@ def test_recovery_restore_is_idempotent_after_rollback_then_restart_failure(tmp_
     safety.mkdir()
     Path(fixture["data_dir"]).rename(safety / "data")
     staged.rename(Path(fixture["data_dir"]))
+    (safety / "current-version").write_text(TARGET_TAG + "\n", encoding="utf-8")
     write_restore_transaction(fixture, staged, safety, "new_active")
 
     first = run_recover(fixture, FAKE_START_FAILURES="1")
@@ -1860,13 +1952,91 @@ def test_recovery_restore_is_idempotent_after_rollback_then_restart_failure(tmp_
     assert first.returncode != 0
     assert_old_restore_data_is_active(fixture)
     assert (safety / "failed-restored-data").is_dir()
-    assert (Path(fixture["deploy_dir"]) / "transaction").exists()
+    transaction = Path(fixture["deploy_dir"]) / "transaction"
+    assert "phase=rollback_ready\n" in transaction.read_text(encoding="utf-8")
+    assert (safety / "current-version").exists()
 
     second = run_recover(fixture)
 
     assert second.returncode == 0, second.stderr
     assert_old_restore_data_is_active(fixture)
-    assert not (Path(fixture["deploy_dir"]) / "transaction").exists()
+    assert not transaction.exists()
+    assert not (safety / "current-version").exists()
+
+
+def test_recovery_restore_remains_reentrant_after_repeated_backend_start_failure(
+    tmp_path,
+):
+    fixture = restore_fixture(tmp_path)
+    root = Path(fixture["root"])
+    staged = root / "data.restore.test"
+    safety = root / "data.safety.test"
+    create_restore_data_tree(staged, "new")
+    safety.mkdir()
+    Path(fixture["data_dir"]).rename(safety / "data")
+    staged.rename(Path(fixture["data_dir"]))
+    (safety / "current-version").write_text(TARGET_TAG + "\n", encoding="utf-8")
+    write_restore_transaction(fixture, staged, safety, "new_active")
+    transaction = Path(fixture["deploy_dir"]) / "transaction"
+
+    first = run_recover(fixture, FAKE_START_FAILURES="2")
+    second = run_recover(fixture, FAKE_START_FAILURES="2")
+
+    assert first.returncode != 0
+    assert second.returncode != 0
+    assert_old_restore_data_is_active(fixture)
+    assert "phase=rollback_ready\n" in transaction.read_text(encoding="utf-8")
+    assert (safety / "current-version").exists()
+
+    third = run_recover(fixture)
+
+    assert third.returncode == 0, third.stderr
+    assert_old_restore_data_is_active(fixture)
+    assert not transaction.exists()
+    assert not (safety / "current-version").exists()
+
+
+def test_recovery_resumes_phase_confirmed_active_only_rollback_after_start_failure(
+    tmp_path,
+):
+    fixture = restore_fixture(tmp_path)
+    root = Path(fixture["root"])
+    staged = root / "data.restore.test"
+    safety = root / "data.safety.test"
+    write_restore_transaction(fixture, staged, safety, "rollback_ready")
+    transaction = Path(fixture["deploy_dir"]) / "transaction"
+
+    first = run_recover(fixture, FAKE_START_FAILURES="1")
+
+    assert first.returncode != 0
+    assert_old_restore_data_is_active(fixture)
+    assert "phase=rollback_ready\n" in transaction.read_text(encoding="utf-8")
+    assert not staged.exists()
+    assert not safety.exists()
+
+    second = run_recover(fixture)
+
+    assert second.returncode == 0, second.stderr
+    assert_old_restore_data_is_active(fixture)
+    assert not transaction.exists()
+
+
+def test_recovery_rejects_active_only_restore_state_without_rollback_phase(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    root = Path(fixture["root"])
+    staged = root / "data.restore.test"
+    safety = root / "data.safety.test"
+    write_restore_transaction(fixture, staged, safety, "new_active")
+
+    result = run_recover(fixture)
+
+    assert result.returncode != 0
+    assert "backend left stopped" in result.stderr
+    assert_old_restore_data_is_active(fixture)
+    assert (Path(fixture["deploy_dir"]) / "transaction").exists()
+    assert not any(
+        "up -d --pull never backend" in line for line in restore_operations(fixture)
+    )
 
 
 def test_recovery_restores_previous_images_and_version_after_interrupted_deploy(
@@ -2129,7 +2299,11 @@ def test_restore_script_has_strict_safe_contract_and_linux_mode():
     assert "chroma.sqlite3" in content
     lock_index = content.index("flock -n 9")
     assert lock_index < content.index("CURRENT_TAG=")
-    assert lock_index < content.index('done < "$DEPLOY_ENV"')
+    preflight_index = content.index('production_preflight "$DEPLOY_ENV" "$APP_ENV"')
+    staging_index = content.index('mktemp -d "$DEPLOY_ROOT/data.restore.')
+    marker_index = content.index("write_restore_marker prepared")
+    stop_index = content.index("compose stop backend", marker_index)
+    assert preflight_index < staging_index < marker_index < stop_index
     index_entry = subprocess.run(
         ["git", "ls-files", "--stage", "scripts/restore-data.sh"],
         cwd=PROJECT_ROOT,
