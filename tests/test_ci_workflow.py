@@ -71,6 +71,7 @@ def test_publish_images_runs_only_after_successful_main_push_ci():
         "concurrency:",
         "group: publish-images",
         "cancel-in-progress: false",
+        "queue: max",
         "timeout-minutes:",
     ]:
         assert required in content
@@ -147,10 +148,22 @@ def test_publish_images_builds_sha_only_then_promotes_both_images_when_current()
 
     assert content.index("- name: Build and publish frontend image") < freshness_index
     assert freshness_index < remote_head_index < backend_promotion_index
+    assert "id: freshness" in content[freshness_index:backend_promotion_index]
     assert '[[ "$remote_main_sha" != "$IMAGE_TAG" ]]' in content
+    stale_branch = content.split(
+        'if [[ "$remote_main_sha" != "$IMAGE_TAG" ]]; then', 1
+    )[1].split("fi", 1)[0]
+    assert 'echo "promote=false" >> "$GITHUB_OUTPUT"' in stale_branch
+    assert "exit 0" in stale_branch
+    assert (
+        'echo "promote=true" >> "$GITHUB_OUTPUT"'
+        in content[remote_head_index:backend_promotion_index]
+    )
     assert backend_promotion_index < frontend_promotion_index
     assert content.count("docker buildx imagetools create") == 2
     promotion_step = content.split("- name: Promote tested images to latest", 1)[1]
+    promotion_header = promotion_step.split("run: |", 1)[0]
+    assert "if: steps.freshness.outputs.promote == 'true'" in promotion_header
     assert (
         "BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend"
         in promotion_step

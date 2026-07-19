@@ -12,6 +12,7 @@ permissions:
 concurrency:
   group: publish-images
   cancel-in-progress: false
+  queue: max
 
 jobs:
   publish:
@@ -69,6 +70,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend
 
       - name: Verify tested commit is still current
+        id: freshness
         shell: bash
         run: |
           set -euo pipefail
@@ -77,10 +79,13 @@ jobs:
           remote_main_sha="$(git rev-parse refs/remotes/origin/main)"
           if [[ "$remote_main_sha" != "$IMAGE_TAG" ]]; then
             echo "origin/main advanced; latest tags will not be updated."
-            exit 1
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "promote=true" >> "$GITHUB_OUTPUT"
 
       - name: Promote tested images to latest
+        if: steps.freshness.outputs.promote == 'true'
         shell: bash
         env:
           BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend
