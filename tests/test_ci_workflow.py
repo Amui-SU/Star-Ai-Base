@@ -1,4 +1,5 @@
 import configparser
+import re
 from pathlib import Path
 
 
@@ -12,12 +13,15 @@ def read_publish_workflow() -> str:
     return workflow.read_text(encoding="utf-8")
 
 
-def test_github_actions_ci_runs_backend_and_frontend_quality_gates():
-    project_root = Path(__file__).resolve().parents[1]
-    workflow = project_root / ".github" / "workflows" / "ci.yml"
+def read_ci_workflow() -> str:
+    workflow = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 
-    assert workflow.exists()
-    content = workflow.read_text(encoding="utf-8")
+    assert workflow.exists(), "CI workflow must exist"
+    return workflow.read_text(encoding="utf-8")
+
+
+def test_github_actions_ci_runs_backend_and_frontend_quality_gates():
+    content = read_ci_workflow()
     for required in [
         "python -m pytest -q",
         "npm ci",
@@ -64,6 +68,10 @@ def test_publish_images_runs_only_after_successful_main_push_ci():
         "github.event.workflow_run.event == 'push'",
         "permissions:",
         "contents: read",
+        "concurrency:",
+        "group: publish-images",
+        "cancel-in-progress: false",
+        "timeout-minutes:",
     ]:
         assert required in content
 
@@ -71,6 +79,7 @@ def test_publish_images_runs_only_after_successful_main_push_ci():
         "github.event.workflow_run.conclusion == 'success' && "
         "github.event.workflow_run.event == 'push'"
     ) in normalized
+    assert re.search(r"timeout-minutes:\s+[1-9][0-9]*", content)
 
 
 def test_publish_images_uses_tested_commit_and_acr_configuration():
@@ -84,12 +93,17 @@ def test_publish_images_uses_tested_commit_and_acr_configuration():
         "ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}",
         "ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}",
         "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+        "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
         "docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4",
     ]:
         assert required in content
 
+    assert content.index("docker/setup-buildx-action@") < content.index(
+        "docker/build-push-action@"
+    )
 
-def test_publish_images_builds_sha_and_latest_backend_and_frontend_images():
+
+def test_publish_images_builds_sha_only_then_promotes_both_images_when_current():
     content = read_publish_workflow()
 
     for required in [
@@ -97,9 +111,7 @@ def test_publish_images_builds_sha_and_latest_backend_and_frontend_images():
         "file: frontend/Dockerfile",
         "NEXT_PUBLIC_API_URL=https://zhiku-cloud.cn",
         "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend:${{ env.IMAGE_TAG }}",
-        "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend:latest",
         "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend:${{ env.IMAGE_TAG }}",
-        "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend:latest",
         "scope=backend",
         "scope=frontend",
     ]:
@@ -112,5 +124,69 @@ def test_publish_images_builds_sha_and_latest_backend_and_frontend_images():
         == 2
     )
     assert content.count("push: true") == 2
+
+    backend_build = content.split("- name: Build and publish backend image", 1)[
+        1
+    ].split("- name: Build and publish frontend image", 1)[0]
+    frontend_build = content.split("- name: Build and publish frontend image", 1)[
+        1
+    ].split("- name: Verify tested commit is still current", 1)[0]
+    assert ":latest" not in backend_build
+    assert ":latest" not in frontend_build
+
+    freshness_index = content.index("- name: Verify tested commit is still current")
+    remote_head_index = content.index("refs/remotes/origin/main")
+    backend_promotion_index = content.index(
+        "docker buildx imagetools create",
+        remote_head_index,
+    )
+    frontend_promotion_index = content.index(
+        "docker buildx imagetools create",
+        backend_promotion_index + 1,
+    )
+
+    assert content.index("- name: Build and publish frontend image") < freshness_index
+    assert freshness_index < remote_head_index < backend_promotion_index
+    assert '[[ "$remote_main_sha" != "$IMAGE_TAG" ]]' in content
+    assert backend_promotion_index < frontend_promotion_index
+    assert content.count("docker buildx imagetools create") == 2
+    promotion_step = content.split("- name: Promote tested images to latest", 1)[1]
+    assert (
+        "BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend"
+        in promotion_step
+    )
+    assert (
+        "FRONTEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend"
+        in promotion_step
+    )
+    promotion_script = promotion_step.split("run: |", 1)[1]
+    assert "${{" not in promotion_script
+    assert '--tag "${BACKEND_IMAGE}:latest"' in promotion_script
+    assert '"${BACKEND_IMAGE}:${IMAGE_TAG}"' in promotion_script
+    assert '--tag "${FRONTEND_IMAGE}:latest"' in promotion_script
+    assert '"${FRONTEND_IMAGE}:${IMAGE_TAG}"' in promotion_script
     assert "ssh" not in content.lower()
     assert "deploy" not in content.lower()
+
+
+def test_workflows_pin_all_actions_and_use_read_only_contents_permission():
+    workflows = {
+        "ci.yml": read_ci_workflow(),
+        "publish-images.yml": read_publish_workflow(),
+    }
+
+    for name, content in workflows.items():
+        header = content.split("jobs:", 1)[0]
+        assert "permissions:\n  contents: read" in header, name
+
+        refs = re.findall(r"^\s*(?:-\s+)?uses:\s+\S+@([^\s#]+)", content, re.MULTILINE)
+        assert refs, name
+        assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs), name
+
+    ci_content = workflows["ci.yml"]
+    assert (
+        ci_content.count("actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0")
+        == 2
+    )
+    assert "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1" in ci_content
+    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" in ci_content
