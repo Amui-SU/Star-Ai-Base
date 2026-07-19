@@ -261,6 +261,7 @@ def test_deploy_script_has_image_only_rollback_and_all_health_checks():
     assert 'wait_http "${PUBLIC_BASE_URL%/}/health"' in rollback
     assert "trap 'on_signal 130' INT" in content
     assert "trap 'on_signal 143' TERM" in content
+    assert "trap 'on_signal 129' HUP" in content
 
     for url in [
         "http://127.0.0.1:8000/health",
@@ -353,6 +354,11 @@ case "$command_line" in
   "ps --all --format {{.State}} backend")
     printf '%s\n' "${FAKE_POST_STOP_STATES:-}"
     ;;
+  "up -d --pull never backend"|"up -d --pull never frontend"|"stop frontend")
+    ;;
+  *)
+    exit 93
+    ;;
 esac
 """,
     )
@@ -393,6 +399,10 @@ while (( $# > 0 )); do
   shift
 done
 [[ -n "$archive" ]] || exit 91
+if [[ -n "${FAKE_TAR_SIGNAL:-}" ]]; then
+  kill -s "$FAKE_TAR_SIGNAL" "$PPID"
+  sleep 1
+fi
 printf 'fake archive\n' > "$archive"
 """,
     )
@@ -405,6 +415,29 @@ if [[ "${FAKE_LOCK_HELD:-0}" == 1 ]]; then
 fi
 """,
     )
+    write_fake_tool(
+        bin_dir,
+        "mktemp",
+        """#!/usr/bin/env bash
+if [[ "${1:-}" == -d && -n "${FAKE_MKTEMP_DIR_EXIT:-}" ]]; then
+  exit "$FAKE_MKTEMP_DIR_EXIT"
+fi
+exec /usr/bin/mktemp "$@"
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "mv",
+        """#!/usr/bin/env bash
+/usr/bin/mv "$@" || exit $?
+destination="${!#}"
+if [[ -n "${FAKE_SIGNAL_ON_CURRENT:-}" && "$destination" == */current-version && ! -e "$FAKE_SIGNAL_MARKER" ]]; then
+  : > "$FAKE_SIGNAL_MARKER"
+  kill -s "$FAKE_SIGNAL_ON_CURRENT" "$PPID"
+  sleep 1
+fi
+""",
+    )
     write_fake_tool(bin_dir, "sleep", "#!/usr/bin/env bash\nexit 0\n")
 
     env = os.environ.copy()
@@ -414,6 +447,7 @@ fi
             "FAKE_DOCKER_LOG": bash_path(docker_log),
             "FAKE_CURL_LOG": bash_path(curl_log),
             "FAKE_TAR_LOG": bash_path(tar_log),
+            "FAKE_SIGNAL_MARKER": bash_path(tmp_path / "signal.marker"),
             "ZHIKU_DEPLOY_HTTP_ATTEMPTS": "2",
             "ZHIKU_DEPLOY_HTTP_DELAY_SECONDS": "0",
         }
@@ -683,3 +717,59 @@ def test_deploy_script_strict_public_health_triggers_rollback(tmp_path, status, 
     assert f"{PREVIOUS_TAG}|up -d --pull never backend" in log_lines(
         fixture["docker_log"]
     )
+
+
+def test_deploy_script_sighup_during_backup_rolls_back_once(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_TAR_SIGNAL="HUP",
+    )
+
+    assert result.returncode == 129
+    commands = log_lines(fixture["docker_log"])
+    assert commands.count(f"{PREVIOUS_TAG}|up -d --pull never backend") == 1
+    assert (deploy_dir / "current-version").read_text().strip() == PREVIOUS_TAG
+
+
+def test_deploy_script_signal_after_version_commit_restores_prior_state(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    older_tag = "3" * 40
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+    (deploy_dir / "previous-version").write_text(older_tag, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_SIGNAL_ON_CURRENT="TERM",
+    )
+
+    assert result.returncode == 143
+    commands = log_lines(fixture["docker_log"])
+    assert commands.count(f"{PREVIOUS_TAG}|up -d --pull never backend") == 1
+    assert (deploy_dir / "current-version").read_text().strip() == PREVIOUS_TAG
+    assert (deploy_dir / "previous-version").read_text().strip() == older_tag
+
+
+def test_deploy_script_backup_directory_failure_rolls_back_once(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_MKTEMP_DIR_EXIT="71",
+    )
+
+    assert result.returncode != 0
+    commands = log_lines(fixture["docker_log"])
+    assert commands.count(f"{PREVIOUS_TAG}|up -d --pull never backend") == 1

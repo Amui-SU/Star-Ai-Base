@@ -165,10 +165,23 @@ atomic_write() {
   fi
 }
 
-PREVIOUS_TAG=""
+ORIGINAL_CURRENT_EXISTS=false
+ORIGINAL_CURRENT_CONTENT=""
 if [[ -f "$CURRENT_FILE" ]]; then
-  PREVIOUS_TAG="$(tr -d '[:space:]' < "$CURRENT_FILE")"
+  ORIGINAL_CURRENT_EXISTS=true
+  ORIGINAL_CURRENT_CONTENT="$(cat "$CURRENT_FILE")"
 fi
+readonly ORIGINAL_CURRENT_EXISTS ORIGINAL_CURRENT_CONTENT
+
+ORIGINAL_PREVIOUS_EXISTS=false
+ORIGINAL_PREVIOUS_CONTENT=""
+if [[ -f "$PREVIOUS_FILE" ]]; then
+  ORIGINAL_PREVIOUS_EXISTS=true
+  ORIGINAL_PREVIOUS_CONTENT="$(cat "$PREVIOUS_FILE")"
+fi
+readonly ORIGINAL_PREVIOUS_EXISTS ORIGINAL_PREVIOUS_CONTENT
+
+PREVIOUS_TAG="$(printf '%s' "$ORIGINAL_CURRENT_CONTENT" | tr -d '[:space:]')"
 if [[ "$PREVIOUS_TAG" =~ ^[0-9a-f]{40}$ ]]; then
   readonly HAS_PREVIOUS=true
 else
@@ -180,7 +193,10 @@ readonly PREVIOUS_TAG
 IMAGE_TAG="$TARGET_TAG"
 export IMAGE_TAG
 
-existing_backend="$(compose ps --all --services backend)"
+if ! existing_backend="$(compose ps --all --services backend)"; then
+  echo "failed to inspect the existing backend service" >&2
+  exit 7
+fi
 if [[ "$HAS_PREVIOUS" == false ]] && grep -Fxq backend <<<"$existing_backend"; then
   echo "existing backend has no valid current SHA; establish deploy/current-version before deploying" >&2
   exit 6
@@ -202,6 +218,24 @@ rollback() {
   wait_http "http://127.0.0.1:3000/" || return 1
   wait_http "${PUBLIC_BASE_URL%/}/" || return 1
   wait_http "${PUBLIC_BASE_URL%/}/health" "$HTTP_ATTEMPTS" "$HTTP_DELAY_SECONDS" '{"status":"healthy"}' || return 1
+  restore_version_state || return 1
+}
+
+restore_file_snapshot() {
+  local existed="$1"
+  local content="$2"
+  local destination="$3"
+
+  if [[ "$existed" == true ]]; then
+    atomic_write "$content" "$destination"
+  else
+    rm -f "$destination"
+  fi
+}
+
+restore_version_state() {
+  restore_file_snapshot "$ORIGINAL_PREVIOUS_EXISTS" "$ORIGINAL_PREVIOUS_CONTENT" "$PREVIOUS_FILE" || return 1
+  restore_file_snapshot "$ORIGINAL_CURRENT_EXISTS" "$ORIGINAL_CURRENT_CONTENT" "$CURRENT_FILE"
 }
 
 cleanup_first_deploy() {
@@ -213,7 +247,11 @@ cleanup_first_deploy() {
   if [[ "$BACKEND_STARTED" == true ]]; then
     compose stop backend || cleanup_failed=true
   fi
-  [[ "$cleanup_failed" == false ]]
+  if [[ "$cleanup_failed" == false ]]; then
+    restore_version_state
+  else
+    return 1
+  fi
 }
 
 recover_images() {
@@ -225,7 +263,7 @@ recover_images() {
 }
 
 disable_failure_traps() {
-  trap - ERR INT TERM
+  trap - ERR HUP INT TERM
 }
 
 on_error() {
@@ -251,6 +289,7 @@ on_signal() {
 }
 
 trap on_error ERR
+trap 'on_signal 129' HUP
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
@@ -267,13 +306,19 @@ fi
 
 DEPLOY_STARTED=true
 compose stop backend
-backend_states="$(compose ps --all --format '{{.State}}' backend)"
+if ! backend_states="$(compose ps --all --format '{{.State}}' backend)"; then
+  echo "failed to confirm that the backend stopped" >&2
+  false
+fi
 if [[ -n "$backend_states" ]] && grep -Evqx '(exited|dead)' <<<"$backend_states"; then
   echo "backend did not stop; observed states: $backend_states" >&2
   false
 fi
 
-BACKUP_DIR="$(mktemp -d "$BACKUPS_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$TARGET_TAG.XXXXXX")"
+if ! BACKUP_DIR="$(mktemp -d "$BACKUPS_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$TARGET_TAG.XXXXXX")"; then
+  echo "failed to create the deployment backup directory" >&2
+  false
+fi
 readonly BACKUP_DIR
 tar -C "$DATA_DIR" -czf "$BACKUP_DIR/data.tar.gz" .
 printf '%s\n' "$PREVIOUS_TAG" > "$BACKUP_DIR/previous-image-tag"
