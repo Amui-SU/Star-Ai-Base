@@ -99,6 +99,99 @@ if ! flock -n 9; then
   exit 5
 fi
 
+invalid_app_env() {
+  echo "invalid production application environment: $1" >&2
+  exit 6
+}
+
+DEBUG_VALUE=""
+SESSION_COOKIE_SECURE_VALUE=""
+ADMIN_EMAILS_VALUE=""
+APP_ENCRYPTION_KEY_VALUE=""
+SMTP_HOST_VALUE=""
+SMTP_USER_VALUE=""
+SMTP_PASSWORD_VALUE=""
+SMTP_FROM_VALUE=""
+GOOGLE_CLIENT_ID_VALUE=""
+GOOGLE_CLIENT_SECRET_VALUE=""
+GOOGLE_REDIRECT_URI_VALUE=""
+declare -A seen_app_keys=()
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+  line="${line%$'\r'}"
+  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+  [[ "$line" == *=* ]] || invalid_app_env "expected KEY=VALUE"
+
+  key="${line%%=*}"
+  value="${line#*=}"
+  [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || invalid_app_env "invalid key: $key"
+  if (( ${#value} >= 2 )); then
+    first_character="${value:0:1}"
+    last_character="${value: -1}"
+    if [[ "$first_character" == \" || "$first_character" == "'" ]]; then
+      [[ "$last_character" == "$first_character" ]] || invalid_app_env "unmatched quote for $key"
+      value="${value:1:${#value}-2}"
+    fi
+  fi
+  [[ "$value" != REPLACE_* ]] || invalid_app_env "placeholder remains for $key"
+
+  case "$key" in
+    DEBUG|SESSION_COOKIE_SECURE|ADMIN_EMAILS|APP_ENCRYPTION_KEY|SMTP_HOST|SMTP_USER|SMTP_PASSWORD|SMTP_FROM|GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GOOGLE_REDIRECT_URI)
+      [[ -z "${seen_app_keys[$key]+x}" ]] || invalid_app_env "duplicate key: $key"
+      seen_app_keys[$key]=true
+      ;;
+  esac
+
+  case "$key" in
+    DEBUG) DEBUG_VALUE="$value" ;;
+    SESSION_COOKIE_SECURE) SESSION_COOKIE_SECURE_VALUE="$value" ;;
+    ADMIN_EMAILS) ADMIN_EMAILS_VALUE="$value" ;;
+    APP_ENCRYPTION_KEY) APP_ENCRYPTION_KEY_VALUE="$value" ;;
+    SMTP_HOST) SMTP_HOST_VALUE="$value" ;;
+    SMTP_USER) SMTP_USER_VALUE="$value" ;;
+    SMTP_PASSWORD) SMTP_PASSWORD_VALUE="$value" ;;
+    SMTP_FROM) SMTP_FROM_VALUE="$value" ;;
+    GOOGLE_CLIENT_ID) GOOGLE_CLIENT_ID_VALUE="$value" ;;
+    GOOGLE_CLIENT_SECRET) GOOGLE_CLIENT_SECRET_VALUE="$value" ;;
+    GOOGLE_REDIRECT_URI) GOOGLE_REDIRECT_URI_VALUE="$value" ;;
+  esac
+done < "$APP_ENV"
+
+[[ "$DEBUG_VALUE" == false ]] || invalid_app_env "DEBUG must be false"
+[[ "${SESSION_COOKIE_SECURE_VALUE,,}" != false ]] || invalid_app_env "SESSION_COOKIE_SECURE must not be false"
+[[ -n "$ADMIN_EMAILS_VALUE" ]] || invalid_app_env "ADMIN_EMAILS is required"
+[[ "${ADMIN_EMAILS_VALUE,,}" != *"admin@example"* && "${ADMIN_EMAILS_VALUE,,}" != *"@example."* ]] ||
+  invalid_app_env "ADMIN_EMAILS must not use an example administrator"
+(( ${#APP_ENCRYPTION_KEY_VALUE} >= 32 )) || invalid_app_env "APP_ENCRYPTION_KEY must be at least 32 characters"
+
+smtp_any=false
+smtp_complete=false
+if [[ -n "$SMTP_HOST_VALUE" || -n "$SMTP_USER_VALUE" || -n "$SMTP_PASSWORD_VALUE" || -n "$SMTP_FROM_VALUE" ]]; then
+  smtp_any=true
+  if [[ -n "$SMTP_HOST_VALUE" && -n "$SMTP_USER_VALUE" && -n "$SMTP_PASSWORD_VALUE" && -n "$SMTP_FROM_VALUE" ]]; then
+    smtp_complete=true
+  else
+    invalid_app_env "SMTP login is partial; configure HOST, USER, PASSWORD, and FROM"
+  fi
+fi
+
+google_any=false
+google_complete=false
+if [[ -n "$GOOGLE_CLIENT_ID_VALUE" || -n "$GOOGLE_CLIENT_SECRET_VALUE" ]]; then
+  google_any=true
+  if [[ -n "$GOOGLE_CLIENT_ID_VALUE" && -n "$GOOGLE_CLIENT_SECRET_VALUE" ]]; then
+    [[ "$GOOGLE_REDIRECT_URI_VALUE" == "https://zhiku-cloud.cn/system-auth/google/callback" ]] ||
+      invalid_app_env "GOOGLE_REDIRECT_URI must use the canonical HTTPS callback"
+    google_complete=true
+  else
+    invalid_app_env "Google login is partial; configure both client ID and secret"
+  fi
+fi
+
+[[ "$smtp_any" == false || "$smtp_complete" == true ]] || invalid_app_env "SMTP login is incomplete"
+[[ "$google_any" == false || "$google_complete" == true ]] || invalid_app_env "Google login is incomplete"
+[[ "$smtp_complete" == true || "$google_complete" == true ]] || invalid_app_env "at least one usable login method is required"
+
 compose() {
   docker compose \
     --project-name zhiku-cloud \

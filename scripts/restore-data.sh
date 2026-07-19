@@ -18,10 +18,15 @@ readonly BACKUPS_DIR="$DEPLOY_ROOT/backups"
 readonly PYTHON_BIN="${ZHIKU_RESTORE_PYTHON:-python3}"
 readonly HTTP_ATTEMPTS="${ZHIKU_RESTORE_HTTP_ATTEMPTS:-30}"
 readonly HTTP_DELAY_SECONDS="${ZHIKU_RESTORE_HTTP_DELAY_SECONDS:-2}"
+readonly MAX_ARCHIVE_MEMBERS="${ZHIKU_RESTORE_MAX_MEMBERS:-100000}"
+readonly MAX_ARCHIVE_BYTES="${ZHIKU_RESTORE_MAX_BYTES:-53687091200}"
 readonly BACKUP_INPUT="$1"
 
-if [[ ! "$HTTP_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || [[ ! "$HTTP_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
-  echo "invalid restore health retry configuration" >&2
+if [[ ! "$HTTP_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] ||
+  [[ ! "$HTTP_DELAY_SECONDS" =~ ^[0-9]+$ ]] ||
+  [[ ! "$MAX_ARCHIVE_MEMBERS" =~ ^[1-9][0-9]*$ ]] ||
+  [[ ! "$MAX_ARCHIVE_BYTES" =~ ^[1-9][0-9]*$ ]]; then
+  echo "invalid restore retry or archive limit configuration" >&2
   exit 2
 fi
 
@@ -70,6 +75,12 @@ esac
 }
 readonly BACKUPS_REAL BACKUP_REAL
 
+exec 9>"$DEPLOY_DIR/deploy.lock"
+if ! flock -n 9; then
+  echo "another deployment or restore is already in progress" >&2
+  exit 7
+fi
+
 CURRENT_TAG="$(tr -d '[:space:]' < "$CURRENT_FILE")"
 [[ "$CURRENT_TAG" =~ ^[0-9a-f]{40}$ ]] || {
   echo "deploy/current-version must contain one lowercase 40-character SHA" >&2
@@ -104,12 +115,6 @@ done < "$DEPLOY_ENV"
   exit 6
 }
 readonly PUBLIC_BASE_URL
-
-exec 9>"$DEPLOY_DIR/deploy.lock"
-if ! flock -n 9; then
-  echo "another deployment or restore is already in progress" >&2
-  exit 7
-fi
 
 compose() {
   docker compose \
@@ -154,6 +159,23 @@ wait_http() {
   return 1
 }
 
+STAGED_DATA=""
+SAFETY_PARENT=""
+RESTORE_SUCCEEDED=false
+
+report_retained_directories() {
+  local original_exit_code="$?"
+  if [[ -n "$STAGED_DATA" && -d "$STAGED_DATA" ]]; then
+    echo "retained restore staging directory for inspection: $STAGED_DATA" >&2
+  fi
+  if [[ "$RESTORE_SUCCEEDED" == false && -n "$SAFETY_PARENT" && -d "$SAFETY_PARENT" ]]; then
+    echo "retained restore safety directory for inspection: $SAFETY_PARENT" >&2
+  fi
+  return "$original_exit_code"
+}
+
+trap report_retained_directories EXIT
+
 if ! STAGED_DATA="$(mktemp -d "$DEPLOY_ROOT/data.restore.XXXXXX")"; then
   echo "failed to create restore staging directory" >&2
   exit 7
@@ -161,21 +183,67 @@ fi
 readonly STAGED_DATA
 chmod 0700 "$STAGED_DATA"
 
-if ! "$PYTHON_BIN" - "$BACKUP_REAL" "$STAGED_DATA" <<'PY'
+if ! "$PYTHON_BIN" - "$BACKUP_REAL" "$STAGED_DATA" "$MAX_ARCHIVE_MEMBERS" "$MAX_ARCHIVE_BYTES" <<'PY'
 import pathlib
 import shutil
+import sqlite3
 import sys
 import tarfile
 
-archive_path, destination_path = sys.argv[1:]
+archive_path, destination_path, max_members_text, max_bytes_text = sys.argv[1:]
 destination = pathlib.Path(destination_path).resolve()
+max_members = int(max_members_text)
+max_bytes = int(max_bytes_text)
 seen = set()
+
+
+def validate_sqlite(database, required_tables=(), require_schema=False):
+    if not database.is_file() or database.stat().st_size == 0:
+        raise ValueError(f"SQLite validation failed: missing or empty {database.name}")
+    connection = None
+    try:
+        connection = sqlite3.connect(
+            f"{database.resolve().as_uri()}?mode=ro", uri=True
+        )
+        integrity = [row[0] for row in connection.execute("PRAGMA integrity_check")]
+        if integrity != ["ok"]:
+            raise ValueError(
+                f"SQLite validation failed for {database.name}: {integrity!r}"
+            )
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        missing = set(required_tables) - tables
+        if missing:
+            raise ValueError(
+                f"SQLite validation failed for {database.name}: missing tables {sorted(missing)!r}"
+            )
+        if require_schema and not tables:
+            raise ValueError(
+                f"SQLite validation failed for {database.name}: empty schema"
+            )
+    except sqlite3.DatabaseError as error:
+        raise ValueError(
+            f"SQLite validation failed for {database.name}: {error}"
+        ) from error
+    finally:
+        if connection is not None:
+            connection.close()
 
 try:
     with tarfile.open(archive_path, "r:gz") as archive:
         members = archive.getmembers()
         if not members:
             raise ValueError("empty archive")
+        total_bytes = sum(member.size for member in members if member.isfile())
+        if len(members) > max_members or total_bytes > max_bytes:
+            raise ValueError(
+                "archive resource limit exceeded: "
+                f"members={len(members)}/{max_members}, bytes={total_bytes}/{max_bytes}"
+            )
         for member in members:
             raw_name = member.name
             path = pathlib.PurePosixPath(raw_name)
@@ -199,7 +267,7 @@ try:
             if destination not in target.parents:
                 raise ValueError(f"escaping member: {raw_name!r}")
             if member.isdir():
-                target.mkdir(parents=True, exist_ok=False)
+                target.mkdir(parents=True, exist_ok=True)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             source = archive.extractfile(member)
@@ -207,6 +275,15 @@ try:
                 raise ValueError(f"unreadable member: {raw_name!r}")
             with source, target.open("xb") as output:
                 shutil.copyfileobj(source, output)
+
+    validate_sqlite(
+        destination / "bilibili_rag.db",
+        required_tables=("system_users", "knowledge_bases"),
+    )
+    validate_sqlite(
+        destination / "chroma_db" / "chroma.sqlite3",
+        require_schema=True,
+    )
 except (OSError, tarfile.TarError, ValueError) as error:
     print(f"unsafe archive: {error}", file=sys.stderr)
     raise SystemExit(1)
@@ -240,33 +317,60 @@ chown -R --reference="$DATA_DIR" "$STAGED_DATA"
 chmod --reference="$DATA_DIR" "$STAGED_DATA"
 
 MUTATION_STARTED=false
-DATA_PRESERVATION_ATTEMPTED=false
+DATA_SWAP_BEGUN=false
 
 disable_failure_traps() {
   trap - ERR HUP INT TERM
 }
 
 recover_data_and_backend() {
-  local recovery_failed=false
+  local data_is_safe=false
 
-  if [[ "$DATA_PRESERVATION_ATTEMPTED" == true && -d "$SAFETY_PARENT/data" ]]; then
-    if [[ -e "$DATA_DIR" ]]; then
-      mv "$DATA_DIR" "$SAFETY_PARENT/failed-restored-data" || recovery_failed=true
-    fi
-    if [[ "$recovery_failed" == false ]]; then
-      mv "$SAFETY_PARENT/data" "$DATA_DIR" || recovery_failed=true
-    fi
+  if ! compose stop backend; then
+    echo "automatic recovery could not stop backend; backend state is unknown" >&2
+    print_manual_recovery_instructions
+    return 1
   fi
 
+  if [[ "$DATA_SWAP_BEGUN" == false ]]; then
+    data_is_safe=true
+  elif [[ -d "$SAFETY_PARENT/data" ]]; then
+    if [[ -e "$DATA_DIR" ]]; then
+      if ! mv "$DATA_DIR" "$SAFETY_PARENT/failed-restored-data"; then
+        print_manual_recovery_instructions
+        return 1
+      fi
+    fi
+    if ! mv "$SAFETY_PARENT/data" "$DATA_DIR"; then
+      print_manual_recovery_instructions
+      return 1
+    fi
+    data_is_safe=true
+  elif [[ -d "$DATA_DIR" && -d "$STAGED_DATA" ]]; then
+    # The first same-filesystem rename did not complete; original data remains.
+    data_is_safe=true
+  else
+    print_manual_recovery_instructions
+    return 1
+  fi
+
+  if [[ "$data_is_safe" != true ]]; then
+    print_manual_recovery_instructions
+    return 1
+  fi
   IMAGE_TAG="$CURRENT_TAG"
   export IMAGE_TAG
-  compose up -d --pull never backend || recovery_failed=true
-  if [[ "$recovery_failed" == false ]]; then
-    wait_http "http://127.0.0.1:8000/health" || recovery_failed=true
-    wait_http "${PUBLIC_BASE_URL%/}/health" || recovery_failed=true
-  fi
+  compose up -d --pull never backend || return 1
+  wait_http "http://127.0.0.1:8000/health" || return 1
+  wait_http "${PUBLIC_BASE_URL%/}/health"
+}
 
-  [[ "$recovery_failed" == false ]]
+print_manual_recovery_instructions() {
+  echo "automatic data recovery failed; backend left stopped" >&2
+  echo "old data: $SAFETY_PARENT/data" >&2
+  echo "failed restored data: $SAFETY_PARENT/failed-restored-data" >&2
+  echo "active data path: $DATA_DIR" >&2
+  echo "inspect these paths, restore the old data to the active path, then start the exact current SHA manually" >&2
 }
 
 on_error() {
@@ -303,7 +407,7 @@ if [[ -n "$backend_states" ]] && grep -Evqx '(exited|dead)' <<<"$backend_states"
   false
 fi
 
-DATA_PRESERVATION_ATTEMPTED=true
+DATA_SWAP_BEGUN=true
 mv "$DATA_DIR" "$SAFETY_PARENT/data"
 mv "$STAGED_DATA" "$DATA_DIR"
 
@@ -314,5 +418,6 @@ wait_http "http://127.0.0.1:8000/health"
 wait_http "${PUBLIC_BASE_URL%/}/health"
 
 MUTATION_STARTED=false
+RESTORE_SUCCEEDED=true
 disable_failure_traps
 echo "data restore succeeded from $BACKUP_REAL; safety copy: $SAFETY_PARENT/data"

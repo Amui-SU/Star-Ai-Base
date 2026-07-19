@@ -7,7 +7,7 @@
 - 宿主机 Nginx 继续作为 HTTPS 网关，保留现有证书和域名配置。
 - 前端容器仅绑定 `127.0.0.1:3000`，后端容器仅绑定 `127.0.0.1:8000`，公网不直接开放这两个端口。
 - Nginx 将页面请求转发至前端，将 API、健康检查和 `/video-notes` 转发至后端。
-- 后端设置 `FORWARDED_ALLOW_IPS=*`，仅因为端口仅绑定 `127.0.0.1:8000`，所有转发请求只能来自同机 Nginx。不得把后端端口改成 `0.0.0.0:8000`，否则任意客户端都可能伪造转发头。
+- 后端设置 `FORWARDED_ALLOW_IPS=*`，仅因为宿主机端口仅绑定 `127.0.0.1:8000`，公网请求只能经同机 Nginx 进入。该设置也会信任同一 Docker Compose 网络中的容器，因此不要把不受信任的服务接入 `zhiku-cloud` 网络，也不得把后端端口改成 `0.0.0.0:8000`；架构变化时应改为明确的代理 IP 范围。
 - 每次生产发布必须使用已经通过 CI 的完整 40 位 Git commit SHA。`latest` 只用于人工浏览或临时排查，不用于生产 Compose 或部署脚本。
 - 两个仓库的 `latest` 标签提升不具备原子性；生产环境始终以同一个精确 SHA 同时选择前后端镜像。
 
@@ -64,6 +64,8 @@ chmod 0750 scripts/deploy.sh scripts/restore-data.sh
 
 `deploy/.env.production` 至少要替换管理员邮箱、Fernet 加密密钥、SMTP 和 Google OAuth 占位值。其他模型供应商或 API Key 参考根目录 `.env.example` 按需加入。生产值和秘密始终留在宿主机；禁止提交到 Git、Dockerfile、Compose 文件或镜像层。
 
+模板同时列出 SMTP 和 Google。至少配置一种登录方式；未启用的一组应删除对应 `REPLACE_*` 行或留空，不能把占位符带入生产文件。部署脚本会安全读取已知字段做生产预检，不会执行环境文件：它拒绝调试模式、不安全 Cookie、示例管理员、占位符、短加密密钥、部分填写的登录配置和错误的 Google 回调。未知的模型/API 配置会保留给应用使用，包含 `=` 的值也不会被截断。
+
 使用 ECS 的拉取专用账号首次登录 ACR，密码通过标准输入提供，避免出现在 shell 历史中：
 
 ```bash
@@ -98,6 +100,8 @@ cd /opt/zhiku-cloud
 
 脚本会拉取前后端同一 SHA、停止后端、备份 `data`、依次启动并执行本机及公网健康检查。常用检查命令：
 
+镜像拉取和停机前会先执行 `.env.production` 生产预检。至少一种登录方式必须完整可用：SMTP 需要 `SMTP_HOST`、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM`，Google 需要 client ID、secret 和规范域名的 HTTPS callback。预检失败不会调用 Docker，也不会改变当前服务。
+
 ```bash
 cd /opt/zhiku-cloud
 export IMAGE_TAG="$(tr -d '[:space:]' < deploy/current-version)"
@@ -129,9 +133,9 @@ cd /opt/zhiku-cloud
 ./scripts/restore-data.sh /opt/zhiku-cloud/backups/REPLACE_WITH_BACKUP/data.tar.gz
 ```
 
-脚本会使用与发布相同的 `deploy.lock`，拒绝备份目录之外的路径、符号链接和危险归档成员；它会在停机前解包并检查非空 SQLite 数据库与 Chroma 内容。随后脚本停止后端，把原数据保存在权限受限且名称唯一的 `data.safety.*` 安全副本中，切换已验证数据，并使用 `current-version` 中的精确 SHA 和 `--pull never` 重启。只有本机和公网健康检查都成功，恢复才算完成。
+脚本会先取得与发布相同的 `deploy.lock`，再读取版本与环境状态。它拒绝备份目录之外的路径、符号链接、危险归档成员，以及超过成员数或解压总量限制的归档；默认限制可通过 `ZHIKU_RESTORE_MAX_MEMBERS`、`ZHIKU_RESTORE_MAX_BYTES` 调整。停机前脚本会验证应用 SQLite 的完整性及核心表，并验证 `chroma_db/chroma.sqlite3` 的完整性和非空 schema。随后脚本停止后端，把原数据保存在权限受限且名称唯一的 `data.safety.*` 安全副本中，切换已验证数据，并使用 `current-version` 中的精确 SHA 和 `--pull never` 重启。只有本机和公网健康检查都成功，恢复才算完成。
 
-交换开始后若复制、移动、启动、健康检查失败，或收到 HUP、INT、TERM，脚本会保留失败数据、恢复安全副本并重启原 SHA 后端。操作结束后检查脚本打印的安全副本路径；确认数据正常前不要删除它。整个流程不删除 Compose volume，也不批量清理 Docker 数据。
+交换开始后若复制、移动、启动、健康检查失败，或收到 HUP、INT、TERM，脚本会先停止后端、恢复安全副本，再决定是否重启原 SHA。若旧数据无法确认已经回到活动路径，后端会保持停止，脚本会打印旧数据、失败数据和活动目录的精确人工恢复路径。未使用但非空的暂存/安全目录会明确保留并打印位置，不会递归删除。操作结束后检查这些路径；确认数据正常前不要删除安全副本。整个流程不删除 Compose volume，也不批量清理 Docker 数据。
 
 ## 故障排查
 
