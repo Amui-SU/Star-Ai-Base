@@ -385,6 +385,9 @@ def test_deploy_and_restore_share_one_read_only_production_preflight():
         assert 'PRODUCTION_PREFLIGHT="$SCRIPT_DIR/production-preflight.sh"' in content
         assert 'source "$PRODUCTION_PREFLIGHT"' in content
         assert content.count('production_preflight "$DEPLOY_ENV" "$APP_ENV"') == 1
+        preflight_index = content.index('production_preflight "$DEPLOY_ENV" "$APP_ENV"')
+        compose_version_index = content.index("docker compose version --short")
+        assert preflight_index < compose_version_index
 
 
 def test_recovery_script_has_strict_transaction_contract():
@@ -1074,6 +1077,10 @@ def test_deploy_script_accepts_supported_beijing_acr_public_endpoint(
         ("docker.io", "supported Beijing ACR public endpoint"),
         (
             "https://crpi-test123.cn-beijing.personal.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "crpi-test123.cn-beijing.personal.cr.aliyuncs.com/zhiku",
             "supported Beijing ACR public endpoint",
         ),
         (
