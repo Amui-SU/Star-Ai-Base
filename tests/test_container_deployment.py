@@ -2450,16 +2450,41 @@ def test_container_production_runbook_documents_safe_exact_sha_operations():
     assert "down -v" not in content
 
 
-def test_container_runbook_requires_immutable_acr_and_operational_disk_safety():
+def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
+    content = read("docs/deployment/container-production.md")
+
+    for required in [
+        "ACR 企业版",
+        "ACR 个人版",
+        "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com",
+        "registry.cn-beijing.aliyuncs.com",
+        "无 SLA",
+        "仅限开发测试",
+        "40 位 Git SHA",
+        "不会覆盖已存在的 SHA 标签",
+        "拉取专用凭据",
+        "docker login",
+    ]:
+        assert required in content
+    assert (
+        "https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances"
+        in content
+    )
+    assert (
+        "https://help.aliyun.com/zh/acr/user-guide/individual-edition-instance-independent-domain-name-capacity-limit"
+        in content
+    )
+
+
+def test_container_runbook_keeps_enterprise_immutability_and_operational_safety():
     content = read("docs/deployment/container-production.md")
 
     assert (
         "https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version"
         in content
     )
-    assert "zhiku-backend" in content and "zhiku-frontend" in content
-    assert "不可变" in content
-    assert "重新运行" in content and "不会覆盖" in content
+    assert "企业版仓库" in content and "不可变" in content
+    assert "个人版不提供仓库侧不可变保护" in content
     assert "Docker Compose 2.30" in content
     assert "最新 10" in content
     assert "异机" in content
@@ -2467,21 +2492,6 @@ def test_container_runbook_requires_immutable_acr_and_operational_disk_safety():
     assert "recover-interrupted.sh" in content
     assert "transaction" in content
     assert "down -v" not in content
-
-
-def test_container_runbook_requires_beijing_acr_enterprise_edition():
-    content = read("docs/deployment/container-production.md")
-
-    assert "ACR 企业版" in content
-    assert "华北 2（北京）" in content
-    assert "your-instance-registry.cn-beijing.cr.aliyuncs.com" in content
-    assert "个人版" in content
-    assert "不支持生产" in content
-    assert "无 SLA" in content
-    assert (
-        "https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances"
-        in content
-    )
 
 
 def test_readme_links_the_production_runbook_next_to_docker_section():
