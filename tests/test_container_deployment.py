@@ -2454,6 +2454,7 @@ def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
     content = read("docs/deployment/container-production.md")
 
     for required in [
+        "正式生产仍推荐阿里云容器镜像服务 **ACR 企业版**",
         "ACR 企业版",
         "ACR 个人版",
         "无 SLA",
@@ -2475,12 +2476,22 @@ def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
         "占位值必须替换",
     ]:
         assert required in content
-    for registry in [
-        "your-instance-registry.cn-beijing.cr.aliyuncs.com",
-        "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com",
-        "registry.cn-beijing.aliyuncs.com",
+    assert (
+        "GitHub Actions Secret 与 `deploy/.env.deploy` 均填写以下三种受支持的北京 "
+        "ACR 公网地址之一" in content
+    )
+    for registry_format in [
+        "企业版 `your-instance-registry.cn-beijing.cr.aliyuncs.com`",
+        "新个人版 `crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com`",
+        "旧个人版 `registry.cn-beijing.aliyuncs.com`",
     ]:
-        assert registry in content
+        assert registry_format in content
+    login_example = """ACR_REGISTRY='crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com'
+read -rsp 'ACR pull password: ' ACR_PULL_PASSWORD && echo
+printf '%s' "$ACR_PULL_PASSWORD" |
+  docker login "$ACR_REGISTRY" --username 'YOUR_ECS_PULL_USERNAME' --password-stdin
+unset ACR_PULL_PASSWORD"""
+    assert login_example in content
     assert (
         "https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances"
         in content
@@ -2512,6 +2523,7 @@ def test_container_runbook_keeps_enterprise_immutability_and_operational_safety(
     )
     assert "zhiku-backend" in immutability_paragraph
     assert "zhiku-frontend" in immutability_paragraph
+    assert "`zhiku-backend`、`zhiku-frontend` 两个私有仓库" in content
     assert "个人版不提供仓库侧不可变保护" in content
     assert "Docker Compose 2.30" in content
     assert "最新 10" in content
