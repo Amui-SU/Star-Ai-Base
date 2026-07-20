@@ -19,6 +19,8 @@ TARGET_TAG = "1" * 40
 PREVIOUS_TAG = "2" * 40
 VALID_FERNET_KEY = "A" * 43 + "="
 ENTERPRISE_ACR = "test-instance-registry.cn-beijing.cr.aliyuncs.com"
+PERSONAL_ACR = "crpi-test123.cn-beijing.personal.cr.aliyuncs.com"
+LEGACY_PERSONAL_ACR = "registry.cn-beijing.aliyuncs.com"
 
 
 def read(relative_path: str) -> str:
@@ -266,7 +268,7 @@ def test_deploy_environment_example_contains_only_public_deployment_metadata():
     content = read("deploy/.env.deploy.example")
 
     assert content.splitlines() == [
-        "ACR_REGISTRY=your-instance-registry.cn-beijing.cr.aliyuncs.com",
+        "ACR_REGISTRY=crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com",
         "ACR_NAMESPACE=zhiku-cloud",
         "PUBLIC_BASE_URL=https://zhiku-cloud.cn",
     ]
@@ -343,12 +345,19 @@ def test_deploy_script_enforces_disk_compose_cookie_and_transaction_preflights()
     assert "backup_dir=$BACKUP_DIR" in content
 
 
-def test_deploy_script_requires_beijing_enterprise_acr_endpoint():
+def test_deploy_script_requires_supported_beijing_acr_public_endpoint():
     content = read("scripts/production-preflight.sh")
 
-    assert "cn-beijing\\.cr\\.aliyuncs\\.com" in content
+    assert "^[a-z0-9][a-z0-9-]*-registry\\.cn-beijing\\.cr\\.aliyuncs\\.com$" in content
+    assert (
+        "^crpi-[a-z0-9][a-z0-9-]*\\.cn-beijing\\.personal\\.cr\\.aliyuncs\\.com$"
+        in content
+    )
+    assert "registry.cn-beijing.aliyuncs.com" in content
+    assert "crpi-.*-vpc\\.cn-beijing\\.personal\\.cr\\.aliyuncs\\.com" in content
     assert "your-instance-registry.cn-beijing.cr.aliyuncs.com" in content
-    assert "Enterprise Edition" in content
+    assert "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com" in content
+    assert "supported Beijing ACR public endpoint" in content
 
 
 def test_restore_script_enforces_20_gib_limit_disk_budget_and_transaction_marker():
@@ -1020,16 +1029,9 @@ def test_deploy_script_accepts_complete_google_login_and_optional_equals(tmp_pat
 
 
 @pytest.mark.parametrize(
-    "registry",
-    [
-        "registry.cn-beijing.aliyuncs.com",
-        "registry-vpc.cn-beijing.aliyuncs.com",
-        "registry.cn-beijing.cr.aliyuncs.com",
-        "test-instance-registry.cn-hangzhou.cr.aliyuncs.com",
-        "your-instance-registry.cn-beijing.cr.aliyuncs.com",
-    ],
+    "registry", [ENTERPRISE_ACR, PERSONAL_ACR, LEGACY_PERSONAL_ACR]
 )
-def test_deploy_script_rejects_non_enterprise_or_placeholder_acr_before_docker(
+def test_deploy_script_accepts_supported_beijing_acr_public_endpoint(
     tmp_path, registry
 ):
     fixture = deployment_fixture(tmp_path)
@@ -1043,8 +1045,64 @@ def test_deploy_script_rejects_non_enterprise_or_placeholder_acr_before_docker(
 
     result = run_deploy(fixture)
 
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("registry", "error_fragment"),
+    [
+        (
+            "registry-vpc.cn-beijing.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "registry.cn-beijing.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "test-instance-registry.cn-hangzhou.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "crpi-test123.cn-hangzhou.personal.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "crpi-test123-vpc.cn-beijing.personal.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        ("docker.io", "supported Beijing ACR public endpoint"),
+        (
+            "https://crpi-test123.cn-beijing.personal.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "your-instance-registry.cn-beijing.cr.aliyuncs.com",
+            "example placeholder",
+        ),
+        (
+            "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com",
+            "example placeholder",
+        ),
+    ],
+)
+def test_deploy_script_rejects_unsupported_or_placeholder_acr_before_docker(
+    tmp_path, registry, error_fragment
+):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / ".env.deploy").write_text(
+        f"ACR_REGISTRY={registry}\n"
+        "ACR_NAMESPACE=zhiku\n"
+        "PUBLIC_BASE_URL=https://public.example.test\n",
+        encoding="utf-8",
+    )
+
+    result = run_deploy(fixture)
+
     assert result.returncode != 0
-    assert "Enterprise Edition" in result.stderr
+    assert "invalid deployment environment" in result.stderr
+    assert error_fragment in result.stderr
     assert log_lines(fixture["docker_log"]) == []
 
 
@@ -1651,10 +1709,10 @@ def test_restore_script_rejects_invalid_current_sha_before_downtime(tmp_path):
     [
         (
             ".env.deploy",
-            "ACR_REGISTRY=registry.cn-beijing.aliyuncs.com\n"
+            "ACR_REGISTRY=registry-vpc.cn-beijing.aliyuncs.com\n"
             "ACR_NAMESPACE=zhiku\n"
             "PUBLIC_BASE_URL=https://public.example.test\n",
-            "Enterprise Edition",
+            "supported Beijing ACR public endpoint",
         ),
         (
             ".env.production",
