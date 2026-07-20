@@ -2456,16 +2456,31 @@ def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
     for required in [
         "ACR 企业版",
         "ACR 个人版",
-        "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com",
-        "registry.cn-beijing.aliyuncs.com",
         "无 SLA",
         "仅限开发测试",
+        "ACR 个人版可作为此单机项目在资源受限或迁移期间的过渡选择",
+        "不能把它当作与企业版等价的生产保障",
         "40 位 Git SHA",
         "不会覆盖已存在的 SHA 标签",
+        "org.opencontainers.image.revision",
+        "推送凭据仅供 GitHub Actions 使用",
+        "ECS 使用隔离的拉取专用凭据",
+        "禁止人工覆盖或删除任何 40 位 SHA 标签",
+        "服务器保留当前/上一镜像",
+        "生产不用 `latest`",
         "拉取专用凭据",
+        "新个人版不支持 ECS 免密拉取",
         "docker login",
+        "--password-stdin",
+        "占位值必须替换",
     ]:
         assert required in content
+    for registry in [
+        "your-instance-registry.cn-beijing.cr.aliyuncs.com",
+        "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com",
+        "registry.cn-beijing.aliyuncs.com",
+    ]:
+        assert registry in content
     assert (
         "https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances"
         in content
@@ -2473,6 +2488,10 @@ def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
     assert (
         "https://help.aliyun.com/zh/acr/user-guide/individual-edition-instance-independent-domain-name-capacity-limit"
         in content
+    )
+    assert (
+        "`production-preflight.sh` 执行与发布完全相同的只读生产预检；"
+        "受支持的北京 ACR 公网地址" in content
     )
 
 
@@ -2483,7 +2502,16 @@ def test_container_runbook_keeps_enterprise_immutability_and_operational_safety(
         "https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version"
         in content
     )
-    assert "企业版仓库" in content and "不可变" in content
+    immutability_paragraph = next(
+        paragraph
+        for paragraph in content.split("\n\n")
+        if "两个企业版仓库都必须开启镜像版本不可变" in paragraph
+    )
+    assert "**使用企业版时，两个企业版仓库都必须开启镜像版本不可变。**" in (
+        immutability_paragraph
+    )
+    assert "zhiku-backend" in immutability_paragraph
+    assert "zhiku-frontend" in immutability_paragraph
     assert "个人版不提供仓库侧不可变保护" in content
     assert "Docker Compose 2.30" in content
     assert "最新 10" in content
