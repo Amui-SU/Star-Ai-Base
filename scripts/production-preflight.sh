@@ -64,7 +64,7 @@ production_preflight() {
   fi
   if [[ "$ACR_REGISTRY" == "registry.cn-beijing.aliyuncs.com" ||
     "$ACR_REGISTRY" =~ ^[a-z0-9][a-z0-9-]*-registry\.cn-beijing\.cr\.aliyuncs\.com$ ||
-    ( "$ACR_REGISTRY" =~ ^crpi-[a-z0-9][a-z0-9-]*\.cn-beijing\.personal\.cr\.aliyuncs\.com$ &&
+    ( "$ACR_REGISTRY" =~ ^crpi-[a-z0-9]([a-z0-9-]*[a-z0-9])?\.cn-beijing\.personal\.cr\.aliyuncs\.com$ &&
       ! "$ACR_REGISTRY" =~ ^crpi-.*-vpc\.cn-beijing\.personal\.cr\.aliyuncs\.com$ ) ]]; then
     :
   else

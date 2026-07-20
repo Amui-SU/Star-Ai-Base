@@ -350,7 +350,7 @@ def test_deploy_script_requires_supported_beijing_acr_public_endpoint():
 
     assert "^[a-z0-9][a-z0-9-]*-registry\\.cn-beijing\\.cr\\.aliyuncs\\.com$" in content
     assert (
-        "^crpi-[a-z0-9][a-z0-9-]*\\.cn-beijing\\.personal\\.cr\\.aliyuncs\\.com$"
+        "^crpi-[a-z0-9]([a-z0-9-]*[a-z0-9])?\\.cn-beijing\\.personal\\.cr\\.aliyuncs\\.com$"
         in content
     )
     assert "registry.cn-beijing.aliyuncs.com" in content
@@ -385,9 +385,6 @@ def test_deploy_and_restore_share_one_read_only_production_preflight():
         assert 'PRODUCTION_PREFLIGHT="$SCRIPT_DIR/production-preflight.sh"' in content
         assert 'source "$PRODUCTION_PREFLIGHT"' in content
         assert content.count('production_preflight "$DEPLOY_ENV" "$APP_ENV"') == 1
-        preflight_index = content.index('production_preflight "$DEPLOY_ENV" "$APP_ENV"')
-        compose_version_index = content.index("docker compose version --short")
-        assert preflight_index < compose_version_index
 
 
 def test_recovery_script_has_strict_transaction_contract():
@@ -519,6 +516,9 @@ def deployment_fixture(tmp_path: Path) -> dict[str, object]:
         "docker",
         """#!/usr/bin/env bash
 set -u
+if [[ -n "${FAKE_DOCKER_INVOCATION_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_DOCKER_INVOCATION_LOG"
+fi
 if [[ "$*" == "compose version --short" ]]; then
   printf '%s\n' "${FAKE_COMPOSE_VERSION:-2.30.0}"
   exit 0
@@ -1084,6 +1084,10 @@ def test_deploy_script_accepts_supported_beijing_acr_public_endpoint(
             "supported Beijing ACR public endpoint",
         ),
         (
+            "crpi-test-.cn-beijing.personal.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
             "your-instance-registry.cn-beijing.cr.aliyuncs.com",
             "example placeholder",
         ),
@@ -1098,6 +1102,7 @@ def test_deploy_script_rejects_unsupported_or_placeholder_acr_before_docker(
 ):
     fixture = deployment_fixture(tmp_path)
     deploy_dir = Path(fixture["deploy_dir"])
+    docker_invocation_log = tmp_path / "docker-invocations.log"
     (deploy_dir / ".env.deploy").write_text(
         f"ACR_REGISTRY={registry}\n"
         "ACR_NAMESPACE=zhiku\n"
@@ -1105,11 +1110,15 @@ def test_deploy_script_rejects_unsupported_or_placeholder_acr_before_docker(
         encoding="utf-8",
     )
 
-    result = run_deploy(fixture)
+    result = run_deploy(
+        fixture,
+        FAKE_DOCKER_INVOCATION_LOG=bash_path(docker_invocation_log),
+    )
 
     assert result.returncode != 0
     assert "invalid deployment environment" in result.stderr
     assert error_fragment in result.stderr
+    assert log_lines(docker_invocation_log) == []
     assert log_lines(fixture["docker_log"]) == []
 
 
@@ -1412,6 +1421,9 @@ def restore_fixture(tmp_path: Path) -> dict[str, object]:
         "docker",
         """#!/usr/bin/env bash
 set -u
+if [[ -n "${FAKE_DOCKER_INVOCATION_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_DOCKER_INVOCATION_LOG"
+fi
 if [[ "$*" == "compose version --short" ]]; then
   printf '%s\n' "${FAKE_COMPOSE_VERSION:-2.30.0}"
   exit 0
@@ -1767,15 +1779,20 @@ def test_restore_script_reuses_production_preflight_before_staging_or_downtime(
 ):
     fixture = restore_fixture(tmp_path)
     deploy_dir = Path(fixture["deploy_dir"])
+    docker_invocation_log = tmp_path / "restore-docker-invocations.log"
     (deploy_dir / file_name).write_text(invalid_content, encoding="utf-8")
 
-    result = run_restore(fixture)
+    result = run_restore(
+        fixture,
+        FAKE_DOCKER_INVOCATION_LOG=bash_path(docker_invocation_log),
+    )
 
     assert result.returncode != 0
     assert error_fragment in result.stderr
     assert list(Path(fixture["root"]).glob("data.restore.*")) == []
     assert list(Path(fixture["root"]).glob("data.safety.*")) == []
     assert not (deploy_dir / "transaction").exists()
+    assert log_lines(docker_invocation_log) == []
     assert restore_operations(fixture) == []
 
 
