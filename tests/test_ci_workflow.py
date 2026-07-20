@@ -118,8 +118,6 @@ def test_publish_images_repairs_missing_sha_tags_without_overwriting_existing_on
     assert "manifest unknown|not found|no such manifest" in inspect_step
     assert 'echo "backend_build=$(state_to_build "$backend_state")"' in inspect_step
     assert 'echo "frontend_build=$(state_to_build "$frontend_state")"' in inspect_step
-    assert "immutable SHA" not in content
-    assert "unable to determine SHA tag state for $image" in inspect_step
     assert "only one immutable SHA tag exists" not in inspect_step
 
     backend_header = content[backend_build_index:frontend_build_index].split(
@@ -128,6 +126,17 @@ def test_publish_images_repairs_missing_sha_tags_without_overwriting_existing_on
     frontend_header = content[frontend_build_index:].split("with:", 1)[0]
     assert "if: steps.sha_tags.outputs.backend_build == 'true'" in backend_header
     assert "if: steps.sha_tags.outputs.frontend_build == 'true'" in frontend_header
+
+
+def test_publish_images_uses_edition_neutral_sha_tag_wording():
+    content = read_publish_workflow()
+
+    inspect_index = content.index("- name: Inspect SHA tags")
+    backend_build_index = content.index("- name: Build and publish backend image")
+    inspect_step = content[inspect_index:backend_build_index]
+
+    assert "immutable SHA" not in content
+    assert "unable to determine SHA tag state for $image" in inspect_step
 
 
 def test_publish_images_annotates_and_verifies_both_sha_manifests_before_freshness():
