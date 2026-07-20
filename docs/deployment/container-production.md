@@ -13,14 +13,17 @@
 
 ## 配置 ACR 和 GitHub
 
-正式生产仍推荐阿里云容器镜像服务 **ACR 企业版**，实例地域固定为华北 2（北京）。ACR 个人版可作为此单机项目在资源受限或迁移期间的过渡选择，但阿里云官方将其定位为仅限开发测试且无 SLA 承诺，不能把它当作与企业版等价的生产保障；版本和 SLA 差异见[阿里云官方规格说明](https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances)。无论选择企业版还是个人版，都要创建私有命名空间，并创建 `zhiku-backend`、`zhiku-frontend` 两个私有仓库。
+正式生产仍推荐阿里云容器镜像服务 **ACR 企业版**，实例地域固定为华北 2（北京）。ACR 个人版可作为此单机项目在资源受限或迁移期间的过渡选择，但阿里云官方将其定位为仅限开发测试且无 SLA 承诺，不能把它当作与企业版等价的生产保障；版本和 SLA 差异见[阿里云官方规格说明](https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances)。无论选择企业版还是个人版，都要创建私有命名空间，并创建 `zhiku-backend`、`zhiku-frontend` 两个私有仓库；不得使用阿里云主账号凭据。
 
 **使用企业版时，两个企业版仓库都必须开启镜像版本不可变。** 分别进入 `zhiku-backend` 和 `zhiku-frontend` 的仓库管理页面，选择“基本信息 > 编辑 > 不可变”，确认两个仓库均已启用。操作路径和验证方法见[阿里云官方说明](https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version)。未完成这一步不得启用企业版生产发布工作流。
 
-个人版不提供仓库侧不可变保护，因此必须落实全部补偿控制：`Publish Images` 登录后先检查两个 SHA 标签，GitHub Actions 不会覆盖已存在的 SHA 标签，缺少哪个镜像才构建并推送哪个；两个镜像都存在后读取原始 OCI index，验证 `org.opencontainers.image.revision` 等于本次通过 CI 的 40 位 Git SHA，错误或缺失 annotation 会阻止发布。推送凭据仅供 GitHub Actions 使用，ECS 使用隔离的拉取专用凭据；禁止人工覆盖或删除任何 40 位 SHA 标签，服务器保留当前/上一镜像，生产不用 `latest`。企业版同样执行这些工作流与凭据控制，仓库不可变设置则是防止控制台或其他凭据绕过工作流覆盖标签的最终保护。工作流重新运行时可以修复单侧推送失败。
+个人版不提供仓库侧不可变保护，因此必须落实镜像补偿控制：`Publish Images` 登录后先检查两个 SHA 标签，GitHub Actions 不会覆盖已存在的 SHA 标签，缺少哪个镜像才构建并推送哪个；两个镜像都存在后读取原始 OCI index，验证 `org.opencontainers.image.revision` 等于本次通过 CI 的 40 位 Git SHA，错误或缺失 annotation 会阻止发布。禁止人工覆盖或删除任何 40 位 SHA 标签，服务器保留当前/上一镜像，生产不用 `latest`。企业版同样执行这些工作流控制，仓库不可变设置则是防止控制台或其他凭据绕过工作流覆盖标签的最终保护。工作流重新运行时可以修复单侧推送失败。
 
-- GitHub Actions 使用推送专用凭据，仅允许向这两个仓库推送镜像。
-- ECS 使用单独的拉取专用凭据，仅允许读取生产所需仓库，不能推送或删除镜像。
+凭据必须按 ACR 版本选择可执行方案：
+
+- **企业版**：继续使用两个身份。推送凭据仅供 GitHub Actions 使用，只授予向两个仓库推送所需权限；ECS 使用隔离的拉取专用凭据，即 ECS pull-only 身份，只能读取生产所需仓库，不能推送或删除镜像。
+- **新个人版**：仅允许一个 RAM 子账号设置 Registry 固定密码，并且不支持 `GetAuthorizationToken` 临时密码，因此无法实现 GitHub Actions push 与 ECS pull 两套完全隔离身份，这是相对企业版的安全降级。创建一个专用 RAM 用户，不要使用主账号，并为推送授予必要 ACR 权限；同一 Registry 固定密码必须供 GitHub Actions 与 ECS 复用。ECS 侧凭据具备更高权限，必须限制 SSH/宿主机访问，保护 root 的 `~/.docker/config.json` 并定期轮换固定密码。如果不能接受该安全降级，必须改用企业版或其他支持独立凭据的仓库。
+- **旧个人版**：旧个人版按控制台实际可用能力配置，但不得声称必然可隔离；同样禁止使用主账号。如果控制台不能提供独立的 push 与 pull 身份，按新个人版的共享凭据风险控制执行，或改用企业版。
 
 在 GitHub 仓库中配置以下 Actions Secrets：
 
@@ -75,13 +78,13 @@ chmod 0750 scripts/inspect-restore-archive.py
 
 模板同时列出 SMTP 和 Google。至少配置一种登录方式；未启用的一组应删除对应 `REPLACE_*` 行或留空，不能把占位符带入生产文件。部署脚本会安全读取已知字段做生产预检，不会执行环境文件：它拒绝调试模式、不安全 Cookie、示例管理员、占位符、短加密密钥、部分填写的登录配置和错误的 Google 回调。未知的模型/API 配置会保留给应用使用，包含 `=` 的值也不会被截断。
 
-使用 ECS 的拉取专用账号首次登录 ACR，密码通过标准输入提供，避免出现在 shell 历史中。新个人版不支持 ECS 免密拉取，必须显式执行 `docker login`；企业版和旧个人版也使用同一方式建立可审计的拉取凭据。以下示例占位值必须替换：
+在 ECS 上使用所选版本对应的账号首次登录 ACR，密码通过标准输入提供，避免出现在 shell 历史中。新个人版不支持 ECS 免密拉取，必须显式执行 `docker login`；以下示例使用新个人版的专用 RAM 用户和与 GitHub Actions 复用的 Registry 固定密码，所有占位值必须替换：
 
 ```bash
 ACR_REGISTRY='crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com'
 read -rsp 'ACR pull password: ' ACR_PULL_PASSWORD && echo
 printf '%s' "$ACR_PULL_PASSWORD" |
-  docker login "$ACR_REGISTRY" --username 'YOUR_ECS_PULL_USERNAME' --password-stdin
+  docker login "$ACR_REGISTRY" --username 'YOUR_PERSONAL_ACR_RAM_USERNAME' --password-stdin
 unset ACR_PULL_PASSWORD
 ```
 

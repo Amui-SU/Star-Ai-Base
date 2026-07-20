@@ -2469,13 +2469,36 @@ def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
         "禁止人工覆盖或删除任何 40 位 SHA 标签",
         "服务器保留当前/上一镜像",
         "生产不用 `latest`",
-        "拉取专用凭据",
         "新个人版不支持 ECS 免密拉取",
         "docker login",
         "--password-stdin",
         "占位值必须替换",
+        "不得使用阿里云主账号凭据",
     ]:
         assert required in content
+    new_personal_credentials = next(
+        line for line in content.splitlines() if line.startswith("- **新个人版**")
+    )
+    for required in [
+        "仅允许一个 RAM 子账号设置 Registry 固定密码",
+        "不支持 `GetAuthorizationToken` 临时密码",
+        "无法实现 GitHub Actions push 与 ECS pull 两套完全隔离身份",
+        "相对企业版的安全降级",
+        "同一 Registry 固定密码必须供 GitHub Actions 与 ECS 复用",
+        "ECS 侧凭据具备更高权限",
+        "限制 SSH/宿主机访问",
+        "保护 root 的 `~/.docker/config.json`",
+        "定期轮换",
+        "如果不能接受该安全降级，必须改用企业版",
+    ]:
+        assert required in new_personal_credentials
+    legacy_personal_credentials = next(
+        line for line in content.splitlines() if line.startswith("- **旧个人版**")
+    )
+    assert (
+        "旧个人版按控制台实际可用能力配置，但不得声称必然可隔离"
+        in legacy_personal_credentials
+    )
     assert (
         "GitHub Actions Secret 与 `deploy/.env.deploy` 均填写以下三种受支持的北京 "
         "ACR 公网地址之一" in content
@@ -2486,12 +2509,33 @@ def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
         "旧个人版 `registry.cn-beijing.aliyuncs.com`",
     ]:
         assert registry_format in content
-    login_example = """ACR_REGISTRY='crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com'
-read -rsp 'ACR pull password: ' ACR_PULL_PASSWORD && echo
-printf '%s' "$ACR_PULL_PASSWORD" |
-  docker login "$ACR_REGISTRY" --username 'YOUR_ECS_PULL_USERNAME' --password-stdin
-unset ACR_PULL_PASSWORD"""
-    assert login_example in content
+    login_section = content.split("新个人版不支持 ECS 免密拉取", maxsplit=1)[1]
+    login_block = login_section.split("```bash\n", maxsplit=1)[1].split(
+        "\n```", maxsplit=1
+    )[0]
+    for token in [
+        "ACR_REGISTRY='crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com'",
+        "printf '%s' \"$ACR_PULL_PASSWORD\"",
+        'docker login "$ACR_REGISTRY"',
+        "--username 'YOUR_PERSONAL_ACR_RAM_USERNAME'",
+        "--password-stdin",
+        "unset ACR_PULL_PASSWORD",
+    ]:
+        assert token in login_block
+    assert "YOUR_ECS_PULL_USERNAME" not in login_block
+    assert login_block.index("ACR_REGISTRY=") < login_block.index("docker login")
+    assert login_block.index("printf '%s'") < login_block.index("docker login")
+    assert login_block.index("docker login") < login_block.index(
+        "unset ACR_PULL_PASSWORD"
+    )
+    syntax = subprocess.run(
+        [bash_executable(), "-n"],
+        input=login_block,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert syntax.returncode == 0, syntax.stderr
     assert (
         "https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances"
         in content
