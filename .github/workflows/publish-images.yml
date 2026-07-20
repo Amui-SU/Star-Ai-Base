@@ -45,7 +45,7 @@ jobs:
           username: ${{ env.ACR_USERNAME }}
           password: ${{ env.ACR_PASSWORD }}
 
-      - name: Inspect immutable SHA tags
+      - name: Inspect SHA tags
         id: sha_tags
         shell: bash
         env:
@@ -66,7 +66,7 @@ jobs:
               return 0
             fi
             printf '%s\n' "$output" >&2
-            echo "unable to determine immutable SHA tag state for $image" >&2
+            echo "unable to determine SHA tag state for $image" >&2
             return 1
           }
 
@@ -108,7 +108,7 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
-      - name: Verify immutable SHA image revisions
+      - name: Verify SHA image revisions
         shell: bash
         env:
           BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend

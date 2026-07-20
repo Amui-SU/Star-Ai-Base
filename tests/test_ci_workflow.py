@@ -106,7 +106,7 @@ def test_publish_images_uses_tested_commit_and_acr_configuration():
 def test_publish_images_repairs_missing_sha_tags_without_overwriting_existing_ones():
     content = read_publish_workflow()
 
-    inspect_index = content.index("- name: Inspect immutable SHA tags")
+    inspect_index = content.index("- name: Inspect SHA tags")
     backend_build_index = content.index("- name: Build and publish backend image")
     frontend_build_index = content.index("- name: Build and publish frontend image")
     inspect_step = content[inspect_index:backend_build_index]
@@ -118,6 +118,8 @@ def test_publish_images_repairs_missing_sha_tags_without_overwriting_existing_on
     assert "manifest unknown|not found|no such manifest" in inspect_step
     assert 'echo "backend_build=$(state_to_build "$backend_state")"' in inspect_step
     assert 'echo "frontend_build=$(state_to_build "$frontend_state")"' in inspect_step
+    assert "immutable SHA" not in content
+    assert "unable to determine SHA tag state for $image" in inspect_step
     assert "only one immutable SHA tag exists" not in inspect_step
 
     backend_header = content[backend_build_index:frontend_build_index].split(
@@ -132,7 +134,7 @@ def test_publish_images_annotates_and_verifies_both_sha_manifests_before_freshne
     content = read_publish_workflow()
     backend_build_index = content.index("- name: Build and publish backend image")
     frontend_build_index = content.index("- name: Build and publish frontend image")
-    verify_index = content.index("- name: Verify immutable SHA image revisions")
+    verify_index = content.index("- name: Verify SHA image revisions")
     freshness_index = content.index("- name: Verify tested commit is still current")
 
     backend_build = content[backend_build_index:frontend_build_index]
@@ -178,7 +180,7 @@ def test_publish_images_builds_sha_only_then_promotes_both_images_when_current()
     ].split("- name: Build and publish frontend image", 1)[0]
     frontend_build = content.split("- name: Build and publish frontend image", 1)[
         1
-    ].split("- name: Verify immutable SHA image revisions", 1)[0]
+    ].split("- name: Verify SHA image revisions", 1)[0]
     assert ":latest" not in backend_build
     assert ":latest" not in frontend_build
 
@@ -193,7 +195,7 @@ def test_publish_images_builds_sha_only_then_promotes_both_images_when_current()
         backend_promotion_index + 1,
     )
 
-    revision_index = content.index("- name: Verify immutable SHA image revisions")
+    revision_index = content.index("- name: Verify SHA image revisions")
     assert content.index("- name: Build and publish frontend image") < revision_index
     assert revision_index < freshness_index
     assert freshness_index < remote_head_index < backend_promotion_index
