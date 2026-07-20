@@ -21,6 +21,14 @@ VALID_FERNET_KEY = "A" * 43 + "="
 ENTERPRISE_ACR = "test-instance-registry.cn-beijing.cr.aliyuncs.com"
 PERSONAL_ACR = "crpi-test123.cn-beijing.personal.cr.aliyuncs.com"
 LEGACY_PERSONAL_ACR = "registry.cn-beijing.aliyuncs.com"
+VALID_ENTERPRISE_ACR_BOUNDARY = "a" * 54 + "-registry.cn-beijing.cr.aliyuncs.com"
+INVALID_ENTERPRISE_ACR_BOUNDARY = "a" * 55 + "-registry.cn-beijing.cr.aliyuncs.com"
+VALID_PERSONAL_ACR_BOUNDARY = (
+    "crpi-" + "a" * 58 + ".cn-beijing.personal.cr.aliyuncs.com"
+)
+INVALID_PERSONAL_ACR_BOUNDARY = (
+    "crpi-" + "a" * 59 + ".cn-beijing.personal.cr.aliyuncs.com"
+)
 
 
 def read(relative_path: str) -> str:
@@ -1032,7 +1040,14 @@ def test_deploy_script_accepts_complete_google_login_and_optional_equals(tmp_pat
 
 
 @pytest.mark.parametrize(
-    "registry", [ENTERPRISE_ACR, PERSONAL_ACR, LEGACY_PERSONAL_ACR]
+    "registry",
+    [
+        ENTERPRISE_ACR,
+        PERSONAL_ACR,
+        LEGACY_PERSONAL_ACR,
+        pytest.param(VALID_ENTERPRISE_ACR_BOUNDARY, id="enterprise-label-63"),
+        pytest.param(VALID_PERSONAL_ACR_BOUNDARY, id="personal-label-63"),
+    ],
 )
 def test_deploy_script_accepts_supported_beijing_acr_public_endpoint(
     tmp_path, registry
@@ -1094,6 +1109,16 @@ def test_deploy_script_accepts_supported_beijing_acr_public_endpoint(
         (
             "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com",
             "example placeholder",
+        ),
+        pytest.param(
+            INVALID_ENTERPRISE_ACR_BOUNDARY,
+            "supported Beijing ACR public endpoint",
+            id="enterprise-label-64",
+        ),
+        pytest.param(
+            INVALID_PERSONAL_ACR_BOUNDARY,
+            "supported Beijing ACR public endpoint",
+            id="personal-label-64",
         ),
     ],
 )
@@ -1732,6 +1757,22 @@ def test_restore_script_rejects_invalid_current_sha_before_downtime(tmp_path):
             "ACR_NAMESPACE=zhiku\n"
             "PUBLIC_BASE_URL=https://public.example.test\n",
             "supported Beijing ACR public endpoint",
+        ),
+        pytest.param(
+            ".env.deploy",
+            f"ACR_REGISTRY={INVALID_ENTERPRISE_ACR_BOUNDARY}\n"
+            "ACR_NAMESPACE=zhiku\n"
+            "PUBLIC_BASE_URL=https://public.example.test\n",
+            "supported Beijing ACR public endpoint",
+            id="enterprise-label-64",
+        ),
+        pytest.param(
+            ".env.deploy",
+            f"ACR_REGISTRY={INVALID_PERSONAL_ACR_BOUNDARY}\n"
+            "ACR_NAMESPACE=zhiku\n"
+            "PUBLIC_BASE_URL=https://public.example.test\n",
+            "supported Beijing ACR public endpoint",
+            id="personal-label-64",
         ),
         (
             ".env.production",
