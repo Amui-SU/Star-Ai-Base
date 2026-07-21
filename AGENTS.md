@@ -184,3 +184,52 @@ The local verification script runs:
 - Git whitespace checks.
 
 For risky or broad changes, prefer the full verification path even if only a few files changed.
+
+## Production Release And Deployment
+
+The source of truth for production releases is
+`docs/deployment/container-production.md`. Read it before changing deployment
+infrastructure, publishing images, operating the ECS host, restoring data, or
+giving production deployment instructions.
+
+For a requested release from the development checkout:
+
+1. Inspect the worktree and the staged diff. Never stage or commit unrelated
+   user changes, local secrets, generated data, dependencies, or build output.
+2. Run the checks required by `Stable Commit Workflow`. Fix failures instead of
+   bypassing hooks or weakening CI.
+3. Push only when the user explicitly requests publication. After pushing
+   `main`, monitor both `CI` and the downstream `Publish Images` workflow for the
+   exact commit.
+4. Treat a skipped, cancelled, or failed workflow as a failed release. Do not
+   deploy from `latest`, from a local build, or from a commit whose two SHA image
+   tags were not successfully published and verified.
+5. Report the full 40-character lowercase Git SHA selected for deployment. The
+   backend and frontend must use the same SHA.
+
+Production deployment remains a manual approval gate. A release request does
+not authorize an agent to SSH to ECS or change the running service. Only perform
+server deployment when the user explicitly requests it and server access is
+available. On ECS:
+
+1. Use the fixed deployment root `/opt/zhiku-cloud` and the same operating-system
+   account used for ACR login, deployment, restore, and recovery.
+2. Before deployment, recover an existing `deploy/transaction`, check disk
+   capacity, confirm the exact SHA exists in both ACR repositories, and preserve
+   the active `.env.deploy`, `.env.production`, certificate paths, `data`,
+   `backups`, and `logs`.
+3. Deploy only with `./scripts/deploy.sh <40-character-sha>`. Do not reproduce
+   its behavior with ad hoc `docker compose` commands.
+4. Verify Compose status, backend and frontend logs, local health endpoints on
+   `127.0.0.1:8000` and `127.0.0.1:3000`, and the public HTTPS health endpoint
+   before reporting success.
+5. On failure, preserve transaction markers and safety directories and follow
+   the documented recovery or rollback procedure. Never delete production data
+   to make a retry pass.
+
+Never commit production secrets, copy production environment files back to the
+development machine, expose ports 3000 or 8000 publicly, overwrite an existing
+40-character ACR tag, or delete old deployment/data/backup paths before backup
+and business acceptance are confirmed. Infrastructure updates may synchronize
+reviewed Compose, script, and Nginx example files, but must not overwrite active
+host environment files or certificate configuration.
