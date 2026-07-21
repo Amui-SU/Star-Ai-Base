@@ -62,7 +62,7 @@ export default function Composer({
             e.preventDefault();
             if (isGenerating) {
               onStopGenerating();
-            } else {
+            } else if (canSend) {
               onSend();
             }
           }
@@ -70,7 +70,6 @@ export default function Composer({
         placeholder={knowledgeBaseId ? "输入问题..." : "请先选择或创建知识库"}
         className="input composer-input w-full shadow-sm"
         rows={1}
-        disabled={!knowledgeBaseId}
       />
       <div className="composer-mode-row">
         <ChatScopePicker

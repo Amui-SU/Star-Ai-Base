@@ -75,7 +75,16 @@ export default function Home() {
             className={`workspace ${activeVideoNote ? "video-note-open" : ""}`}
           >
             {!isSidebarOpen && (
-              <WorkspaceCornerTools onOpenSidebarMode={openSidebarMode} />
+              <WorkspaceCornerTools
+                onOpenSidebarMode={openSidebarMode}
+                onOpenNotes={() => {
+                  if (shell.activeKbId) {
+                    openVideoNoteWorkspace(null);
+                  } else {
+                    openSidebarMode("sources");
+                  }
+                }}
+              />
             )}
 
             {isSidebarOpen && sidebarMode !== "history" && (
