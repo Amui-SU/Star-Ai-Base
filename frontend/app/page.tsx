@@ -75,10 +75,7 @@ export default function Home() {
             className={`workspace ${activeVideoNote ? "video-note-open" : ""}`}
           >
             {!isSidebarOpen && (
-              <WorkspaceCornerTools
-                onOpenSidebarMode={openSidebarMode}
-                onOpenVideoNotes={() => openVideoNoteWorkspace(null)}
-              />
+              <WorkspaceCornerTools onOpenSidebarMode={openSidebarMode} />
             )}
 
             {isSidebarOpen && sidebarMode !== "history" && (

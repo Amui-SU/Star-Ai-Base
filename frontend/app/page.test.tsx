@@ -215,7 +215,7 @@ describe("Home mobile shell", () => {
     });
   });
 
-  it("opens the video note workspace directly from the collapsed notes tool", async () => {
+  it("opens the notes sidebar from the collapsed notes tool", async () => {
     localStorage.setItem("active_kb_id", "7");
     const user = userEvent.setup();
     const { container } = render(<Home />);
@@ -226,18 +226,63 @@ describe("Home mobile shell", () => {
 
     await user.click(screen.getByRole("button", { name: "打开笔记" }));
 
-    expect(container.querySelector(".sidebar-shell")).toHaveClass("closed");
-    expect(screen.getByText("Video Note Workspace list")).toBeVisible();
-    expect(videoNoteWorkspaceMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        knowledgeBaseId: 7,
-        initialBvid: null,
-      }),
-    );
-    expect(screen.queryByRole("heading", { name: "笔记" })).toBeNull();
+    expect(container.querySelector(".sidebar-shell")).toHaveClass("open");
+    expect(screen.getByRole("heading", { name: "笔记" })).toBeVisible();
+    expect(screen.getByPlaceholderText("写下这次学习的要点")).toBeVisible();
+    expect(videoNoteWorkspaceMock).not.toHaveBeenCalled();
     expect(
-      screen.queryByPlaceholderText("写下这次学习的要点"),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "收起展开页" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps notes usable when no knowledge base is selected", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat Panel")).toBeInTheDocument();
+    });
+
+    const notesButton = container.querySelectorAll(".workspace-corner-tool")[2];
+    expect(notesButton).toBeInstanceOf(HTMLElement);
+    await user.click(notesButton as HTMLElement);
+
+    expect(container.querySelector(".workspace")).not.toHaveClass(
+      "video-note-open",
+    );
+    expect(container.querySelector(".sidebar-shell")).toHaveClass("open");
+    expect(container.querySelector(".notes-sidebar-editor")).toBeVisible();
+    expect(videoNoteWorkspaceMock).not.toHaveBeenCalled();
+  });
+
+  it("closes an open video note workspace before showing the notes sidebar editor", async () => {
+    localStorage.setItem("active_kb_id", "7");
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat Panel")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Mock open video note" }),
+    );
+    expect(screen.getByText("Video Note Workspace BVNOTE123")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "打开笔记" }));
+
+    expect(screen.queryByText("Video Note Workspace BVNOTE123")).toBeNull();
+    expect(container.querySelector(".workspace")).not.toHaveClass(
+      "video-note-open",
+    );
+    expect(container.querySelector(".sidebar-shell")).toHaveClass("open");
+
+    const editor = screen.getByPlaceholderText(
+      "写下这次学习的要点",
+    ) as HTMLTextAreaElement;
+    await user.type(editor, "服务器笔记测试");
+
+    expect(editor).toHaveValue("服务器笔记测试");
   });
 
   it("docks the video note workspace inside the workspace before chat", async () => {
@@ -249,9 +294,8 @@ describe("Home mobile shell", () => {
       expect(screen.getByText("Chat Panel")).toBeInTheDocument();
     });
 
-    const notesButton = container.querySelectorAll(".workspace-corner-tool")[2];
-    expect(notesButton).toBeInstanceOf(HTMLElement);
-    await user.click(notesButton as HTMLElement);
+    await user.click(screen.getByRole("button", { name: "打开笔记" }));
+    await user.click(screen.getByRole("button", { name: "打开视频笔记库" }));
 
     const workspace = container.querySelector(".workspace");
     const drawer = container.querySelector(".video-note-drawer");

@@ -8,7 +8,7 @@ import AuthCard from "@/components/auth/AuthCard";
 import AuthDemoPreview from "@/components/auth/AuthDemoPreview";
 import {
   getOAuthUnavailableNotice,
-  isLocalhost,
+  supportsPublicHttpsOAuth,
   type OAuthProvider,
 } from "@/components/auth/authPageLogic";
 import { useAuthForm } from "@/components/auth/useAuthForm";
@@ -24,7 +24,10 @@ export default function AuthPage({ onAuthSuccess }: Props) {
   const [visible, setVisible] = useState(false);
   const [googleLoginSupported] = useState(() => {
     if (typeof window === "undefined") return false;
-    return isLocalhost(window.location.hostname);
+    return supportsPublicHttpsOAuth(
+      window.location.protocol,
+      window.location.hostname,
+    );
   });
   const [oauthNotice, setOauthNotice] = useState<string | null>(null);
 

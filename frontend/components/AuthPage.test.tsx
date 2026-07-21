@@ -28,7 +28,9 @@ const thirdPartyNotice = /WeChat and QQ login are not configured yet/i;
 beforeEach(() => {
   vi.stubGlobal("location", {
     ...window.location,
+    protocol: "http:",
     hostname: "mobile-preview.example.test",
+    origin: "http://mobile-preview.example.test",
   });
 });
 
@@ -39,6 +41,41 @@ afterEach(() => {
 });
 
 describe("AuthPage third-party login notice", () => {
+  it("enables Google login on a public HTTPS origin", () => {
+    vi.stubGlobal("location", {
+      ...window.location,
+      protocol: "https:",
+      hostname: "zhiku-cloud.cn",
+      origin: "https://zhiku-cloud.cn",
+    });
+
+    render(<AuthPage onAuthSuccess={vi.fn()} />);
+
+    const googleLink = screen.getByRole("link", { name: /Google/i });
+    expect(googleLink).toHaveAttribute("href", "/oauth/google");
+    expect(googleLink).toHaveAttribute("aria-disabled", "false");
+  });
+
+  it("keeps Google login disabled on local preview origins", async () => {
+    vi.stubGlobal("location", {
+      ...window.location,
+      protocol: "http:",
+      hostname: "localhost",
+      origin: "http://localhost",
+    });
+    const user = userEvent.setup();
+    render(<AuthPage onAuthSuccess={vi.fn()} />);
+
+    const googleLink = screen.getByRole("link", { name: /Google/i });
+    expect(googleLink).toHaveAttribute("href", "#");
+
+    await user.click(googleLink);
+
+    expect(
+      screen.getByText(/Google login requires an HTTPS public callback/i),
+    ).toBeInTheDocument();
+  });
+
   it("shows the unavailable notice only after clicking an unsupported provider", async () => {
     const user = userEvent.setup();
     render(<AuthPage onAuthSuccess={vi.fn()} />);

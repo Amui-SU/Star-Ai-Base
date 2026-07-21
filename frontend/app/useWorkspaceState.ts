@@ -78,6 +78,7 @@ export function useWorkspaceState() {
 
   const openSidebarMode = useCallback(
     (mode: SidebarMode) => {
+      setActiveVideoNote(null);
       setSidebarMode(mode);
       setSidebarOpen(true);
     },
