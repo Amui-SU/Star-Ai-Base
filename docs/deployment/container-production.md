@@ -13,18 +13,21 @@
 
 ## 配置 ACR 和 GitHub
 
-生产环境强制使用阿里云容器镜像服务 **ACR 企业版**，实例地域固定为华北 2（北京）。在该企业版实例中创建一个私有命名空间，并创建 `zhiku-backend`、`zhiku-frontend` 两个私有仓库。ACR 个人版仅面向开发测试、无 SLA 承诺，因此本方案不支持生产使用个人版；版本和 SLA 差异见[阿里云官方规格说明](https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances)。不要使用阿里云主账号凭据，并严格分开两类身份：
+正式生产仍推荐阿里云容器镜像服务 **ACR 企业版**，实例地域固定为华北 2（北京）。ACR 个人版可作为此单机项目在资源受限或迁移期间的过渡选择，但阿里云官方将其定位为仅限开发测试且无 SLA 承诺，不能把它当作与企业版等价的生产保障；版本和 SLA 差异见[阿里云官方规格说明](https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances)。无论选择企业版还是个人版，都要创建私有命名空间，并创建 `zhiku-backend`、`zhiku-frontend` 两个私有仓库；不得使用阿里云主账号凭据。
 
-**强制前置条件：两个仓库都必须开启镜像版本不可变。** 分别进入 `zhiku-backend` 和 `zhiku-frontend` 的仓库管理页面，选择“基本信息 > 编辑 > 不可变”，确认两个仓库均已启用。操作路径和验证方法见[阿里云官方说明](https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version)。未完成这一步不得启用生产发布工作流。
+**使用企业版时，两个企业版仓库都必须开启镜像版本不可变。** 分别进入 `zhiku-backend` 和 `zhiku-frontend` 的仓库管理页面，选择“基本信息 > 编辑 > 不可变”，确认两个仓库均已启用。操作路径和验证方法见[阿里云官方说明](https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version)。未完成这一步不得启用企业版生产发布工作流。
 
-`Publish Images` 会在登录后分别检查两个 SHA 标签：缺少哪个镜像就只构建并推送哪个，已存在的不可变 SHA 不会覆盖，因此工作流重新运行时可修复单侧推送失败。两个镜像都存在后，工作流读取原始 OCI index，并确认 `org.opencontainers.image.revision` 等于本次受测 SHA；错误或缺失 annotation 会阻止 `latest` 提升。ACR 的不可变设置是防止控制台或其他凭据绕过工作流覆盖标签的最终保护。生产始终部署精确 SHA，`latest` 仍只用于浏览和排查。
+个人版不提供仓库侧不可变保护，因此必须落实镜像补偿控制：`Publish Images` 登录后先检查两个 SHA 标签，GitHub Actions 不会覆盖已存在的 SHA 标签，缺少哪个镜像才构建并推送哪个；两个镜像都存在后读取原始 OCI index，验证 `org.opencontainers.image.revision` 等于本次通过 CI 的 40 位 Git SHA，错误或缺失 annotation 会阻止发布。禁止人工覆盖或删除任何 40 位 SHA 标签，服务器保留当前/上一镜像，生产不用 `latest`。企业版同样执行这些工作流控制，仓库不可变设置则是防止控制台或其他凭据绕过工作流覆盖标签的最终保护。工作流重新运行时可以修复单侧推送失败。
 
-- GitHub Actions 使用推送专用凭据，仅允许向这两个仓库推送镜像。
-- ECS 使用单独的拉取专用凭据，仅允许读取生产所需仓库，不能推送或删除镜像。
+凭据必须按 ACR 版本选择可执行方案：
+
+- **企业版**：继续使用两个身份。推送凭据仅供 GitHub Actions 使用，只授予向两个仓库推送所需权限；ECS 使用隔离的拉取专用凭据，即 ECS pull-only 身份，只能读取生产所需仓库，不能推送或删除镜像。
+- **新个人版**：仅允许一个 RAM 子账号设置 Registry 固定密码，并且不支持 `GetAuthorizationToken` 临时密码，因此无法实现 GitHub Actions push 与 ECS pull 两套完全隔离身份，这是相对企业版的安全降级。创建一个专用 RAM 用户，不要使用主账号，并为推送授予必要 ACR 权限；同一 Registry 固定密码必须供 GitHub Actions 与 ECS 复用。ECS 侧凭据具备更高权限，必须限制 SSH/宿主机访问，保护 root 的 `~/.docker/config.json` 并定期轮换固定密码。如果不能接受该安全降级，必须改用企业版或其他支持独立凭据的仓库。
+- **旧个人版**：旧个人版按控制台实际可用能力配置，但不得声称必然可隔离；同样禁止使用主账号。如果控制台不能提供独立的 push 与 pull 身份，按新个人版的共享凭据风险控制执行，或改用企业版。
 
 在 GitHub 仓库中配置以下 Actions Secrets：
 
-- `ACR_REGISTRY`：企业版北京公网默认域名，例如 `your-instance-registry.cn-beijing.cr.aliyuncs.com`；必须替换 `your-instance`，个人版/旧版兼容域名会被部署预检拒绝。企业版与个人版默认域名格式见[阿里云官方域名说明](https://help.aliyun.com/zh/acr/user-guide/use-an-image-domain-name-of-a-personal-edition-instance-to-access-an-enterprise-edition-instance)。
+- `ACR_REGISTRY`：GitHub Actions Secret 与 `deploy/.env.deploy` 均填写以下三种受支持的北京 ACR 公网地址之一：企业版 `your-instance-registry.cn-beijing.cr.aliyuncs.com`、新个人版 `crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com`，或旧个人版 `registry.cn-beijing.aliyuncs.com`。示例中的 `your-instance`、`crpi-your-instance` 等占位值必须替换为控制台显示的实际值。个人版独立域名的官方限制见[阿里云说明](https://help.aliyun.com/zh/acr/user-guide/individual-edition-instance-independent-domain-name-capacity-limit)。
 - `ACR_USERNAME`：ACR 登录用户名
 - `ACR_PASSWORD`：ACR 登录密码或专用访问凭据
 
@@ -75,11 +78,13 @@ chmod 0750 scripts/inspect-restore-archive.py
 
 模板同时列出 SMTP 和 Google。至少配置一种登录方式；未启用的一组应删除对应 `REPLACE_*` 行或留空，不能把占位符带入生产文件。部署脚本会安全读取已知字段做生产预检，不会执行环境文件：它拒绝调试模式、不安全 Cookie、示例管理员、占位符、短加密密钥、部分填写的登录配置和错误的 Google 回调。未知的模型/API 配置会保留给应用使用，包含 `=` 的值也不会被截断。
 
-使用 ECS 的拉取专用账号首次登录 ACR，密码通过标准输入提供，避免出现在 shell 历史中：
+在 ECS 上使用所选版本对应的账号首次登录 ACR，密码通过标准输入提供，避免出现在 shell 历史中。新个人版不支持 ECS 免密拉取，必须显式执行 `docker login`；以下示例使用新个人版的专用 RAM 用户和与 GitHub Actions 复用的 Registry 固定密码，所有占位值必须替换：
 
 ```bash
-read -rsp 'ACR pull-only password: ' ACR_PULL_PASSWORD && echo
-printf '%s' "$ACR_PULL_PASSWORD" | docker login your-instance-registry.cn-beijing.cr.aliyuncs.com --username 'YOUR_ECS_PULL_ONLY_USERNAME' --password-stdin
+ACR_REGISTRY='crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com'
+read -rsp 'ACR pull password: ' ACR_PULL_PASSWORD && echo
+printf '%s' "$ACR_PULL_PASSWORD" |
+  docker login "$ACR_REGISTRY" --username 'YOUR_PERSONAL_ACR_RAM_USERNAME' --password-stdin
 unset ACR_PULL_PASSWORD
 ```
 
@@ -142,7 +147,7 @@ cd /opt/zhiku-cloud
 ./scripts/restore-data.sh /opt/zhiku-cloud/backups/REPLACE_WITH_BACKUP/data.tar.gz
 ```
 
-脚本会先取得与发布相同的 `deploy.lock`，再通过 `production-preflight.sh` 执行与发布完全相同的只读生产预检；企业版 ACR、Compose raw 值、Fernet、Cookie、管理员和登录配置任一无效时，不会展开归档、创建事务 marker 或停止后端。它拒绝备份目录之外的路径、符号链接、危险归档成员，以及超过成员数或解压总量限制的归档；默认解压总量上限为 20 GiB，可通过 `ZHIKU_RESTORE_MAX_MEMBERS`、`ZHIKU_RESTORE_MAX_BYTES` 调低或在评估后调整。真正解压前，可用空间必须至少为归档展开大小加 2 GiB；可用 `ZHIKU_RESTORE_DISK_RESERVE_BYTES` 提高预留量。停机前脚本会验证应用 SQLite 的完整性及核心表，并验证 `chroma_db/chroma.sqlite3` 的完整性和非空 schema。随后脚本停止后端，把原数据保存在权限受限且名称唯一的 `data.safety.*` 安全副本中，切换已验证数据，并使用 `current-version` 中的精确 SHA 和 `--pull never` 重启。只有本机和公网健康检查都成功，恢复才算完成。
+脚本会先取得与发布相同的 `deploy.lock`，再通过 `production-preflight.sh` 执行与发布完全相同的只读生产预检；受支持的北京 ACR 公网地址、Compose raw 值、Fernet、Cookie、管理员和登录配置任一无效时，不会展开归档、创建事务 marker 或停止后端。它拒绝备份目录之外的路径、符号链接、危险归档成员，以及超过成员数或解压总量限制的归档；默认解压总量上限为 20 GiB，可通过 `ZHIKU_RESTORE_MAX_MEMBERS`、`ZHIKU_RESTORE_MAX_BYTES` 调低或在评估后调整。真正解压前，可用空间必须至少为归档展开大小加 2 GiB；可用 `ZHIKU_RESTORE_DISK_RESERVE_BYTES` 提高预留量。停机前脚本会验证应用 SQLite 的完整性及核心表，并验证 `chroma_db/chroma.sqlite3` 的完整性和非空 schema。随后脚本停止后端，把原数据保存在权限受限且名称唯一的 `data.safety.*` 安全副本中，切换已验证数据，并使用 `current-version` 中的精确 SHA 和 `--pull never` 重启。只有本机和公网健康检查都成功，恢复才算完成。
 
 交换开始后若复制、移动、启动、健康检查失败，或收到 HUP、INT、TERM，脚本会先停止后端、恢复安全副本，再决定是否重启原 SHA。若旧数据无法确认已经回到活动路径，后端会保持停止，脚本会打印旧数据、失败数据和活动目录的精确人工恢复路径。生产数据变更前会原子写入 `deploy/transaction`；只有发布、恢复或自动回退完整成功后才删除。未进入数据交换的失败只清理本次已知 `data.restore.*` 暂存目录；交换开始后的暂存、安全副本和失败数据会保留以便审计。整个流程不删除 Compose volume，也不批量清理 Docker 数据。
 

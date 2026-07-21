@@ -13,7 +13,7 @@ production_preflight_invalid_app() {
 production_preflight() {
   local deploy_env="$1"
   local app_env="$2"
-  local line key value first_character last_character
+  local line key value first_character last_character registry_label
   local seen_registry=false
   local seen_namespace=false
   local seen_public_url=false
@@ -56,10 +56,22 @@ production_preflight() {
     esac
   done < "$deploy_env"
 
-  [[ "$seen_registry" == true && "$ACR_REGISTRY" =~ ^[a-z0-9][a-z0-9-]*-registry\.cn-beijing\.cr\.aliyuncs\.com$ ]] ||
-    production_preflight_invalid_deploy "ACR_REGISTRY must be a Beijing ACR Enterprise Edition public endpoint"
-  [[ "$ACR_REGISTRY" != "your-instance-registry.cn-beijing.cr.aliyuncs.com" ]] ||
-    production_preflight_invalid_deploy "ACR_REGISTRY still contains the Enterprise Edition example placeholder"
+  [[ "$seen_registry" == true ]] ||
+    production_preflight_invalid_deploy "ACR_REGISTRY must be a supported Beijing ACR public endpoint"
+  if [[ "$ACR_REGISTRY" == "your-instance-registry.cn-beijing.cr.aliyuncs.com" ||
+    "$ACR_REGISTRY" == "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com" ]]; then
+    production_preflight_invalid_deploy "ACR_REGISTRY still contains an example placeholder"
+  fi
+  registry_label="${ACR_REGISTRY%%.*}"
+  if [[ -n "$registry_label" && ${#registry_label} -le 63 &&
+    ( "$ACR_REGISTRY" == "registry.cn-beijing.aliyuncs.com" ||
+      "$ACR_REGISTRY" =~ ^[a-z0-9][a-z0-9-]*-registry\.cn-beijing\.cr\.aliyuncs\.com$ ||
+      ( "$ACR_REGISTRY" =~ ^crpi-[a-z0-9]([a-z0-9-]*[a-z0-9])?\.cn-beijing\.personal\.cr\.aliyuncs\.com$ &&
+        ! "$ACR_REGISTRY" =~ ^crpi-.*-vpc\.cn-beijing\.personal\.cr\.aliyuncs\.com$ ) ) ]]; then
+    :
+  else
+    production_preflight_invalid_deploy "ACR_REGISTRY must be a supported Beijing ACR public endpoint"
+  fi
   [[ "$seen_namespace" == true && "$ACR_NAMESPACE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]] ||
     production_preflight_invalid_deploy "ACR_NAMESPACE has an unsafe value"
   [[ "$seen_public_url" == true ]] || production_preflight_invalid_deploy "PUBLIC_BASE_URL is required"

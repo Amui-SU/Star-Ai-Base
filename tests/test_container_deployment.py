@@ -19,6 +19,16 @@ TARGET_TAG = "1" * 40
 PREVIOUS_TAG = "2" * 40
 VALID_FERNET_KEY = "A" * 43 + "="
 ENTERPRISE_ACR = "test-instance-registry.cn-beijing.cr.aliyuncs.com"
+PERSONAL_ACR = "crpi-test123.cn-beijing.personal.cr.aliyuncs.com"
+LEGACY_PERSONAL_ACR = "registry.cn-beijing.aliyuncs.com"
+VALID_ENTERPRISE_ACR_BOUNDARY = "a" * 54 + "-registry.cn-beijing.cr.aliyuncs.com"
+INVALID_ENTERPRISE_ACR_BOUNDARY = "a" * 55 + "-registry.cn-beijing.cr.aliyuncs.com"
+VALID_PERSONAL_ACR_BOUNDARY = (
+    "crpi-" + "a" * 58 + ".cn-beijing.personal.cr.aliyuncs.com"
+)
+INVALID_PERSONAL_ACR_BOUNDARY = (
+    "crpi-" + "a" * 59 + ".cn-beijing.personal.cr.aliyuncs.com"
+)
 
 
 def read(relative_path: str) -> str:
@@ -266,7 +276,7 @@ def test_deploy_environment_example_contains_only_public_deployment_metadata():
     content = read("deploy/.env.deploy.example")
 
     assert content.splitlines() == [
-        "ACR_REGISTRY=your-instance-registry.cn-beijing.cr.aliyuncs.com",
+        "ACR_REGISTRY=crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com",
         "ACR_NAMESPACE=zhiku-cloud",
         "PUBLIC_BASE_URL=https://zhiku-cloud.cn",
     ]
@@ -343,12 +353,19 @@ def test_deploy_script_enforces_disk_compose_cookie_and_transaction_preflights()
     assert "backup_dir=$BACKUP_DIR" in content
 
 
-def test_deploy_script_requires_beijing_enterprise_acr_endpoint():
+def test_deploy_script_requires_supported_beijing_acr_public_endpoint():
     content = read("scripts/production-preflight.sh")
 
-    assert "cn-beijing\\.cr\\.aliyuncs\\.com" in content
+    assert "^[a-z0-9][a-z0-9-]*-registry\\.cn-beijing\\.cr\\.aliyuncs\\.com$" in content
+    assert (
+        "^crpi-[a-z0-9]([a-z0-9-]*[a-z0-9])?\\.cn-beijing\\.personal\\.cr\\.aliyuncs\\.com$"
+        in content
+    )
+    assert "registry.cn-beijing.aliyuncs.com" in content
+    assert "crpi-.*-vpc\\.cn-beijing\\.personal\\.cr\\.aliyuncs\\.com" in content
     assert "your-instance-registry.cn-beijing.cr.aliyuncs.com" in content
-    assert "Enterprise Edition" in content
+    assert "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com" in content
+    assert "supported Beijing ACR public endpoint" in content
 
 
 def test_restore_script_enforces_20_gib_limit_disk_budget_and_transaction_marker():
@@ -507,6 +524,9 @@ def deployment_fixture(tmp_path: Path) -> dict[str, object]:
         "docker",
         """#!/usr/bin/env bash
 set -u
+if [[ -n "${FAKE_DOCKER_INVOCATION_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_DOCKER_INVOCATION_LOG"
+fi
 if [[ "$*" == "compose version --short" ]]; then
   printf '%s\n' "${FAKE_COMPOSE_VERSION:-2.30.0}"
   exit 0
@@ -1022,14 +1042,14 @@ def test_deploy_script_accepts_complete_google_login_and_optional_equals(tmp_pat
 @pytest.mark.parametrize(
     "registry",
     [
-        "registry.cn-beijing.aliyuncs.com",
-        "registry-vpc.cn-beijing.aliyuncs.com",
-        "registry.cn-beijing.cr.aliyuncs.com",
-        "test-instance-registry.cn-hangzhou.cr.aliyuncs.com",
-        "your-instance-registry.cn-beijing.cr.aliyuncs.com",
+        ENTERPRISE_ACR,
+        PERSONAL_ACR,
+        LEGACY_PERSONAL_ACR,
+        pytest.param(VALID_ENTERPRISE_ACR_BOUNDARY, id="enterprise-label-63"),
+        pytest.param(VALID_PERSONAL_ACR_BOUNDARY, id="personal-label-63"),
     ],
 )
-def test_deploy_script_rejects_non_enterprise_or_placeholder_acr_before_docker(
+def test_deploy_script_accepts_supported_beijing_acr_public_endpoint(
     tmp_path, registry
 ):
     fixture = deployment_fixture(tmp_path)
@@ -1043,8 +1063,87 @@ def test_deploy_script_rejects_non_enterprise_or_placeholder_acr_before_docker(
 
     result = run_deploy(fixture)
 
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("registry", "error_fragment"),
+    [
+        (
+            "registry-vpc.cn-beijing.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "registry.cn-beijing.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "test-instance-registry.cn-hangzhou.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "crpi-test123.cn-hangzhou.personal.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "crpi-test123-vpc.cn-beijing.personal.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        ("docker.io", "supported Beijing ACR public endpoint"),
+        (
+            "https://crpi-test123.cn-beijing.personal.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "crpi-test123.cn-beijing.personal.cr.aliyuncs.com/zhiku",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "crpi-test-.cn-beijing.personal.cr.aliyuncs.com",
+            "supported Beijing ACR public endpoint",
+        ),
+        (
+            "your-instance-registry.cn-beijing.cr.aliyuncs.com",
+            "example placeholder",
+        ),
+        (
+            "crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com",
+            "example placeholder",
+        ),
+        pytest.param(
+            INVALID_ENTERPRISE_ACR_BOUNDARY,
+            "supported Beijing ACR public endpoint",
+            id="enterprise-label-64",
+        ),
+        pytest.param(
+            INVALID_PERSONAL_ACR_BOUNDARY,
+            "supported Beijing ACR public endpoint",
+            id="personal-label-64",
+        ),
+    ],
+)
+def test_deploy_script_rejects_unsupported_or_placeholder_acr_before_docker(
+    tmp_path, registry, error_fragment
+):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    docker_invocation_log = tmp_path / "docker-invocations.log"
+    (deploy_dir / ".env.deploy").write_text(
+        f"ACR_REGISTRY={registry}\n"
+        "ACR_NAMESPACE=zhiku\n"
+        "PUBLIC_BASE_URL=https://public.example.test\n",
+        encoding="utf-8",
+    )
+
+    result = run_deploy(
+        fixture,
+        FAKE_DOCKER_INVOCATION_LOG=bash_path(docker_invocation_log),
+    )
+
     assert result.returncode != 0
-    assert "Enterprise Edition" in result.stderr
+    assert "invalid deployment environment" in result.stderr
+    assert error_fragment in result.stderr
+    assert log_lines(docker_invocation_log) == []
     assert log_lines(fixture["docker_log"]) == []
 
 
@@ -1347,6 +1446,9 @@ def restore_fixture(tmp_path: Path) -> dict[str, object]:
         "docker",
         """#!/usr/bin/env bash
 set -u
+if [[ -n "${FAKE_DOCKER_INVOCATION_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_DOCKER_INVOCATION_LOG"
+fi
 if [[ "$*" == "compose version --short" ]]; then
   printf '%s\n' "${FAKE_COMPOSE_VERSION:-2.30.0}"
   exit 0
@@ -1651,10 +1753,26 @@ def test_restore_script_rejects_invalid_current_sha_before_downtime(tmp_path):
     [
         (
             ".env.deploy",
-            "ACR_REGISTRY=registry.cn-beijing.aliyuncs.com\n"
+            "ACR_REGISTRY=registry-vpc.cn-beijing.aliyuncs.com\n"
             "ACR_NAMESPACE=zhiku\n"
             "PUBLIC_BASE_URL=https://public.example.test\n",
-            "Enterprise Edition",
+            "supported Beijing ACR public endpoint",
+        ),
+        pytest.param(
+            ".env.deploy",
+            f"ACR_REGISTRY={INVALID_ENTERPRISE_ACR_BOUNDARY}\n"
+            "ACR_NAMESPACE=zhiku\n"
+            "PUBLIC_BASE_URL=https://public.example.test\n",
+            "supported Beijing ACR public endpoint",
+            id="enterprise-label-64",
+        ),
+        pytest.param(
+            ".env.deploy",
+            f"ACR_REGISTRY={INVALID_PERSONAL_ACR_BOUNDARY}\n"
+            "ACR_NAMESPACE=zhiku\n"
+            "PUBLIC_BASE_URL=https://public.example.test\n",
+            "supported Beijing ACR public endpoint",
+            id="personal-label-64",
         ),
         (
             ".env.production",
@@ -1702,15 +1820,20 @@ def test_restore_script_reuses_production_preflight_before_staging_or_downtime(
 ):
     fixture = restore_fixture(tmp_path)
     deploy_dir = Path(fixture["deploy_dir"])
+    docker_invocation_log = tmp_path / "restore-docker-invocations.log"
     (deploy_dir / file_name).write_text(invalid_content, encoding="utf-8")
 
-    result = run_restore(fixture)
+    result = run_restore(
+        fixture,
+        FAKE_DOCKER_INVOCATION_LOG=bash_path(docker_invocation_log),
+    )
 
     assert result.returncode != 0
     assert error_fragment in result.stderr
     assert list(Path(fixture["root"]).glob("data.restore.*")) == []
     assert list(Path(fixture["root"]).glob("data.safety.*")) == []
     assert not (deploy_dir / "transaction").exists()
+    assert log_lines(docker_invocation_log) == []
     assert restore_operations(fixture) == []
 
 
@@ -2368,16 +2491,125 @@ def test_container_production_runbook_documents_safe_exact_sha_operations():
     assert "down -v" not in content
 
 
-def test_container_runbook_requires_immutable_acr_and_operational_disk_safety():
+def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
+    content = read("docs/deployment/container-production.md")
+
+    for required in [
+        "正式生产仍推荐阿里云容器镜像服务 **ACR 企业版**",
+        "ACR 企业版",
+        "ACR 个人版",
+        "无 SLA",
+        "仅限开发测试",
+        "ACR 个人版可作为此单机项目在资源受限或迁移期间的过渡选择",
+        "不能把它当作与企业版等价的生产保障",
+        "40 位 Git SHA",
+        "不会覆盖已存在的 SHA 标签",
+        "org.opencontainers.image.revision",
+        "推送凭据仅供 GitHub Actions 使用",
+        "ECS 使用隔离的拉取专用凭据",
+        "禁止人工覆盖或删除任何 40 位 SHA 标签",
+        "服务器保留当前/上一镜像",
+        "生产不用 `latest`",
+        "新个人版不支持 ECS 免密拉取",
+        "docker login",
+        "--password-stdin",
+        "占位值必须替换",
+        "不得使用阿里云主账号凭据",
+    ]:
+        assert required in content
+    new_personal_credentials = next(
+        line for line in content.splitlines() if line.startswith("- **新个人版**")
+    )
+    for required in [
+        "仅允许一个 RAM 子账号设置 Registry 固定密码",
+        "不支持 `GetAuthorizationToken` 临时密码",
+        "无法实现 GitHub Actions push 与 ECS pull 两套完全隔离身份",
+        "相对企业版的安全降级",
+        "同一 Registry 固定密码必须供 GitHub Actions 与 ECS 复用",
+        "ECS 侧凭据具备更高权限",
+        "限制 SSH/宿主机访问",
+        "保护 root 的 `~/.docker/config.json`",
+        "定期轮换",
+        "如果不能接受该安全降级，必须改用企业版",
+    ]:
+        assert required in new_personal_credentials
+    legacy_personal_credentials = next(
+        line for line in content.splitlines() if line.startswith("- **旧个人版**")
+    )
+    assert (
+        "旧个人版按控制台实际可用能力配置，但不得声称必然可隔离"
+        in legacy_personal_credentials
+    )
+    assert (
+        "GitHub Actions Secret 与 `deploy/.env.deploy` 均填写以下三种受支持的北京 "
+        "ACR 公网地址之一" in content
+    )
+    for registry_format in [
+        "企业版 `your-instance-registry.cn-beijing.cr.aliyuncs.com`",
+        "新个人版 `crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com`",
+        "旧个人版 `registry.cn-beijing.aliyuncs.com`",
+    ]:
+        assert registry_format in content
+    login_section = content.split("新个人版不支持 ECS 免密拉取", maxsplit=1)[1]
+    login_block = login_section.split("```bash\n", maxsplit=1)[1].split(
+        "\n```", maxsplit=1
+    )[0]
+    for token in [
+        "ACR_REGISTRY='crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com'",
+        "printf '%s' \"$ACR_PULL_PASSWORD\"",
+        'docker login "$ACR_REGISTRY"',
+        "--username 'YOUR_PERSONAL_ACR_RAM_USERNAME'",
+        "--password-stdin",
+        "unset ACR_PULL_PASSWORD",
+    ]:
+        assert token in login_block
+    assert "YOUR_ECS_PULL_USERNAME" not in login_block
+    assert login_block.index("ACR_REGISTRY=") < login_block.index("docker login")
+    assert login_block.index("printf '%s'") < login_block.index("docker login")
+    assert login_block.index("docker login") < login_block.index(
+        "unset ACR_PULL_PASSWORD"
+    )
+    syntax = subprocess.run(
+        [bash_executable(), "-n"],
+        input=login_block,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert syntax.returncode == 0, syntax.stderr
+    assert (
+        "https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances"
+        in content
+    )
+    assert (
+        "https://help.aliyun.com/zh/acr/user-guide/individual-edition-instance-independent-domain-name-capacity-limit"
+        in content
+    )
+    assert (
+        "`production-preflight.sh` 执行与发布完全相同的只读生产预检；"
+        "受支持的北京 ACR 公网地址" in content
+    )
+
+
+def test_container_runbook_keeps_enterprise_immutability_and_operational_safety():
     content = read("docs/deployment/container-production.md")
 
     assert (
         "https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version"
         in content
     )
-    assert "zhiku-backend" in content and "zhiku-frontend" in content
-    assert "不可变" in content
-    assert "重新运行" in content and "不会覆盖" in content
+    immutability_paragraph = next(
+        paragraph
+        for paragraph in content.split("\n\n")
+        if "两个企业版仓库都必须开启镜像版本不可变" in paragraph
+    )
+    assert "**使用企业版时，两个企业版仓库都必须开启镜像版本不可变。**" in (
+        immutability_paragraph
+    )
+    assert "zhiku-backend" in immutability_paragraph
+    assert "zhiku-frontend" in immutability_paragraph
+    assert "`zhiku-backend`、`zhiku-frontend` 两个私有仓库" in content
+    assert "个人版不提供仓库侧不可变保护" in content
     assert "Docker Compose 2.30" in content
     assert "最新 10" in content
     assert "异机" in content
@@ -2385,21 +2617,6 @@ def test_container_runbook_requires_immutable_acr_and_operational_disk_safety():
     assert "recover-interrupted.sh" in content
     assert "transaction" in content
     assert "down -v" not in content
-
-
-def test_container_runbook_requires_beijing_acr_enterprise_edition():
-    content = read("docs/deployment/container-production.md")
-
-    assert "ACR 企业版" in content
-    assert "华北 2（北京）" in content
-    assert "your-instance-registry.cn-beijing.cr.aliyuncs.com" in content
-    assert "个人版" in content
-    assert "不支持生产" in content
-    assert "无 SLA" in content
-    assert (
-        "https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances"
-        in content
-    )
 
 
 def test_readme_links_the_production_runbook_next_to_docker_section():
