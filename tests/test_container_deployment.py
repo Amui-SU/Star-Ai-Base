@@ -35,6 +35,16 @@ def read(relative_path: str) -> str:
     return (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def markdown_section(content: str, heading: str) -> str:
+    marker = f"## {heading}"
+    assert (
+        content.count(marker) == 1
+    ), f"expected exactly one Markdown section: {marker}"
+    start = content.index(marker)
+    end = content.find("\n## ", start + len(marker))
+    return content[start:] if end == -1 else content[start:end]
+
+
 def test_shell_scripts_keep_linux_line_endings():
     assert "*.sh text eol=lf" in read(".gitattributes")
 
@@ -2901,6 +2911,176 @@ def test_container_production_runbook_documents_safe_exact_sha_operations():
     assert "tar -xzf" not in content
     assert "mv /opt/zhiku-cloud/data" not in content
     assert "down -v" not in content
+
+
+def test_production_guide_documents_verifiable_release_headings_and_boundary():
+    content = read("docs/deployment/container-production.md")
+
+    for heading in [
+        "## 首次部署",
+        "## 正常升级精确 SHA",
+        "## 有意重复部署同一 SHA",
+        "## 镜像回滚",
+        "## 接管已有运行版本",
+        "## 页面未变化诊断表",
+    ]:
+        assert heading in content
+
+    for required in [
+        "Publish Images does not deploy ECS",
+        "post-deploy",
+    ]:
+        assert required in content
+
+
+def test_production_guide_intentional_redeploy_is_current_sha_only():
+    section = markdown_section(
+        read("docs/deployment/container-production.md"), "有意重复部署同一 SHA"
+    )
+
+    recovery = "test ! -e deploy/transaction || ./scripts/recover-interrupted.sh"
+    read_current = "REDEPLOY_SHA=\"$(tr -d '[:space:]' < deploy/current-version)\""
+    validate = '[[ "$REDEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]'
+    deploy = './scripts/deploy.sh --allow-redeploy "$REDEPLOY_SHA"'
+
+    for required in [
+        "cd /opt/zhiku-cloud",
+        recovery,
+        read_current,
+        validate,
+        deploy,
+        "不得用于不同 SHA",
+    ]:
+        assert required in section
+
+    assert section.index(recovery) < section.index(read_current)
+    assert section.index(read_current) < section.index(validate) < section.index(deploy)
+
+
+def test_production_guide_legacy_baseline_adoption_is_unambiguous_and_atomic():
+    section = markdown_section(
+        read("docs/deployment/container-production.md"), "接管已有运行版本"
+    )
+
+    backend_read = 'BACKEND_IMAGE="$(docker ps'
+    frontend_read = 'FRONTEND_IMAGE="$(docker ps'
+    reject_ambiguous = (
+        '[[ -n "$BACKEND_IMAGE" && "$BACKEND_IMAGE" != *$\'\\n\'* '
+        '&& -n "$FRONTEND_IMAGE" && "$FRONTEND_IMAGE" != *$\'\\n\'* ]]'
+    )
+    backend_tag = 'BACKEND_SHA="${BACKEND_IMAGE##*:}"'
+    frontend_tag = 'FRONTEND_SHA="${FRONTEND_IMAGE##*:}"'
+    validate_backend = '[[ "$BACKEND_SHA" =~ ^[0-9a-f]{40}$'
+    validate_frontend = '"$FRONTEND_SHA" =~ ^[0-9a-f]{40}$'
+    validate_equal = '"$BACKEND_SHA" == "$FRONTEND_SHA"'
+    strict_mode = "set -Eeuo pipefail"
+    cleanup_trap = 'trap \'[[ -z "$BASELINE_TMP" ]] || rm -f -- "$BASELINE_TMP"\' EXIT'
+    make_temp = 'BASELINE_TMP="$(mktemp deploy/current-version.tmp.XXXXXX)"'
+    write_temp = 'printf \'%s\\n\' "$BACKEND_SHA" > "$BASELINE_TMP"'
+    publish = 'mv -f -- "$BASELINE_TMP" deploy/current-version'
+    clear_trap = "trap - EXIT"
+
+    for required in [
+        "--filter label=com.docker.compose.project=zhiku-cloud",
+        "--filter label=com.docker.compose.service=backend",
+        "--filter label=com.docker.compose.service=frontend",
+        reject_ambiguous,
+        validate_backend,
+        validate_frontend,
+        validate_equal,
+        strict_mode,
+        'BASELINE_TMP=""',
+        cleanup_trap,
+        make_temp,
+        write_temp,
+        publish,
+        clear_trap,
+    ]:
+        assert required in section
+
+    assert section.index(backend_read) < section.index(reject_ambiguous)
+    assert section.index(frontend_read) < section.index(reject_ambiguous)
+    assert section.index(reject_ambiguous) < section.index(backend_tag)
+    assert section.index(reject_ambiguous) < section.index(frontend_tag)
+    assert section.index(backend_tag) < section.index(validate_backend)
+    assert section.index(frontend_tag) < section.index(validate_frontend)
+    assert (
+        section.index(strict_mode)
+        < section.index(cleanup_trap)
+        < section.index(make_temp)
+    )
+    assert section.index(make_temp) < section.index(write_temp) < section.index(publish)
+    assert section.index(publish) < section.index(clear_trap)
+
+
+def test_production_guide_post_deploy_proof_is_complete_and_ordered():
+    section = markdown_section(
+        read("docs/deployment/container-production.md"), "部署后的本机与公网证明"
+    )
+
+    export_current = (
+        "export IMAGE_TAG=\"$(tr -d '[:space:]' < deploy/current-version)\""
+    )
+    validate_current = '[[ "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]'
+    previous_guard = "if [[ -f deploy/previous-version ]]; then"
+    read_previous = "PREVIOUS_SHA=\"$(tr -d '[:space:]' < deploy/previous-version)\""
+    validate_previous = '[[ "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]]'
+    transaction_check = "test ! -e deploy/transaction"
+    compose_ps = "docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml ps"
+    compose_logs = "docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml logs --tail=200 backend frontend"
+
+    for required in [
+        "请求 SHA",
+        export_current,
+        validate_current,
+        previous_guard,
+        read_previous,
+        validate_previous,
+        "仅首次部署",
+        transaction_check,
+        "完整镜像引用",
+        compose_ps,
+        compose_logs,
+    ]:
+        assert required in section
+
+    for endpoint in [
+        "http://127.0.0.1:8000/health",
+        "http://127.0.0.1:3000/version.json",
+        "https://zhiku-cloud.cn/health",
+        "https://zhiku-cloud.cn/version.json",
+    ]:
+        assert endpoint in section
+
+    assert "http://127.0.0.1:8000/version.json" not in section
+    assert "http://127.0.0.1:3000/health" not in section
+    assert section.index(export_current) < section.index(validate_current)
+    assert section.index(validate_current) < section.index(previous_guard)
+    assert section.index(previous_guard) < section.index(read_previous)
+    assert section.index(read_previous) < section.index(validate_previous)
+    assert section.index(validate_previous) < section.index(transaction_check)
+    assert section.index(transaction_check) < section.index(compose_ps)
+    assert section.index(validate_current) < section.index(compose_ps)
+    assert section.index(compose_ps) < section.index(compose_logs)
+
+
+def test_production_guide_unchanged_page_diagnostics_follow_evidence_layers():
+    section = markdown_section(
+        read("docs/deployment/container-production.md"), "页面未变化诊断表"
+    )
+
+    assert "必须按表格从上到下逐层检查" in section
+    assert "不要" in section and "浏览器缓存开始排查" in section
+
+    record = "`deploy/current-version` 与请求 SHA 不同"
+    container = "`backend image mismatch` 或 `frontend image mismatch`"
+    local = "本机 `/version.json` 与容器 SHA 不同"
+    public = "本机匹配但公网 `/health` 或 `/version.json` 不同"
+    browser = "本机与公网都匹配，但浏览器仍显示旧页面"
+
+    assert section.index(record) < section.index(container)
+    assert section.index(container) < section.index(local)
+    assert section.index(local) < section.index(public) < section.index(browser)
 
 
 def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
