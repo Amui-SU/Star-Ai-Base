@@ -190,6 +190,10 @@ def test_publish_images_builds_sha_only_then_promotes_both_images_when_current()
     frontend_build = content.split("- name: Build and publish frontend image", 1)[
         1
     ].split("- name: Verify SHA image revisions", 1)[0]
+    assert backend_build.count("APP_VERSION=${{ env.IMAGE_TAG }}") == 1
+    assert frontend_build.count("APP_VERSION=${{ env.IMAGE_TAG }}") == 1
+    assert "NEXT_PUBLIC_API_URL=https://zhiku-cloud.cn" not in backend_build
+    assert frontend_build.count("NEXT_PUBLIC_API_URL=https://zhiku-cloud.cn") == 1
     assert ":latest" not in backend_build
     assert ":latest" not in frontend_build
 

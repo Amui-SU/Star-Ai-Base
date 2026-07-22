@@ -85,6 +85,8 @@ jobs:
           context: .
           file: Dockerfile.backend
           push: true
+          build-args: |
+            APP_VERSION=${{ env.IMAGE_TAG }}
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend:${{ env.IMAGE_TAG }}
           annotations: |
@@ -101,6 +103,7 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=https://zhiku-cloud.cn
+            APP_VERSION=${{ env.IMAGE_TAG }}
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend:${{ env.IMAGE_TAG }}
           annotations: |

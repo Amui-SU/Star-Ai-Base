@@ -70,11 +70,34 @@ def test_backend_image_defines_healthcheck_contract():
     assert lines[healthcheck_index + 1] == command
 
 
+def test_backend_image_accepts_app_version_build_argument():
+    lines = active_dockerfile_lines("Dockerfile.backend")
+    install_dependencies = (
+        "RUN python -m pip install --no-cache-dir -r requirements.txt"
+    )
+    copy_application = "COPY app ./app"
+    app_version_arg = "ARG APP_VERSION=development"
+    app_version_env = "ENV APP_VERSION=$APP_VERSION"
+
+    assert lines.index(install_dependencies) < lines.index(copy_application)
+    assert lines.index(copy_application) < lines.index(app_version_arg)
+    assert lines.index(app_version_arg) < lines.index(app_version_env)
+
+
 def test_frontend_image_defines_api_url_and_healthcheck_contracts():
     lines = active_dockerfile_lines("frontend/Dockerfile")
     arg = "ARG NEXT_PUBLIC_API_URL=http://localhost:8000"
     env = "ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL"
+    app_version_arg = "ARG APP_VERSION=development"
+    app_version_env = "ENV APP_VERSION=$APP_VERSION"
+    app_version_validation = (
+        "RUN case \"$APP_VERSION\" in development) ;; *[!0-9a-f]*|'') exit 1 ;; "
+        '*) test "${#APP_VERSION}" -eq 40 ;; esac'
+    )
     build = "RUN npm run build"
+    version_file = (
+        'RUN printf \'{"version":"%s"}\\n\' "$APP_VERSION" ' "> /app/out/version.json"
+    )
     healthcheck = (
         "HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\"
     )
@@ -82,8 +105,55 @@ def test_frontend_image_defines_api_url_and_healthcheck_contracts():
 
     assert lines.index(arg) < lines.index(build)
     assert lines.index(env) < lines.index(build)
+    assert lines.index(build) < lines.index(app_version_arg)
+    assert lines.index(app_version_arg) < lines.index(app_version_env)
+    assert lines.index(app_version_env) < lines.index(app_version_validation)
+    assert lines.index(app_version_validation) < lines.index(version_file)
     healthcheck_index = lines.index(healthcheck)
     assert lines[healthcheck_index + 1] == command
+
+
+def test_frontend_app_version_validation_rejects_multiline_values():
+    lines = active_dockerfile_lines("frontend/Dockerfile")
+    validation = next(
+        line.removeprefix("RUN ")
+        for line in lines
+        if line.startswith("RUN ") and "$APP_VERSION" in line
+    )
+    shell_candidates = [
+        Path(r"C:\Program Files\Git\bin\bash.exe"),
+        *(
+            Path(shell)
+            for shell in (shutil.which("sh"), shutil.which("bash"))
+            if shell is not None
+        ),
+    ]
+    shell = next(
+        (str(candidate) for candidate in shell_candidates if candidate.is_file()),
+        None,
+    )
+    assert (
+        shell is not None
+    ), "A POSIX shell is required to validate Dockerfile RUN instructions"
+
+    valid_sha = "a" * 40
+    for app_version, expected_returncode in [
+        ("development", 0),
+        (valid_sha, 0),
+        (f"invalid\n{valid_sha}", 1),
+        (f"{valid_sha}\ninvalid", 1),
+        ("a" * 39, 1),
+        ("g" * 40, 1),
+    ]:
+        result = subprocess.run(
+            [shell, "-c", validation],
+            env={**os.environ, "APP_VERSION": app_version},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == expected_returncode, app_version
 
 
 def test_frontend_runtime_uses_pinned_supported_nginx_image():
@@ -134,7 +204,7 @@ def test_production_compose_uses_registry_images_without_build_contexts():
     assert {name: service["image"] for name, service in services.items()} == (
         expected_images
     )
-    assert read("compose.production.yml").count("${IMAGE_TAG:?set IMAGE_TAG}") == 2
+    assert read("compose.production.yml").count("${IMAGE_TAG:?set IMAGE_TAG}") == 3
 
 
 def test_production_compose_exposes_only_loopback_ports_and_persists_backend_data():
@@ -149,6 +219,9 @@ def test_production_compose_exposes_only_loopback_ports_and_persists_backend_dat
         "./data:/app/data",
         "./logs:/app/logs",
     ]
+    assert services["backend"]["environment"]["APP_VERSION"] == (
+        "${IMAGE_TAG:?set IMAGE_TAG}"
+    )
     assert services["backend"]["environment"]["FORWARDED_ALLOW_IPS"] == "*"
 
 
@@ -243,6 +316,7 @@ def test_production_compose_defines_runtime_and_healthcheck_contracts():
         "DATABASE_URL": "sqlite+aiosqlite:///./data/bilibili_rag.db",
         "CHROMA_PERSIST_DIRECTORY": "./data/chroma_db",
         "FORWARDED_ALLOW_IPS": "*",
+        "APP_VERSION": "${IMAGE_TAG:?set IMAGE_TAG}",
     }
     assert services["backend"]["healthcheck"] == {
         "test": [
