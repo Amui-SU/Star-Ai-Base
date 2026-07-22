@@ -24,6 +24,9 @@ describe("workspace desktop layout", () => {
   });
 
   it("disables the sidebar width transition while resizing", () => {
+    expect(ruleFor(".sidebar-shell")).toContain(
+      "transition: width 0.36s cubic-bezier(0.22, 1, 0.36, 1);",
+    );
     expect(ruleFor(".sidebar-shell.resizing")).toContain("transition: none;");
   });
 
