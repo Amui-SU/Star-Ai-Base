@@ -499,7 +499,9 @@ FRONTEND_STARTED=true
 compose up -d --pull never frontend
 verify_runtime_version "$TARGET_TAG"
 
-if [[ "$HAS_PREVIOUS" == true ]]; then
+if [[ "$ALLOW_REDEPLOY" == true && "$TARGET_TAG" == "$PREVIOUS_TAG" ]]; then
+  restore_file_snapshot "$ORIGINAL_PREVIOUS_EXISTS" "$ORIGINAL_PREVIOUS_CONTENT" "$PREVIOUS_FILE"
+elif [[ "$HAS_PREVIOUS" == true ]]; then
   atomic_write "$PREVIOUS_TAG" "$PREVIOUS_FILE"
 else
   rm -f "$PREVIOUS_FILE"

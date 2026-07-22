@@ -45,6 +45,56 @@ def markdown_section(content: str, heading: str) -> str:
     return content[start:] if end == -1 else content[start:end]
 
 
+def markdown_bash_blocks(section: str) -> list[str]:
+    return [
+        remainder.split("\n```", maxsplit=1)[0]
+        for remainder in section.split("```bash\n")[1:]
+    ]
+
+
+def markdown_bash_block_containing(content: str, heading: str, token: str) -> str:
+    matching = [
+        block
+        for block in markdown_bash_blocks(markdown_section(content, heading))
+        if token in block
+    ]
+    assert len(matching) == 1, f"expected one Bash block containing {token!r}"
+    return matching[0]
+
+
+def run_documented_bash(
+    block: str,
+    tmp_path: Path,
+    *,
+    input_text: str = "",
+    env_updates: dict[str, str] | None = None,
+    script_prefix: str = "",
+    replace_production_root: bool = True,
+    working_directory: Path | None = None,
+) -> subprocess.CompletedProcess:
+    documented_block = (
+        block.replace("cd /opt/zhiku-cloud", 'cd "$DOC_TEST_ROOT"')
+        if replace_production_root
+        else block
+    )
+    script = script_prefix + documented_block
+    environment = os.environ.copy()
+    environment["DOC_TEST_ROOT"] = bash_path(tmp_path)
+    if env_updates:
+        environment.update(env_updates)
+    return subprocess.run(
+        [bash_executable(), "-c", script],
+        cwd=working_directory or PROJECT_ROOT,
+        env=environment,
+        input=input_text,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+    )
+
+
 def test_shell_scripts_keep_linux_line_endings():
     assert "*.sh text eol=lf" in read(".gitattributes")
 
@@ -966,10 +1016,17 @@ def test_deploy_script_prioritizes_interrupted_transaction_over_same_sha(
     assert {path.relative_to(root) for path in root.rglob("*")} == paths_before
 
 
-def test_deploy_script_allows_intentional_same_sha_redeploy(tmp_path):
+@pytest.mark.parametrize("original_previous", [PREVIOUS_TAG, None])
+def test_deploy_script_same_sha_redeploy_preserves_rollback_pointer(
+    tmp_path, original_previous
+):
     fixture = deployment_fixture(tmp_path)
     deploy_dir = Path(fixture["deploy_dir"])
     (deploy_dir / "current-version").write_text(TARGET_TAG, encoding="utf-8")
+    if original_previous is not None:
+        (deploy_dir / "previous-version").write_text(
+            original_previous, encoding="utf-8"
+        )
 
     result = run_deploy(
         fixture,
@@ -980,6 +1037,12 @@ def test_deploy_script_allows_intentional_same_sha_redeploy(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert f"{TARGET_TAG}|pull backend frontend" in log_lines(fixture["docker_log"])
+    assert (deploy_dir / "current-version").read_text().strip() == TARGET_TAG
+    previous_file = deploy_dir / "previous-version"
+    if original_previous is None:
+        assert not previous_file.exists()
+    else:
+        assert previous_file.read_text().strip() == original_previous
 
 
 def test_deploy_script_rechecks_same_sha_after_acquiring_lock(tmp_path):
@@ -2950,6 +3013,7 @@ def test_production_guide_intentional_redeploy_is_current_sha_only():
         validate,
         deploy,
         "不得用于不同 SHA",
+        "保留原有 `deploy/previous-version`",
     ]:
         assert required in section
 
@@ -2957,11 +3021,408 @@ def test_production_guide_intentional_redeploy_is_current_sha_only():
     assert section.index(read_current) < section.index(validate) < section.index(deploy)
 
 
-def test_production_guide_legacy_baseline_adoption_is_unambiguous_and_atomic():
+def test_production_guide_critical_admin_blocks_are_fail_closed_and_valid_bash():
+    content = read("docs/deployment/container-production.md")
+    acr_login = markdown_bash_block_containing(
+        content, "首次初始化 ECS", "docker login"
+    )
+    nginx_reload = markdown_bash_block_containing(
+        content, "合并 Nginx 配置", "nginx -t"
+    )
+    redeploy = markdown_bash_block_containing(
+        content, "有意重复部署同一 SHA", "--allow-redeploy"
+    )
+    baseline_adoption = markdown_bash_block_containing(
+        content, "接管已有运行版本", 'BACKEND_IMAGE="$(docker ps'
+    )
+    post_proof = markdown_bash_block_containing(
+        content, "部署后的本机与公网证明", "REQUESTED_SHA="
+    )
+
+    disable_xtrace = "set +x"
+    strict_mode = "set -Eeuo pipefail"
+    assert acr_login.startswith("(\n  set +x\n  set -Eeuo pipefail")
+    assert disable_xtrace in acr_login
+    assert strict_mode in acr_login
+    assert "(" in acr_login and ")" in acr_login
+    assert "trap 'unset ACR_PULL_PASSWORD' EXIT" in acr_login
+    assert acr_login.index(disable_xtrace) < acr_login.index(strict_mode)
+    assert acr_login.index(strict_mode) < acr_login.index("read -rsp")
+    assert acr_login.index("read -rsp") < acr_login.index("docker login")
+    assert "nginx -t &&" in nginx_reload
+    assert nginx_reload.index("nginx -t") < nginx_reload.index("systemctl reload nginx")
+    assert "set -Eeuo pipefail" in post_proof
+
+    for block in [acr_login, nginx_reload, redeploy, baseline_adoption, post_proof]:
+        syntax = subprocess.run(
+            [bash_executable(), "-n"],
+            input=block,
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+        assert syntax.returncode == 0, syntax.stderr
+
+
+def test_documented_acr_login_failure_is_not_masked_by_cleanup(tmp_path):
+    content = read("docs/deployment/container-production.md")
+    block = markdown_bash_block_containing(content, "首次初始化 ECS", "docker login")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_tool(
+        bin_dir,
+        "docker",
+        "#!/usr/bin/env bash\ncat >/dev/null\nexit 42\n",
+    )
+
+    result = run_documented_bash(
+        block,
+        tmp_path,
+        input_text="test-password\n",
+        env_updates={"PATH": f'{bash_path(bin_dir)}:{os.environ.get("PATH", "")}'},
+    )
+
+    assert result.returncode == 42
+
+
+def test_documented_acr_login_disables_inherited_xtrace_before_reading_password(
+    tmp_path,
+):
+    block = markdown_bash_block_containing(
+        read("docs/deployment/container-production.md"),
+        "首次初始化 ECS",
+        "docker login",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    password = "acr-xtrace-secret-7f92c"
+    write_fake_tool(
+        bin_dir,
+        "docker",
+        "#!/usr/bin/env bash\ncat >/dev/null\nexit 0\n",
+    )
+
+    result = run_documented_bash(
+        block,
+        tmp_path,
+        input_text=password + "\n",
+        env_updates={"PATH": f'{bash_path(bin_dir)}:{os.environ.get("PATH", "")}'},
+        script_prefix="set -x\n",
+    )
+
+    assert result.returncode == 0
+    assert password not in result.stdout
+    assert password not in result.stderr
+
+
+def test_documented_nginx_failure_does_not_reload(tmp_path):
+    content = read("docs/deployment/container-production.md")
+    block = markdown_bash_block_containing(content, "合并 Nginx 配置", "nginx -t")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    command_log = tmp_path / "sudo.log"
+    write_fake_tool(
+        bin_dir,
+        "sudo",
+        """#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOC_COMMAND_LOG"
+[[ "$*" != "nginx -t" ]] || exit 41
+""",
+    )
+
+    result = run_documented_bash(
+        block,
+        tmp_path,
+        env_updates={
+            "PATH": f'{bash_path(bin_dir)}:{os.environ.get("PATH", "")}',
+            "DOC_COMMAND_LOG": bash_path(command_log),
+        },
+    )
+
+    assert result.returncode == 41
+    assert log_lines(command_log) == ["nginx -t"]
+
+
+def prepare_documented_post_deploy_preflight(
+    tmp_path: Path,
+    deploy_environment: str,
+    production_environment: str | None = None,
+) -> Path:
+    deploy_dir = tmp_path / "deploy"
+    scripts_dir = tmp_path / "scripts"
+    deploy_dir.mkdir(exist_ok=True)
+    scripts_dir.mkdir(exist_ok=True)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "production-preflight.sh", scripts_dir)
+    (deploy_dir / ".env.deploy").write_text(deploy_environment, encoding="utf-8")
+    (deploy_dir / ".env.production").write_text(
+        production_environment or valid_production_environment(), encoding="utf-8"
+    )
+    return deploy_dir
+
+
+def test_documented_post_deploy_transaction_failure_stops_later_checks(tmp_path):
+    content = read("docs/deployment/container-production.md")
+    block = markdown_bash_block_containing(
+        content, "部署后的本机与公网证明", "REQUESTED_SHA="
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    documented_sha = "0123456789abcdef0123456789abcdef01234567"
+    deploy_dir = prepare_documented_post_deploy_preflight(
+        tmp_path,
+        f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
+        "ACR_NAMESPACE=zhiku\n"
+        "PUBLIC_BASE_URL=https://public.example.test\n",
+    )
+    (deploy_dir / "current-version").write_text(documented_sha + "\n", encoding="utf-8")
+    (deploy_dir / "transaction").write_text("active\n", encoding="utf-8")
+    command_log = tmp_path / "commands.log"
+    for name in ["docker", "curl"]:
+        write_fake_tool(
+            bin_dir,
+            name,
+            '#!/usr/bin/env bash\nprintf \'%s|%s\\n\' "${0##*/}" "$*" >> "$DOC_COMMAND_LOG"\n',
+        )
+
+    result = run_documented_bash(
+        block,
+        tmp_path,
+        env_updates={
+            "PATH": f'{bash_path(bin_dir)}:{os.environ.get("PATH", "")}',
+            "DOC_COMMAND_LOG": bash_path(command_log),
+        },
+    )
+
+    assert result.returncode != 0
+    assert log_lines(command_log) == []
+
+
+@pytest.mark.parametrize(
+    "malicious_value",
+    [
+        '$(touch "$DOC_MARKER")',
+        '`touch "$DOC_MARKER"`',
+        'https://public.example.test; touch "$DOC_MARKER"',
+    ],
+)
+def test_documented_post_deploy_reads_metadata_without_executing_it(
+    tmp_path, malicious_value
+):
+    block = markdown_bash_block_containing(
+        read("docs/deployment/container-production.md"),
+        "部署后的本机与公网证明",
+        "REQUESTED_SHA=",
+    )
+    marker = tmp_path / "untrusted-env-executed"
+    prepare_documented_post_deploy_preflight(
+        tmp_path,
+        f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
+        "ACR_NAMESPACE=zhiku\n"
+        f"PUBLIC_BASE_URL={malicious_value}\n",
+    )
+
+    result = run_documented_bash(
+        block,
+        tmp_path,
+        env_updates={"DOC_MARKER": bash_path(marker)},
+    )
+
+    assert result.returncode != 0
+    assert not marker.exists()
+
+
+def test_documented_post_deploy_disables_inherited_xtrace_before_preflight(
+    tmp_path,
+):
+    block = markdown_bash_block_containing(
+        read("docs/deployment/container-production.md"),
+        "部署后的本机与公网证明",
+        "REQUESTED_SHA=",
+    )
+    smtp_secret = "smtp-xtrace-secret-4d81e"
+    fernet_secret = "Z" * 43 + "="
+    production_environment = (
+        valid_production_environment()
+        .replace(
+            f"APP_ENCRYPTION_KEY={VALID_FERNET_KEY}",
+            f"APP_ENCRYPTION_KEY={fernet_secret}",
+        )
+        .replace(
+            "SMTP_PASSWORD=password=$literal=with=equals",
+            f"SMTP_PASSWORD={smtp_secret}",
+        )
+    )
+    prepare_documented_post_deploy_preflight(
+        tmp_path,
+        f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
+        "ACR_NAMESPACE=zhiku\n"
+        "PUBLIC_BASE_URL=https://public.example.test\n",
+        production_environment,
+    )
+
+    result = run_documented_bash(
+        block,
+        tmp_path,
+        script_prefix="set -x\n",
+    )
+
+    assert result.returncode != 0
+    for secret in [smtp_secret, fernet_secret]:
+        assert secret not in result.stdout
+        assert secret not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "deploy_env",
+    [
+        f"ACR_REGISTRY={ENTERPRISE_ACR}\nACR_NAMESPACE=zhiku\n",
+        (
+            f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
+            f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
+            "ACR_NAMESPACE=zhiku\n"
+            "PUBLIC_BASE_URL=https://public.example.test\n"
+        ),
+        (
+            f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
+            "ACR_NAMESPACE zhiku\n"
+            "PUBLIC_BASE_URL=https://public.example.test\n"
+        ),
+        (
+            f'ACR_REGISTRY="{ENTERPRISE_ACR}"\n'
+            "ACR_NAMESPACE=zhiku\n"
+            "PUBLIC_BASE_URL=https://public.example.test\n"
+        ),
+        (
+            f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
+            "ACR_NAMESPACE='zhiku'\n"
+            "PUBLIC_BASE_URL=https://public.example.test\n"
+        ),
+        (
+            f"ACR_REGISTRY={ENTERPRISE_ACR}\n"
+            "ACR_NAMESPACE=zhiku\n"
+            'PUBLIC_BASE_URL="https://public.example.test"\n'
+        ),
+    ],
+)
+def test_documented_post_deploy_rejects_incomplete_or_malformed_metadata(
+    tmp_path, deploy_env
+):
+    block = markdown_bash_block_containing(
+        read("docs/deployment/container-production.md"),
+        "部署后的本机与公网证明",
+        "REQUESTED_SHA=",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    deploy_dir = prepare_documented_post_deploy_preflight(tmp_path, deploy_env)
+    (deploy_dir / "current-version").write_text(
+        "0123456789abcdef0123456789abcdef01234567\n", encoding="utf-8"
+    )
+    command_log = tmp_path / "commands.log"
+    for name in ["docker", "curl"]:
+        write_fake_tool(
+            bin_dir,
+            name,
+            '#!/usr/bin/env bash\nprintf \'%s|%s\\n\' "${0##*/}" "$*" >> "$DOC_COMMAND_LOG"\n',
+        )
+
+    result = run_documented_bash(
+        block,
+        tmp_path,
+        env_updates={
+            "PATH": f'{bash_path(bin_dir)}:{os.environ.get("PATH", "")}',
+            "DOC_COMMAND_LOG": bash_path(command_log),
+        },
+    )
+
+    assert result.returncode != 0
+    assert log_lines(command_log) == []
+
+
+@pytest.mark.parametrize(
+    "registry", [ENTERPRISE_ACR, PERSONAL_ACR, LEGACY_PERSONAL_ACR]
+)
+def test_documented_post_deploy_rejects_stale_successful_json(tmp_path, registry):
+    content = read("docs/deployment/container-production.md")
+    block = markdown_bash_block_containing(
+        content, "部署后的本机与公网证明", "REQUESTED_SHA="
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    documented_sha = "0123456789abcdef0123456789abcdef01234567"
+    deploy_dir = prepare_documented_post_deploy_preflight(
+        tmp_path,
+        f"ACR_REGISTRY={registry}\n"
+        "ACR_NAMESPACE=zhiku\n"
+        "PUBLIC_BASE_URL=https://public.example.test\n",
+    )
+    (deploy_dir / "current-version").write_text(documented_sha + "\n", encoding="utf-8")
+    command_log = tmp_path / "commands.log"
+    write_fake_tool(
+        bin_dir,
+        "docker",
+        f"""#!/usr/bin/env bash
+printf 'docker|%s\n' "$*" >> "$DOC_COMMAND_LOG"
+case "$*" in
+  *"ps --format {{{{.Image}}}} backend")
+    printf '%s\n' '{registry}/zhiku/zhiku-backend:{documented_sha}'
+    ;;
+  *"ps --format {{{{.Image}}}} frontend")
+    printf '%s\n' '{registry}/zhiku/zhiku-frontend:{documented_sha}'
+    ;;
+esac
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "curl",
+        """#!/usr/bin/env bash
+printf 'curl|%s\n' "$*" >> "$DOC_COMMAND_LOG"
+printf '%s\n' '{"status":"healthy","version":"0000000000000000000000000000000000000000"}'
+""",
+    )
+    write_fake_tool(bin_dir, "python3", '#!/usr/bin/env bash\nexec python "$@"\n')
+
+    result = run_documented_bash(
+        block,
+        tmp_path,
+        env_updates={
+            "PATH": f'{bash_path(bin_dir)}:{os.environ.get("PATH", "")}',
+            "DOC_COMMAND_LOG": bash_path(command_log),
+            "DOC_FAKE_CURL": bash_path(bin_dir / "curl"),
+        },
+        script_prefix='curl() { "$DOC_FAKE_CURL" "$@"; }\n',
+    )
+
+    assert result.returncode != 0
+    commands = log_lines(command_log)
+    assert sum(line.startswith("curl|") for line in commands) == 1, (
+        commands,
+        result.stdout,
+        result.stderr,
+    )
+    assert not any("logs --tail=200" in line for line in commands)
+    assert not any(line.endswith("compose.production.yml ps") for line in commands)
+
+
+def test_production_guide_legacy_baseline_adoption_is_recovered_locked_and_atomic():
     section = markdown_section(
         read("docs/deployment/container-production.md"), "接管已有运行版本"
     )
+    adoption = markdown_bash_block_containing(
+        read("docs/deployment/container-production.md"),
+        "接管已有运行版本",
+        'BACKEND_IMAGE="$(docker ps',
+    )
 
+    recovery = "./scripts/recover-interrupted.sh"
+    strict_mode = "set -Eeuo pipefail"
+    production_root = "cd /opt/zhiku-cloud"
+    lock_file = "exec 9>deploy/deploy.lock"
+    take_lock = "flock -n 9"
+    transaction_recheck = "[[ ! -e deploy/transaction ]]"
+    current_absent = "[[ ! -e deploy/current-version ]]"
     backend_read = 'BACKEND_IMAGE="$(docker ps'
     frontend_read = 'FRONTEND_IMAGE="$(docker ps'
     reject_ambiguous = (
@@ -2973,14 +3434,20 @@ def test_production_guide_legacy_baseline_adoption_is_unambiguous_and_atomic():
     validate_backend = '[[ "$BACKEND_SHA" =~ ^[0-9a-f]{40}$'
     validate_frontend = '"$FRONTEND_SHA" =~ ^[0-9a-f]{40}$'
     validate_equal = '"$BACKEND_SHA" == "$FRONTEND_SHA"'
-    strict_mode = "set -Eeuo pipefail"
     cleanup_trap = 'trap \'[[ -z "$BASELINE_TMP" ]] || rm -f -- "$BASELINE_TMP"\' EXIT'
     make_temp = 'BASELINE_TMP="$(mktemp deploy/current-version.tmp.XXXXXX)"'
     write_temp = 'printf \'%s\\n\' "$BACKEND_SHA" > "$BASELINE_TMP"'
-    publish = 'mv -f -- "$BASELINE_TMP" deploy/current-version'
+    publish = 'ln -- "$BASELINE_TMP" deploy/current-version'
+    remove_temp = 'rm -f -- "$BASELINE_TMP"'
     clear_trap = "trap - EXIT"
 
     for required in [
+        recovery,
+        strict_mode,
+        lock_file,
+        take_lock,
+        transaction_recheck,
+        current_absent,
         "--filter label=com.docker.compose.project=zhiku-cloud",
         "--filter label=com.docker.compose.service=backend",
         "--filter label=com.docker.compose.service=frontend",
@@ -2994,30 +3461,211 @@ def test_production_guide_legacy_baseline_adoption_is_unambiguous_and_atomic():
         make_temp,
         write_temp,
         publish,
+        remove_temp,
         clear_trap,
     ]:
-        assert required in section
+        assert required in adoption
 
-    assert section.index(backend_read) < section.index(reject_ambiguous)
-    assert section.index(frontend_read) < section.index(reject_ambiguous)
-    assert section.index(reject_ambiguous) < section.index(backend_tag)
-    assert section.index(reject_ambiguous) < section.index(frontend_tag)
-    assert section.index(backend_tag) < section.index(validate_backend)
-    assert section.index(frontend_tag) < section.index(validate_frontend)
+    assert adoption.startswith("(\n  set -Eeuo pipefail")
+    assert adoption.index(strict_mode) < adoption.index(production_root)
+    assert adoption.index(production_root) < adoption.index(recovery)
+    assert adoption.index(recovery) < adoption.index(lock_file)
+    assert adoption.index(lock_file) < adoption.index(take_lock)
+    assert adoption.index(take_lock) < adoption.index(transaction_recheck)
+    assert adoption.index(transaction_recheck) < adoption.index(current_absent)
+    assert adoption.index(current_absent) < adoption.index(backend_read)
+    assert adoption.index(current_absent) < adoption.index(frontend_read)
+    assert adoption.index(backend_read) < adoption.index(reject_ambiguous)
+    assert adoption.index(frontend_read) < adoption.index(reject_ambiguous)
+    assert adoption.index(reject_ambiguous) < adoption.index(backend_tag)
+    assert adoption.index(reject_ambiguous) < adoption.index(frontend_tag)
+    assert adoption.index(backend_tag) < adoption.index(validate_backend)
+    assert adoption.index(frontend_tag) < adoption.index(validate_frontend)
     assert (
-        section.index(strict_mode)
-        < section.index(cleanup_trap)
-        < section.index(make_temp)
+        adoption.index(strict_mode)
+        < adoption.index(cleanup_trap)
+        < adoption.index(make_temp)
     )
-    assert section.index(make_temp) < section.index(write_temp) < section.index(publish)
-    assert section.index(publish) < section.index(clear_trap)
+    assert (
+        adoption.index(make_temp) < adoption.index(write_temp) < adoption.index(publish)
+    )
+    explicit_remove = adoption.rindex(remove_temp)
+    assert adoption.index(publish) < explicit_remove
+    assert explicit_remove < adoption.rindex('BASELINE_TMP=""')
+    assert adoption.rindex('BASELINE_TMP=""') < adoption.index(clear_trap)
+    assert "mv " not in adoption
+    assert "同一文件系统" in section
+    assert "硬链接" in section
+    assert "EEXIST" in section
+    assert section.count('BACKEND_IMAGE="$(docker ps') == 1
 
 
-def test_production_guide_post_deploy_proof_is_complete_and_ordered():
+def test_documented_baseline_cd_failure_has_no_caller_directory_side_effects(tmp_path):
+    adoption = markdown_bash_block_containing(
+        read("docs/deployment/container-production.md"),
+        "接管已有运行版本",
+        'BACKEND_IMAGE="$(docker ps',
+    )
+    deploy_dir = tmp_path / "deploy"
+    scripts_dir = tmp_path / "scripts"
+    bin_dir = tmp_path / "bin"
+    deploy_dir.mkdir()
+    scripts_dir.mkdir()
+    bin_dir.mkdir()
+    (deploy_dir / "transaction").write_text("active\n", encoding="utf-8")
+    recover_log = tmp_path / "recover.log"
+    docker_log = tmp_path / "docker.log"
+    write_fake_tool(
+        scripts_dir,
+        "recover-interrupted.sh",
+        """#!/usr/bin/env bash
+printf 'recover\n' >> "$DOC_RECOVER_LOG"
+rm -f deploy/transaction
+""",
+    )
+    write_fake_tool(
+        bin_dir,
+        "docker",
+        f"""#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOC_DOCKER_LOG"
+case "$*" in
+  *"service=backend"*) printf '%s\n' 'registry/zhiku-backend:{TARGET_TAG}' ;;
+  *"service=frontend"*) printf '%s\n' 'registry/zhiku-frontend:{TARGET_TAG}' ;;
+  *) exit 91 ;;
+esac
+""",
+    )
+
+    result = run_documented_bash(
+        adoption.replace(
+            "/opt/zhiku-cloud", "/definitely-missing-zhiku-cloud-production-root"
+        ),
+        tmp_path,
+        replace_production_root=False,
+        working_directory=tmp_path,
+        env_updates={
+            "PATH": f'{bash_path(bin_dir)}:{os.environ.get("PATH", "")}',
+            "DOC_RECOVER_LOG": bash_path(recover_log),
+            "DOC_DOCKER_LOG": bash_path(docker_log),
+        },
+    )
+
+    assert result.returncode != 0
+    assert log_lines(recover_log) == []
+    assert log_lines(docker_log) == []
+    assert not (deploy_dir / "current-version").exists()
+    assert not (deploy_dir / "deploy.lock").exists()
+
+
+def test_documented_baseline_adoption_rechecks_current_version_under_lock(tmp_path):
+    content = read("docs/deployment/container-production.md")
+    adoption = markdown_bash_block_containing(
+        content, "接管已有运行版本", 'BACKEND_IMAGE="$(docker ps'
+    )
+    deploy_dir = tmp_path / "deploy"
+    bin_dir = tmp_path / "bin"
+    deploy_dir.mkdir()
+    bin_dir.mkdir()
+    (deploy_dir / "current-version").write_text(TARGET_TAG + "\n", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    write_fake_tool(bin_dir, "flock", "#!/usr/bin/env bash\nexit 0\n")
+    write_fake_tool(
+        bin_dir,
+        "docker",
+        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$DOC_DOCKER_LOG"\n',
+    )
+
+    result = run_documented_bash(
+        adoption,
+        tmp_path,
+        env_updates={
+            "PATH": f'{bash_path(bin_dir)}:{os.environ.get("PATH", "")}',
+            "DOC_DOCKER_LOG": bash_path(docker_log),
+            "DOC_FAKE_FLOCK": bash_path(bin_dir / "flock"),
+            "DOC_FAKE_DOCKER": bash_path(bin_dir / "docker"),
+        },
+        script_prefix=(
+            "install() { :; }\n"
+            'flock() { "$DOC_FAKE_FLOCK" "$@"; }\n'
+            'docker() { "$DOC_FAKE_DOCKER" "$@"; }\n'
+        ),
+    )
+
+    assert result.returncode != 0
+    assert log_lines(docker_log) == []
+    assert (deploy_dir / "current-version").read_text().strip() == TARGET_TAG
+
+
+def test_documented_baseline_publication_never_clobbers_racing_record(tmp_path):
+    content = read("docs/deployment/container-production.md")
+    adoption = markdown_bash_block_containing(
+        content, "接管已有运行版本", 'BACKEND_IMAGE="$(docker ps'
+    )
+    deploy_dir = tmp_path / "deploy"
+    bin_dir = tmp_path / "bin"
+    deploy_dir.mkdir()
+    bin_dir.mkdir()
+    current_file = deploy_dir / "current-version"
+    write_fake_tool(bin_dir, "flock", "#!/usr/bin/env bash\nexit 0\n")
+    write_fake_tool(
+        bin_dir,
+        "docker",
+        f"""#!/usr/bin/env bash
+case "$*" in
+  *"service=backend"*) printf '%s\n' 'registry/zhiku-backend:{TARGET_TAG}' ;;
+  *"service=frontend"*) printf '%s\n' 'registry/zhiku-frontend:{TARGET_TAG}' ;;
+  *) exit 91 ;;
+esac
+""",
+    )
+    race_hook = """#!/usr/bin/env bash
+printf '%s\n' protected > "$DOC_CURRENT_VERSION"
+exec "$DOC_REAL_PUBLISH" "$@"
+"""
+    write_fake_tool(bin_dir, "mv-race", race_hook)
+    write_fake_tool(bin_dir, "ln-race", race_hook)
+
+    result = run_documented_bash(
+        adoption,
+        tmp_path,
+        env_updates={
+            "PATH": f'{bash_path(bin_dir)}:{os.environ.get("PATH", "")}',
+            "DOC_CURRENT_VERSION": bash_path(current_file),
+            "DOC_FAKE_FLOCK": bash_path(bin_dir / "flock"),
+            "DOC_FAKE_DOCKER": bash_path(bin_dir / "docker"),
+            "DOC_FAKE_MV": bash_path(bin_dir / "mv-race"),
+            "DOC_FAKE_LN": bash_path(bin_dir / "ln-race"),
+            "DOC_REAL_PUBLISH": "/usr/bin/mv",
+        },
+        script_prefix=(
+            "install() { :; }\n"
+            'flock() { "$DOC_FAKE_FLOCK" "$@"; }\n'
+            'docker() { "$DOC_FAKE_DOCKER" "$@"; }\n'
+            'mv() { DOC_REAL_PUBLISH=/usr/bin/mv "$DOC_FAKE_MV" "$@"; }\n'
+            'ln() { DOC_REAL_PUBLISH=/usr/bin/ln "$DOC_FAKE_LN" "$@"; }\n'
+        ),
+    )
+
+    assert result.returncode != 0
+    assert current_file.exists(), (result.returncode, result.stdout, result.stderr)
+    assert current_file.read_text(encoding="utf-8").strip() == "protected"
+    assert list(deploy_dir.glob("current-version.tmp.*")) == []
+
+
+def test_production_guide_post_deploy_proof_compares_exact_runtime_identity():
     section = markdown_section(
         read("docs/deployment/container-production.md"), "部署后的本机与公网证明"
     )
+    proof = markdown_bash_block_containing(
+        read("docs/deployment/container-production.md"),
+        "部署后的本机与公网证明",
+        "REQUESTED_SHA=",
+    )
 
+    disable_xtrace = "set +x"
+    strict_mode = "set -Eeuo pipefail"
+    trusted_preflight = "source scripts/production-preflight.sh"
+    preflight_call = "production_preflight deploy/.env.deploy deploy/.env.production"
     export_current = (
         "export IMAGE_TAG=\"$(tr -d '[:space:]' < deploy/current-version)\""
     )
@@ -3025,43 +3673,94 @@ def test_production_guide_post_deploy_proof_is_complete_and_ordered():
     previous_guard = "if [[ -f deploy/previous-version ]]; then"
     read_previous = "PREVIOUS_SHA=\"$(tr -d '[:space:]' < deploy/previous-version)\""
     validate_previous = '[[ "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]]'
-    transaction_check = "test ! -e deploy/transaction"
+    transaction_check = "[[ ! -e deploy/transaction ]]"
+    backend_image = "BACKEND_IMAGE=\"$(compose ps --format '{{.Image}}' backend)\""
+    frontend_image = "FRONTEND_IMAGE=\"$(compose ps --format '{{.Image}}' frontend)\""
+    expected_backend = 'EXPECTED_BACKEND_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/zhiku-backend:${REQUESTED_SHA}"'
+    expected_frontend = 'EXPECTED_FRONTEND_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/zhiku-frontend:${REQUESTED_SHA}"'
+    compare_backend = '[[ "$BACKEND_IMAGE" == "$EXPECTED_BACKEND_IMAGE" ]]'
+    compare_frontend = '[[ "$FRONTEND_IMAGE" == "$EXPECTED_FRONTEND_IMAGE" ]]'
+    local_health_call = 'verify_json_version "http://127.0.0.1:8000/health" true false'
+    public_version_call = (
+        'verify_json_version "${PUBLIC_BASE_URL%/}/version.json" false true'
+    )
     compose_ps = "docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml ps"
     compose_logs = "docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml logs --tail=200 backend frontend"
 
     for required in [
+        strict_mode,
+        trusted_preflight,
+        preflight_call,
         "请求 SHA",
         export_current,
         validate_current,
         previous_guard,
         read_previous,
         validate_previous,
-        "仅首次部署",
+        "不同 SHA 的版本转换",
         transaction_check,
         "完整镜像引用",
+        backend_image,
+        frontend_image,
+        expected_backend,
+        expected_frontend,
+        compare_backend,
+        compare_frontend,
+        local_health_call,
+        public_version_call,
+        "json.load(sys.stdin)",
+        'payload.get("version") != expected_sha',
+        'payload.get("status") != "healthy"',
+        "${PUBLIC_BASE_URL%/}/health",
+        "${PUBLIC_BASE_URL%/}/version.json",
+        "--proto '=https'",
+        "--proto-redir '=https'",
+        "--location",
+        "--max-redirs 0",
+        "--max-time 5",
         compose_ps,
         compose_logs,
     ]:
-        assert required in section
+        assert required in proof
+
+    assert "可信仓库脚本" in section
+    assert "不会把任一环境文件交给 `source` 或 `eval`" in section
+    assert "source deploy/.env.deploy" not in proof
+    assert "source deploy/.env.production" not in proof
+    assert "eval" not in proof
+    assert "while IFS= read -r line" not in proof
+    assert "SEEN_ACR_REGISTRY" not in proof
+    assert "invalid_metadata" not in proof
+    assert proof.count("--max-time 5") == 2
+    assert "没有完成过不同 SHA 的版本转换" in section
 
     for endpoint in [
         "http://127.0.0.1:8000/health",
         "http://127.0.0.1:3000/version.json",
-        "https://zhiku-cloud.cn/health",
-        "https://zhiku-cloud.cn/version.json",
     ]:
-        assert endpoint in section
+        assert endpoint in proof
 
-    assert "http://127.0.0.1:8000/version.json" not in section
-    assert "http://127.0.0.1:3000/health" not in section
-    assert section.index(export_current) < section.index(validate_current)
-    assert section.index(validate_current) < section.index(previous_guard)
-    assert section.index(previous_guard) < section.index(read_previous)
-    assert section.index(read_previous) < section.index(validate_previous)
-    assert section.index(validate_previous) < section.index(transaction_check)
-    assert section.index(transaction_check) < section.index(compose_ps)
-    assert section.index(validate_current) < section.index(compose_ps)
-    assert section.index(compose_ps) < section.index(compose_logs)
+    assert "http://127.0.0.1:8000/version.json" not in proof
+    assert "http://127.0.0.1:3000/health" not in proof
+    assert "https://zhiku-cloud.cn" not in proof
+    assert proof.startswith("(\n  set +x\n  set -Eeuo pipefail")
+    assert proof.index(disable_xtrace) < proof.index(strict_mode)
+    assert proof.index(strict_mode) < proof.index(trusted_preflight)
+    assert proof.index(trusted_preflight) < proof.index(preflight_call)
+    assert proof.index(preflight_call) < proof.index(export_current)
+    assert proof.index(export_current) < proof.index(validate_current)
+    assert proof.index(validate_current) < proof.index(previous_guard)
+    assert proof.index(previous_guard) < proof.index(read_previous)
+    assert proof.index(read_previous) < proof.index(validate_previous)
+    assert proof.index(validate_previous) < proof.index(transaction_check)
+    assert proof.index(transaction_check) < proof.index(backend_image)
+    assert proof.index(backend_image) < proof.index(compare_backend)
+    assert proof.index(frontend_image) < proof.index(compare_frontend)
+    assert proof.index(compare_backend) < proof.index(local_health_call)
+    assert proof.index(compare_frontend) < proof.index(local_health_call)
+    assert proof.index(public_version_call) < proof.index(compose_ps)
+    assert proof.index(compose_ps) < proof.index(compose_logs)
+    assert section.count("检查 backend 与 frontend 日志") == 0
 
 
 def test_production_guide_unchanged_page_diagnostics_follow_evidence_layers():
@@ -3081,6 +3780,19 @@ def test_production_guide_unchanged_page_diagnostics_follow_evidence_layers():
     assert section.index(record) < section.index(container)
     assert section.index(container) < section.index(local)
     assert section.index(local) < section.index(public) < section.index(browser)
+    assert "--allow-redeploy" in section
+    assert "deploy/transaction" in section
+
+
+def test_production_guide_first_deploy_and_infrastructure_paths_are_exact():
+    content = read("docs/deployment/container-production.md")
+    first_deploy = markdown_section(content, "首次部署")
+
+    assert "包括已停止的容器" in first_deploy
+    assert "backend、frontend Compose 容器" in first_deploy
+    assert "ps --all" in first_deploy
+    assert "deploy/.env.deploy.example" in content
+    assert "、`.env.deploy.example`" not in content
 
 
 def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
@@ -3158,9 +3870,9 @@ def test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety():
     assert "YOUR_ECS_PULL_USERNAME" not in login_block
     assert login_block.index("ACR_REGISTRY=") < login_block.index("docker login")
     assert login_block.index("printf '%s'") < login_block.index("docker login")
-    assert login_block.index("docker login") < login_block.index(
-        "unset ACR_PULL_PASSWORD"
-    )
+    cleanup_trap = "trap 'unset ACR_PULL_PASSWORD' EXIT"
+    assert login_block.index(cleanup_trap) < login_block.index("read -rsp")
+    assert login_block.index(cleanup_trap) < login_block.index("docker login")
     syntax = subprocess.run(
         [bash_executable(), "-n"],
         input=login_block,
