@@ -38,7 +38,7 @@ if [[ ! "$HTTP_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] ||
   exit 2
 fi
 
-for command_name in docker curl tar flock mktemp du df awk; do
+for command_name in docker curl tar flock mktemp du df awk python3; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "missing required command: $command_name" >&2
     exit 3
@@ -175,6 +175,81 @@ wait_http() {
   return 1
 }
 
+wait_version_json() {
+  local url="$1"
+  local expected_sha="$2"
+  local require_healthy="${3:-false}"
+  local attempts="${4:-$HTTP_ATTEMPTS}"
+  local delay_seconds="${5:-$HTTP_DELAY_SECONDS}"
+  local attempt response status body
+  local -a curl_options=(
+    --fail
+    --silent
+    --show-error
+    --max-time 5
+    --write-out $'\n%{http_code}'
+  )
+
+  if [[ "$url" == https://* ]]; then
+    curl_options+=(--proto '=https' --max-redirs 0)
+  fi
+
+  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
+    if response="$(curl "${curl_options[@]}" "$url")"; then
+      status="${response##*$'\n'}"
+      body="${response%$'\n'*}"
+      if [[ "$status" == 200 ]] &&
+        printf '%s' "$body" | python3 -c '
+import json
+import sys
+
+try:
+    payload = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit(1)
+if not isinstance(payload, dict) or payload.get("version") != sys.argv[1]:
+    raise SystemExit(1)
+if sys.argv[2] == "true" and payload.get("status") != "healthy":
+    raise SystemExit(1)
+' "$expected_sha" "$require_healthy" 2>/dev/null; then
+        return 0
+      fi
+    fi
+    if (( attempt < attempts )); then
+      sleep "$delay_seconds"
+    fi
+  done
+
+  echo "version check failed: $url (expected SHA $expected_sha)" >&2
+  return 1
+}
+
+verify_service_image() {
+  local service="$1"
+  local expected_sha="$2"
+  local expected_image actual_image
+
+  expected_image="${ACR_REGISTRY}/${ACR_NAMESPACE}/zhiku-${service}:${expected_sha}"
+  actual_image="$(compose ps --format '{{.Image}}' "$service")" || actual_image=""
+  if [[ "$actual_image" != "$expected_image" ]]; then
+    echo "$service image mismatch: expected $expected_image, got ${actual_image:-<empty>}" >&2
+    return 1
+  fi
+}
+
+verify_runtime_version() {
+  local expected_sha="$1"
+
+  # Prove the immutable image identities first, then local responses, then the
+  # public reverse-proxy responses so no version state is committed on drift.
+  verify_service_image backend "$expected_sha" || return 1
+  verify_service_image frontend "$expected_sha" || return 1
+  wait_version_json "http://127.0.0.1:8000/health" "$expected_sha" true || return 1
+  wait_version_json "http://127.0.0.1:3000/version.json" "$expected_sha" || return 1
+  wait_version_json "${PUBLIC_BASE_URL%/}/health" "$expected_sha" true || return 1
+  wait_version_json "${PUBLIC_BASE_URL%/}/version.json" "$expected_sha"
+}
+
 atomic_write() {
   local value="$1"
   local destination="$2"
@@ -223,11 +298,9 @@ rollback() {
   IMAGE_TAG="$PREVIOUS_TAG"
   export IMAGE_TAG
   compose up -d --pull never backend || return 1
-  wait_http "http://127.0.0.1:8000/health" "$HTTP_ATTEMPTS" "$HTTP_DELAY_SECONDS" '{"status":"healthy"}' || return 1
+  wait_version_json "http://127.0.0.1:8000/health" "$PREVIOUS_TAG" true || return 1
   compose up -d --pull never frontend || return 1
-  wait_http "http://127.0.0.1:3000/" || return 1
-  wait_http "${PUBLIC_BASE_URL%/}/" || return 1
-  wait_http "${PUBLIC_BASE_URL%/}/health" "$HTTP_ATTEMPTS" "$HTTP_DELAY_SECONDS" '{"status":"healthy"}' || return 1
+  verify_runtime_version "$PREVIOUS_TAG" || return 1
   restore_version_state || return 1
 }
 
@@ -420,13 +493,11 @@ IMAGE_TAG="$TARGET_TAG"
 export IMAGE_TAG
 BACKEND_STARTED=true
 compose up -d --pull never backend
-wait_http "http://127.0.0.1:8000/health" "$HTTP_ATTEMPTS" "$HTTP_DELAY_SECONDS" '{"status":"healthy"}'
+wait_version_json "http://127.0.0.1:8000/health" "$TARGET_TAG" true
 
 FRONTEND_STARTED=true
 compose up -d --pull never frontend
-wait_http "http://127.0.0.1:3000/"
-wait_http "${PUBLIC_BASE_URL%/}/"
-wait_http "${PUBLIC_BASE_URL%/}/health" "$HTTP_ATTEMPTS" "$HTTP_DELAY_SECONDS" '{"status":"healthy"}'
+verify_runtime_version "$TARGET_TAG"
 
 if [[ "$HAS_PREVIOUS" == true ]]; then
   atomic_write "$PREVIOUS_TAG" "$PREVIOUS_FILE"

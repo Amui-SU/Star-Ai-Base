@@ -394,7 +394,16 @@ def test_deploy_script_uses_rooted_files_and_public_deployment_metadata():
     ]:
         assert path in content
 
-    for command_name in ["docker", "curl", "tar", "flock", "mktemp", "du", "df"]:
+    for command_name in [
+        "docker",
+        "curl",
+        "tar",
+        "flock",
+        "mktemp",
+        "du",
+        "df",
+        "python3",
+    ]:
         assert command_name in content
     assert 'command -v "$command_name"' in content
     assert 'source "$DEPLOY_ENV"' not in content
@@ -501,7 +510,7 @@ def test_deploy_script_backs_up_before_rollout_and_tracks_successful_versions():
     assert 'atomic_write "$TARGET_TAG" "$CURRENT_FILE"' in content
 
 
-def test_deploy_script_has_image_only_rollback_and_all_health_checks():
+def test_deploy_script_has_image_only_rollback_and_runtime_attestation():
     content = read("scripts/deploy.sh")
     rollback = content[content.index("rollback()") : content.index("on_error()")]
 
@@ -511,24 +520,34 @@ def test_deploy_script_has_image_only_rollback_and_all_health_checks():
     assert "tar " not in rollback
     assert "compose up -d --pull never backend" in rollback
     assert "compose up -d --pull never frontend" in rollback
-    assert 'wait_http "http://127.0.0.1:8000/health"' in rollback
-    assert 'wait_http "http://127.0.0.1:3000/"' in rollback
-    assert 'wait_http "${PUBLIC_BASE_URL%/}/"' in rollback
-    assert 'wait_http "${PUBLIC_BASE_URL%/}/health"' in rollback
+    assert 'verify_runtime_version "$PREVIOUS_TAG"' in rollback
     assert "trap 'on_signal 130' INT" in content
     assert "trap 'on_signal 143' TERM" in content
     assert "trap 'on_signal 129' HUP" in content
 
-    for url in [
-        "http://127.0.0.1:8000/health",
-        "http://127.0.0.1:3000/",
-        "${PUBLIC_BASE_URL%/}/",
-        "${PUBLIC_BASE_URL%/}/health",
+    attestation = content[
+        content.index("verify_runtime_version()") : content.index("atomic_write()")
+    ]
+    for required in [
+        'verify_service_image backend "$expected_sha"',
+        'verify_service_image frontend "$expected_sha"',
+        'wait_version_json "http://127.0.0.1:8000/health" "$expected_sha" true',
+        'wait_version_json "http://127.0.0.1:3000/version.json" "$expected_sha"',
+        'wait_version_json "${PUBLIC_BASE_URL%/}/health" "$expected_sha" true',
+        'wait_version_json "${PUBLIC_BASE_URL%/}/version.json" "$expected_sha"',
     ]:
-        assert f'wait_http "{url}"' in content
+        assert required in attestation
     for option in ["--fail", "--silent", "--show-error", "--max-time 5"]:
         assert option in content
     assert "--max-redirs 0" in content
+    target_attestation = content.index('verify_runtime_version "$TARGET_TAG"')
+    previous_write = content.index('atomic_write "$PREVIOUS_TAG" "$PREVIOUS_FILE"')
+    current_write = content.index('atomic_write "$TARGET_TAG" "$CURRENT_FILE"')
+    transaction_clear = content.rindex('rm -f -- "$TRANSACTION_FILE"')
+    assert target_attestation < previous_write < current_write < transaction_clear
+    assert rollback.index('verify_runtime_version "$PREVIOUS_TAG"') < rollback.index(
+        "restore_version_state"
+    )
 
 
 def write_fake_tool(bin_dir: Path, name: str, content: str) -> None:
@@ -636,6 +655,15 @@ case "$command_line" in
   "ps --all --format {{.State}} backend")
     printf '%s\n' "${FAKE_POST_STOP_STATES:-}"
     ;;
+  "ps --format {{.Image}} backend"|"ps --format {{.Image}} frontend")
+    service="${command_line##* }"
+    image_tag="${IMAGE_TAG:-unset}"
+    registry="${FAKE_ACR_REGISTRY}/${FAKE_ACR_NAMESPACE}"
+    if [[ "$image_tag" == "$FAKE_TARGET_TAG" && "${FAKE_IMAGE_MISMATCH_SERVICE:-}" == "$service" ]]; then
+      registry="wrong.example.test/wrong"
+    fi
+    printf '%s/zhiku-%s:%s\n' "$registry" "$service" "$image_tag"
+    ;;
   "up -d --pull never backend"|"up -d --pull never frontend"|"stop frontend")
     ;;
   *)
@@ -657,12 +685,39 @@ fi
 status=200
 body=ok
 if [[ "$url" == */health ]]; then
-  body='{"status":"healthy"}'
+  printf -v body '{"status":"healthy","version":"%s"}' "${IMAGE_TAG:-unset}"
+fi
+if [[ "$url" == */version.json ]]; then
+  version="${IMAGE_TAG:-unset}"
+  printf -v body '{"version":"%s"}' "$version"
+fi
+if [[ "${IMAGE_TAG:-}" == "$FAKE_TARGET_TAG" && "$url" == "${FAKE_VERSION_MISMATCH_URL:-}" ]]; then
+  mismatch_version="${FAKE_MISMATCH_VERSION:-0000000000000000000000000000000000000000}"
+  if [[ "$url" == */health ]]; then
+    printf -v body '{"status":"healthy","version":"%s"}' "$mismatch_version"
+  else
+    printf -v body '{"version":"%s"}' "$mismatch_version"
+  fi
 fi
 if [[ "$url" == https://public.example.test/health && "${IMAGE_TAG:-}" == "${FAKE_STRICT_TAG:-}" ]]; then
   status="${FAKE_PUBLIC_HEALTH_STATUS:-$status}"
   body="${FAKE_PUBLIC_HEALTH_BODY:-$body}"
 fi
+failure_mode=""
+if [[ "${IMAGE_TAG:-}" == "$FAKE_TARGET_TAG" && "$url" == "${FAKE_ENDPOINT_FAILURE_URL:-}" ]]; then
+  failure_mode="${FAKE_ENDPOINT_FAILURE_MODE:-missing}"
+elif [[ "${IMAGE_TAG:-}" != "$FAKE_TARGET_TAG" && "$url" == "${FAKE_ROLLBACK_FAILURE_URL:-}" ]]; then
+  failure_mode="${FAKE_ROLLBACK_FAILURE_MODE:-missing_version}"
+fi
+case "$failure_mode" in
+  missing) exit 22 ;;
+  non_200) status=503 ;;
+  invalid_json) body='not-json' ;;
+  missing_version) body='{"status":"healthy"}' ;;
+  unhealthy)
+    printf -v body '{"status":"degraded","version":"%s"}' "${IMAGE_TAG:-unset}"
+    ;;
+esac
 printf '%s\n%s' "$body" "$status"
 """,
     )
@@ -746,6 +801,7 @@ fi
 """,
     )
     write_fake_tool(bin_dir, "sleep", "#!/usr/bin/env bash\nexit 0\n")
+    write_fake_tool(bin_dir, "python3", '#!/usr/bin/env bash\nexec python "$@"\n')
 
     env = os.environ.copy()
     env.update(
@@ -757,6 +813,9 @@ fi
             "FAKE_FLOCK_CURRENT_FILE": bash_path(deploy_dir / "current-version"),
             "FAKE_SIGNAL_MARKER": bash_path(tmp_path / "signal.marker"),
             "FAKE_PULL_MARKER": bash_path(tmp_path / "pull.marker"),
+            "FAKE_ACR_REGISTRY": ENTERPRISE_ACR,
+            "FAKE_ACR_NAMESPACE": "zhiku",
+            "FAKE_TARGET_TAG": TARGET_TAG,
             "ZHIKU_DEPLOY_HTTP_ATTEMPTS": "2",
             "ZHIKU_DEPLOY_HTTP_DELAY_SECONDS": "0",
         }
@@ -798,7 +857,7 @@ def run_deploy(
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=12,
+        timeout=30,
         check=False,
     )
 
@@ -1048,8 +1107,12 @@ def test_deploy_script_health_failure_completes_public_rollback_checks(tmp_path)
     assert f"{TARGET_TAG}|up -d --pull never backend" in commands
     assert f"{PREVIOUS_TAG}|up -d --pull never backend" in commands
     curl_calls = log_lines(fixture["curl_log"])
-    assert f"{PREVIOUS_TAG}|https://public.example.test/" in curl_calls
+    assert f"{PREVIOUS_TAG}|http://127.0.0.1:8000/health" in curl_calls
+    assert f"{PREVIOUS_TAG}|http://127.0.0.1:3000/version.json" in curl_calls
     assert f"{PREVIOUS_TAG}|https://public.example.test/health" in curl_calls
+    assert f"{PREVIOUS_TAG}|https://public.example.test/version.json" in curl_calls
+    assert f"{PREVIOUS_TAG}|ps --format {{{{.Image}}}} backend" in commands
+    assert f"{PREVIOUS_TAG}|ps --format {{{{.Image}}}} frontend" in commands
 
 
 def test_deploy_script_success_tracks_versions_and_complete_backup(tmp_path):
@@ -1075,6 +1138,134 @@ def test_deploy_script_success_tracks_versions_and_complete_backup(tmp_path):
     assert len(backup_dirs) == 1
     assert (backup_dirs[0] / "data.tar.gz").is_file()
     assert (backup_dirs[0] / "previous-image-tag").read_text().strip() == PREVIOUS_TAG
+    assert not (deploy_dir / "transaction").exists()
+    backend_image = commands.index(f"{TARGET_TAG}|ps --format {{{{.Image}}}} backend")
+    frontend_image = commands.index(f"{TARGET_TAG}|ps --format {{{{.Image}}}} frontend")
+    curl_calls = log_lines(fixture["curl_log"])
+    expected_urls = [
+        "http://127.0.0.1:8000/health",
+        "http://127.0.0.1:3000/version.json",
+        "https://public.example.test/health",
+        "https://public.example.test/version.json",
+    ]
+    for url in expected_urls:
+        assert f"{TARGET_TAG}|{url}" in curl_calls
+    assert backend_image < frontend_image
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8000/health",
+        "http://127.0.0.1:3000/version.json",
+        "https://public.example.test/health",
+        "https://public.example.test/version.json",
+    ],
+    ids=["local-backend", "local-frontend", "public-backend", "public-frontend"],
+)
+def test_deploy_script_version_mismatch_rolls_back_before_commit(tmp_path, url):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    transaction = deploy_dir / "transaction"
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_VERSION_MISMATCH_URL=url,
+    )
+
+    assert result.returncode != 0
+    assert (deploy_dir / "current-version").read_text().strip() == PREVIOUS_TAG
+    assert not (deploy_dir / "previous-version").exists()
+    assert not transaction.exists()
+    commands = log_lines(fixture["docker_log"])
+    assert f"{PREVIOUS_TAG}|up -d --pull never backend" in commands
+    assert f"{PREVIOUS_TAG}|up -d --pull never frontend" in commands
+    assert f"{TARGET_TAG}|{url}" in log_lines(fixture["curl_log"])
+
+
+@pytest.mark.parametrize("service", ["backend", "frontend"])
+def test_deploy_script_running_image_mismatch_rolls_back(tmp_path, service):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_IMAGE_MISMATCH_SERVICE=service,
+    )
+
+    assert result.returncode != 0
+    assert f"{service} image mismatch: expected " in result.stderr
+    assert "wrong.example.test/wrong" in result.stderr
+    assert (deploy_dir / "current-version").read_text().strip() == PREVIOUS_TAG
+    commands = log_lines(fixture["docker_log"])
+    assert f"{PREVIOUS_TAG}|up -d --pull never backend" in commands
+    assert f"{PREVIOUS_TAG}|up -d --pull never frontend" in commands
+
+
+@pytest.mark.parametrize(
+    ("url", "mode"),
+    [
+        ("http://127.0.0.1:3000/version.json", "missing"),
+        ("https://public.example.test/version.json", "non_200"),
+        ("http://127.0.0.1:3000/version.json", "invalid_json"),
+        ("http://127.0.0.1:8000/health", "missing_version"),
+        ("https://public.example.test/health", "unhealthy"),
+    ],
+    ids=["missing", "non-200", "invalid-json", "missing-version", "unhealthy"],
+)
+def test_deploy_script_rejects_invalid_version_endpoint_proof(tmp_path, url, mode):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_ENDPOINT_FAILURE_URL=url,
+        FAKE_ENDPOINT_FAILURE_MODE=mode,
+    )
+
+    assert result.returncode != 0
+    assert f"version check failed: {url} (expected SHA {TARGET_TAG})" in result.stderr
+    assert (deploy_dir / "current-version").read_text().strip() == PREVIOUS_TAG
+    assert f"{PREVIOUS_TAG}|up -d --pull never frontend" in log_lines(
+        fixture["docker_log"]
+    )
+
+
+def test_deploy_script_preserves_transaction_when_rollback_version_proof_fails(
+    tmp_path,
+):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    transaction = deploy_dir / "transaction"
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+    rollback_url = "https://public.example.test/version.json"
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_VERSION_MISMATCH_URL="http://127.0.0.1:3000/version.json",
+        FAKE_ROLLBACK_FAILURE_URL=rollback_url,
+    )
+
+    assert result.returncode != 0
+    assert "automatic image recovery failed" in result.stderr
+    assert f"version check failed: {rollback_url} (expected SHA {PREVIOUS_TAG})" in (
+        result.stderr
+    )
+    assert transaction.exists()
+    assert (deploy_dir / "current-version").read_text().strip() == PREVIOUS_TAG
+    assert not (deploy_dir / "previous-version").exists()
+    assert f"{PREVIOUS_TAG}|{rollback_url}" in log_lines(fixture["curl_log"])
 
 
 def test_deploy_script_fails_clearly_when_deployment_lock_is_held(tmp_path):
@@ -1282,7 +1473,7 @@ def test_deploy_script_accepts_supported_beijing_acr_public_endpoint(
         encoding="utf-8",
     )
 
-    result = run_deploy(fixture)
+    result = run_deploy(fixture, FAKE_ACR_REGISTRY=registry)
 
     assert result.returncode == 0, result.stderr
 
