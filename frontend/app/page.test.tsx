@@ -1,4 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -112,6 +118,27 @@ describe("Home mobile shell", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+  });
+
+  it("marks the sidebar as resizing while its width handle is dragged", async () => {
+    const { container } = render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat Panel")).toBeInTheDocument();
+    });
+
+    const resizer = container.querySelector(".resizer");
+    const sidebarShell = container.querySelector(".sidebar-shell");
+    expect(resizer).toBeInstanceOf(HTMLElement);
+    expect(sidebarShell).toBeInstanceOf(HTMLElement);
+
+    fireEvent.mouseDown(resizer as HTMLElement);
+    expect(sidebarShell).toHaveClass("resizing");
+
+    fireEvent.mouseUp(window);
+    await waitFor(() => {
+      expect(sidebarShell).not.toHaveClass("resizing");
+    });
   });
 
   it("starts with the sidebar collapsed on mobile after login", async () => {

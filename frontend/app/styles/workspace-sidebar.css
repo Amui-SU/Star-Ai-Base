@@ -4,6 +4,9 @@
   overflow: hidden;
   transition: width 0.36s cubic-bezier(0.22, 1, 0.36, 1);
 }
+.sidebar-shell.resizing {
+  transition: none;
+}
 .sidebar-shell.open {
   width: var(--sidebar-width);
 }

@@ -23,6 +23,10 @@ describe("workspace desktop layout", () => {
     expect(lightWorkspaceCard).toContain("box-shadow: none;");
   });
 
+  it("disables the sidebar width transition while resizing", () => {
+    expect(ruleFor(".sidebar-shell.resizing")).toContain("transition: none;");
+  });
+
   it("reserves chat space while the fixed video note drawer is open", () => {
     expect(stylesheet).toMatch(
       /\.workspace\.video-note-open \.panel-chat-embedded\s*\{[^}]*margin-left:\s*var\(--video-note-drawer-width,\s*720px\);/s,

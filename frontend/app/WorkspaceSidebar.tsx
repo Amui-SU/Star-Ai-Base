@@ -12,6 +12,7 @@ interface WorkspaceSidebarProps {
   activeKbId: number | null;
   activeKnowledgeBase: KnowledgeBase | null;
   historyRefreshKey: number;
+  isDragging: boolean;
   isSidebarOpen: boolean;
   knowledgeBuilding: boolean;
   kbRefreshKey: number;
@@ -35,6 +36,7 @@ export default function WorkspaceSidebar({
   activeKbId,
   activeKnowledgeBase,
   historyRefreshKey,
+  isDragging,
   isSidebarOpen,
   knowledgeBuilding,
   kbRefreshKey,
@@ -54,7 +56,9 @@ export default function WorkspaceSidebar({
 }: WorkspaceSidebarProps) {
   return (
     <div
-      className={`sidebar-shell ${isSidebarOpen ? "open" : "closed"}`}
+      className={`sidebar-shell ${isSidebarOpen ? "open" : "closed"} ${
+        isDragging ? "resizing" : ""
+      }`}
       style={
         {
           "--sidebar-width": `${sidebarWidth}px`,

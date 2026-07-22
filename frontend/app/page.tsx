@@ -21,6 +21,7 @@ export default function Home() {
   const {
     containerRef,
     handleMouseDown,
+    isDragging,
     isSidebarOpen,
     sidebarMode,
     sidebarWidth,
@@ -99,6 +100,7 @@ export default function Home() {
               activeKbId={shell.activeKbId}
               activeKnowledgeBase={shell.activeKnowledgeBase}
               historyRefreshKey={historyRefreshKey}
+              isDragging={isDragging}
               isSidebarOpen={isSidebarOpen}
               knowledgeBuilding={shell.knowledgeBuilding}
               kbRefreshKey={shell.kbRefreshKey}

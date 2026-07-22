@@ -160,6 +160,7 @@ export function useWorkspaceState() {
   return {
     containerRef,
     handleMouseDown,
+    isDragging,
     isSidebarOpen,
     sidebarMode,
     sidebarWidth,
