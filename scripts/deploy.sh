@@ -2,10 +2,16 @@
 set -Eeuo pipefail
 umask 077
 
+ALLOW_REDEPLOY=false
+if [[ "${1:-}" == --allow-redeploy ]]; then
+  ALLOW_REDEPLOY=true
+  shift
+fi
 if (( $# != 1 )) || [[ ! "$1" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "usage: $0 <40-character-git-sha>" >&2
+  echo "usage: $0 [--allow-redeploy] <40-character-git-sha>" >&2
   exit 2
 fi
+readonly ALLOW_REDEPLOY
 readonly TARGET_TAG="$1"
 
 readonly DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"
@@ -51,6 +57,28 @@ source "$PRODUCTION_PREFLIGHT"
 production_preflight "$DEPLOY_ENV" "$APP_ENV"
 readonly ACR_REGISTRY ACR_NAMESPACE PUBLIC_BASE_URL
 
+INITIAL_CURRENT_TAG=""
+if [[ -f "$CURRENT_FILE" ]]; then
+  INITIAL_CURRENT_TAG="$(tr -d '[:space:]' < "$CURRENT_FILE")"
+fi
+if [[ "$INITIAL_CURRENT_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+  readonly INITIAL_HAS_CURRENT_TAG=true
+else
+  INITIAL_CURRENT_TAG=""
+  readonly INITIAL_HAS_CURRENT_TAG=false
+fi
+readonly INITIAL_CURRENT_TAG
+
+if [[ -e "$TRANSACTION_FILE" ]]; then
+  echo "an interrupted transaction exists; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
+  exit 5
+fi
+
+if [[ "$INITIAL_HAS_CURRENT_TAG" == true && "$TARGET_TAG" == "$INITIAL_CURRENT_TAG" && "$ALLOW_REDEPLOY" == false ]]; then
+  echo "target SHA is already current; use --allow-redeploy only for an intentional redeploy" >&2
+  exit 2
+fi
+
 mkdir -p "$DEPLOY_DIR" "$DATA_DIR" "$LOG_DIR" "$BACKUPS_DIR"
 exec 9>"$DEPLOY_DIR/deploy.lock"
 if ! flock -n 9; then
@@ -61,6 +89,28 @@ if [[ -e "$TRANSACTION_FILE" ]]; then
   echo "an interrupted transaction exists; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
   exit 5
 fi
+
+ORIGINAL_CURRENT_EXISTS=false
+ORIGINAL_CURRENT_CONTENT=""
+if [[ -f "$CURRENT_FILE" ]]; then
+  ORIGINAL_CURRENT_EXISTS=true
+  ORIGINAL_CURRENT_CONTENT="$(cat "$CURRENT_FILE")"
+fi
+readonly ORIGINAL_CURRENT_EXISTS ORIGINAL_CURRENT_CONTENT
+
+PREVIOUS_TAG="$(printf '%s' "$ORIGINAL_CURRENT_CONTENT" | tr -d '[:space:]')"
+if [[ "$PREVIOUS_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+  HAS_PREVIOUS=true
+else
+  PREVIOUS_TAG=""
+  HAS_PREVIOUS=false
+fi
+
+if [[ "$HAS_PREVIOUS" == true && "$TARGET_TAG" == "$PREVIOUS_TAG" && "$ALLOW_REDEPLOY" == false ]]; then
+  echo "target SHA is already current; use --allow-redeploy only for an intentional redeploy" >&2
+  exit 2
+fi
+readonly PREVIOUS_TAG HAS_PREVIOUS
 
 if ! COMPOSE_VERSION="$(docker compose version --short 2>/dev/null)"; then
   echo "Docker Compose >= 2.30 is required" >&2
@@ -141,14 +191,6 @@ atomic_write() {
   fi
 }
 
-ORIGINAL_CURRENT_EXISTS=false
-ORIGINAL_CURRENT_CONTENT=""
-if [[ -f "$CURRENT_FILE" ]]; then
-  ORIGINAL_CURRENT_EXISTS=true
-  ORIGINAL_CURRENT_CONTENT="$(cat "$CURRENT_FILE")"
-fi
-readonly ORIGINAL_CURRENT_EXISTS ORIGINAL_CURRENT_CONTENT
-
 ORIGINAL_PREVIOUS_EXISTS=false
 ORIGINAL_PREVIOUS_CONTENT=""
 if [[ -f "$PREVIOUS_FILE" ]]; then
@@ -156,15 +198,6 @@ if [[ -f "$PREVIOUS_FILE" ]]; then
   ORIGINAL_PREVIOUS_CONTENT="$(cat "$PREVIOUS_FILE")"
 fi
 readonly ORIGINAL_PREVIOUS_EXISTS ORIGINAL_PREVIOUS_CONTENT
-
-PREVIOUS_TAG="$(printf '%s' "$ORIGINAL_CURRENT_CONTENT" | tr -d '[:space:]')"
-if [[ "$PREVIOUS_TAG" =~ ^[0-9a-f]{40}$ ]]; then
-  readonly HAS_PREVIOUS=true
-else
-  PREVIOUS_TAG=""
-  readonly HAS_PREVIOUS=false
-fi
-readonly PREVIOUS_TAG
 
 IMAGE_TAG="$TARGET_TAG"
 export IMAGE_TAG

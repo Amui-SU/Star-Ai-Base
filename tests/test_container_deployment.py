@@ -362,6 +362,8 @@ def test_deploy_script_validates_versions_and_never_deletes_runtime_state():
     content = read("scripts/deploy.sh")
 
     assert "set -Eeuo pipefail" in content
+    assert "ALLOW_REDEPLOY=false" in content
+    assert '[[ "${1:-}" == --allow-redeploy ]]' in content
     assert "(( $# != 1 ))" in content
     assert "^[0-9a-f]{40}$" in content
     assert "compose()" in content
@@ -696,6 +698,9 @@ fi
 if [[ "${FAKE_LOCK_HELD:-0}" == 1 ]]; then
   exit 1
 fi
+if [[ -n "${FAKE_FLOCK_CURRENT_VERSION:-}" ]]; then
+  printf '%s\n' "$FAKE_FLOCK_CURRENT_VERSION" > "$FAKE_FLOCK_CURRENT_FILE"
+fi
 """,
     )
     write_fake_tool(
@@ -749,6 +754,7 @@ fi
             "FAKE_DOCKER_LOG": bash_path(docker_log),
             "FAKE_CURL_LOG": bash_path(curl_log),
             "FAKE_TAR_LOG": bash_path(tar_log),
+            "FAKE_FLOCK_CURRENT_FILE": bash_path(deploy_dir / "current-version"),
             "FAKE_SIGNAL_MARKER": bash_path(tmp_path / "signal.marker"),
             "FAKE_PULL_MARKER": bash_path(tmp_path / "pull.marker"),
             "ZHIKU_DEPLOY_HTTP_ATTEMPTS": "2",
@@ -769,24 +775,29 @@ fi
 
 
 def run_deploy(
-    fixture: dict[str, object], **env_updates: str
+    fixture: dict[str, object],
+    *,
+    deploy_args: tuple[str, ...] = (TARGET_TAG,),
+    **env_updates: str,
 ) -> subprocess.CompletedProcess:
     env = dict(fixture["env"])
     env.update(env_updates)
+    command = 'PATH="$1:$PATH"; export PATH; shift; exec bash "$1" "${@:2}"'
     return subprocess.run(
         [
             bash_executable(),
             "-c",
-            'PATH="$1:$PATH"; export PATH; exec bash "$2" "$3"',
+            command,
             "deploy-test",
             bash_path(Path(fixture["bin_dir"])),
             bash_path(DEPLOY_SCRIPT),
-            TARGET_TAG,
+            *deploy_args,
         ],
         cwd=PROJECT_ROOT,
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=12,
         check=False,
     )
@@ -826,6 +837,142 @@ def test_deploy_script_rejects_unknown_existing_backend_before_mutation(tmp_path
     commands = log_lines(fixture["docker_log"])
     assert commands == [f"{TARGET_TAG}|ps --all --services backend frontend"]
     assert log_lines(fixture["tar_log"]) == []
+
+
+def test_deploy_script_rejects_same_current_sha_before_runtime_mutation(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    root = Path(fixture["root"])
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(TARGET_TAG, encoding="utf-8")
+    assert (root / "data").is_dir()
+    for path in [
+        root / "logs",
+        root / "backups",
+        deploy_dir / "deploy.lock",
+        deploy_dir / "transaction",
+    ]:
+        assert not path.exists()
+    paths_before = {path.relative_to(root) for path in root.rglob("*")}
+
+    result = run_deploy(fixture)
+
+    assert result.returncode == 2
+    assert "target SHA is already current" in result.stderr
+    assert "--allow-redeploy" in result.stderr
+    assert log_lines(fixture["docker_log"]) == []
+    assert log_lines(fixture["tar_log"]) == []
+    assert log_lines(fixture["curl_log"]) == []
+    assert {path.relative_to(root) for path in root.rglob("*")} == paths_before
+    assert (deploy_dir / "current-version").read_text() == TARGET_TAG
+
+
+@pytest.mark.parametrize(
+    "deploy_args",
+    [(TARGET_TAG,), ("--allow-redeploy", TARGET_TAG)],
+    ids=["without-override", "with-allow-redeploy"],
+)
+def test_deploy_script_prioritizes_interrupted_transaction_over_same_sha(
+    tmp_path, deploy_args
+):
+    fixture = deployment_fixture(tmp_path)
+    root = Path(fixture["root"])
+    deploy_dir = Path(fixture["deploy_dir"])
+    transaction = deploy_dir / "transaction"
+    transaction_contents = "version=1\noperation=deploy\nphase=runtime\n"
+    (deploy_dir / "current-version").write_text(TARGET_TAG, encoding="utf-8")
+    transaction.write_text(transaction_contents, encoding="utf-8")
+    for path in [root / "logs", root / "backups", deploy_dir / "deploy.lock"]:
+        assert not path.exists()
+    paths_before = {path.relative_to(root) for path in root.rglob("*")}
+
+    result = run_deploy(fixture, deploy_args=deploy_args)
+
+    assert result.returncode == 5
+    assert "recover-interrupted.sh" in result.stderr
+    assert "target SHA is already current" not in result.stderr
+    assert transaction.read_text(encoding="utf-8") == transaction_contents
+    assert log_lines(fixture["docker_log"]) == []
+    assert log_lines(fixture["tar_log"]) == []
+    assert log_lines(fixture["curl_log"]) == []
+    assert {path.relative_to(root) for path in root.rglob("*")} == paths_before
+
+
+def test_deploy_script_allows_intentional_same_sha_redeploy(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(TARGET_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        deploy_args=("--allow-redeploy", TARGET_TAG),
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"{TARGET_TAG}|pull backend frontend" in log_lines(fixture["docker_log"])
+
+
+def test_deploy_script_rechecks_same_sha_after_acquiring_lock(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(PREVIOUS_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_FLOCK_CURRENT_VERSION=TARGET_TAG,
+    )
+
+    assert result.returncode == 2
+    assert "target SHA is already current" in result.stderr
+    assert log_lines(fixture["docker_log"]) == []
+    assert log_lines(fixture["tar_log"]) == []
+    assert log_lines(fixture["curl_log"]) == []
+    assert not (deploy_dir / "transaction").exists()
+
+
+def test_deploy_script_uses_current_version_refreshed_under_lock(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    older_tag = "3" * 40
+    (deploy_dir / "current-version").write_text(older_tag, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        FAKE_EXISTING_SERVICES="backend",
+        FAKE_POST_STOP_STATES="exited",
+        FAKE_FLOCK_CURRENT_VERSION=PREVIOUS_TAG,
+    )
+
+    assert result.returncode == 0, result.stderr
+    commands = log_lines(fixture["docker_log"])
+    assert f"{PREVIOUS_TAG}|pull backend frontend" in commands
+    assert (deploy_dir / "previous-version").read_text().strip() == PREVIOUS_TAG
+    backup_dirs = list((Path(fixture["root"]) / "backups").iterdir())
+    assert len(backup_dirs) == 1
+    assert (backup_dirs[0] / "previous-image-tag").read_text().strip() == PREVIOUS_TAG
+
+
+@pytest.mark.parametrize(
+    "deploy_args",
+    [
+        (),
+        ("--allow-redeploy",),
+        (TARGET_TAG, "extra"),
+        ("--allow-redeploy", TARGET_TAG, "extra"),
+        ("redeploy", TARGET_TAG),
+        ("A" * 40,),
+        ("g" * 40,),
+    ],
+)
+def test_deploy_script_rejects_invalid_cli_arguments(tmp_path, deploy_args):
+    fixture = deployment_fixture(tmp_path)
+
+    result = run_deploy(fixture, deploy_args=deploy_args)
+
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert log_lines(fixture["docker_log"]) == []
 
 
 def test_deploy_script_pull_failure_does_not_mutate_runtime(tmp_path):
