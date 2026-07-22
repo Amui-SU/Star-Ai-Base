@@ -5,10 +5,9 @@ import {
   buildProvidersForMenu,
   hasEnabledCurrentSource,
   resolveCurrentApiSource,
-  resolveSourceAvailability,
   shouldShowAiKeyHint,
 } from "@/components/chat/chatModelSettingsState";
-import type { LLMConfigResponse, LLMProviderInfo } from "@/lib/api";
+import type { LLMConfigResponse } from "@/lib/api";
 
 describe("chatModelSettingsState", () => {
   it("treats missing and legacy API source as official", () => {
@@ -21,29 +20,24 @@ describe("chatModelSettingsState", () => {
     ).toBe("personal");
   });
 
-  it("builds source availability and menu options from remote providers", () => {
-    const providers: LLMProviderInfo[] = [
-      {
-        provider: "deepseek",
-        label: "DeepSeek",
-        enabled: false,
-        official_enabled: true,
-        personal_enabled: false,
-        model: "deepseek-chat",
-        thinking_config: {},
-        thinking_template: {},
-      },
-    ];
-
-    const availability = resolveSourceAvailability(providers);
-    expect(availability).toEqual({ official: true, personal: false });
-    const options = buildModelSourceOptions(availability);
+  it("builds the official and personal source menu options", () => {
+    const options = buildModelSourceOptions();
     expect(options.map((option) => option.value)).toEqual([
       "official",
       "personal",
     ]);
     expect(options.map((option) => option.label)).toEqual(["官方", "个人"]);
     expect(options.map((option) => option.enabled)).toEqual([true, true]);
+  });
+
+  it("keeps the limited official channel selectable before a provider is configured", () => {
+    const [official] = buildModelSourceOptions();
+
+    expect(official).toMatchObject({
+      value: "official",
+      hint: "限制开放",
+      enabled: true,
+    });
   });
 
   it("detects whether the loaded provider set can serve the current source", () => {

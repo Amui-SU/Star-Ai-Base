@@ -46,7 +46,6 @@ def test_chat_model_settings_hook_uses_state_helpers():
 
     for helper_name in [
         "resolveCurrentApiSource",
-        "resolveSourceAvailability",
         "buildModelSourceOptions",
         "buildProvidersForMenu",
         "hasEnabledCurrentSource",

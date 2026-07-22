@@ -20,28 +20,10 @@ export interface ModelMenuProvider extends ModelConfigProvider {
   personal_enabled?: boolean;
 }
 
-export interface ModelSourceAvailability {
-  official: boolean;
-  personal: boolean;
-}
-
 export function resolveCurrentApiSource(
   llmConfig: Pick<LLMConfigResponse, "current_api_source"> | null | undefined,
 ): LLMApiSource {
   return llmConfig?.current_api_source === "personal" ? "personal" : "official";
-}
-
-export function resolveSourceAvailability(
-  remoteProviders: readonly LLMProviderInfo[],
-): ModelSourceAvailability {
-  return {
-    official: remoteProviders.some(
-      (provider) => provider.official_enabled ?? provider.enabled,
-    ),
-    personal: remoteProviders.some(
-      (provider) => provider.personal_enabled ?? provider.enabled,
-    ),
-  };
 }
 
 export function hasEnabledCurrentSource(
@@ -62,15 +44,13 @@ export function shouldShowAiKeyHint(
   );
 }
 
-export function buildModelSourceOptions(
-  sourceAvailability: ModelSourceAvailability,
-): ModelSourceOption[] {
+export function buildModelSourceOptions(): ModelSourceOption[] {
   return [
     {
       value: "official",
       label: "官方",
-      hint: "付费通道",
-      enabled: sourceAvailability.official,
+      hint: "限制开放",
+      enabled: true,
     },
     {
       value: "personal",

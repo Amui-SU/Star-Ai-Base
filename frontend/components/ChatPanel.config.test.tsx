@@ -89,6 +89,34 @@ describe("ChatPanel model and service configuration", () => {
     );
   });
 
+  it("does not disable the limited official channel before Agnes is configured", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatApi.getModelConfig).mockResolvedValue({
+      current_provider: "agnes",
+      current_api_source: "personal",
+      providers: [
+        {
+          provider: "agnes",
+          label: "Agnes",
+          enabled: false,
+          official_enabled: false,
+          personal_enabled: false,
+          model: "agnes-2.0-flash",
+          thinking_config: {},
+          thinking_template: {},
+        },
+      ],
+    });
+    const user = userEvent.setup();
+
+    render(<ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" />);
+
+    await user.click(await screen.findByLabelText("模型选择"));
+    const officialButton = screen.getByRole("button", { name: "官方" });
+    expect(officialButton).toBeEnabled();
+    expect(officialButton).toHaveTextContent("限制开放");
+  });
+
   it("treats legacy model config without an explicit source as official", async () => {
     mockChatPanelDependencies();
     vi.mocked(chatApi.getModelConfig).mockResolvedValue({

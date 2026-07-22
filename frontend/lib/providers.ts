@@ -37,6 +37,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: "Agnes",
     baseUrl: "https://apihub.agnes-ai.com/v1",
     model: "agnes-2.0-flash",
+    logo: "/logos/agnes-icon.svg",
     kind: "llm",
   },
   {

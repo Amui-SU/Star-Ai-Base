@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { LLM_PROVIDER_PRESETS, PROVIDER_PRESETS } from "@/lib/providers";
+import {
+  LLM_PROVIDER_PRESETS,
+  PROVIDER_PRESETS,
+  providerLogoMap,
+} from "@/lib/providers";
 
 describe("provider presets", () => {
   it("keeps API account defaults and chat model menu order unchanged", () => {
@@ -25,5 +29,9 @@ describe("provider presets", () => {
       "siliconflow",
       "zhipu",
     ]);
+  });
+
+  it("uses the official Agnes icon in provider menus", () => {
+    expect(providerLogoMap.get("agnes")).toBe("/logos/agnes-icon.svg");
   });
 });

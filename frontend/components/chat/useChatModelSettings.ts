@@ -17,7 +17,6 @@ import {
   EMPTY_PROVIDERS,
   hasEnabledCurrentSource,
   resolveCurrentApiSource,
-  resolveSourceAvailability,
   shouldShowAiKeyHint as resolveShouldShowAiKeyHint,
   type ModelMenuProvider,
   type ModelSourceOption,
@@ -225,11 +224,6 @@ export function useChatModelSettings({
   const remoteProviders = llmConfig?.providers ?? EMPTY_PROVIDERS;
   const currentApiSource: LLMApiSource = resolveCurrentApiSource(llmConfig);
 
-  const sourceAvailability = useMemo(
-    () => resolveSourceAvailability(remoteProviders),
-    [remoteProviders],
-  );
-
   const currentSourceHasEnabledProvider = useMemo(
     () => hasEnabledCurrentSource(remoteProviders),
     [remoteProviders],
@@ -242,8 +236,8 @@ export function useChatModelSettings({
   );
 
   const sourceOptions: ModelSourceOption[] = useMemo(
-    () => buildModelSourceOptions(sourceAvailability),
-    [sourceAvailability],
+    () => buildModelSourceOptions(),
+    [],
   );
 
   const providersForMenu: ModelMenuProvider[] = useMemo(

@@ -103,20 +103,12 @@ export default function ChatModelStatus({
                   type="button"
                   aria-label={option.label}
                   aria-pressed={currentApiSource === option.value}
-                  disabled={
-                    llmSwitching ||
-                    !llmConfig ||
-                    (option.value === "official" && !option.enabled)
-                  }
+                  disabled={llmSwitching || !llmConfig || !option.enabled}
                   className={`model-source-option ${
                     currentApiSource === option.value ? "active" : ""
                   }`}
                   onClick={() => onSwitchModelSource(option.value)}
-                  title={
-                    option.value === "official" && !option.enabled
-                      ? "官方通道暂未开通"
-                      : `${option.label} · ${option.hint}`
-                  }
+                  title={`${option.label} · ${option.hint}`}
                 >
                   <span>{option.label}</span>
                   <small>{option.hint}</small>
