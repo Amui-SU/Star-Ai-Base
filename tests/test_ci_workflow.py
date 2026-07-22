@@ -2,7 +2,18 @@ import configparser
 import re
 from pathlib import Path
 
+import pytest
+import yaml
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+SUMMARY_OUTPUT_GROUP_PATTERN = re.compile(
+    r'(?ms)^\{\n(?P<body>.*?)^\}\s*>>\s*"\$GITHUB_STEP_SUMMARY"\s*$'
+)
+DISPLAY_ONLY_DEPLOY_COMMAND_PATTERN = re.compile(
+    r'''printf[ \t]+'%s\\n'[ \t]+"\./scripts/deploy\.sh \$\{IMAGE_TAG\}"'''
+)
+DEPLOY_SCRIPT_TOKEN_PATTERN = re.compile(r"(?<![\w.-])deploy\.sh(?![\w.-])")
 
 
 def read_publish_workflow() -> str:
@@ -17,6 +28,51 @@ def read_ci_workflow() -> str:
 
     assert workflow.exists(), "CI workflow must exist"
     return workflow.read_text(encoding="utf-8")
+
+
+def workflow_steps(content: str) -> list[dict]:
+    workflow = yaml.safe_load(content)
+    return [
+        step
+        for job in workflow.get("jobs", {}).values()
+        for step in job.get("steps", [])
+        if isinstance(step, dict)
+    ]
+
+
+def workflow_run_blocks(content: str) -> list[str]:
+    return [
+        step["run"]
+        for step in workflow_steps(content)
+        if isinstance(step.get("run"), str)
+    ]
+
+
+def assert_deploy_commands_are_summary_only(run_block: str) -> None:
+    deploy_lines = [
+        line
+        for line in run_block.splitlines()
+        if DEPLOY_SCRIPT_TOKEN_PATTERN.search(line)
+    ]
+    if not deploy_lines:
+        return
+
+    for line in deploy_lines:
+        stripped_line = line.strip()
+        assert DISPLAY_ONLY_DEPLOY_COMMAND_PATTERN.fullmatch(
+            stripped_line
+        ), "deploy command must be a display-only printf argument"
+
+    summary_groups = [
+        match.group("body")
+        for match in SUMMARY_OUTPUT_GROUP_PATTERN.finditer(run_block)
+    ]
+    assert summary_groups, "deploy command must be written to GITHUB_STEP_SUMMARY"
+
+    for line in deploy_lines:
+        assert any(
+            line in group.splitlines() for group in summary_groups
+        ), "deploy command must be inside the GITHUB_STEP_SUMMARY output group"
 
 
 def test_github_actions_ci_runs_backend_and_frontend_quality_gates():
@@ -225,7 +281,9 @@ def test_publish_images_builds_sha_only_then_promotes_both_images_when_current()
     )
     assert backend_promotion_index < frontend_promotion_index
     assert content.count("docker buildx imagetools create") == 2
-    promotion_step = content.split("- name: Promote tested images to latest", 1)[1]
+    promotion_step = content.split("- name: Promote tested images to latest", 1)[
+        1
+    ].split("- name: Write manual deployment summary", 1)[0]
     promotion_header = promotion_step.split("run: |", 1)[0]
     assert "if: steps.freshness.outputs.promote == 'true'" in promotion_header
     assert (
@@ -243,7 +301,126 @@ def test_publish_images_builds_sha_only_then_promotes_both_images_when_current()
     assert '--tag "${FRONTEND_IMAGE}:latest"' in promotion_script
     assert '"${FRONTEND_IMAGE}:${IMAGE_TAG}"' in promotion_script
     assert "ssh" not in content.lower()
-    assert "deploy" not in content.lower()
+
+
+def test_publish_images_writes_a_safe_manual_deployment_summary_after_publication():
+    content = read_publish_workflow()
+
+    revision_index = content.index("- name: Verify SHA image revisions")
+    freshness_index = content.index("- name: Verify tested commit is still current")
+    promotion_index = content.index("- name: Promote tested images to latest")
+    summary_index = content.index("- name: Write manual deployment summary")
+    summary_step = content[summary_index:]
+    summary_header = summary_step.split("run: |", 1)[0]
+
+    assert revision_index < freshness_index < promotion_index < summary_index
+    assert "if: success()" in summary_header
+    assert '>> "$GITHUB_STEP_SUMMARY"' in summary_step
+
+    run_blocks = workflow_run_blocks(content)
+    summary_run_block = next(
+        step["run"]
+        for step in workflow_steps(content)
+        if step.get("name") == "Write manual deployment summary"
+    )
+    assert_deploy_commands_are_summary_only(summary_run_block)
+    for run_block in run_blocks:
+        assert_deploy_commands_are_summary_only(run_block)
+
+    for required in [
+        "## Container images published",
+        "- Tested SHA: `",
+        "- Backend: `",
+        "- Frontend: `",
+        '"${IMAGE_TAG}"',
+        '"${BACKEND_IMAGE}:${IMAGE_TAG}"',
+        '"${FRONTEND_IMAGE}:${IMAGE_TAG}"',
+        "ECS has not been deployed. Run this manually on the approved host:",
+        "cd /opt/zhiku-cloud",
+        "./scripts/deploy.sh ${IMAGE_TAG}",
+        "local and public /health and /version.json report ${IMAGE_TAG}",
+    ]:
+        assert required in summary_step
+
+    assert (
+        "BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend"
+        in summary_step
+    )
+    assert (
+        "FRONTEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend"
+        in summary_step
+    )
+
+    workflow_lower = content.lower()
+    for prohibited in [
+        "ssh",
+        "scp",
+        "rsync",
+        "aws ",
+        "aliyun",
+        "gcloud",
+        "kubectl",
+        "terraform",
+        "ansible",
+    ]:
+        assert prohibited not in workflow_lower
+
+    summary_lower = summary_step.lower()
+    for credential in ["acr_username", "acr_password", "token"]:
+        assert credential not in summary_lower
+
+    workflow_header = content.split("jobs:", 1)[0]
+    assert "permissions:\n  contents: read" in workflow_header
+    assert workflow_header.count("permissions:") == 1
+
+
+def test_deploy_summary_guard_allows_the_exact_display_only_command():
+    summary_run_block = '''{
+  printf '%s\\n' "./scripts/deploy.sh ${IMAGE_TAG}"
+} >> "$GITHUB_STEP_SUMMARY"'''
+
+    assert_deploy_commands_are_summary_only(summary_run_block)
+
+
+@pytest.mark.parametrize(
+    "executable_line",
+    [
+        './scripts/deploy.sh "${IMAGE_TAG}"',
+        'bash ./scripts/deploy.sh "${IMAGE_TAG}"',
+        'sudo ./scripts/deploy.sh "${IMAGE_TAG}"',
+        "sh -c './scripts/deploy.sh \"${IMAGE_TAG}\"'",
+        '/usr/bin/env bash ./scripts/deploy.sh "${IMAGE_TAG}"',
+        'bash scripts/deploy.sh "${IMAGE_TAG}"',
+        '/opt/zhiku-cloud/scripts/deploy.sh "${IMAGE_TAG}"',
+        'deploy.sh "${IMAGE_TAG}"',
+        "printf '%s\\n' \"./scripts/deploy.sh $(./scripts/deploy.sh ${IMAGE_TAG})\"",
+        "printf '%s\\n' \"./scripts/deploy.sh `./scripts/deploy.sh ${IMAGE_TAG}`\"",
+    ],
+)
+def test_deploy_summary_guard_rejects_executable_deploy_commands(executable_line):
+    malicious_run_block = f'''{{
+  printf '%s\\n' 'Container images published'
+  {executable_line}
+}} >> "$GITHUB_STEP_SUMMARY"'''
+
+    with pytest.raises(AssertionError, match="display-only printf argument"):
+        assert_deploy_commands_are_summary_only(malicious_run_block)
+
+
+def test_deploy_summary_guard_scans_unnamed_run_steps():
+    malicious_workflow = """
+jobs:
+  publish:
+    steps:
+      - run: |
+          ./scripts/deploy.sh "${IMAGE_TAG}"
+"""
+
+    run_blocks = workflow_run_blocks(malicious_workflow)
+
+    assert len(run_blocks) == 1
+    with pytest.raises(AssertionError, match="display-only printf argument"):
+        assert_deploy_commands_are_summary_only(run_blocks[0])
 
 
 def test_workflows_pin_all_actions_and_use_read_only_contents_permission():
