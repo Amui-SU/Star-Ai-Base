@@ -220,7 +220,10 @@ describe("mobile chat message layout", () => {
       /\.sidebar-history-actions\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*8px;[^}]*padding-right:\s*4px;/s,
     );
     expect(stylesheet).toMatch(
-      /\.sidebar-history-new-chat\s*\{[^}]*width:\s*min\(100%, 220px\);[^}]*min-height:\s*32px;[^}]*background:\s*var\(--paper-2\);/s,
+      /\.sidebar-history-new-chat\s*\{[^}]*width:\s*auto;[^}]*min-width:\s*0;[^}]*min-height:\s*32px;[^}]*flex:\s*1 1 auto;[^}]*background:\s*var\(--paper-2\);/s,
+    );
+    expect(stylesheet).not.toMatch(
+      /\.sidebar-history-new-chat\s*\{[^}]*width:\s*min\(100%, 220px\);/s,
     );
     expect(stylesheet).toMatch(
       /html\.light \.sidebar-history-new-chat\s*\{[^}]*border-color:\s*var\(--border-strong\);[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.55\);[^}]*box-shadow:\s*none;[^}]*color:\s*var\(--ink-soft\);/s,
