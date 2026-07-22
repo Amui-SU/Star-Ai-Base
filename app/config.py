@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     # 应用配置
     app_host: str = Field(default="0.0.0.0")
     app_port: int = Field(default=8000)
+    app_version: str = Field(default="development")
     debug: bool = Field(default=False)
     session_cookie_secure: Optional[bool] = Field(
         default=None,
@@ -137,6 +138,27 @@ class Settings(BaseSettings):
             "deepseekv4flash": "deepseek-v4-flash",
         }
         return alias_map.get(normalized, value.strip())
+
+    @field_validator("app_version", mode="before")
+    @classmethod
+    def validate_app_version(cls, value: str) -> str:
+        """Validate the development marker or a production Git SHA."""
+        if not isinstance(value, str):
+            raise ValueError(
+                "app_version must be 'development' or a lowercase 40-character SHA"
+            )
+
+        normalized = value.strip()
+        if normalized == "development":
+            return normalized
+        if len(normalized) == 40 and all(
+            character in "0123456789abcdef" for character in normalized
+        ):
+            return normalized
+
+        raise ValueError(
+            "app_version must be 'development' or a lowercase 40-character SHA"
+        )
 
 
 # 全局配置实例
