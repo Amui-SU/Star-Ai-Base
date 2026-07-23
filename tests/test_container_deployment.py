@@ -557,6 +557,27 @@ def test_recovery_script_has_strict_transaction_contract():
     assert "data.tar.gz.partial" in content
 
 
+def test_deploy_restore_and_recovery_share_exact_runtime_attestation():
+    helper = read("scripts/runtime-attestation.sh")
+
+    assert "json.load(sys.stdin)" in helper
+    assert 'payload.get("version") != sys.argv[1]' in helper
+    assert 'payload.get("status") != "healthy"' in helper
+    assert "eval " not in helper
+    assert "source " not in helper
+    for script in ["scripts/deploy.sh", "scripts/recover-interrupted.sh"]:
+        content = read(script)
+        assert 'RUNTIME_ATTESTATION="$SCRIPT_DIR/runtime-attestation.sh"' in content
+        assert 'source "$RUNTIME_ATTESTATION"' in content
+        assert 'verify_runtime_version "$previous_tag"' in content or (
+            'verify_runtime_version "$TARGET_TAG"' in content
+        )
+    restore = read("scripts/restore-data.sh")
+    assert 'source "$RUNTIME_ATTESTATION"' in restore
+    assert restore.count('wait_version_json "http://127.0.0.1:8000/health"') == 2
+    assert restore.count('wait_version_json "${PUBLIC_BASE_URL%/}/health"') == 2
+
+
 def test_deploy_script_backs_up_before_rollout_and_tracks_successful_versions():
     content = read("scripts/deploy.sh")
 
@@ -572,6 +593,7 @@ def test_deploy_script_backs_up_before_rollout_and_tracks_successful_versions():
 
 def test_deploy_script_has_image_only_rollback_and_runtime_attestation():
     content = read("scripts/deploy.sh")
+    helper = read("scripts/runtime-attestation.sh")
     rollback = content[content.index("rollback()") : content.index("on_error()")]
 
     assert "DEPLOY_STARTED=false" in content
@@ -585,9 +607,7 @@ def test_deploy_script_has_image_only_rollback_and_runtime_attestation():
     assert "trap 'on_signal 143' TERM" in content
     assert "trap 'on_signal 129' HUP" in content
 
-    attestation = content[
-        content.index("verify_runtime_version()") : content.index("atomic_write()")
-    ]
+    attestation = helper[helper.index("verify_runtime_version()") :]
     for required in [
         'verify_service_image backend "$expected_sha"',
         'verify_service_image frontend "$expected_sha"',
@@ -598,8 +618,8 @@ def test_deploy_script_has_image_only_rollback_and_runtime_attestation():
     ]:
         assert required in attestation
     for option in ["--fail", "--silent", "--show-error", "--max-time 5"]:
-        assert option in content
-    assert "--max-redirs 0" in content
+        assert option in helper
+    assert "--max-redirs 0" in helper
     target_attestation = content.index('verify_runtime_version "$TARGET_TAG"')
     previous_write = content.index('atomic_write "$PREVIOUS_TAG" "$PREVIOUS_FILE"')
     current_write = content.index('atomic_write "$TARGET_TAG" "$CURRENT_FILE"')
@@ -1061,6 +1081,45 @@ def test_deploy_script_rechecks_same_sha_after_acquiring_lock(tmp_path):
     assert log_lines(fixture["tar_log"]) == []
     assert log_lines(fixture["curl_log"]) == []
     assert not (deploy_dir / "transaction").exists()
+
+
+def test_allow_redeploy_rejects_current_sha_changed_while_waiting_for_lock(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    (deploy_dir / "current-version").write_text(TARGET_TAG, encoding="utf-8")
+
+    result = run_deploy(
+        fixture,
+        deploy_args=("--allow-redeploy", TARGET_TAG),
+        FAKE_FLOCK_CURRENT_VERSION=PREVIOUS_TAG,
+    )
+
+    assert result.returncode == 2
+    assert "--allow-redeploy requires the target SHA to remain current" in result.stderr
+    assert (deploy_dir / "current-version").read_text().strip() == PREVIOUS_TAG
+    assert log_lines(fixture["docker_log"]) == []
+    assert log_lines(fixture["tar_log"]) == []
+    assert log_lines(fixture["curl_log"]) == []
+    assert not (deploy_dir / "transaction").exists()
+    assert list((Path(fixture["root"]) / "backups").iterdir()) == []
+
+
+def test_allow_redeploy_rejects_missing_current_version_before_side_effects(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+
+    result = run_deploy(
+        fixture,
+        deploy_args=("--allow-redeploy", TARGET_TAG),
+    )
+
+    assert result.returncode == 2
+    assert "--allow-redeploy requires an existing current SHA" in result.stderr
+    assert log_lines(fixture["docker_log"]) == []
+    assert log_lines(fixture["tar_log"]) == []
+    assert log_lines(fixture["curl_log"]) == []
+    assert not (deploy_dir / "transaction").exists()
+    assert not (Path(fixture["root"]) / "backups").exists()
 
 
 def test_deploy_script_uses_current_version_refreshed_under_lock(tmp_path):
@@ -1954,6 +2013,12 @@ printf 'docker|%s|%s\n' "${IMAGE_TAG:-unset}" "$command_line" >> "$FAKE_OPERATIO
 case "$command_line" in
   "stop backend"|"stop backend frontend") exit "${FAKE_STOP_EXIT:-0}" ;;
   "ps --all --format {{.State}} backend") printf '%s\n' "${FAKE_POST_STOP_STATES:-exited}" ;;
+  "ps --format {{.Image}} backend")
+    printf '%s\n' "${FAKE_BACKEND_IMAGE:-${ACR_REGISTRY}/${ACR_NAMESPACE}/zhiku-backend:${IMAGE_TAG}}"
+    ;;
+  "ps --format {{.Image}} frontend")
+    printf '%s\n' "${FAKE_FRONTEND_IMAGE:-${ACR_REGISTRY}/${ACR_NAMESPACE}/zhiku-frontend:${IMAGE_TAG}}"
+    ;;
   "up -d --pull never backend"|"up -d --pull never frontend")
     count=0
     [[ -f "$FAKE_DOCKER_COUNTER" ]] && count="$(cat "$FAKE_DOCKER_COUNTER")"
@@ -1977,7 +2042,32 @@ count=$((count + 1))
 printf '%s' "$count" > "$FAKE_CURL_COUNTER"
 printf 'curl|%s|%s\n' "${IMAGE_TAG:-unset}" "$url" >> "$FAKE_OPERATION_LOG"
 if (( count <= ${FAKE_CURL_FAILURES:-0} )); then exit 22; fi
-printf '{"status":"healthy"}\n200'
+case "$url" in
+  http://127.0.0.1:8000/health)
+    if [[ -n "${FAKE_LOCAL_HEALTH_BODY+x}" ]]; then body="$FAKE_LOCAL_HEALTH_BODY"
+    elif [[ -n "${FAKE_HEALTH_BODY+x}" ]]; then body="$FAKE_HEALTH_BODY"
+    else printf -v body '{"status":"healthy","version":"%s"}' "${IMAGE_TAG:-unset}"
+    fi
+    ;;
+  http://127.0.0.1:3000/version.json)
+    if [[ -n "${FAKE_LOCAL_VERSION_BODY+x}" ]]; then body="$FAKE_LOCAL_VERSION_BODY"
+    else printf -v body '{"version":"%s"}' "${IMAGE_TAG:-unset}"
+    fi
+    ;;
+  https://*/health)
+    if [[ -n "${FAKE_PUBLIC_HEALTH_BODY+x}" ]]; then body="$FAKE_PUBLIC_HEALTH_BODY"
+    elif [[ -n "${FAKE_HEALTH_BODY+x}" ]]; then body="$FAKE_HEALTH_BODY"
+    else printf -v body '{"status":"healthy","version":"%s"}' "${IMAGE_TAG:-unset}"
+    fi
+    ;;
+  https://*/version.json)
+    if [[ -n "${FAKE_PUBLIC_VERSION_BODY+x}" ]]; then body="$FAKE_PUBLIC_VERSION_BODY"
+    else printf -v body '{"version":"%s"}' "${IMAGE_TAG:-unset}"
+    fi
+    ;;
+  *) body="${FAKE_ROOT_BODY:-ok}" ;;
+esac
+printf '%s\n%s' "$body" "${FAKE_HEALTH_STATUS:-200}"
 """,
     )
     write_fake_tool(
@@ -2036,6 +2126,7 @@ printf 'fake 8388608 0 %s 0%% /\n' "${FAKE_AVAILABLE_KIB:-4194304}"
 """,
     )
     write_fake_tool(bin_dir, "sleep", "#!/usr/bin/env bash\nexit 0\n")
+    write_fake_tool(bin_dir, "python3", '#!/usr/bin/env bash\nexec python "$@"\n')
 
     env = os.environ.copy()
     env.update(
@@ -2044,6 +2135,8 @@ printf 'fake 8388608 0 %s 0%% /\n' "${FAKE_AVAILABLE_KIB:-4194304}"
             "ZHIKU_RESTORE_PYTHON": bash_path(Path(sys.executable)),
             "ZHIKU_RESTORE_HTTP_ATTEMPTS": "2",
             "ZHIKU_RESTORE_HTTP_DELAY_SECONDS": "0",
+            "ZHIKU_RECOVER_HTTP_ATTEMPTS": "2",
+            "ZHIKU_RECOVER_HTTP_DELAY_SECONDS": "0",
             "FAKE_OPERATION_LOG": bash_path(operation_log),
             "FAKE_DOCKER_COUNTER": bash_path(docker_counter),
             "FAKE_CURL_COUNTER": bash_path(curl_counter),
@@ -2424,6 +2517,58 @@ def test_restore_script_success_swaps_data_and_keeps_unique_safety_copy(tmp_path
     assert f"curl|{TARGET_TAG}|https://public.example.test/health" in operations
 
 
+@pytest.mark.parametrize(
+    "health_body",
+    [
+        "{not-json",
+        f'{{"status":"degraded","version":"{TARGET_TAG}"}}',
+        f'{{"version":"{TARGET_TAG}"}}',
+        f'{{"status":"healthy","version":"{PREVIOUS_TAG}"}}',
+        '{"status":"healthy"}',
+    ],
+    ids=[
+        "malformed-json",
+        "unhealthy",
+        "missing-status",
+        "wrong-version",
+        "missing-version",
+    ],
+)
+def test_restore_and_recovery_fail_closed_on_invalid_health_json(tmp_path, health_body):
+    restore = restore_fixture(tmp_path / "restore")
+
+    restore_result = run_restore(restore, FAKE_HEALTH_BODY=health_body)
+
+    assert restore_result.returncode != 0
+    assert "version check failed" in restore_result.stderr
+    assert (Path(restore["deploy_dir"]) / "transaction").exists()
+
+    recovery = restore_fixture(tmp_path / "recovery")
+    recovery_deploy_dir = Path(recovery["deploy_dir"])
+    recovery_backup_dir = (
+        Path(recovery["backups_dir"]) / f"20260719T010203Z-{TARGET_TAG}.test"
+    )
+    recovery_backup_dir.mkdir()
+    (recovery_deploy_dir / "transaction").write_text(
+        "version=1\n"
+        "operation=deploy\n"
+        "phase=runtime\n"
+        f"target_tag={TARGET_TAG}\n"
+        f"previous_tag={PREVIOUS_TAG}\n"
+        "original_previous_tag=none\n"
+        f"backup_dir={bash_path(recovery_backup_dir)}\n",
+        encoding="utf-8",
+    )
+
+    recovery_result = run_recover(
+        recovery, FAKE_HEALTH_BODY=health_body.replace(PREVIOUS_TAG, TARGET_TAG)
+    )
+
+    assert recovery_result.returncode != 0
+    assert "version check failed" in recovery_result.stderr
+    assert (recovery_deploy_dir / "transaction").exists()
+
+
 def test_restore_script_real_flock_blocks_concurrent_restore(tmp_path):
     has_flock = subprocess.run(
         [bash_executable(), "-lc", "command -v flock"],
@@ -2482,6 +2627,24 @@ def write_restore_transaction(
         f"safety_parent={bash_path(safety_parent)}\n",
         encoding="utf-8",
     )
+
+
+def prepare_interrupted_deploy_recovery(fixture: dict[str, object]) -> Path:
+    deploy_dir = Path(fixture["deploy_dir"])
+    backup_dir = Path(fixture["backups_dir"]) / f"20260719T010203Z-{TARGET_TAG}.test"
+    backup_dir.mkdir()
+    (deploy_dir / "current-version").write_text(TARGET_TAG + "\n", encoding="utf-8")
+    (deploy_dir / "transaction").write_text(
+        "version=1\n"
+        "operation=deploy\n"
+        "phase=runtime\n"
+        f"target_tag={TARGET_TAG}\n"
+        f"previous_tag={PREVIOUS_TAG}\n"
+        "original_previous_tag=none\n"
+        f"backup_dir={bash_path(backup_dir)}\n",
+        encoding="utf-8",
+    )
+    return deploy_dir
 
 
 def test_recovery_reconciles_restore_before_data_swap(tmp_path):
@@ -2678,6 +2841,72 @@ def test_recovery_restores_previous_images_and_version_after_interrupted_deploy(
     assert (deploy_dir / "previous-version").read_text().strip() == older_tag
     assert not backup_dir.exists()
     assert not (deploy_dir / "transaction").exists()
+
+
+@pytest.mark.parametrize(
+    ("health_overrides", "expected_operation", "expected_error"),
+    [
+        (
+            {
+                "FAKE_LOCAL_HEALTH_BODY": (
+                    f'{{"status":"healthy","version":"{TARGET_TAG}"}}'
+                )
+            },
+            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:8000/health",
+            "version check failed: http://127.0.0.1:8000/health",
+        ),
+        (
+            {"FAKE_LOCAL_VERSION_BODY": f'{{"version":"{TARGET_TAG}"}}'},
+            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:3000/version.json",
+            "version check failed: http://127.0.0.1:3000/version.json",
+        ),
+        (
+            {
+                "FAKE_BACKEND_IMAGE": (
+                    f"{ENTERPRISE_ACR}/zhiku/zhiku-backend:{TARGET_TAG}"
+                )
+            },
+            "docker|" + PREVIOUS_TAG + "|ps --format {{.Image}} backend",
+            "backend image mismatch",
+        ),
+        (
+            {"FAKE_PUBLIC_VERSION_BODY": f'{{"version":"{TARGET_TAG}"}}'},
+            "curl|" + PREVIOUS_TAG + "|https://public.example.test/version.json",
+            "version check failed: https://public.example.test/version.json",
+        ),
+        (
+            {"FAKE_LOCAL_HEALTH_BODY": "{not-json"},
+            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:8000/health",
+            "version check failed: http://127.0.0.1:8000/health",
+        ),
+        (
+            {"FAKE_LOCAL_HEALTH_BODY": '{"status":"healthy"}'},
+            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:8000/health",
+            "version check failed: http://127.0.0.1:8000/health",
+        ),
+    ],
+    ids=[
+        "wrong-health-sha",
+        "wrong-frontend-json-sha",
+        "wrong-runtime-image",
+        "wrong-public-version-sha",
+        "malformed-json",
+        "missing-version",
+    ],
+)
+def test_deploy_recovery_retains_marker_until_exact_sha_is_attested(
+    tmp_path, health_overrides, expected_operation, expected_error
+):
+    fixture = restore_fixture(tmp_path)
+    deploy_dir = prepare_interrupted_deploy_recovery(fixture)
+
+    result = run_recover(fixture, **health_overrides)
+
+    assert result.returncode != 0
+    assert (deploy_dir / "transaction").exists()
+    assert "automatic reconciliation failed" in result.stderr
+    assert expected_operation in restore_operations(fixture)
+    assert expected_error in result.stderr
 
 
 def test_recovery_deploy_cleans_only_known_partial_backup_after_hard_interrupt(

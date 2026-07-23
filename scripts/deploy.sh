@@ -17,6 +17,7 @@ readonly TARGET_TAG="$1"
 readonly DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly PRODUCTION_PREFLIGHT="$SCRIPT_DIR/production-preflight.sh"
+readonly RUNTIME_ATTESTATION="$SCRIPT_DIR/runtime-attestation.sh"
 readonly COMPOSE_FILE="$DEPLOY_ROOT/compose.production.yml"
 readonly DEPLOY_DIR="$DEPLOY_ROOT/deploy"
 readonly DEPLOY_ENV="$DEPLOY_DIR/.env.deploy"
@@ -45,7 +46,7 @@ for command_name in docker curl tar flock mktemp du df awk python3; do
   }
 done
 
-for required_file in "$PRODUCTION_PREFLIGHT" "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV"; do
+for required_file in "$PRODUCTION_PREFLIGHT" "$RUNTIME_ATTESTATION" "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV"; do
   [[ -f "$required_file" ]] || {
     echo "missing required deployment file: $required_file" >&2
     exit 4
@@ -74,7 +75,16 @@ if [[ -e "$TRANSACTION_FILE" ]]; then
   exit 5
 fi
 
-if [[ "$INITIAL_HAS_CURRENT_TAG" == true && "$TARGET_TAG" == "$INITIAL_CURRENT_TAG" && "$ALLOW_REDEPLOY" == false ]]; then
+if [[ "$ALLOW_REDEPLOY" == true ]]; then
+  if [[ "$INITIAL_HAS_CURRENT_TAG" != true ]]; then
+    echo "--allow-redeploy requires an existing current SHA" >&2
+    exit 2
+  fi
+  if [[ "$TARGET_TAG" != "$INITIAL_CURRENT_TAG" ]]; then
+    echo "--allow-redeploy requires the target SHA to be current" >&2
+    exit 2
+  fi
+elif [[ "$INITIAL_HAS_CURRENT_TAG" == true && "$TARGET_TAG" == "$INITIAL_CURRENT_TAG" ]]; then
   echo "target SHA is already current; use --allow-redeploy only for an intentional redeploy" >&2
   exit 2
 fi
@@ -106,7 +116,16 @@ else
   HAS_PREVIOUS=false
 fi
 
-if [[ "$HAS_PREVIOUS" == true && "$TARGET_TAG" == "$PREVIOUS_TAG" && "$ALLOW_REDEPLOY" == false ]]; then
+if [[ "$ALLOW_REDEPLOY" == true ]]; then
+  if [[ "$HAS_PREVIOUS" != true ]]; then
+    echo "--allow-redeploy requires an existing current SHA" >&2
+    exit 2
+  fi
+  if [[ "$TARGET_TAG" != "$PREVIOUS_TAG" ]]; then
+    echo "--allow-redeploy requires the target SHA to remain current while acquiring the deployment lock" >&2
+    exit 2
+  fi
+elif [[ "$HAS_PREVIOUS" == true && "$TARGET_TAG" == "$PREVIOUS_TAG" ]]; then
   echo "target SHA is already current; use --allow-redeploy only for an intentional redeploy" >&2
   exit 2
 fi
@@ -134,121 +153,8 @@ compose() {
     "$@"
 }
 
-wait_http() {
-  local url="$1"
-  local attempts="${2:-$HTTP_ATTEMPTS}"
-  local delay_seconds="${3:-$HTTP_DELAY_SECONDS}"
-  local expected_body="${4:-}"
-  local attempt response status body compact_body
-  local -a curl_options=(
-    --fail
-    --silent
-    --show-error
-    --max-time 5
-    --write-out $'\n%{http_code}'
-  )
-
-  if [[ "$url" == https://* ]]; then
-    curl_options+=(--proto '=https' --max-redirs 0)
-  fi
-
-  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
-    if response="$(curl "${curl_options[@]}" "$url")"; then
-      status="${response##*$'\n'}"
-      body="${response%$'\n'*}"
-      if [[ "$status" == 200 ]]; then
-        if [[ -z "$expected_body" ]]; then
-          return 0
-        fi
-        compact_body="$(printf '%s' "$body" | tr -d '[:space:]')"
-        if [[ "$compact_body" == "$expected_body" ]]; then
-          return 0
-        fi
-      fi
-    fi
-    if (( attempt < attempts )); then
-      sleep "$delay_seconds"
-    fi
-  done
-
-  echo "health check failed: $url" >&2
-  return 1
-}
-
-wait_version_json() {
-  local url="$1"
-  local expected_sha="$2"
-  local require_healthy="${3:-false}"
-  local attempts="${4:-$HTTP_ATTEMPTS}"
-  local delay_seconds="${5:-$HTTP_DELAY_SECONDS}"
-  local attempt response status body
-  local -a curl_options=(
-    --fail
-    --silent
-    --show-error
-    --max-time 5
-    --write-out $'\n%{http_code}'
-  )
-
-  if [[ "$url" == https://* ]]; then
-    curl_options+=(--proto '=https' --max-redirs 0)
-  fi
-
-  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
-    if response="$(curl "${curl_options[@]}" "$url")"; then
-      status="${response##*$'\n'}"
-      body="${response%$'\n'*}"
-      if [[ "$status" == 200 ]] &&
-        printf '%s' "$body" | python3 -c '
-import json
-import sys
-
-try:
-    payload = json.load(sys.stdin)
-except (json.JSONDecodeError, UnicodeDecodeError):
-    raise SystemExit(1)
-if not isinstance(payload, dict) or payload.get("version") != sys.argv[1]:
-    raise SystemExit(1)
-if sys.argv[2] == "true" and payload.get("status") != "healthy":
-    raise SystemExit(1)
-' "$expected_sha" "$require_healthy" 2>/dev/null; then
-        return 0
-      fi
-    fi
-    if (( attempt < attempts )); then
-      sleep "$delay_seconds"
-    fi
-  done
-
-  echo "version check failed: $url (expected SHA $expected_sha)" >&2
-  return 1
-}
-
-verify_service_image() {
-  local service="$1"
-  local expected_sha="$2"
-  local expected_image actual_image
-
-  expected_image="${ACR_REGISTRY}/${ACR_NAMESPACE}/zhiku-${service}:${expected_sha}"
-  actual_image="$(compose ps --format '{{.Image}}' "$service")" || actual_image=""
-  if [[ "$actual_image" != "$expected_image" ]]; then
-    echo "$service image mismatch: expected $expected_image, got ${actual_image:-<empty>}" >&2
-    return 1
-  fi
-}
-
-verify_runtime_version() {
-  local expected_sha="$1"
-
-  # Prove the immutable image identities first, then local responses, then the
-  # public reverse-proxy responses so no version state is committed on drift.
-  verify_service_image backend "$expected_sha" || return 1
-  verify_service_image frontend "$expected_sha" || return 1
-  wait_version_json "http://127.0.0.1:8000/health" "$expected_sha" true || return 1
-  wait_version_json "http://127.0.0.1:3000/version.json" "$expected_sha" || return 1
-  wait_version_json "${PUBLIC_BASE_URL%/}/health" "$expected_sha" true || return 1
-  wait_version_json "${PUBLIC_BASE_URL%/}/version.json" "$expected_sha"
-}
+# shellcheck source=runtime-attestation.sh
+source "$RUNTIME_ATTESTATION"
 
 atomic_write() {
   local value="$1"

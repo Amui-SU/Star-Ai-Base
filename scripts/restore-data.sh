@@ -10,6 +10,7 @@ fi
 readonly DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly PRODUCTION_PREFLIGHT="$SCRIPT_DIR/production-preflight.sh"
+readonly RUNTIME_ATTESTATION="$SCRIPT_DIR/runtime-attestation.sh"
 readonly ARCHIVE_INSPECTOR="$SCRIPT_DIR/inspect-restore-archive.py"
 readonly COMPOSE_FILE="$DEPLOY_ROOT/compose.production.yml"
 readonly DEPLOY_DIR="$DEPLOY_ROOT/deploy"
@@ -47,7 +48,7 @@ done
   exit 3
 }
 
-for required_file in "$PRODUCTION_PREFLIGHT" "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV" "$CURRENT_FILE"; do
+for required_file in "$PRODUCTION_PREFLIGHT" "$RUNTIME_ATTESTATION" "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV" "$CURRENT_FILE"; do
   [[ -f "$required_file" ]] || {
     echo "missing required restore file: $required_file" >&2
     exit 4
@@ -160,39 +161,9 @@ compose() {
     "$@"
 }
 
-wait_http() {
-  local url="$1"
-  local expected_body='{"status":"healthy"}'
-  local attempt response status body compact_body
-  local -a curl_options=(
-    --fail
-    --silent
-    --show-error
-    --max-time 5
-    --write-out $'\n%{http_code}'
-  )
-
-  if [[ "$url" == https://* ]]; then
-    curl_options+=(--proto '=https' --max-redirs 0)
-  fi
-
-  for ((attempt = 1; attempt <= HTTP_ATTEMPTS; attempt += 1)); do
-    if response="$(curl "${curl_options[@]}" "$url")"; then
-      status="${response##*$'\n'}"
-      body="${response%$'\n'*}"
-      compact_body="$(printf '%s' "$body" | tr -d '[:space:]')"
-      if [[ "$status" == 200 && "$compact_body" == "$expected_body" ]]; then
-        return 0
-      fi
-    fi
-    if (( attempt < HTTP_ATTEMPTS )); then
-      sleep "$HTTP_DELAY_SECONDS"
-    fi
-  done
-
-  echo "health check failed: $url" >&2
-  return 1
-}
+ATTESTATION_PYTHON_BIN="$PYTHON_BIN"
+# shellcheck source=runtime-attestation.sh
+source "$RUNTIME_ATTESTATION"
 
 STAGED_DATA=""
 SAFETY_PARENT=""
@@ -462,8 +433,8 @@ recover_data_and_backend() {
   IMAGE_TAG="$CURRENT_TAG"
   export IMAGE_TAG
   compose up -d --pull never backend || return 1
-  wait_http "http://127.0.0.1:8000/health" || return 1
-  wait_http "${PUBLIC_BASE_URL%/}/health"
+  wait_version_json "http://127.0.0.1:8000/health" "$CURRENT_TAG" true || return 1
+  wait_version_json "${PUBLIC_BASE_URL%/}/health" "$CURRENT_TAG" true
 }
 
 print_manual_recovery_instructions() {
@@ -526,8 +497,8 @@ write_restore_marker new_active
 IMAGE_TAG="$CURRENT_TAG"
 export IMAGE_TAG
 compose up -d --pull never backend
-wait_http "http://127.0.0.1:8000/health"
-wait_http "${PUBLIC_BASE_URL%/}/health"
+wait_version_json "http://127.0.0.1:8000/health" "$CURRENT_TAG" true
+wait_version_json "${PUBLIC_BASE_URL%/}/health" "$CURRENT_TAG" true
 
 MUTATION_STARTED=false
 RESTORE_SUCCEEDED=true

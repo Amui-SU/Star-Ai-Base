@@ -59,6 +59,7 @@ scripts/deploy.sh
 scripts/restore-data.sh
 scripts/recover-interrupted.sh
 scripts/production-preflight.sh
+scripts/runtime-attestation.sh
 scripts/inspect-restore-archive.py
 ```
 
@@ -69,7 +70,7 @@ cd /opt/zhiku-cloud
 cp deploy/.env.deploy.example deploy/.env.deploy
 cp deploy/.env.production.example deploy/.env.production
 chmod 600 deploy/.env.deploy deploy/.env.production
-chmod 0640 scripts/production-preflight.sh
+chmod 0640 scripts/production-preflight.sh scripts/runtime-attestation.sh
 chmod 0750 scripts/deploy.sh scripts/restore-data.sh scripts/recover-interrupted.sh
 chmod 0750 scripts/inspect-restore-archive.py
 ```
@@ -94,7 +95,7 @@ chmod 0750 scripts/inspect-restore-archive.py
 )
 ```
 
-以后如果部署基础设施有变更，需要再次同步 `compose.production.yml`、`scripts/deploy.sh`、`scripts/restore-data.sh`、`scripts/recover-interrupted.sh`、`scripts/production-preflight.sh`、`scripts/inspect-restore-archive.py`、`deploy/nginx/zhiku-cloud.conf.example`、`deploy/.env.deploy.example` 和 `deploy/.env.production.example` 的结构变化。同步示例文件时不要覆盖服务器上的 `.env.deploy`、`.env.production` 或实际证书路径。
+以后如果部署基础设施有变更，需要再次同步 `compose.production.yml`、`scripts/deploy.sh`、`scripts/restore-data.sh`、`scripts/recover-interrupted.sh`、`scripts/production-preflight.sh`、`scripts/runtime-attestation.sh`、`scripts/inspect-restore-archive.py`、`deploy/nginx/zhiku-cloud.conf.example`、`deploy/.env.deploy.example` 和 `deploy/.env.production.example` 的结构变化。同步示例文件时不要覆盖服务器上的 `.env.deploy`、`.env.production` 或实际证书路径。
 
 ## 合并 Nginx 配置
 
