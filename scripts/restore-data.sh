@@ -20,7 +20,6 @@ readonly CURRENT_FILE="$DEPLOY_DIR/current-version"
 readonly TRANSACTION_FILE="$DEPLOY_DIR/transaction"
 readonly DATA_DIR="$DEPLOY_ROOT/data"
 readonly BACKUPS_DIR="$DEPLOY_ROOT/backups"
-readonly PYTHON_BIN="${ZHIKU_RESTORE_PYTHON:-python3}"
 readonly HTTP_ATTEMPTS="${ZHIKU_RESTORE_HTTP_ATTEMPTS:-30}"
 readonly HTTP_DELAY_SECONDS="${ZHIKU_RESTORE_HTTP_DELAY_SECONDS:-2}"
 readonly MAX_ARCHIVE_MEMBERS="${ZHIKU_RESTORE_MAX_MEMBERS:-100000}"
@@ -37,7 +36,7 @@ if [[ ! "$HTTP_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] ||
   exit 2
 fi
 
-for command_name in docker curl flock mktemp realpath cp mv chown chmod find grep tr sleep df awk rm rmdir "$PYTHON_BIN"; do
+for command_name in docker curl flock mktemp realpath cp mv chown chmod find grep tr sleep df awk rm rmdir python3; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "missing required command: $command_name" >&2
     exit 3
@@ -125,7 +124,7 @@ IMAGE_TAG="$CURRENT_TAG"
 export IMAGE_TAG
 
 if ! UNCOMPRESSED_BYTES="$(
-  "$PYTHON_BIN" "$ARCHIVE_INSPECTOR" \
+  command python3 "$ARCHIVE_INSPECTOR" \
     "$BACKUP_REAL" "$MAX_ARCHIVE_MEMBERS" "$MAX_ARCHIVE_BYTES"
 )"; then
   echo "backup inspection failed" >&2
@@ -161,7 +160,6 @@ compose() {
     "$@"
 }
 
-ATTESTATION_PYTHON_BIN="$PYTHON_BIN"
 # shellcheck source=runtime-attestation.sh
 source "$RUNTIME_ATTESTATION"
 
@@ -229,7 +227,7 @@ fi
 readonly STAGED_DATA
 chmod 0700 "$STAGED_DATA"
 
-if ! "$PYTHON_BIN" - "$BACKUP_REAL" "$STAGED_DATA" "$MAX_ARCHIVE_MEMBERS" "$MAX_ARCHIVE_BYTES" <<'PY'
+if ! command python3 - "$BACKUP_REAL" "$STAGED_DATA" "$MAX_ARCHIVE_MEMBERS" "$MAX_ARCHIVE_BYTES" <<'PY'
 import pathlib
 import shutil
 import sqlite3

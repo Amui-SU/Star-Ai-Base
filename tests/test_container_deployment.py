@@ -1372,6 +1372,23 @@ def test_deploy_script_rejects_invalid_version_endpoint_proof(tmp_path, url, mod
     )
 
 
+def test_deploy_script_ignores_external_attestation_parser_override(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    health_url = "http://127.0.0.1:8000/health"
+
+    result = run_deploy(
+        fixture,
+        ATTESTATION_PYTHON_BIN="true",
+        FAKE_ENDPOINT_FAILURE_URL=health_url,
+        FAKE_ENDPOINT_FAILURE_MODE="invalid_json",
+    )
+
+    assert result.returncode != 0
+    assert f"version check failed: {health_url}" in result.stderr
+    assert not (deploy_dir / "current-version").exists()
+
+
 def test_deploy_script_preserves_transaction_when_rollback_version_proof_fails(
     tmp_path,
 ):
@@ -2517,6 +2534,16 @@ def test_restore_script_success_swaps_data_and_keeps_unique_safety_copy(tmp_path
     assert f"curl|{TARGET_TAG}|https://public.example.test/health" in operations
 
 
+def test_restore_script_ignores_external_python_override(tmp_path):
+    fixture = restore_fixture(tmp_path)
+
+    result = run_restore(fixture, ZHIKU_RESTORE_PYTHON="true")
+
+    assert result.returncode == 0, result.stderr
+    data_dir = Path(fixture["data_dir"])
+    assert sqlite_restore_marker(data_dir / "bilibili_rag.db") == "new"
+
+
 @pytest.mark.parametrize(
     "health_body",
     [
@@ -2907,6 +2934,22 @@ def test_deploy_recovery_retains_marker_until_exact_sha_is_attested(
     assert "automatic reconciliation failed" in result.stderr
     assert expected_operation in restore_operations(fixture)
     assert expected_error in result.stderr
+
+
+def test_deploy_recovery_ignores_external_attestation_parser_override(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    deploy_dir = prepare_interrupted_deploy_recovery(fixture)
+    wrong_health = f'{{"status":"healthy","version":"{TARGET_TAG}"}}'
+
+    result = run_recover(
+        fixture,
+        ATTESTATION_PYTHON_BIN="true",
+        FAKE_LOCAL_HEALTH_BODY=wrong_health,
+    )
+
+    assert result.returncode != 0
+    assert (deploy_dir / "transaction").exists()
+    assert "version check failed: http://127.0.0.1:8000/health" in result.stderr
 
 
 def test_recovery_deploy_cleans_only_known_partial_backup_after_hard_interrupt(

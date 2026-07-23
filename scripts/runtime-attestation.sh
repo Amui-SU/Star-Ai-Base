@@ -39,7 +39,6 @@ wait_version_json() {
   local require_healthy="${3:-false}"
   local attempts="${4:-$HTTP_ATTEMPTS}"
   local delay_seconds="${5:-$HTTP_DELAY_SECONDS}"
-  local python_bin="${ATTESTATION_PYTHON_BIN:-python3}"
   local attempt response status body
   local -a curl_options=(
     --fail
@@ -58,7 +57,7 @@ wait_version_json() {
       status="${response##*$'\n'}"
       body="${response%$'\n'*}"
       if [[ "$status" == 200 ]] &&
-        printf '%s' "$body" | "$python_bin" -c '
+        printf '%s' "$body" | command python3 -c '
 import json
 import sys
 
