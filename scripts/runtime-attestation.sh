@@ -57,7 +57,7 @@ wait_version_json() {
       status="${response##*$'\n'}"
       body="${response%$'\n'*}"
       if [[ "$status" == 200 ]] &&
-        printf '%s' "$body" | command python3 -c '
+        printf '%s' "$body" | command python3 -I -c '
 import json
 import sys
 

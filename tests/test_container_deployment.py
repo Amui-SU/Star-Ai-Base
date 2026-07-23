@@ -636,6 +636,23 @@ def write_fake_tool(bin_dir: Path, name: str, content: str) -> None:
     path.chmod(0o755)
 
 
+def malicious_json_pythonpath(tmp_path: Path) -> str:
+    module_dir = tmp_path / "malicious-pythonpath"
+    module_dir.mkdir()
+    (module_dir / "json.py").write_text(
+        """import sys
+
+class JSONDecodeError(ValueError):
+    pass
+
+def load(stream):
+    return {"status": "healthy", "version": sys.argv[1]}
+""",
+        encoding="utf-8",
+    )
+    return str(module_dir)
+
+
 def bash_executable() -> str:
     git_bash = Path("C:/Program Files/Git/bin/bash.exe")
     if git_bash.exists():
@@ -1380,6 +1397,23 @@ def test_deploy_script_ignores_external_attestation_parser_override(tmp_path):
     result = run_deploy(
         fixture,
         ATTESTATION_PYTHON_BIN="true",
+        FAKE_ENDPOINT_FAILURE_URL=health_url,
+        FAKE_ENDPOINT_FAILURE_MODE="invalid_json",
+    )
+
+    assert result.returncode != 0
+    assert f"version check failed: {health_url}" in result.stderr
+    assert not (deploy_dir / "current-version").exists()
+
+
+def test_deploy_script_ignores_pythonpath_json_shadow(tmp_path):
+    fixture = deployment_fixture(tmp_path)
+    deploy_dir = Path(fixture["deploy_dir"])
+    health_url = "http://127.0.0.1:8000/health"
+
+    result = run_deploy(
+        fixture,
+        PYTHONPATH=malicious_json_pythonpath(tmp_path),
         FAKE_ENDPOINT_FAILURE_URL=health_url,
         FAKE_ENDPOINT_FAILURE_MODE="invalid_json",
     )
@@ -2544,6 +2578,20 @@ def test_restore_script_ignores_external_python_override(tmp_path):
     assert sqlite_restore_marker(data_dir / "bilibili_rag.db") == "new"
 
 
+def test_restore_script_ignores_pythonpath_json_shadow(tmp_path):
+    fixture = restore_fixture(tmp_path)
+
+    result = run_restore(
+        fixture,
+        PYTHONPATH=malicious_json_pythonpath(tmp_path),
+        FAKE_HEALTH_BODY="{not-json",
+    )
+
+    assert result.returncode != 0
+    assert "version check failed" in result.stderr
+    assert (Path(fixture["deploy_dir"]) / "transaction").exists()
+
+
 @pytest.mark.parametrize(
     "health_body",
     [
@@ -2944,6 +2992,22 @@ def test_deploy_recovery_ignores_external_attestation_parser_override(tmp_path):
     result = run_recover(
         fixture,
         ATTESTATION_PYTHON_BIN="true",
+        FAKE_LOCAL_HEALTH_BODY=wrong_health,
+    )
+
+    assert result.returncode != 0
+    assert (deploy_dir / "transaction").exists()
+    assert "version check failed: http://127.0.0.1:8000/health" in result.stderr
+
+
+def test_deploy_recovery_ignores_pythonpath_json_shadow(tmp_path):
+    fixture = restore_fixture(tmp_path)
+    deploy_dir = prepare_interrupted_deploy_recovery(fixture)
+    wrong_health = f'{{"status":"healthy","version":"{TARGET_TAG}"}}'
+
+    result = run_recover(
+        fixture,
+        PYTHONPATH=malicious_json_pythonpath(tmp_path),
         FAKE_LOCAL_HEALTH_BODY=wrong_health,
     )
 

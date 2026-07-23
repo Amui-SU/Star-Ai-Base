@@ -124,7 +124,7 @@ IMAGE_TAG="$CURRENT_TAG"
 export IMAGE_TAG
 
 if ! UNCOMPRESSED_BYTES="$(
-  command python3 "$ARCHIVE_INSPECTOR" \
+  command python3 -I "$ARCHIVE_INSPECTOR" \
     "$BACKUP_REAL" "$MAX_ARCHIVE_MEMBERS" "$MAX_ARCHIVE_BYTES"
 )"; then
   echo "backup inspection failed" >&2
@@ -227,7 +227,7 @@ fi
 readonly STAGED_DATA
 chmod 0700 "$STAGED_DATA"
 
-if ! command python3 - "$BACKUP_REAL" "$STAGED_DATA" "$MAX_ARCHIVE_MEMBERS" "$MAX_ARCHIVE_BYTES" <<'PY'
+if ! command python3 -I - "$BACKUP_REAL" "$STAGED_DATA" "$MAX_ARCHIVE_MEMBERS" "$MAX_ARCHIVE_BYTES" <<'PY'
 import pathlib
 import shutil
 import sqlite3
