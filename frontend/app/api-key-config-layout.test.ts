@@ -27,6 +27,27 @@ describe("official model API configuration layout", () => {
   });
 });
 
+describe("personal API account layout", () => {
+  it("uses a two-column account grid and two-column basic field grid", () => {
+    expect(stylesheet).toMatch(
+      /\.api-accounts-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.api-account-basic-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
+    );
+  });
+
+  it("collapses account and basic grids to one column on mobile", () => {
+    expect(stylesheet).toMatch(
+      /@media \(max-width:\s*640px\)\s*\{[\s\S]*?\.api-accounts-grid,[\s\S]*?\.api-account-basic-grid\s*\{[^}]*grid-template-columns:\s*1fr;/s,
+    );
+  });
+
+  it("removes the legacy split list and form layout", () => {
+    expect(stylesheet).not.toMatch(/\.api-accounts-layout\s*\{/);
+  });
+});
+
 describe("model source switch", () => {
   it("renders two stable equal-width segments", () => {
     expect(stylesheet).toMatch(

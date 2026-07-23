@@ -1,9 +1,8 @@
 .modal-card.api-accounts-panel {
-  display: grid;
-  width: min(1120px, calc(100vw - 24px));
-  max-height: min(92dvh, 860px);
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 18px;
+  width: min(880px, calc(100vw - 32px));
+  height: min(760px, calc(100dvh - 32px));
+  max-height: min(760px, calc(100dvh - 32px));
+  padding: 0;
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(32, 32, 30, 0.98);
   box-shadow: 0 26px 70px rgba(0, 0, 0, 0.58);
@@ -16,33 +15,34 @@ html.light .modal-card.api-accounts-panel {
   box-shadow: 0 24px 60px rgba(55, 38, 22, 0.18);
 }
 
-.api-accounts-layout {
+.api-accounts-list-view {
   display: grid;
+  height: 100%;
+  min-width: 0;
   min-height: 0;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 16px;
+  grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
 }
 
-.api-accounts-list,
-.api-account-form {
-  min-width: 0;
-  min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+.api-accounts-list-view > .provider-config-head {
+  padding: 20px 20px 16px;
+}
+
+.api-accounts-list-view > .api-account-message {
+  margin: 0 20px 12px;
 }
 
 .api-accounts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow-y: auto;
-  padding: 14px;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 0 20px 20px;
+  overflow: hidden;
 }
 
-.api-accounts-toolbar,
-.api-account-form-head {
+.api-accounts-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -52,28 +52,52 @@ html.light .modal-card.api-accounts-panel {
   font-weight: 650;
 }
 
+.api-accounts-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-accounts-toolbar-actions .btn {
+  min-height: 36px;
+  padding: 7px 13px;
+}
+
+.api-accounts-scroll {
+  min-width: 0;
+  min-height: 0;
+  padding-right: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.api-accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .api-accounts-empty {
   display: grid;
-  min-height: 160px;
+  min-height: 180px;
   place-items: center;
   border: 1px dashed var(--border);
-  border-radius: 14px;
+  border-radius: 8px;
   color: var(--muted);
   font-size: 13px;
 }
 
 .api-account-row {
+  position: relative;
   display: grid;
-  gap: 10px;
+  min-width: 0;
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px 10px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 12px;
-  background: rgba(0, 0, 0, 0.08);
-}
-
-.api-account-row.active {
-  border-color: rgba(217, 119, 87, 0.45);
-  background: rgba(217, 119, 87, 0.09);
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .api-account-main {
@@ -98,18 +122,21 @@ html.light .modal-card.api-accounts-panel {
 .api-account-meta {
   display: block;
   margin-top: 3px;
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-size: 11px;
-  overflow-wrap: anywhere;
 }
 
 .api-account-badges,
-.api-account-actions,
 .api-account-switches {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.api-account-badges {
+  grid-column: 1 / -1;
 }
 
 .api-account-badges span {
@@ -130,34 +157,75 @@ html.light .modal-card.api-accounts-panel {
   color: var(--muted);
 }
 
+.api-account-menu-wrap {
+  position: relative;
+}
+
+.api-account-more {
+  width: 32px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.api-account-menu {
+  position: absolute;
+  top: 34px;
+  right: 0;
+  z-index: 4;
+  display: grid;
+  width: 112px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--panel-bg);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.3);
+}
+
+.api-account-menu button {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 9px;
+  background: transparent;
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+}
+
+.api-account-menu button:hover:not(:disabled) {
+  background: var(--paper-2);
+}
+
+.api-account-menu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.api-account-menu button.danger,
 .api-account-error,
 .api-account-message.error {
-  color: #ffb2a0;
+  color: var(--danger);
 }
 
-.api-account-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
-  padding: 16px;
-  scrollbar-gutter: stable;
+.api-account-error {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+  font-size: 11px;
 }
 
-.api-account-form-title {
-  color: var(--ink);
-  font-size: 16px;
-  font-weight: 760;
-}
-
-.api-account-form-subtitle {
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 12px;
+.api-account-basic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .api-account-field {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 7px;
   color: var(--ink-soft);
@@ -167,6 +235,11 @@ html.light .modal-card.api-accounts-panel {
 
 .api-account-field .input {
   width: 100%;
+  min-width: 0;
+}
+
+.api-account-switches {
+  margin-top: 16px;
 }
 
 .api-account-switches label {
@@ -180,7 +253,8 @@ html.light .modal-card.api-accounts-panel {
 
 .api-account-message {
   border: 1px solid rgba(47, 124, 120, 0.28);
-  border-radius: 12px;
+  border-radius: 8px;
+  margin-top: 14px;
   padding: 10px 12px;
   background: rgba(47, 124, 120, 0.12);
   color: #8bded1;
@@ -190,4 +264,38 @@ html.light .modal-card.api-accounts-panel {
 .api-account-message.error {
   border-color: rgba(255, 178, 160, 0.3);
   background: rgba(255, 112, 80, 0.1);
+}
+
+@media (max-width: 640px) {
+  .modal-card.api-accounts-panel {
+    width: min(100%, calc(100vw - 16px));
+    height: calc(100dvh - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .api-accounts-grid,
+  .api-account-basic-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .api-accounts-list-view > .provider-config-head {
+    padding: 16px 16px 12px;
+  }
+
+  .api-accounts-list-view > .api-account-message {
+    margin: 0 16px 10px;
+  }
+
+  .api-accounts-list {
+    padding: 0 16px 16px;
+  }
+
+  .api-accounts-toolbar {
+    align-items: flex-start;
+  }
+
+  .api-accounts-toolbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }

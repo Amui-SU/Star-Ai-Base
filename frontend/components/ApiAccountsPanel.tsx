@@ -13,7 +13,9 @@ interface Props {
 export default function ApiAccountsPanel({ open, onClose, onChanged }: Props) {
   const {
     accounts,
+    activeTab,
     busyId,
+    createAccount,
     editAccount,
     editing,
     error,
@@ -23,14 +25,19 @@ export default function ApiAccountsPanel({ open, onClose, onChanged }: Props) {
     loading,
     notice,
     removeAccount,
-    resetForm,
+    returnToList,
     saveAccount,
     saving,
     selectedPreset,
+    selectedTemplate,
     selectProvider,
     setDefault,
     setForm,
+    setActiveTab,
+    setThinkingError,
+    thinkingError,
     validateAccount,
+    view,
   } = useApiAccountsPanel({ open, onChanged });
 
   if (!open) return null;
@@ -39,6 +46,7 @@ export default function ApiAccountsPanel({ open, onClose, onChanged }: Props) {
     <ModalShell cardClassName="api-accounts-panel" onClose={onClose}>
       <ApiAccountsPanelView
         accounts={accounts}
+        activeTab={activeTab}
         busyId={busyId}
         editing={editing}
         error={error}
@@ -48,15 +56,21 @@ export default function ApiAccountsPanel({ open, onClose, onChanged }: Props) {
         notice={notice}
         saving={saving}
         selectedPreset={selectedPreset}
+        selectedTemplate={selectedTemplate}
+        thinkingError={thinkingError}
+        view={view}
         setForm={setForm}
         onClose={onClose}
+        onCreateAccount={createAccount}
         onEditAccount={editAccount}
         onRefreshAccounts={() => void loadAccounts()}
         onRemoveAccount={(account) => void removeAccount(account)}
-        onResetForm={resetForm}
+        onReturnToList={returnToList}
         onSaveAccount={() => void saveAccount()}
         onSelectProvider={selectProvider}
         onSetDefault={(account) => void setDefault(account)}
+        onTabChange={setActiveTab}
+        onThinkingErrorChange={setThinkingError}
         onValidateAccount={(account) => void validateAccount(account)}
       />
     </ModalShell>

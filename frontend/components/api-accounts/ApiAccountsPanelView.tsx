@@ -2,22 +2,18 @@ import type { Dispatch, SetStateAction } from "react";
 
 import type { ApiAccount } from "@/lib/api";
 import type { ProviderPreset } from "@/lib/providers";
-import ApiAccountForm from "@/components/api-accounts/ApiAccountForm";
-import ApiAccountsList from "@/components/api-accounts/ApiAccountsList";
-
-interface ApiAccountFormState {
-  accountId: number | null;
-  provider: string;
-  displayName: string;
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  enabled: boolean;
-  isDefault: boolean;
-}
+import type { ThinkingConfig } from "@/lib/thinkingConfig";
+import ApiAccountForm from "./ApiAccountForm";
+import ApiAccountsList from "./ApiAccountsList";
+import type {
+  ApiAccountEditorTab,
+  ApiAccountFormState,
+  ApiAccountsPanelView as PanelView,
+} from "./types";
 
 interface ApiAccountsPanelViewProps {
   accounts: ApiAccount[];
+  activeTab: ApiAccountEditorTab;
   busyId: number | null;
   editing: boolean;
   error: string;
@@ -27,20 +23,27 @@ interface ApiAccountsPanelViewProps {
   notice: string;
   saving: boolean;
   selectedPreset: ProviderPreset;
+  selectedTemplate: ThinkingConfig;
+  thinkingError: string;
+  view: PanelView;
   setForm: Dispatch<SetStateAction<ApiAccountFormState>>;
   onClose: () => void;
+  onCreateAccount: () => void;
   onEditAccount: (account: ApiAccount) => void;
   onRefreshAccounts: () => void;
   onRemoveAccount: (account: ApiAccount) => void;
-  onResetForm: () => void;
+  onReturnToList: () => void;
   onSaveAccount: () => void;
   onSelectProvider: (provider: string) => void;
   onSetDefault: (account: ApiAccount) => void;
+  onTabChange: (tab: ApiAccountEditorTab) => void;
+  onThinkingErrorChange: (error: string) => void;
   onValidateAccount: (account: ApiAccount) => void;
 }
 
 export default function ApiAccountsPanelView({
   accounts,
+  activeTab,
   busyId,
   editing,
   error,
@@ -50,25 +53,53 @@ export default function ApiAccountsPanelView({
   notice,
   saving,
   selectedPreset,
+  selectedTemplate,
+  thinkingError,
+  view,
   setForm,
   onClose,
+  onCreateAccount,
   onEditAccount,
   onRefreshAccounts,
   onRemoveAccount,
-  onResetForm,
+  onReturnToList,
   onSaveAccount,
   onSelectProvider,
   onSetDefault,
+  onTabChange,
+  onThinkingErrorChange,
   onValidateAccount,
 }: ApiAccountsPanelViewProps) {
+  if (view !== "list") {
+    return (
+      <ApiAccountForm
+        activeTab={activeTab}
+        editing={editing}
+        error={error}
+        form={form}
+        isSearchProvider={isSearchProvider}
+        saving={saving}
+        selectedPreset={selectedPreset}
+        selectedTemplate={selectedTemplate}
+        thinkingError={thinkingError}
+        setForm={setForm}
+        onBack={onReturnToList}
+        onClose={onClose}
+        onSave={onSaveAccount}
+        onSelectProvider={onSelectProvider}
+        onTabChange={onTabChange}
+        onThinkingErrorChange={onThinkingErrorChange}
+      />
+    );
+  }
+
   return (
-    <>
+    <div className="api-accounts-list-view">
       <div className="provider-config-head">
         <div className="provider-config-title-block">
           <div className="provider-config-title">AI 服务密钥</div>
           <div className="provider-config-subtitle">
-            每个用户独立保存第三方模型或搜索服务 Key，Key
-            只写入后端，不会在前端回显。
+            管理个人模型与搜索服务凭据，API Key 不会在前端回显。
           </div>
         </div>
         <button
@@ -81,33 +112,26 @@ export default function ApiAccountsPanelView({
         </button>
       </div>
 
-      <div className="api-accounts-layout">
-        <ApiAccountsList
-          accounts={accounts}
-          busyId={busyId}
-          formAccountId={form.accountId}
-          loading={loading}
-          onEdit={onEditAccount}
-          onRefresh={onRefreshAccounts}
-          onRemove={onRemoveAccount}
-          onSetDefault={onSetDefault}
-          onValidate={onValidateAccount}
-        />
-        <ApiAccountForm
-          editing={editing}
-          error={error}
-          form={form}
-          isSearchProvider={isSearchProvider}
-          notice={notice}
-          saving={saving}
-          selectedPreset={selectedPreset}
-          setForm={setForm}
-          onClose={onClose}
-          onResetForm={onResetForm}
-          onSave={onSaveAccount}
-          onSelectProvider={onSelectProvider}
-        />
-      </div>
-    </>
+      {notice || error ? (
+        <div
+          className={`api-account-message ${error ? "error" : ""}`}
+          role="status"
+        >
+          {error || notice}
+        </div>
+      ) : null}
+
+      <ApiAccountsList
+        accounts={accounts}
+        busyId={busyId}
+        loading={loading}
+        onCreate={onCreateAccount}
+        onEdit={onEditAccount}
+        onRefresh={onRefreshAccounts}
+        onRemove={onRemoveAccount}
+        onSetDefault={onSetDefault}
+        onValidate={onValidateAccount}
+      />
+    </div>
   );
 }

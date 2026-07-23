@@ -1,18 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   apiAccountApi,
+  chatApi,
   type ApiAccount,
   type ApiAccountCreateRequest,
   type ApiAccountUpdateRequest,
 } from "@/lib/api";
 import { PROVIDER_PRESETS, providerPresetMap } from "@/lib/providers";
+import {
+  formatThinkingConfig,
+  inferThinkingMode,
+  parseThinkingConfig,
+  type ThinkingConfig,
+} from "@/lib/thinkingConfig";
+import type {
+  ApiAccountEditorTab,
+  ApiAccountFormState,
+  ApiAccountsPanelView,
+  ThinkingTemplates,
+} from "./types";
 
 const firstProvider = PROVIDER_PRESETS[0];
 
-const emptyForm = () => ({
-  accountId: null as number | null,
+const emptyForm = (): ApiAccountFormState => ({
+  accountId: null,
   provider: firstProvider.provider,
   displayName: "",
   apiKey: "",
@@ -20,6 +33,8 @@ const emptyForm = () => ({
   model: firstProvider.model,
   enabled: true,
   isDefault: false,
+  thinkingMode: "off",
+  thinkingJson: "{}",
 });
 
 interface UseApiAccountsPanelParams {
@@ -32,47 +47,71 @@ export function useApiAccountsPanel({
   onChanged,
 }: UseApiAccountsPanelParams) {
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
+  const [view, setView] = useState<ApiAccountsPanelView>("list");
+  const [activeTab, setActiveTab] = useState<ApiAccountEditorTab>("basic");
+  const [templates, setTemplates] = useState<ThinkingTemplates>({});
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [thinkingError, setThinkingError] = useState("");
   const [notice, setNotice] = useState("");
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState<ApiAccountFormState>(emptyForm);
 
   const selectedPreset = useMemo(
     () => providerPresetMap.get(form.provider) ?? firstProvider,
     [form.provider],
   );
-  const editing = form.accountId !== null;
+  const selectedTemplate = templates[form.provider] ?? {};
+  const editing = view === "edit";
   const isSearchProvider = form.provider === "tavily";
 
-  const loadAccounts = async () => {
+  const loadAccounts = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const nextAccounts = await apiAccountApi.list();
-      setAccounts(nextAccounts);
+      setAccounts(await apiAccountApi.list());
     } catch (err) {
       setError(err instanceof Error ? err.message : "AI 服务密钥加载失败");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const loadTemplates = useCallback(async () => {
+    try {
+      const config = await chatApi.getModelConfig();
+      setTemplates(
+        Object.fromEntries(
+          config.providers.map((provider) => [
+            provider.provider,
+            provider.thinking_template ?? {},
+          ]),
+        ),
+      );
+    } catch {
+      setTemplates({});
+    }
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     void Promise.resolve().then(() => {
       if (cancelled) return;
+      setView("list");
+      setActiveTab("basic");
       setNotice("");
       setError("");
+      setThinkingError("");
       setForm(emptyForm());
       void loadAccounts();
+      void loadTemplates();
     });
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [loadAccounts, loadTemplates, open]);
 
   const selectProvider = (provider: string) => {
     const preset = providerPresetMap.get(provider) ?? firstProvider;
@@ -81,13 +120,27 @@ export function useApiAccountsPanel({
       provider: preset.provider,
       baseUrl: preset.baseUrl,
       model: preset.model,
-      displayName: prev.accountId ? prev.displayName : "",
+      displayName: "",
+      thinkingMode: "off",
     }));
+    setThinkingError("");
+    setActiveTab("basic");
+  };
+
+  const createAccount = () => {
+    setNotice("");
+    setError("");
+    setThinkingError("");
+    setForm(emptyForm());
+    setActiveTab("basic");
+    setView("create");
   };
 
   const editAccount = (account: ApiAccount) => {
+    const template = templates[account.provider] ?? {};
     setNotice("");
     setError("");
+    setThinkingError("");
     setForm({
       accountId: account.id,
       provider: account.provider,
@@ -97,19 +150,39 @@ export function useApiAccountsPanel({
       model: account.model,
       enabled: account.enabled,
       isDefault: account.is_default,
+      thinkingMode: inferThinkingMode(account.thinking_config, template),
+      thinkingJson: formatThinkingConfig(account.thinking_config),
     });
+    setActiveTab("basic");
+    setView("edit");
   };
 
-  const resetForm = () => {
-    setNotice("");
+  const returnToList = () => {
     setError("");
-    setForm(emptyForm());
+    setThinkingError("");
+    setActiveTab("basic");
+    setView("list");
   };
 
   const notifyChanged = async (message: string) => {
     await loadAccounts();
     onChanged?.();
     setNotice(message);
+  };
+
+  const getThinkingConfig = (): ThinkingConfig | null => {
+    if (form.thinkingMode === "off") return {};
+    if (form.thinkingMode === "standard") return selectedTemplate;
+    try {
+      return parseThinkingConfig(form.thinkingJson);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "思考配置 JSON 格式错误";
+      setThinkingError(message);
+      setError(message);
+      setActiveTab("request");
+      return null;
+    }
   };
 
   const saveAccount = async () => {
@@ -126,19 +199,25 @@ export function useApiAccountsPanel({
       setError("请填写模型或服务名称");
       return;
     }
+    const thinkingConfig = isSearchProvider ? {} : getThinkingConfig();
+    if (thinkingConfig === null) return;
+
     setSaving(true);
     setError("");
+    setThinkingError("");
     try {
       if (editing && form.accountId !== null) {
         const payload: ApiAccountUpdateRequest = {
           display_name: form.displayName.trim() || selectedPreset.label,
           base_url: form.baseUrl.trim(),
           model: form.model.trim(),
+          thinking_config: thinkingConfig,
           enabled: form.enabled,
           is_default: form.isDefault,
         };
         if (apiKey) payload.api_key = apiKey;
         await apiAccountApi.update(form.accountId, payload);
+        returnToList();
         await notifyChanged("AI 服务密钥已更新");
       } else {
         const payload: ApiAccountCreateRequest = {
@@ -147,12 +226,13 @@ export function useApiAccountsPanel({
           api_key: apiKey,
           base_url: form.baseUrl.trim(),
           model: form.model.trim(),
+          thinking_config: thinkingConfig,
           is_default: form.isDefault,
         };
         await apiAccountApi.create(payload);
+        returnToList();
         await notifyChanged("AI 服务密钥已添加");
       }
-      resetForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : "AI 服务密钥保存失败");
     } finally {
@@ -187,14 +267,12 @@ export function useApiAccountsPanel({
   };
 
   const removeAccount = async (account: ApiAccount) => {
-    const confirmed = window.confirm(`删除 ${account.display_name}？`);
-    if (!confirmed) return;
+    if (!window.confirm(`删除 ${account.display_name}？`)) return;
     setBusyId(account.id);
     setError("");
     try {
       await apiAccountApi.remove(account.id);
       await notifyChanged("AI 服务密钥已删除");
-      if (form.accountId === account.id) resetForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : "AI 服务密钥删除失败");
     } finally {
@@ -204,7 +282,9 @@ export function useApiAccountsPanel({
 
   return {
     accounts,
+    activeTab,
     busyId,
+    createAccount,
     editAccount,
     editing,
     error,
@@ -214,13 +294,18 @@ export function useApiAccountsPanel({
     loading,
     notice,
     removeAccount,
-    resetForm,
+    returnToList,
     saveAccount,
     saving,
     selectedPreset,
+    selectedTemplate,
     selectProvider,
+    setActiveTab,
     setDefault,
     setForm,
+    setThinkingError,
+    thinkingError,
     validateAccount,
+    view,
   };
 }
