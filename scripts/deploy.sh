@@ -2,15 +2,22 @@
 set -Eeuo pipefail
 umask 077
 
+ALLOW_REDEPLOY=false
+if [[ "${1:-}" == --allow-redeploy ]]; then
+  ALLOW_REDEPLOY=true
+  shift
+fi
 if (( $# != 1 )) || [[ ! "$1" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "usage: $0 <40-character-git-sha>" >&2
+  echo "usage: $0 [--allow-redeploy] <40-character-git-sha>" >&2
   exit 2
 fi
+readonly ALLOW_REDEPLOY
 readonly TARGET_TAG="$1"
 
 readonly DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly PRODUCTION_PREFLIGHT="$SCRIPT_DIR/production-preflight.sh"
+readonly RUNTIME_ATTESTATION="$SCRIPT_DIR/runtime-attestation.sh"
 readonly COMPOSE_FILE="$DEPLOY_ROOT/compose.production.yml"
 readonly DEPLOY_DIR="$DEPLOY_ROOT/deploy"
 readonly DEPLOY_ENV="$DEPLOY_DIR/.env.deploy"
@@ -32,14 +39,14 @@ if [[ ! "$HTTP_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] ||
   exit 2
 fi
 
-for command_name in docker curl tar flock mktemp du df awk; do
+for command_name in docker curl tar flock mktemp du df awk python3; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "missing required command: $command_name" >&2
     exit 3
   }
 done
 
-for required_file in "$PRODUCTION_PREFLIGHT" "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV"; do
+for required_file in "$PRODUCTION_PREFLIGHT" "$RUNTIME_ATTESTATION" "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV"; do
   [[ -f "$required_file" ]] || {
     echo "missing required deployment file: $required_file" >&2
     exit 4
@@ -51,6 +58,37 @@ source "$PRODUCTION_PREFLIGHT"
 production_preflight "$DEPLOY_ENV" "$APP_ENV"
 readonly ACR_REGISTRY ACR_NAMESPACE PUBLIC_BASE_URL
 
+INITIAL_CURRENT_TAG=""
+if [[ -f "$CURRENT_FILE" ]]; then
+  INITIAL_CURRENT_TAG="$(tr -d '[:space:]' < "$CURRENT_FILE")"
+fi
+if [[ "$INITIAL_CURRENT_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+  readonly INITIAL_HAS_CURRENT_TAG=true
+else
+  INITIAL_CURRENT_TAG=""
+  readonly INITIAL_HAS_CURRENT_TAG=false
+fi
+readonly INITIAL_CURRENT_TAG
+
+if [[ -e "$TRANSACTION_FILE" ]]; then
+  echo "an interrupted transaction exists; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
+  exit 5
+fi
+
+if [[ "$ALLOW_REDEPLOY" == true ]]; then
+  if [[ "$INITIAL_HAS_CURRENT_TAG" != true ]]; then
+    echo "--allow-redeploy requires an existing current SHA" >&2
+    exit 2
+  fi
+  if [[ "$TARGET_TAG" != "$INITIAL_CURRENT_TAG" ]]; then
+    echo "--allow-redeploy requires the target SHA to be current" >&2
+    exit 2
+  fi
+elif [[ "$INITIAL_HAS_CURRENT_TAG" == true && "$TARGET_TAG" == "$INITIAL_CURRENT_TAG" ]]; then
+  echo "target SHA is already current; use --allow-redeploy only for an intentional redeploy" >&2
+  exit 2
+fi
+
 mkdir -p "$DEPLOY_DIR" "$DATA_DIR" "$LOG_DIR" "$BACKUPS_DIR"
 exec 9>"$DEPLOY_DIR/deploy.lock"
 if ! flock -n 9; then
@@ -61,6 +99,37 @@ if [[ -e "$TRANSACTION_FILE" ]]; then
   echo "an interrupted transaction exists; run $DEPLOY_ROOT/scripts/recover-interrupted.sh" >&2
   exit 5
 fi
+
+ORIGINAL_CURRENT_EXISTS=false
+ORIGINAL_CURRENT_CONTENT=""
+if [[ -f "$CURRENT_FILE" ]]; then
+  ORIGINAL_CURRENT_EXISTS=true
+  ORIGINAL_CURRENT_CONTENT="$(cat "$CURRENT_FILE")"
+fi
+readonly ORIGINAL_CURRENT_EXISTS ORIGINAL_CURRENT_CONTENT
+
+PREVIOUS_TAG="$(printf '%s' "$ORIGINAL_CURRENT_CONTENT" | tr -d '[:space:]')"
+if [[ "$PREVIOUS_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+  HAS_PREVIOUS=true
+else
+  PREVIOUS_TAG=""
+  HAS_PREVIOUS=false
+fi
+
+if [[ "$ALLOW_REDEPLOY" == true ]]; then
+  if [[ "$HAS_PREVIOUS" != true ]]; then
+    echo "--allow-redeploy requires an existing current SHA" >&2
+    exit 2
+  fi
+  if [[ "$TARGET_TAG" != "$PREVIOUS_TAG" ]]; then
+    echo "--allow-redeploy requires the target SHA to remain current while acquiring the deployment lock" >&2
+    exit 2
+  fi
+elif [[ "$HAS_PREVIOUS" == true && "$TARGET_TAG" == "$PREVIOUS_TAG" ]]; then
+  echo "target SHA is already current; use --allow-redeploy only for an intentional redeploy" >&2
+  exit 2
+fi
+readonly PREVIOUS_TAG HAS_PREVIOUS
 
 if ! COMPOSE_VERSION="$(docker compose version --short 2>/dev/null)"; then
   echo "Docker Compose >= 2.30 is required" >&2
@@ -84,46 +153,8 @@ compose() {
     "$@"
 }
 
-wait_http() {
-  local url="$1"
-  local attempts="${2:-$HTTP_ATTEMPTS}"
-  local delay_seconds="${3:-$HTTP_DELAY_SECONDS}"
-  local expected_body="${4:-}"
-  local attempt response status body compact_body
-  local -a curl_options=(
-    --fail
-    --silent
-    --show-error
-    --max-time 5
-    --write-out $'\n%{http_code}'
-  )
-
-  if [[ "$url" == https://* ]]; then
-    curl_options+=(--proto '=https' --max-redirs 0)
-  fi
-
-  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
-    if response="$(curl "${curl_options[@]}" "$url")"; then
-      status="${response##*$'\n'}"
-      body="${response%$'\n'*}"
-      if [[ "$status" == 200 ]]; then
-        if [[ -z "$expected_body" ]]; then
-          return 0
-        fi
-        compact_body="$(printf '%s' "$body" | tr -d '[:space:]')"
-        if [[ "$compact_body" == "$expected_body" ]]; then
-          return 0
-        fi
-      fi
-    fi
-    if (( attempt < attempts )); then
-      sleep "$delay_seconds"
-    fi
-  done
-
-  echo "health check failed: $url" >&2
-  return 1
-}
+# shellcheck source=runtime-attestation.sh
+source "$RUNTIME_ATTESTATION"
 
 atomic_write() {
   local value="$1"
@@ -141,14 +172,6 @@ atomic_write() {
   fi
 }
 
-ORIGINAL_CURRENT_EXISTS=false
-ORIGINAL_CURRENT_CONTENT=""
-if [[ -f "$CURRENT_FILE" ]]; then
-  ORIGINAL_CURRENT_EXISTS=true
-  ORIGINAL_CURRENT_CONTENT="$(cat "$CURRENT_FILE")"
-fi
-readonly ORIGINAL_CURRENT_EXISTS ORIGINAL_CURRENT_CONTENT
-
 ORIGINAL_PREVIOUS_EXISTS=false
 ORIGINAL_PREVIOUS_CONTENT=""
 if [[ -f "$PREVIOUS_FILE" ]]; then
@@ -156,15 +179,6 @@ if [[ -f "$PREVIOUS_FILE" ]]; then
   ORIGINAL_PREVIOUS_CONTENT="$(cat "$PREVIOUS_FILE")"
 fi
 readonly ORIGINAL_PREVIOUS_EXISTS ORIGINAL_PREVIOUS_CONTENT
-
-PREVIOUS_TAG="$(printf '%s' "$ORIGINAL_CURRENT_CONTENT" | tr -d '[:space:]')"
-if [[ "$PREVIOUS_TAG" =~ ^[0-9a-f]{40}$ ]]; then
-  readonly HAS_PREVIOUS=true
-else
-  PREVIOUS_TAG=""
-  readonly HAS_PREVIOUS=false
-fi
-readonly PREVIOUS_TAG
 
 IMAGE_TAG="$TARGET_TAG"
 export IMAGE_TAG
@@ -190,11 +204,9 @@ rollback() {
   IMAGE_TAG="$PREVIOUS_TAG"
   export IMAGE_TAG
   compose up -d --pull never backend || return 1
-  wait_http "http://127.0.0.1:8000/health" "$HTTP_ATTEMPTS" "$HTTP_DELAY_SECONDS" '{"status":"healthy"}' || return 1
+  wait_version_json "http://127.0.0.1:8000/health" "$PREVIOUS_TAG" true || return 1
   compose up -d --pull never frontend || return 1
-  wait_http "http://127.0.0.1:3000/" || return 1
-  wait_http "${PUBLIC_BASE_URL%/}/" || return 1
-  wait_http "${PUBLIC_BASE_URL%/}/health" "$HTTP_ATTEMPTS" "$HTTP_DELAY_SECONDS" '{"status":"healthy"}' || return 1
+  verify_runtime_version "$PREVIOUS_TAG" || return 1
   restore_version_state || return 1
 }
 
@@ -387,15 +399,15 @@ IMAGE_TAG="$TARGET_TAG"
 export IMAGE_TAG
 BACKEND_STARTED=true
 compose up -d --pull never backend
-wait_http "http://127.0.0.1:8000/health" "$HTTP_ATTEMPTS" "$HTTP_DELAY_SECONDS" '{"status":"healthy"}'
+wait_version_json "http://127.0.0.1:8000/health" "$TARGET_TAG" true
 
 FRONTEND_STARTED=true
 compose up -d --pull never frontend
-wait_http "http://127.0.0.1:3000/"
-wait_http "${PUBLIC_BASE_URL%/}/"
-wait_http "${PUBLIC_BASE_URL%/}/health" "$HTTP_ATTEMPTS" "$HTTP_DELAY_SECONDS" '{"status":"healthy"}'
+verify_runtime_version "$TARGET_TAG"
 
-if [[ "$HAS_PREVIOUS" == true ]]; then
+if [[ "$ALLOW_REDEPLOY" == true && "$TARGET_TAG" == "$PREVIOUS_TAG" ]]; then
+  restore_file_snapshot "$ORIGINAL_PREVIOUS_EXISTS" "$ORIGINAL_PREVIOUS_CONTENT" "$PREVIOUS_FILE"
+elif [[ "$HAS_PREVIOUS" == true ]]; then
   atomic_write "$PREVIOUS_TAG" "$PREVIOUS_FILE"
 else
   rm -f "$PREVIOUS_FILE"

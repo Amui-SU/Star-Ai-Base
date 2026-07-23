@@ -3,6 +3,9 @@ set -Eeuo pipefail
 umask 077
 
 readonly DEPLOY_ROOT="${ZHIKU_DEPLOY_ROOT:-/opt/zhiku-cloud}"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly PRODUCTION_PREFLIGHT="$SCRIPT_DIR/production-preflight.sh"
+readonly RUNTIME_ATTESTATION="$SCRIPT_DIR/runtime-attestation.sh"
 readonly COMPOSE_FILE="$DEPLOY_ROOT/compose.production.yml"
 readonly DEPLOY_DIR="$DEPLOY_ROOT/deploy"
 readonly DEPLOY_ENV="$DEPLOY_DIR/.env.deploy"
@@ -14,13 +17,13 @@ readonly TRANSACTION_FILE="$DEPLOY_DIR/transaction"
 readonly HTTP_ATTEMPTS="${ZHIKU_RECOVER_HTTP_ATTEMPTS:-30}"
 readonly HTTP_DELAY_SECONDS="${ZHIKU_RECOVER_HTTP_DELAY_SECONDS:-2}"
 
-for command_name in docker curl flock mktemp mv rm rmdir grep tr sleep; do
+for command_name in docker curl flock mktemp mv rm rmdir grep tr sleep python3; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "missing required command: $command_name" >&2
     exit 3
   }
 done
-for required_file in "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV" "$TRANSACTION_FILE"; do
+for required_file in "$PRODUCTION_PREFLIGHT" "$RUNTIME_ATTESTATION" "$COMPOSE_FILE" "$DEPLOY_ENV" "$APP_ENV" "$TRANSACTION_FILE"; do
   [[ -f "$required_file" ]] || {
     echo "missing required recovery file: $required_file" >&2
     exit 4
@@ -101,16 +104,10 @@ case "${marker[operation]:-}" in
     ;;
 esac
 
-PUBLIC_BASE_URL=""
-while IFS= read -r line || [[ -n "$line" ]]; do
-  line="${line%$'\r'}"
-  [[ "$line" == PUBLIC_BASE_URL=* ]] && PUBLIC_BASE_URL="${line#*=}"
-done < "$DEPLOY_ENV"
-[[ "$PUBLIC_BASE_URL" =~ ^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?(/[^[:space:]?#]*)?$ ]] || {
-  echo "PUBLIC_BASE_URL must be a valid HTTPS URL" >&2
-  exit 6
-}
-readonly PUBLIC_BASE_URL
+# shellcheck source=production-preflight.sh
+source "$PRODUCTION_PREFLIGHT"
+production_preflight "$DEPLOY_ENV" "$APP_ENV"
+readonly ACR_REGISTRY ACR_NAMESPACE PUBLIC_BASE_URL
 
 compose() {
   docker compose \
@@ -121,24 +118,8 @@ compose() {
     "$@"
 }
 
-wait_http() {
-  local url="$1"
-  local expected_body="${2:-}"
-  local attempt response status body compact_body
-  for ((attempt = 1; attempt <= HTTP_ATTEMPTS; attempt += 1)); do
-    if response="$(curl --fail --silent --show-error --max-time 5 --max-redirs 0 --write-out $'\n%{http_code}' "$url")"; then
-      status="${response##*$'\n'}"
-      body="${response%$'\n'*}"
-      compact_body="$(printf '%s' "$body" | tr -d '[:space:]')"
-      if [[ "$status" == 200 && ( -z "$expected_body" || "$compact_body" == "$expected_body" ) ]]; then
-        return 0
-      fi
-    fi
-    (( attempt == HTTP_ATTEMPTS )) || sleep "$HTTP_DELAY_SECONDS"
-  done
-  echo "health check failed: $url" >&2
-  return 1
-}
+# shellcheck source=runtime-attestation.sh
+source "$RUNTIME_ATTESTATION"
 
 atomic_write() {
   local value="$1"
@@ -301,8 +282,8 @@ recover_restore() {
   [[ ! -e "$staged_data" ]] || manual_failure
 
   compose up -d --pull never backend || manual_failure
-  wait_http "http://127.0.0.1:8000/health" '{"status":"healthy"}' || manual_failure
-  wait_http "${PUBLIC_BASE_URL%/}/health" '{"status":"healthy"}' || manual_failure
+  wait_version_json "http://127.0.0.1:8000/health" "$current_tag" true || manual_failure
+  wait_version_json "${PUBLIC_BASE_URL%/}/health" "$current_tag" true || manual_failure
   if [[ -d "$safety_parent" && ! -L "$safety_parent" ]]; then
     rm -f -- "$safety_parent/current-version"
     rmdir -- "$safety_parent" 2>/dev/null || true
@@ -340,11 +321,10 @@ recover_deploy() {
     rm -f -- "$CURRENT_FILE"
   else
     compose up -d --pull never backend || manual_failure
-    wait_http "http://127.0.0.1:8000/health" '{"status":"healthy"}' || manual_failure
     compose up -d --pull never frontend || manual_failure
     wait_http "http://127.0.0.1:3000/" || manual_failure
     wait_http "${PUBLIC_BASE_URL%/}/" || manual_failure
-    wait_http "${PUBLIC_BASE_URL%/}/health" '{"status":"healthy"}' || manual_failure
+    verify_runtime_version "$previous_tag" || manual_failure
     atomic_write "$previous_tag" "$CURRENT_FILE" || manual_failure
   fi
 

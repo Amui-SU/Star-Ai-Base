@@ -130,7 +130,7 @@ async def root():
 @app.get("/health")
 async def health_check():
     """健康检查"""
-    return {"status": "healthy"}
+    return {"status": "healthy", "version": settings.app_version}
 
 
 if __name__ == "__main__":

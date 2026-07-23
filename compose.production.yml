@@ -13,6 +13,7 @@ services:
       DATABASE_URL: sqlite+aiosqlite:///./data/bilibili_rag.db
       CHROMA_PERSIST_DIRECTORY: ./data/chroma_db
       FORWARDED_ALLOW_IPS: "*"
+      APP_VERSION: "${IMAGE_TAG:?set IMAGE_TAG}"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:

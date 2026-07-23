@@ -35,7 +35,7 @@
 
 - `ACR_NAMESPACE`：私有命名空间名称
 
-为 `main` 启用分支保护，要求 `CI` 成功后才能合并。推送到 `main` 后，先观察 `CI`，再观察由它触发的 `Publish Images`。发布工作流只推送镜像，不自动 SSH，也不会直接修改 ECS。
+为 `main` 启用分支保护，要求 `CI` 成功后才能合并。推送到 `main` 后，先观察 `CI`，再观察由它触发的 `Publish Images`。**Publish Images does not deploy ECS**：工作流成功只表示它已发布并验证镜像；运维人员必须从其成功摘要复制完整精确 SHA，并在已批准的 ECS 主机上手工执行下文命令。绝不能因工作流成功就推断 ECS 已经变更。
 
 ## 首次初始化 ECS
 
@@ -59,6 +59,7 @@ scripts/deploy.sh
 scripts/restore-data.sh
 scripts/recover-interrupted.sh
 scripts/production-preflight.sh
+scripts/runtime-attestation.sh
 scripts/inspect-restore-archive.py
 ```
 
@@ -69,7 +70,7 @@ cd /opt/zhiku-cloud
 cp deploy/.env.deploy.example deploy/.env.deploy
 cp deploy/.env.production.example deploy/.env.production
 chmod 600 deploy/.env.deploy deploy/.env.production
-chmod 0640 scripts/production-preflight.sh
+chmod 0640 scripts/production-preflight.sh scripts/runtime-attestation.sh
 chmod 0750 scripts/deploy.sh scripts/restore-data.sh scripts/recover-interrupted.sh
 chmod 0750 scripts/inspect-restore-archive.py
 ```
@@ -81,14 +82,20 @@ chmod 0750 scripts/inspect-restore-archive.py
 在 ECS 上使用所选版本对应的账号首次登录 ACR，密码通过标准输入提供，避免出现在 shell 历史中。新个人版不支持 ECS 免密拉取，必须显式执行 `docker login`；以下示例使用新个人版的专用 RAM 用户和与 GitHub Actions 复用的 Registry 固定密码，所有占位值必须替换：
 
 ```bash
-ACR_REGISTRY='crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com'
-read -rsp 'ACR pull password: ' ACR_PULL_PASSWORD && echo
-printf '%s' "$ACR_PULL_PASSWORD" |
-  docker login "$ACR_REGISTRY" --username 'YOUR_PERSONAL_ACR_RAM_USERNAME' --password-stdin
-unset ACR_PULL_PASSWORD
+(
+  set +x
+  set -Eeuo pipefail
+  ACR_REGISTRY='crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com'
+  ACR_PULL_PASSWORD=""
+  trap 'unset ACR_PULL_PASSWORD' EXIT
+  read -rsp 'ACR pull password: ' ACR_PULL_PASSWORD
+  printf '\n'
+  printf '%s' "$ACR_PULL_PASSWORD" |
+    docker login "$ACR_REGISTRY" --username 'YOUR_PERSONAL_ACR_RAM_USERNAME' --password-stdin
+)
 ```
 
-以后如果部署基础设施有变更，需要再次同步 `compose.production.yml`、`scripts/deploy.sh`、`scripts/restore-data.sh`、`scripts/recover-interrupted.sh`、`scripts/production-preflight.sh`、`scripts/inspect-restore-archive.py`、`deploy/nginx/zhiku-cloud.conf.example`、`.env.deploy.example` 和 `deploy/.env.production.example` 的结构变化。同步示例文件时不要覆盖服务器上的 `.env.deploy`、`.env.production` 或实际证书路径。
+以后如果部署基础设施有变更，需要再次同步 `compose.production.yml`、`scripts/deploy.sh`、`scripts/restore-data.sh`、`scripts/recover-interrupted.sh`、`scripts/production-preflight.sh`、`scripts/runtime-attestation.sh`、`scripts/inspect-restore-archive.py`、`deploy/nginx/zhiku-cloud.conf.example`、`deploy/.env.deploy.example` 和 `deploy/.env.production.example` 的结构变化。同步示例文件时不要覆盖服务器上的 `.env.deploy`、`.env.production` 或实际证书路径。
 
 ## 合并 Nginx 配置
 
@@ -99,44 +106,191 @@ unset ACR_PULL_PASSWORD
 确认安全组只对公网开放 80、443 和必要的运维端口，不开放 3000、8000。验证并平滑重载：
 
 ```bash
-sudo nginx -t
-sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-## 发布精确 SHA
+## 首次部署
 
-从成功的 `Publish Images` 运行或 GitHub commit 页面取得完整 40 位小写 SHA，例如：
+首次部署只适用于空主机：没有任何 backend、frontend Compose 容器（包括已停止的容器），且没有 `deploy/current-version`。部署脚本用 Compose `ps --all` 执行这一准入检查；发现任一已有服务都会拒绝把主机当作首次部署。从成功的 `Publish Images` 摘要复制完整的小写 40 位 SHA；不要使用分支名、短 SHA、`latest` 或未解析占位符。开始前如有事务标记，必须先恢复：
 
 ```bash
 cd /opt/zhiku-cloud
-./scripts/deploy.sh 0123456789abcdef0123456789abcdef01234567
+test ! -e deploy/transaction || ./scripts/recover-interrupted.sh
+RELEASE_SHA=0123456789abcdef0123456789abcdef01234567 # 示例：请替换为成功工作流摘要中的完整 SHA
+[[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid release SHA" >&2; exit 1; }
+./scripts/deploy.sh "$RELEASE_SHA"
 ```
 
-脚本会拉取前后端同一 SHA、停止后端、备份 `data`、依次启动并执行本机及公网健康检查。所有目标和回滚镜像拉取完成后、停止后端之前，脚本重新检查磁盘，要求备份所在文件系统的可用空间至少为当前 `data` 大小加 2 GiB；可通过 `ZHIKU_DEPLOY_DISK_RESERVE_BYTES` 提高预留量。备份先写入唯一的 `.partial` 文件，只有 `tar` 成功后才原子改名；失败时只删除该已知临时文件和已确认为空的本次备份目录。常用检查命令：
+首次上线只调用这一条部署脚本，不用临时的 Compose 重建命令替代它。脚本会验证前后端两张镜像，并在记录成功前验证四个版本证明端点：本机 backend 的 `/health`、本机 frontend 的 `/version.json`，以及公网 HTTPS 的 `/health`、`/version.json`。镜像拉取和停机前会先执行 `.env.production` 生产预检；至少一种登录方式必须完整可用：SMTP 需要 `SMTP_HOST`、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM`，Google 需要 client ID、secret 和规范域名的 HTTPS callback。预检失败不会调用 Docker，也不会改变当前服务。
 
-镜像拉取和停机前会先执行 `.env.production` 生产预检。至少一种登录方式必须完整可用：SMTP 需要 `SMTP_HOST`、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM`，Google 需要 client ID、secret 和规范域名的 HTTPS callback。预检失败不会调用 Docker，也不会改变当前服务。
+所有目标和回滚镜像拉取完成后、停止后端之前，脚本重新检查磁盘，要求备份所在文件系统的可用空间至少为当前 `data` 大小加 2 GiB；可通过 `ZHIKU_DEPLOY_DISK_RESERVE_BYTES` 提高预留量。备份先写入唯一的 `.partial` 文件，只有 `tar` 成功后才原子改名；失败时只删除该已知临时文件和已确认为空的本次备份目录。
+
+## 正常升级精确 SHA
+
+从成功的 `Publish Images` 摘要复制完整精确 SHA，先读取当前记录再升级。`Publish Images` 成功并不部署 ECS；只能在批准的 ECS 上执行以下手工操作：
+
+```bash
+cd /opt/zhiku-cloud
+test ! -e deploy/transaction || ./scripts/recover-interrupted.sh
+CURRENT_SHA="$(tr -d '[:space:]' < deploy/current-version)"
+RELEASE_SHA=0123456789abcdef0123456789abcdef01234567 # 示例：请替换为成功工作流摘要中的完整 SHA
+[[ "$CURRENT_SHA" =~ ^[0-9a-f]{40}$ && "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid version record or release SHA" >&2; exit 1; }
+printf 'current=%s requested=%s\n' "$CURRENT_SHA" "$RELEASE_SHA"
+./scripts/deploy.sh "$RELEASE_SHA"
+```
+
+正常调用同一 SHA 会在拉取镜像和任何变更之前被拒绝，防止误把无变化当作升级。不要用 `docker compose up`、`pull`、`restart` 或手工重建来绕过这个准入检查。
+
+## 有意重复部署同一 SHA
+
+只有经过明确批准、确实要重新执行当前 SHA 的完整验证流程时，才使用下面的精确命令。目标直接从可信的 `deploy/current-version` 读取并验证，以证明 override 仍然指向当前版本：
+
+```bash
+cd /opt/zhiku-cloud
+test ! -e deploy/transaction || ./scripts/recover-interrupted.sh
+REDEPLOY_SHA="$(tr -d '[:space:]' < deploy/current-version)"
+[[ "$REDEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid current-version" >&2; exit 1; }
+./scripts/deploy.sh --allow-redeploy "$REDEPLOY_SHA"
+```
+
+`--allow-redeploy` 只削弱“目标等于当前 SHA”这一项准入拒绝；中断事务恢复、生产预检、磁盘检查、数据备份、镜像拉取、版本证明和失败回滚仍然全部强制执行。成功的同 SHA 重部署会保留原有 `deploy/previous-version` 回滚指针；如果重部署前没有该文件，也不会创建一个指向当前 SHA 的伪回滚记录。它不得用于不同 SHA，也不是 Compose 的快捷重建开关；发布不同 SHA 必须走“正常升级精确 SHA”。
+
+## 镜像回滚
+
+部署失败时脚本会尝试恢复旧镜像。人工回滚也必须是一次新的、可验证的发布转换：有事务先恢复，安全读取并验证 `deploy/previous-version`，再把那个精确 SHA 交给同一脚本。只有所有版本证明通过后，当前记录才会更新。
+
+```bash
+cd /opt/zhiku-cloud
+test ! -e deploy/transaction || ./scripts/recover-interrupted.sh
+ROLLBACK_SHA="$(tr -d '[:space:]' < deploy/previous-version)"
+[[ "$ROLLBACK_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid previous-version" >&2; exit 1; }
+./scripts/deploy.sh "$ROLLBACK_SHA"
+```
+
+绝不删除 `data`、`deploy/transaction` 或版本记录来强迫回滚“成功”。镜像回滚不会恢复数据；部署脚本为每次变更创建备份，但自动恢复只处理容器镜像和版本记录，避免在故障处理中悄悄覆盖用户数据。
+
+## 接管已有运行版本
+
+旧主机可能已有运行中的服务，却没有 `deploy/current-version`。此时不要调用 Compose（它会因所有镜像和环境表达式都要插值而需要 `IMAGE_TAG`），也不要猜测 SHA。整个接管流程必须在同一个严格子 shell 中执行：先进入生产目录，再在取得接管锁之前恢复中断事务；随后取得 `deploy/deploy.lock`，重新确认事务与版本记录仍不存在，再从 Docker 标签读取两个运行容器。这样生产目录不存在或无法进入时，会在恢复、Docker 查询以及任何 `deploy/` 写入前立即停止。每个查询必须只返回一个运行容器，且两张镜像都必须是相同的精确小写 40 位 tag。空值、多行、digest、非 SHA 或前后端不同都必须停止并人工核对。
+
+只有在锁内完成上述全部证明后，才原子写入记录。临时文件创建在 `deploy/` 的同一文件系统；完整写入后用硬链接为 `deploy/current-version` 原子创建新目录项。若非协作进程抢先创建目标，`ln` 会以 `EEXIST` 失败而不会覆盖已有内容，EXIT trap 随即清理临时文件。不要使用会覆盖目标的 `mv` 或可能跳过后仍返回成功的 `mv -n`。任何 `flock`、Docker 查询、`mktemp`、`printf`、`ln` 或清理失败都会使该块返回非零；不要为了满足插值而写入不相关的 SHA：
+
+```bash
+(
+  set -Eeuo pipefail
+  cd /opt/zhiku-cloud
+  if [[ -e deploy/transaction ]]; then
+    ./scripts/recover-interrupted.sh
+  fi
+  install -d -m 0750 deploy
+  exec 9>deploy/deploy.lock
+  flock -n 9 || { echo "another deployment is already in progress" >&2; exit 1; }
+  [[ ! -e deploy/transaction ]] || { echo "transaction appeared while acquiring lock" >&2; exit 1; }
+  [[ ! -e deploy/current-version ]] || { echo "current-version already exists; adoption refused" >&2; exit 1; }
+  BACKEND_IMAGE="$(docker ps --filter label=com.docker.compose.project=zhiku-cloud --filter label=com.docker.compose.service=backend --format '{{.Image}}')"
+  FRONTEND_IMAGE="$(docker ps --filter label=com.docker.compose.project=zhiku-cloud --filter label=com.docker.compose.service=frontend --format '{{.Image}}')"
+  [[ -n "$BACKEND_IMAGE" && "$BACKEND_IMAGE" != *$'\n'* && -n "$FRONTEND_IMAGE" && "$FRONTEND_IMAGE" != *$'\n'* ]] || { echo "expected exactly one running backend and frontend container" >&2; exit 1; }
+  BACKEND_SHA="${BACKEND_IMAGE##*:}"
+  FRONTEND_SHA="${FRONTEND_IMAGE##*:}"
+  [[ "$BACKEND_SHA" =~ ^[0-9a-f]{40}$ && "$FRONTEND_SHA" =~ ^[0-9a-f]{40}$ && "$BACKEND_SHA" == "$FRONTEND_SHA" ]] || { echo "cannot verify one matching legacy release" >&2; exit 1; }
+  BASELINE_TMP=""
+  trap '[[ -z "$BASELINE_TMP" ]] || rm -f -- "$BASELINE_TMP"' EXIT
+  BASELINE_TMP="$(mktemp deploy/current-version.tmp.XXXXXX)"
+  printf '%s\n' "$BACKEND_SHA" > "$BASELINE_TMP"
+  ln -- "$BASELINE_TMP" deploy/current-version
+  rm -f -- "$BASELINE_TMP"
+  BASELINE_TMP=""
+  trap - EXIT
+)
+```
+
+Compose 对 `ps`、`logs` 等命令也会解析所有必需的 image/environment 表达式，所以 `IMAGE_TAG` 必须从可信的当前记录导出，不能猜测：
 
 ```bash
 cd /opt/zhiku-cloud
 export IMAGE_TAG="$(tr -d '[:space:]' < deploy/current-version)"
+[[ "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid current-version" >&2; exit 1; }
 docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml ps
-docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml logs --tail=200 backend frontend
-curl --fail http://127.0.0.1:8000/health
-curl --fail http://127.0.0.1:3000/
-curl --fail https://zhiku-cloud.cn/health
 ```
 
-## 镜像回滚
+## 部署后的本机与公网证明
 
-部署失败时脚本会尝试恢复旧镜像。需要人工回滚时，读取 `previous-version` 并再次调用同一个脚本：
+`post-deploy` 证明清单如下；部署脚本强制执行版本和事务检查，手工命令在严格子 shell 内独立证明配置、镜像与四个 JSON 端点，最后补充 Compose 状态与日志诊断，不能替代脚本。该块只通过 `source` 加载受版本控制的可信仓库脚本 `scripts/production-preflight.sh`，随后调用与发布和恢复相同的 `production_preflight`；不会把任一环境文件交给 `source` 或 `eval`。共享预检把 `deploy/.env.deploy` 和 `deploy/.env.production` 作为数据读取，不输出环境文件、秘密或响应正文，并统一强制未加引号的部署元数据格式、受支持的北京 ACR 公网地址、安全命名空间、HTTPS 公网 URL 及生产应用配置。缺失、重复、未知、引号、命令语法或其他格式错误都会停止证明：
+
+- `deploy/current-version` 与请求 SHA 完全相同；两者都必须是完整小写 40 位 SHA。
+- 如果 `deploy/previous-version` 存在，它也是可打印、可验证的完整 SHA；记录不存在只在没有完成过不同 SHA 的版本转换时符合预期（包括首次部署或同 SHA 重部署），不同 SHA 的升级或回滚后缺失必须调查。
+- Compose `ps` 显示运行中 backend、frontend 的状态与完整镜像引用，分别等于预期的 backend、frontend SHA 镜像引用，并检查两者日志。
+- 本机 backend 的 `http://127.0.0.1:8000/health` 与本机 frontend 的 `http://127.0.0.1:3000/version.json` 都报告该 SHA。
+- 公网 HTTPS 的 `/health` 和 `/version.json` 也报告同一 SHA。
+- 成功后 `deploy/transaction` 不存在，Compose 状态健康。
 
 ```bash
-cd /opt/zhiku-cloud
-ROLLBACK_SHA=$(tr -d '[:space:]' < deploy/previous-version)
-./scripts/deploy.sh "$ROLLBACK_SHA"
-```
+(
+  set +x
+  set -Eeuo pipefail
+  cd /opt/zhiku-cloud
+  source scripts/production-preflight.sh
+  production_preflight deploy/.env.deploy deploy/.env.production
 
-镜像回滚不会恢复数据。部署脚本为每次变更创建备份，但自动恢复只处理容器镜像和版本记录，避免在故障处理中悄悄覆盖用户数据。
+  REQUESTED_SHA=0123456789abcdef0123456789abcdef01234567 # 替换为本次请求 SHA
+  [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid requested SHA" >&2; exit 1; }
+  export IMAGE_TAG="$(tr -d '[:space:]' < deploy/current-version)"
+  [[ "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid current-version" >&2; exit 1; }
+  [[ "$IMAGE_TAG" == "$REQUESTED_SHA" ]] || { echo "current-version does not match requested SHA" >&2; exit 1; }
+  printf 'current=%s requested=%s\n' "$IMAGE_TAG" "$REQUESTED_SHA"
+  if [[ -f deploy/previous-version ]]; then
+    PREVIOUS_SHA="$(tr -d '[:space:]' < deploy/previous-version)"
+    [[ "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid previous-version" >&2; exit 1; }
+    printf 'previous=%s\n' "$PREVIOUS_SHA"
+  else
+    echo 'previous=<absent>; 尚未完成不同 SHA 的版本转换时符合预期'
+  fi
+  [[ ! -e deploy/transaction ]] || { echo "deployment transaction still exists" >&2; exit 1; }
+
+  compose() {
+    docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml "$@"
+  }
+  # 比较完整镜像引用，不能只比较 tag。
+  BACKEND_IMAGE="$(compose ps --format '{{.Image}}' backend)"
+  FRONTEND_IMAGE="$(compose ps --format '{{.Image}}' frontend)"
+  EXPECTED_BACKEND_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/zhiku-backend:${REQUESTED_SHA}"
+  EXPECTED_FRONTEND_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/zhiku-frontend:${REQUESTED_SHA}"
+  [[ "$BACKEND_IMAGE" == "$EXPECTED_BACKEND_IMAGE" ]] || { echo "backend image mismatch" >&2; exit 1; }
+  [[ "$FRONTEND_IMAGE" == "$EXPECTED_FRONTEND_IMAGE" ]] || { echo "frontend image mismatch" >&2; exit 1; }
+
+  verify_json_version() {
+    local url="$1"
+    local require_health="$2"
+    local require_https="$3"
+    if [[ "$require_https" == true ]]; then
+      curl --silent --show-error --fail --max-time 5 --proto '=https' --proto-redir '=https' --location --max-redirs 0 "$url"
+    else
+      curl --silent --show-error --fail --max-time 5 "$url"
+    fi | EXPECTED_SHA="$REQUESTED_SHA" REQUIRE_HEALTH="$require_health" python3 -c '
+import json
+import os
+import sys
+
+try:
+    payload = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit("invalid JSON response")
+expected_sha = os.environ["EXPECTED_SHA"]
+if payload.get("version") != expected_sha:
+    raise SystemExit("version mismatch")
+if os.environ["REQUIRE_HEALTH"] == "true" and payload.get("status") != "healthy":
+    raise SystemExit("health status mismatch")
+'
+  }
+
+  verify_json_version "http://127.0.0.1:8000/health" true false
+  verify_json_version "http://127.0.0.1:3000/version.json" false false
+  verify_json_version "${PUBLIC_BASE_URL%/}/health" true true
+  verify_json_version "${PUBLIC_BASE_URL%/}/version.json" false true
+  docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml ps
+  docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml logs --tail=200 backend frontend
+)
+```
 
 ## 恢复数据备份
 
@@ -176,5 +330,17 @@ test ! -e deploy/transaction || ./scripts/recover-interrupted.sh
 - **公网健康检查失败**：先确认 `127.0.0.1:3000` 和 `127.0.0.1:8000` 正常，再执行 `nginx -t`，检查 Nginx 日志、DNS A 记录、HTTPS 证书和安全组。
 - **笔记或视频接口 404**：确认 Nginx 后端正则包含 `/video-notes`，并已重载最新配置。
 - **上传失败或超时**：核对 `client_max_body_size`、代理读写超时、磁盘空间以及 `data`/`logs` 写权限。
+
+## 页面未变化诊断表
+
+必须按表格从上到下逐层检查：先证明服务器和公网身份，再考虑浏览器缓存；不要在服务器/公网 SHA 未被证明前就从浏览器缓存开始排查。
+
+| 证据                                                                            | 含义                                                | 下一步                                                                                                                                    |
+| ------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy/current-version` 与请求 SHA 不同                                        | 目标发布没有被记录为成功                            | 停止假设页面已升级；检查部署输出和 `deploy/transaction`，必要时先运行恢复脚本。                                                           |
+| 容器 tag 与记录不同，出现 `backend image mismatch` 或 `frontend image mismatch` | 后端或前端运行镜像并非记录的发布版本                | 保留现场并检查 `deploy/transaction`；恢复中断事务后，按已批准的“有意重复部署同一 SHA”流程使用 `--allow-redeploy`，不能手工 Compose 重建。 |
+| 本机 `/version.json` 与容器 SHA 不同                                            | 容器、应用构建产物或本机转发身份不一致              | 检查 Compose 状态、容器镜像引用和本机 `/health`、`/version.json`；先修复本机证明。                                                        |
+| 本机匹配但公网 `/health` 或 `/version.json` 不同                                | 宿主机服务正确，但 Nginx、DNS、上游或缓存没有指向它 | 检查 `nginx -t`、Nginx 日志、站点上游、DNS 和 CDN/代理缓存。                                                                              |
+| 本机与公网都匹配，但浏览器仍显示旧页面                                          | 服务端身份已证明，才可能是客户端陈旧资源            | 再执行强制刷新，并检查 service worker 和浏览器缓存。                                                                                      |
 
 生产发布不依赖 `latest`，不使用自动 SSH 部署，也不把任何生产秘密同步回开发机或 Git 仓库。

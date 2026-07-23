@@ -85,6 +85,8 @@ jobs:
           context: .
           file: Dockerfile.backend
           push: true
+          build-args: |
+            APP_VERSION=${{ env.IMAGE_TAG }}
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend:${{ env.IMAGE_TAG }}
           annotations: |
@@ -101,6 +103,7 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=https://zhiku-cloud.cn
+            APP_VERSION=${{ env.IMAGE_TAG }}
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend:${{ env.IMAGE_TAG }}
           annotations: |
@@ -160,3 +163,27 @@ jobs:
           docker buildx imagetools create \
             --tag "${FRONTEND_IMAGE}:latest" \
             "${FRONTEND_IMAGE}:${IMAGE_TAG}"
+
+      - name: Write manual deployment summary
+        if: success()
+        shell: bash
+        env:
+          BACKEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-backend
+          FRONTEND_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/zhiku-frontend
+        run: |
+          set -euo pipefail
+          {
+            printf '%s\n' '## Container images published'
+            printf '\n'
+            printf '%s%s%s\n' '- Tested SHA: `' "${IMAGE_TAG}" '`'
+            printf '%s%s%s\n' '- Backend: `' "${BACKEND_IMAGE}:${IMAGE_TAG}" '`'
+            printf '%s%s%s\n' '- Frontend: `' "${FRONTEND_IMAGE}:${IMAGE_TAG}" '`'
+            printf '\n'
+            printf '%s\n' 'ECS has not been deployed. Run this manually on the approved host:'
+            printf '%s\n' '```bash'
+            printf '%s\n' 'cd /opt/zhiku-cloud'
+            printf '%s\n' "./scripts/deploy.sh ${IMAGE_TAG}"
+            printf '%s\n' '```'
+            printf '\n'
+            printf '%s\n' "After deployment, verify local and public /health and /version.json report ${IMAGE_TAG}."
+          } >> "$GITHUB_STEP_SUMMARY"
