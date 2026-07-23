@@ -57,6 +57,40 @@ describe("ApiCredentialEditorShell", () => {
     expect(props.onTabChange).toHaveBeenCalledWith("request");
   });
 
+  it("links stable tab controls to the active request panel", () => {
+    renderShell({ activeTab: "request" });
+
+    const basicTab = screen.getByRole("tab", { name: "基础配置" });
+    const requestTab = screen.getByRole("tab", { name: "请求配置" });
+    const activePanel = screen.getByRole("tabpanel");
+
+    expect(basicTab).toHaveAttribute("aria-selected", "false");
+    expect(basicTab).toHaveAttribute(
+      "aria-controls",
+      "api-credential-basic-panel",
+    );
+    expect(requestTab).toHaveAttribute("aria-selected", "true");
+    expect(requestTab).toHaveAttribute(
+      "aria-controls",
+      "api-credential-request-panel",
+    );
+    expect(activePanel).toHaveAttribute("id", "api-credential-request-panel");
+    expect(activePanel).toHaveAttribute(
+      "aria-labelledby",
+      "api-credential-request-tab",
+    );
+    expect(screen.getByText("请求内容")).toBeInTheDocument();
+    expect(screen.queryByText("基础内容")).not.toBeInTheDocument();
+  });
+
+  it("omits the back action when no handler is provided", () => {
+    renderShell();
+
+    expect(
+      screen.queryByRole("button", { name: "返回密钥列表" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("supports an optional back action and hides the request tab", async () => {
     const user = userEvent.setup();
     const onBack = vi.fn();
