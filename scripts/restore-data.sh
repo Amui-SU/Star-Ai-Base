@@ -431,8 +431,8 @@ recover_data_and_backend() {
   IMAGE_TAG="$CURRENT_TAG"
   export IMAGE_TAG
   compose up -d --pull never backend || return 1
-  wait_version_json "http://127.0.0.1:8000/health" "$CURRENT_TAG" true || return 1
-  wait_version_json "${PUBLIC_BASE_URL%/}/health" "$CURRENT_TAG" true
+  wait_version_json "http://127.0.0.1:8000/health/version" "$CURRENT_TAG" true || return 1
+  wait_version_json "${PUBLIC_BASE_URL%/}/health/version" "$CURRENT_TAG" true
 }
 
 print_manual_recovery_instructions() {
@@ -495,8 +495,8 @@ write_restore_marker new_active
 IMAGE_TAG="$CURRENT_TAG"
 export IMAGE_TAG
 compose up -d --pull never backend
-wait_version_json "http://127.0.0.1:8000/health" "$CURRENT_TAG" true
-wait_version_json "${PUBLIC_BASE_URL%/}/health" "$CURRENT_TAG" true
+wait_version_json "http://127.0.0.1:8000/health/version" "$CURRENT_TAG" true
+wait_version_json "${PUBLIC_BASE_URL%/}/health/version" "$CURRENT_TAG" true
 
 MUTATION_STARTED=false
 RESTORE_SUCCEEDED=true

@@ -130,6 +130,12 @@ async def root():
 @app.get("/health")
 async def health_check():
     """健康检查"""
+    return {"status": "healthy"}
+
+
+@app.get("/health/version")
+async def health_version_check():
+    """带构建版本的健康检查。"""
     return {"status": "healthy", "version": settings.app_version}
 
 

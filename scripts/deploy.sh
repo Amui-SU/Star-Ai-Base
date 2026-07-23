@@ -204,7 +204,7 @@ rollback() {
   IMAGE_TAG="$PREVIOUS_TAG"
   export IMAGE_TAG
   compose up -d --pull never backend || return 1
-  wait_version_json "http://127.0.0.1:8000/health" "$PREVIOUS_TAG" true || return 1
+  wait_version_json "http://127.0.0.1:8000/health/version" "$PREVIOUS_TAG" true || return 1
   compose up -d --pull never frontend || return 1
   verify_runtime_version "$PREVIOUS_TAG" || return 1
   restore_version_state || return 1
@@ -399,7 +399,7 @@ IMAGE_TAG="$TARGET_TAG"
 export IMAGE_TAG
 BACKEND_STARTED=true
 compose up -d --pull never backend
-wait_version_json "http://127.0.0.1:8000/health" "$TARGET_TAG" true
+wait_version_json "http://127.0.0.1:8000/health/version" "$TARGET_TAG" true
 
 FRONTEND_STARTED=true
 compose up -d --pull never frontend

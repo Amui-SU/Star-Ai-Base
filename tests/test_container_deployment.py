@@ -574,8 +574,10 @@ def test_deploy_restore_and_recovery_share_exact_runtime_attestation():
         )
     restore = read("scripts/restore-data.sh")
     assert 'source "$RUNTIME_ATTESTATION"' in restore
-    assert restore.count('wait_version_json "http://127.0.0.1:8000/health"') == 2
-    assert restore.count('wait_version_json "${PUBLIC_BASE_URL%/}/health"') == 2
+    assert (
+        restore.count('wait_version_json "http://127.0.0.1:8000/health/version"') == 2
+    )
+    assert restore.count('wait_version_json "${PUBLIC_BASE_URL%/}/health/version"') == 2
 
 
 def test_deploy_script_backs_up_before_rollout_and_tracks_successful_versions():
@@ -611,9 +613,9 @@ def test_deploy_script_has_image_only_rollback_and_runtime_attestation():
     for required in [
         'verify_service_image backend "$expected_sha"',
         'verify_service_image frontend "$expected_sha"',
-        'wait_version_json "http://127.0.0.1:8000/health" "$expected_sha" true',
+        'wait_version_json "http://127.0.0.1:8000/health/version" "$expected_sha" true',
         'wait_version_json "http://127.0.0.1:3000/version.json" "$expected_sha"',
-        'wait_version_json "${PUBLIC_BASE_URL%/}/health" "$expected_sha" true',
+        'wait_version_json "${PUBLIC_BASE_URL%/}/health/version" "$expected_sha" true',
         'wait_version_json "${PUBLIC_BASE_URL%/}/version.json" "$expected_sha"',
     ]:
         assert required in attestation
@@ -628,6 +630,22 @@ def test_deploy_script_has_image_only_rollback_and_runtime_attestation():
     assert rollback.index('verify_runtime_version "$PREVIOUS_TAG"') < rollback.index(
         "restore_version_state"
     )
+
+
+def test_production_runbook_documents_the_legacy_health_contract_migration():
+    content = read("docs/deployment/container-production.md")
+    section = content[
+        content.index("## 从旧健康契约迁移") : content.index("## 正常升级精确 SHA")
+    ]
+
+    legacy_deploy = './scripts/deploy.sh "$RELEASE_SHA"'
+    infrastructure_sync = "再同步该 SHA 对应的部署基础设施"
+    assert "5b5c19259cc6b1482cff507231902a879e763468" in section
+    assert "http://127.0.0.1:8000/health/version" in section
+    assert legacy_deploy in section
+    assert infrastructure_sync in section
+    assert section.index(legacy_deploy) < section.index(infrastructure_sync)
+    assert "不要先同步新版 `deploy.sh`" in section
 
 
 def write_fake_tool(bin_dir: Path, name: str, content: str) -> None:
@@ -781,7 +799,7 @@ if [[ -n "${FAKE_CURL_FAIL_TAG:-}" && "${IMAGE_TAG:-}" == "$FAKE_CURL_FAIL_TAG" 
 fi
 status=200
 body=ok
-if [[ "$url" == */health ]]; then
+if [[ "$url" == */health/version ]]; then
   printf -v body '{"status":"healthy","version":"%s"}' "${IMAGE_TAG:-unset}"
 fi
 if [[ "$url" == */version.json ]]; then
@@ -790,13 +808,13 @@ if [[ "$url" == */version.json ]]; then
 fi
 if [[ "${IMAGE_TAG:-}" == "$FAKE_TARGET_TAG" && "$url" == "${FAKE_VERSION_MISMATCH_URL:-}" ]]; then
   mismatch_version="${FAKE_MISMATCH_VERSION:-0000000000000000000000000000000000000000}"
-  if [[ "$url" == */health ]]; then
+  if [[ "$url" == */health/version ]]; then
     printf -v body '{"status":"healthy","version":"%s"}' "$mismatch_version"
   else
     printf -v body '{"version":"%s"}' "$mismatch_version"
   fi
 fi
-if [[ "$url" == https://public.example.test/health && "${IMAGE_TAG:-}" == "${FAKE_STRICT_TAG:-}" ]]; then
+if [[ "$url" == https://public.example.test/health/version && "${IMAGE_TAG:-}" == "${FAKE_STRICT_TAG:-}" ]]; then
   status="${FAKE_PUBLIC_HEALTH_STATUS:-$status}"
   body="${FAKE_PUBLIC_HEALTH_BODY:-$body}"
 fi
@@ -1256,9 +1274,9 @@ def test_deploy_script_health_failure_completes_public_rollback_checks(tmp_path)
     assert f"{TARGET_TAG}|up -d --pull never backend" in commands
     assert f"{PREVIOUS_TAG}|up -d --pull never backend" in commands
     curl_calls = log_lines(fixture["curl_log"])
-    assert f"{PREVIOUS_TAG}|http://127.0.0.1:8000/health" in curl_calls
+    assert f"{PREVIOUS_TAG}|http://127.0.0.1:8000/health/version" in curl_calls
     assert f"{PREVIOUS_TAG}|http://127.0.0.1:3000/version.json" in curl_calls
-    assert f"{PREVIOUS_TAG}|https://public.example.test/health" in curl_calls
+    assert f"{PREVIOUS_TAG}|https://public.example.test/health/version" in curl_calls
     assert f"{PREVIOUS_TAG}|https://public.example.test/version.json" in curl_calls
     assert f"{PREVIOUS_TAG}|ps --format {{{{.Image}}}} backend" in commands
     assert f"{PREVIOUS_TAG}|ps --format {{{{.Image}}}} frontend" in commands
@@ -1292,9 +1310,9 @@ def test_deploy_script_success_tracks_versions_and_complete_backup(tmp_path):
     frontend_image = commands.index(f"{TARGET_TAG}|ps --format {{{{.Image}}}} frontend")
     curl_calls = log_lines(fixture["curl_log"])
     expected_urls = [
-        "http://127.0.0.1:8000/health",
+        "http://127.0.0.1:8000/health/version",
         "http://127.0.0.1:3000/version.json",
-        "https://public.example.test/health",
+        "https://public.example.test/health/version",
         "https://public.example.test/version.json",
     ]
     for url in expected_urls:
@@ -1305,9 +1323,9 @@ def test_deploy_script_success_tracks_versions_and_complete_backup(tmp_path):
 @pytest.mark.parametrize(
     "url",
     [
-        "http://127.0.0.1:8000/health",
+        "http://127.0.0.1:8000/health/version",
         "http://127.0.0.1:3000/version.json",
-        "https://public.example.test/health",
+        "https://public.example.test/health/version",
         "https://public.example.test/version.json",
     ],
     ids=["local-backend", "local-frontend", "public-backend", "public-frontend"],
@@ -1363,8 +1381,8 @@ def test_deploy_script_running_image_mismatch_rolls_back(tmp_path, service):
         ("http://127.0.0.1:3000/version.json", "missing"),
         ("https://public.example.test/version.json", "non_200"),
         ("http://127.0.0.1:3000/version.json", "invalid_json"),
-        ("http://127.0.0.1:8000/health", "missing_version"),
-        ("https://public.example.test/health", "unhealthy"),
+        ("http://127.0.0.1:8000/health/version", "missing_version"),
+        ("https://public.example.test/health/version", "unhealthy"),
     ],
     ids=["missing", "non-200", "invalid-json", "missing-version", "unhealthy"],
 )
@@ -1392,7 +1410,7 @@ def test_deploy_script_rejects_invalid_version_endpoint_proof(tmp_path, url, mod
 def test_deploy_script_ignores_external_attestation_parser_override(tmp_path):
     fixture = deployment_fixture(tmp_path)
     deploy_dir = Path(fixture["deploy_dir"])
-    health_url = "http://127.0.0.1:8000/health"
+    health_url = "http://127.0.0.1:8000/health/version"
 
     result = run_deploy(
         fixture,
@@ -1409,7 +1427,7 @@ def test_deploy_script_ignores_external_attestation_parser_override(tmp_path):
 def test_deploy_script_ignores_pythonpath_json_shadow(tmp_path):
     fixture = deployment_fixture(tmp_path)
     deploy_dir = Path(fixture["deploy_dir"])
-    health_url = "http://127.0.0.1:8000/health"
+    health_url = "http://127.0.0.1:8000/health/version"
 
     result = run_deploy(
         fixture,
@@ -2094,7 +2112,7 @@ printf '%s' "$count" > "$FAKE_CURL_COUNTER"
 printf 'curl|%s|%s\n' "${IMAGE_TAG:-unset}" "$url" >> "$FAKE_OPERATION_LOG"
 if (( count <= ${FAKE_CURL_FAILURES:-0} )); then exit 22; fi
 case "$url" in
-  http://127.0.0.1:8000/health)
+  http://127.0.0.1:8000/health/version)
     if [[ -n "${FAKE_LOCAL_HEALTH_BODY+x}" ]]; then body="$FAKE_LOCAL_HEALTH_BODY"
     elif [[ -n "${FAKE_HEALTH_BODY+x}" ]]; then body="$FAKE_HEALTH_BODY"
     else printf -v body '{"status":"healthy","version":"%s"}' "${IMAGE_TAG:-unset}"
@@ -2105,7 +2123,7 @@ case "$url" in
     else printf -v body '{"version":"%s"}' "${IMAGE_TAG:-unset}"
     fi
     ;;
-  https://*/health)
+  https://*/health/version)
     if [[ -n "${FAKE_PUBLIC_HEALTH_BODY+x}" ]]; then body="$FAKE_PUBLIC_HEALTH_BODY"
     elif [[ -n "${FAKE_HEALTH_BODY+x}" ]]; then body="$FAKE_HEALTH_BODY"
     else printf -v body '{"status":"healthy","version":"%s"}' "${IMAGE_TAG:-unset}"
@@ -2507,7 +2525,7 @@ def test_restore_script_mutation_failures_restore_old_data_and_backend(
         operations.count(f"docker|{TARGET_TAG}|up -d --pull never backend")
         == expected_start_count
     )
-    assert f"curl|{TARGET_TAG}|https://public.example.test/health" in operations
+    assert f"curl|{TARGET_TAG}|https://public.example.test/health/version" in operations
 
 
 def test_restore_script_failed_safety_restore_leaves_backend_stopped(tmp_path):
@@ -2565,7 +2583,7 @@ def test_restore_script_success_swaps_data_and_keeps_unique_safety_copy(tmp_path
     assert sqlite_restore_marker(safety_dirs[0] / "data" / "bilibili_rag.db") == ("old")
     operations = restore_operations(fixture)
     assert operations.count(f"docker|{TARGET_TAG}|up -d --pull never backend") == 1
-    assert f"curl|{TARGET_TAG}|https://public.example.test/health" in operations
+    assert f"curl|{TARGET_TAG}|https://public.example.test/health/version" in operations
 
 
 def test_restore_script_ignores_external_python_override(tmp_path):
@@ -2927,8 +2945,8 @@ def test_recovery_restores_previous_images_and_version_after_interrupted_deploy(
                     f'{{"status":"healthy","version":"{TARGET_TAG}"}}'
                 )
             },
-            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:8000/health",
-            "version check failed: http://127.0.0.1:8000/health",
+            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:8000/health/version",
+            "version check failed: http://127.0.0.1:8000/health/version",
         ),
         (
             {"FAKE_LOCAL_VERSION_BODY": f'{{"version":"{TARGET_TAG}"}}'},
@@ -2951,13 +2969,13 @@ def test_recovery_restores_previous_images_and_version_after_interrupted_deploy(
         ),
         (
             {"FAKE_LOCAL_HEALTH_BODY": "{not-json"},
-            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:8000/health",
-            "version check failed: http://127.0.0.1:8000/health",
+            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:8000/health/version",
+            "version check failed: http://127.0.0.1:8000/health/version",
         ),
         (
             {"FAKE_LOCAL_HEALTH_BODY": '{"status":"healthy"}'},
-            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:8000/health",
-            "version check failed: http://127.0.0.1:8000/health",
+            "curl|" + PREVIOUS_TAG + "|http://127.0.0.1:8000/health/version",
+            "version check failed: http://127.0.0.1:8000/health/version",
         ),
     ],
     ids=[
@@ -2997,7 +3015,7 @@ def test_deploy_recovery_ignores_external_attestation_parser_override(tmp_path):
 
     assert result.returncode != 0
     assert (deploy_dir / "transaction").exists()
-    assert "version check failed: http://127.0.0.1:8000/health" in result.stderr
+    assert "version check failed: http://127.0.0.1:8000/health/version" in result.stderr
 
 
 def test_deploy_recovery_ignores_pythonpath_json_shadow(tmp_path):
@@ -3013,7 +3031,7 @@ def test_deploy_recovery_ignores_pythonpath_json_shadow(tmp_path):
 
     assert result.returncode != 0
     assert (deploy_dir / "transaction").exists()
-    assert "version check failed: http://127.0.0.1:8000/health" in result.stderr
+    assert "version check failed: http://127.0.0.1:8000/health/version" in result.stderr
 
 
 def test_recovery_deploy_cleans_only_known_partial_backup_after_hard_interrupt(
@@ -4016,7 +4034,9 @@ def test_production_guide_post_deploy_proof_compares_exact_runtime_identity():
     expected_frontend = 'EXPECTED_FRONTEND_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/zhiku-frontend:${REQUESTED_SHA}"'
     compare_backend = '[[ "$BACKEND_IMAGE" == "$EXPECTED_BACKEND_IMAGE" ]]'
     compare_frontend = '[[ "$FRONTEND_IMAGE" == "$EXPECTED_FRONTEND_IMAGE" ]]'
-    local_health_call = 'verify_json_version "http://127.0.0.1:8000/health" true false'
+    local_health_call = (
+        'verify_json_version "http://127.0.0.1:8000/health/version" true false'
+    )
     public_version_call = (
         'verify_json_version "${PUBLIC_BASE_URL%/}/version.json" false true'
     )
@@ -4045,9 +4065,10 @@ def test_production_guide_post_deploy_proof_compares_exact_runtime_identity():
         local_health_call,
         public_version_call,
         "json.load(sys.stdin)",
+        "python3 -I -c",
         'payload.get("version") != expected_sha',
         'payload.get("status") != "healthy"',
-        "${PUBLIC_BASE_URL%/}/health",
+        "${PUBLIC_BASE_URL%/}/health/version",
         "${PUBLIC_BASE_URL%/}/version.json",
         "--proto '=https'",
         "--proto-redir '=https'",
@@ -4071,7 +4092,7 @@ def test_production_guide_post_deploy_proof_compares_exact_runtime_identity():
     assert "没有完成过不同 SHA 的版本转换" in section
 
     for endpoint in [
-        "http://127.0.0.1:8000/health",
+        "http://127.0.0.1:8000/health/version",
         "http://127.0.0.1:3000/version.json",
     ]:
         assert endpoint in proof
@@ -4109,8 +4130,8 @@ def test_production_guide_unchanged_page_diagnostics_follow_evidence_layers():
 
     record = "`deploy/current-version` 与请求 SHA 不同"
     container = "`backend image mismatch` 或 `frontend image mismatch`"
-    local = "本机 `/version.json` 与容器 SHA 不同"
-    public = "本机匹配但公网 `/health` 或 `/version.json` 不同"
+    local = "本机 `/health/version` 或 `/version.json` 与容器 SHA 不同"
+    public = "本机匹配但公网 `/health/version` 或 `/version.json` 不同"
     browser = "本机与公网都匹配，但浏览器仍显示旧页面"
 
     assert section.index(record) < section.index(container)

@@ -282,8 +282,8 @@ recover_restore() {
   [[ ! -e "$staged_data" ]] || manual_failure
 
   compose up -d --pull never backend || manual_failure
-  wait_version_json "http://127.0.0.1:8000/health" "$current_tag" true || manual_failure
-  wait_version_json "${PUBLIC_BASE_URL%/}/health" "$current_tag" true || manual_failure
+  wait_version_json "http://127.0.0.1:8000/health/version" "$current_tag" true || manual_failure
+  wait_version_json "${PUBLIC_BASE_URL%/}/health/version" "$current_tag" true || manual_failure
   if [[ -d "$safety_parent" && ! -L "$safety_parent" ]]; then
     rm -f -- "$safety_parent/current-version"
     rmdir -- "$safety_parent" 2>/dev/null || true

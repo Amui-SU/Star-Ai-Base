@@ -336,9 +336,11 @@ def test_publish_images_writes_a_safe_manual_deployment_summary_after_publicatio
         '"${BACKEND_IMAGE}:${IMAGE_TAG}"',
         '"${FRONTEND_IMAGE}:${IMAGE_TAG}"',
         "ECS has not been deployed. Run this manually on the approved host:",
+        "Legacy hosts where /health/version is unavailable must deploy this compatibility release with their current legacy deployment script before syncing deployment infrastructure.",
+        "Otherwise, sync deployment infrastructure from this tested commit before running:",
         "cd /opt/zhiku-cloud",
         "./scripts/deploy.sh ${IMAGE_TAG}",
-        "local and public /health and /version.json report ${IMAGE_TAG}",
+        "local and public /health/version and /version.json report ${IMAGE_TAG}",
     ]:
         assert required in summary_step
 

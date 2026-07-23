@@ -180,10 +180,12 @@ jobs:
             printf '%s%s%s\n' '- Frontend: `' "${FRONTEND_IMAGE}:${IMAGE_TAG}" '`'
             printf '\n'
             printf '%s\n' 'ECS has not been deployed. Run this manually on the approved host:'
+            printf '%s\n' 'Legacy hosts where /health/version is unavailable must deploy this compatibility release with their current legacy deployment script before syncing deployment infrastructure.'
+            printf '%s\n' 'Otherwise, sync deployment infrastructure from this tested commit before running:'
             printf '%s\n' '```bash'
             printf '%s\n' 'cd /opt/zhiku-cloud'
             printf '%s\n' "./scripts/deploy.sh ${IMAGE_TAG}"
             printf '%s\n' '```'
             printf '\n'
-            printf '%s\n' "After deployment, verify local and public /health and /version.json report ${IMAGE_TAG}."
+            printf '%s\n' "After deployment, verify local and public /health/version and /version.json report ${IMAGE_TAG}."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -121,13 +121,35 @@ RELEASE_SHA=0123456789abcdef0123456789abcdef01234567 # 示例：请替换为成�
 ./scripts/deploy.sh "$RELEASE_SHA"
 ```
 
-首次上线只调用这一条部署脚本，不用临时的 Compose 重建命令替代它。脚本会验证前后端两张镜像，并在记录成功前验证四个版本证明端点：本机 backend 的 `/health`、本机 frontend 的 `/version.json`，以及公网 HTTPS 的 `/health`、`/version.json`。镜像拉取和停机前会先执行 `.env.production` 生产预检；至少一种登录方式必须完整可用：SMTP 需要 `SMTP_HOST`、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM`，Google 需要 client ID、secret 和规范域名的 HTTPS callback。预检失败不会调用 Docker，也不会改变当前服务。
+首次上线只调用这一条部署脚本，不用临时的 Compose 重建命令替代它。脚本会验证前后端两张镜像，并在记录成功前验证四个版本证明端点：本机 backend 的 `/health/version`、本机 frontend 的 `/version.json`，以及公网 HTTPS 的 `/health/version`、`/version.json`。普通存活检查仍使用向后兼容的 `/health`。镜像拉取和停机前会先执行 `.env.production` 生产预检；至少一种登录方式必须完整可用：SMTP 需要 `SMTP_HOST`、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM`，Google 需要 client ID、secret 和规范域名的 HTTPS callback。预检失败不会调用 Docker，也不会改变当前服务。
 
 所有目标和回滚镜像拉取完成后、停止后端之前，脚本重新检查磁盘，要求备份所在文件系统的可用空间至少为当前 `data` 大小加 2 GiB；可通过 `ZHIKU_DEPLOY_DISK_RESERVE_BYTES` 提高预留量。备份先写入唯一的 `.partial` 文件，只有 `tar` 成功后才原子改名；失败时只删除该已知临时文件和已确认为空的本次备份目录。
 
+## 从旧健康契约迁移
+
+此次一次性迁移适用于 `deploy/current-version` 仍为 `5b5c19259cc6b1482cff507231902a879e763468`，且 `http://127.0.0.1:8000/health/version` 返回 404 的旧主机。旧 `deploy.sh` 要求 `/health` 正文精确等于 `{"status":"healthy"}`；兼容发布保留该正文，并另行通过 `/health/version` 提供 SHA。
+
+不要先同步新版 `deploy.sh`：旧回滚镜像不提供 `/health/version`，新脚本无法对它完成精确回滚证明。先使用主机当前的旧脚本部署已发布的兼容 SHA：
+
+```bash
+cd /opt/zhiku-cloud
+test ! -e deploy/transaction || ./scripts/recover-interrupted.sh
+CURRENT_SHA="$(tr -d '[:space:]' < deploy/current-version)"
+[[ "$CURRENT_SHA" == 5b5c19259cc6b1482cff507231902a879e763468 ]] || { echo "not the documented legacy baseline" >&2; exit 1; }
+if curl --silent --show-error --fail --max-time 5 http://127.0.0.1:8000/health/version >/dev/null; then
+  echo "versioned health already exists; use the normal upgrade flow" >&2
+  exit 1
+fi
+RELEASE_SHA=0123456789abcdef0123456789abcdef01234567 # 替换为兼容发布的完整 SHA
+[[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid release SHA" >&2; exit 1; }
+./scripts/deploy.sh "$RELEASE_SHA"
+```
+
+该命令成功后，确认本机和公网 `/health/version` 均报告 `RELEASE_SHA`，再同步该 SHA 对应的部署基础设施：`compose.production.yml`、`scripts/deploy.sh`、`scripts/restore-data.sh`、`scripts/recover-interrupted.sh`、`scripts/production-preflight.sh`、`scripts/runtime-attestation.sh` 和 `scripts/inspect-restore-archive.py`。不得覆盖服务器上的 `.env.deploy`、`.env.production` 或证书路径。同步后恢复本手册规定的脚本权限，以后只使用下方正常升级流程。
+
 ## 正常升级精确 SHA
 
-从成功的 `Publish Images` 摘要复制完整精确 SHA，先读取当前记录再升级。`Publish Images` 成功并不部署 ECS；只能在批准的 ECS 上执行以下手工操作：
+从成功的 `Publish Images` 摘要复制完整精确 SHA，先将该已测试提交的部署基础设施同步到 ECS（不覆盖生产环境文件），再读取当前记录并升级。`Publish Images` 成功并不部署 ECS；只能在批准的 ECS 上执行以下手工操作：
 
 ```bash
 cd /opt/zhiku-cloud
@@ -220,8 +242,8 @@ docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compo
 - `deploy/current-version` 与请求 SHA 完全相同；两者都必须是完整小写 40 位 SHA。
 - 如果 `deploy/previous-version` 存在，它也是可打印、可验证的完整 SHA；记录不存在只在没有完成过不同 SHA 的版本转换时符合预期（包括首次部署或同 SHA 重部署），不同 SHA 的升级或回滚后缺失必须调查。
 - Compose `ps` 显示运行中 backend、frontend 的状态与完整镜像引用，分别等于预期的 backend、frontend SHA 镜像引用，并检查两者日志。
-- 本机 backend 的 `http://127.0.0.1:8000/health` 与本机 frontend 的 `http://127.0.0.1:3000/version.json` 都报告该 SHA。
-- 公网 HTTPS 的 `/health` 和 `/version.json` 也报告同一 SHA。
+- 本机 backend 的 `http://127.0.0.1:8000/health/version` 与本机 frontend 的 `http://127.0.0.1:3000/version.json` 都报告该 SHA；`/health` 另行保持向后兼容的存活检查正文。
+- 公网 HTTPS 的 `/health/version` 和 `/version.json` 也报告同一 SHA。
 - 成功后 `deploy/transaction` 不存在，Compose 状态健康。
 
 ```bash
@@ -266,7 +288,7 @@ docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compo
       curl --silent --show-error --fail --max-time 5 --proto '=https' --proto-redir '=https' --location --max-redirs 0 "$url"
     else
       curl --silent --show-error --fail --max-time 5 "$url"
-    fi | EXPECTED_SHA="$REQUESTED_SHA" REQUIRE_HEALTH="$require_health" python3 -c '
+    fi | EXPECTED_SHA="$REQUESTED_SHA" REQUIRE_HEALTH="$require_health" python3 -I -c '
 import json
 import os
 import sys
@@ -283,9 +305,9 @@ if os.environ["REQUIRE_HEALTH"] == "true" and payload.get("status") != "healthy"
 '
   }
 
-  verify_json_version "http://127.0.0.1:8000/health" true false
+  verify_json_version "http://127.0.0.1:8000/health/version" true false
   verify_json_version "http://127.0.0.1:3000/version.json" false false
-  verify_json_version "${PUBLIC_BASE_URL%/}/health" true true
+  verify_json_version "${PUBLIC_BASE_URL%/}/health/version" true true
   verify_json_version "${PUBLIC_BASE_URL%/}/version.json" false true
   docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml ps
   docker compose --project-name zhiku-cloud --env-file deploy/.env.deploy -f compose.production.yml logs --tail=200 backend frontend
@@ -339,8 +361,8 @@ test ! -e deploy/transaction || ./scripts/recover-interrupted.sh
 | ------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `deploy/current-version` 与请求 SHA 不同                                        | 目标发布没有被记录为成功                            | 停止假设页面已升级；检查部署输出和 `deploy/transaction`，必要时先运行恢复脚本。                                                           |
 | 容器 tag 与记录不同，出现 `backend image mismatch` 或 `frontend image mismatch` | 后端或前端运行镜像并非记录的发布版本                | 保留现场并检查 `deploy/transaction`；恢复中断事务后，按已批准的“有意重复部署同一 SHA”流程使用 `--allow-redeploy`，不能手工 Compose 重建。 |
-| 本机 `/version.json` 与容器 SHA 不同                                            | 容器、应用构建产物或本机转发身份不一致              | 检查 Compose 状态、容器镜像引用和本机 `/health`、`/version.json`；先修复本机证明。                                                        |
-| 本机匹配但公网 `/health` 或 `/version.json` 不同                                | 宿主机服务正确，但 Nginx、DNS、上游或缓存没有指向它 | 检查 `nginx -t`、Nginx 日志、站点上游、DNS 和 CDN/代理缓存。                                                                              |
+| 本机 `/health/version` 或 `/version.json` 与容器 SHA 不同                       | 容器、应用构建产物或本机转发身份不一致              | 检查 Compose 状态、容器镜像引用和本机 `/health/version`、`/version.json`；先修复本机证明。                                                |
+| 本机匹配但公网 `/health/version` 或 `/version.json` 不同                        | 宿主机服务正确，但 Nginx、DNS、上游或缓存没有指向它 | 检查 `nginx -t`、Nginx 日志、站点上游、DNS 和 CDN/代理缓存。                                                                              |
 | 本机与公网都匹配，但浏览器仍显示旧页面                                          | 服务端身份已证明，才可能是客户端陈旧资源            | 再执行强制刷新，并检查 service worker 和浏览器缓存。                                                                                      |
 
 生产发布不依赖 `latest`，不使用自动 SSH 部署，也不把任何生产秘密同步回开发机或 Git 仓库。

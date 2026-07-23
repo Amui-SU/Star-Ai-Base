@@ -100,8 +100,8 @@ verify_runtime_version() {
 
   verify_service_image backend "$expected_sha" || return 1
   verify_service_image frontend "$expected_sha" || return 1
-  wait_version_json "http://127.0.0.1:8000/health" "$expected_sha" true || return 1
+  wait_version_json "http://127.0.0.1:8000/health/version" "$expected_sha" true || return 1
   wait_version_json "http://127.0.0.1:3000/version.json" "$expected_sha" || return 1
-  wait_version_json "${PUBLIC_BASE_URL%/}/health" "$expected_sha" true || return 1
+  wait_version_json "${PUBLIC_BASE_URL%/}/health/version" "$expected_sha" true || return 1
   wait_version_json "${PUBLIC_BASE_URL%/}/version.json" "$expected_sha"
 }
