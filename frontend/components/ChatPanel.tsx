@@ -102,6 +102,7 @@ export default function ChatPanel({
     activeProvider,
     closeProviderConfig,
     configApiKey,
+    configActiveTab,
     configBaseUrl,
     configError,
     configModel,
@@ -124,6 +125,7 @@ export default function ChatPanel({
     openProviderConfig,
     providersForMenu,
     setConfigApiKey,
+    setConfigActiveTab,
     setConfigBaseUrl,
     setConfigError,
     setConfigModel,
@@ -327,6 +329,7 @@ export default function ChatPanel({
           ? {
               provider: configProvider,
               apiKey: configApiKey,
+              activeTab: configActiveTab,
               baseUrl: configBaseUrl,
               model: configModel,
               thinkingMode: configThinkingMode,
@@ -336,12 +339,10 @@ export default function ChatPanel({
               onApiKeyChange: setConfigApiKey,
               onBaseUrlChange: setConfigBaseUrl,
               onModelChange: setConfigModel,
-              onThinkingModeChange: (mode, json) => {
-                setConfigThinkingMode(mode);
-                setConfigThinkingJson(json);
-              },
+              onTabChange: setConfigActiveTab,
+              onThinkingModeChange: setConfigThinkingMode,
               onThinkingJsonChange: setConfigThinkingJson,
-              onClearError: () => setConfigError(""),
+              onErrorChange: setConfigError,
               onClose: () => closeProviderConfig(),
               onSave: () => void handleSaveProviderConfig(),
             }

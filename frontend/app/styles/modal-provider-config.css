@@ -1,10 +1,7 @@
 .thinking-provider-modal {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 18px;
-  width: min(640px, calc(100vw - 32px));
+  width: min(840px, calc(100vw - 32px));
   max-height: min(88dvh, 780px);
-  padding: 28px;
+  padding: 0;
   overflow: hidden;
 }
 
@@ -14,191 +11,59 @@
   padding: 16px;
 }
 
-.provider-config-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 48px;
-  align-items: start;
-  gap: 18px;
-  min-width: 0;
-}
-
-.provider-config-title-block {
-  min-width: 0;
-}
-
-.provider-config-title {
-  color: var(--ink);
-  font-size: clamp(22px, 4.8vw, 28px);
-  font-weight: 750;
-  line-height: 1.18;
-}
-
-.provider-config-subtitle {
-  max-width: 100%;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
-.provider-config-close {
-  width: 48px;
-  height: 48px;
-  border: 1px solid transparent;
-  border-radius: 50%;
-  background: var(--paper-2);
-  color: var(--ink-soft);
-  font-size: 24px;
-  font-weight: 650;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    color 0.2s ease,
-    transform 0.2s ease;
-}
-
-.provider-config-close:hover {
-  border-color: rgba(217, 119, 87, 0.45);
-  color: var(--accent-strong);
-  transform: translateY(-1px);
-}
-
-.provider-config-close:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  transform: none;
-}
-
-.provider-config-body {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  gap: 16px;
-  overflow-x: hidden;
+.thinking-provider-modal .api-credential-editor-body {
   overflow-y: auto;
-  padding: 2px 2px 2px 0;
-  scrollbar-gutter: stable;
   scrollbar-width: none;
-  -ms-overflow-style: none;
+}
+
+.thinking-provider-modal .api-credential-editor-body::-webkit-scrollbar {
+  display: none;
+}
+
+/* Kept for the legacy modal layout contract; the shared editor owns new UI. */
+.provider-config-body {
+  overflow-y: auto;
+  scrollbar-width: none;
 }
 
 .provider-config-body::-webkit-scrollbar {
   display: none;
-  width: 0;
-  height: 0;
+}
+
+.provider-config-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.provider-config-fields label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .provider-config-input {
   width: 100%;
-  height: 56px;
   min-width: 0;
-  scroll-margin-top: 28px;
-  border-width: 2px;
-  border-radius: 16px;
-  padding: 0 20px;
-  font-size: 16px;
+  height: 48px;
+  border-radius: 8px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.provider-config-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
 }
 
 .provider-config-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  padding-top: 2px;
-}
-
-.thinking-config-fieldset {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  margin: 0;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-}
-
-.thinking-config-fieldset legend {
-  padding: 0 6px;
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.thinking-mode-options {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-  min-width: 0;
-}
-
-.thinking-mode-option {
-  min-height: 34px;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--muted);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.thinking-mode-option.active {
-  border-color: rgba(217, 119, 87, 0.52);
-  background: rgba(217, 119, 87, 0.14);
-  color: var(--accent-strong);
-}
-
-.thinking-mode-option:disabled {
-  opacity: 0.38;
-  cursor: not-allowed;
-}
-
-.thinking-json-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  min-width: 0;
-  color: var(--ink-soft);
-  font-size: 11px;
-}
-
-.thinking-json-editor textarea {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  resize: none;
-  min-height: 150px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: var(--input-bg);
-  color: var(--ink);
-  font:
-    12px/1.65 ui-monospace,
-    SFMono-Regular,
-    Consolas,
-    monospace;
-  outline: none;
-  overflow-x: hidden;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.thinking-json-editor textarea:focus {
-  border-color: rgba(217, 119, 87, 0.55);
-}
-
-.thinking-json-editor textarea[readonly] {
-  color: color-mix(in srgb, var(--ink-soft) 75%, transparent);
-}
-
-.thinking-config-help {
-  margin: 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
 }

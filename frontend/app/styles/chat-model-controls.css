@@ -96,7 +96,7 @@ html.light .model-status-card {
 .model-source-option {
   display: grid;
   min-width: 0;
-  min-height: 38px;
+  min-height: 48px;
   place-items: center;
   gap: 1px;
   border: 1px solid transparent;
@@ -116,10 +116,15 @@ html.light .model-status-card {
   opacity: 0.68;
 }
 
+.model-source-option span,
+.model-source-option small {
+  white-space: nowrap;
+}
+
 .model-source-option.active {
-  border-color: rgba(47, 124, 120, 0.28);
-  background: rgba(47, 124, 120, 0.14);
-  color: #9bd0ca;
+  border-color: rgba(217, 119, 87, 0.52);
+  background: rgba(217, 119, 87, 0.14);
+  color: var(--accent-strong);
 }
 
 .model-source-option:disabled {

@@ -13,7 +13,7 @@
   .thinking-provider-modal {
     width: min(100%, calc(100vw - 20px));
     max-height: calc(100dvh - 28px);
-    padding: 22px;
+    padding: 0;
     overflow: hidden;
   }
 }
@@ -39,67 +39,12 @@
   .thinking-provider-modal {
     width: min(100%, calc(100vw - 16px));
     max-height: calc(100dvh - 20px);
+    padding: 0;
+  }
+
+  .provider-config-fields {
+    grid-template-columns: 1fr;
     gap: 14px;
-    padding: 18px;
-  }
-
-  .provider-config-head {
-    grid-template-columns: minmax(0, 1fr) 42px;
-    gap: 12px;
-  }
-
-  .provider-config-title {
-    font-size: clamp(20px, 6vw, 24px);
-  }
-
-  .provider-config-subtitle {
-    margin-top: 6px;
-    font-size: 12px;
-    line-height: 1.45;
-  }
-
-  .provider-config-close {
-    width: 42px;
-    height: 42px;
-    font-size: 21px;
-  }
-
-  .provider-config-body {
-    gap: 12px;
-    padding: 2px 0;
-    scrollbar-gutter: auto;
-  }
-
-  .provider-config-input {
-    height: 50px;
-    scroll-margin-top: 24px;
-    border-radius: 15px;
-    padding: 0 16px;
-    font-size: 15px;
-  }
-
-  .thinking-config-fieldset {
-    padding: 12px;
-    border-radius: 15px;
-  }
-
-  .thinking-mode-options {
-    gap: 6px;
-  }
-
-  .thinking-mode-option {
-    min-height: 38px;
-    padding: 0 6px;
-    font-size: 10px;
-    line-height: 1.2;
-    white-space: normal;
-  }
-
-  .thinking-json-editor textarea {
-    min-height: 116px;
-    padding: 10px 12px;
-    font-size: 11px;
-    line-height: 1.55;
   }
 
   .provider-config-actions {
@@ -111,5 +56,18 @@
   .provider-config-actions .btn {
     min-width: 0;
     padding-inline: 12px;
+  }
+
+  .thinking-provider-modal .api-credential-editor-header,
+  .thinking-provider-modal .api-credential-editor-body {
+    padding: 16px;
+  }
+
+  .thinking-provider-modal .api-credential-editor-tabs {
+    padding-inline: 16px;
+  }
+
+  .thinking-provider-modal .api-credential-editor-footer {
+    padding: 12px 16px;
   }
 }

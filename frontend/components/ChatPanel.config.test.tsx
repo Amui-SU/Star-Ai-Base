@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getModelConfig: vi.fn(),
       getWebSearchConfig: vi.fn(),
       health: vi.fn(),
+      saveModelProviderConfig: vi.fn(),
       saveWebSearchConfig: vi.fn(),
       setModelProvider: vi.fn(),
       setModelSource: vi.fn(),
@@ -42,6 +43,11 @@ vi.mock("@/lib/api", async (importOriginal) => {
 afterEach(cleanupChatPanelTest);
 
 describe("ChatPanel model and service configuration", () => {
+  async function openModelConfig(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("button", { name: "模型选择" }));
+    await user.click(screen.getByRole("button", { name: "配置 DeepSeek" }));
+  }
+
   it("does not show the AI key prompt when a model is available", async () => {
     mockChatPanelDependencies();
 
@@ -192,6 +198,99 @@ describe("ChatPanel model and service configuration", () => {
       "1 个视频",
     );
     expect(contextActions?.querySelector(".model-status-card")).not.toBeNull();
+  });
+
+  it("saves parsed custom thinking JSON from the request tab", async () => {
+    mockChatPanelDependencies();
+    vi.mocked(chatApi.saveModelProviderConfig).mockResolvedValue({
+      ok: true,
+      current_provider: "deepseek",
+      model: "deepseek-v4-pro",
+      provider_label: "DeepSeek",
+      thinking_config: { reasoning: { enabled: true } },
+      thinking_template: { thinking: { type: "enabled" } },
+      verified: true,
+      latency_ms: 18,
+    });
+    const user = userEvent.setup();
+
+    render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" isAdmin />,
+    );
+    await openModelConfig(user);
+
+    expect(screen.getByRole("tab", { name: "基础配置" })).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "请求配置" }));
+    await user.click(screen.getByRole("button", { name: "自定义" }));
+    const editor = screen.getByRole("textbox", {
+      name: "请求体 JSON（自定义）",
+    });
+    fireEvent.change(editor, {
+      target: { value: '{"reasoning":{"enabled":true}}' },
+    });
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() =>
+      expect(chatApi.saveModelProviderConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "deepseek",
+          thinking_mode: "custom",
+          thinking_config: { reasoning: { enabled: true } },
+        }),
+      ),
+    );
+  });
+
+  it("blocks invalid custom JSON and returns to the request tab", async () => {
+    mockChatPanelDependencies();
+    const user = userEvent.setup();
+
+    render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" isAdmin />,
+    );
+    await openModelConfig(user);
+    await user.click(screen.getByRole("tab", { name: "请求配置" }));
+    await user.click(screen.getByRole("button", { name: "自定义" }));
+    const editor = screen.getByRole("textbox", {
+      name: "请求体 JSON（自定义）",
+    });
+    fireEvent.change(editor, { target: { value: "{bad" } });
+    await user.click(screen.getByRole("tab", { name: "基础配置" }));
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+
+    expect(chatApi.saveModelProviderConfig).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "思考配置 JSON 格式错误",
+    );
+    expect(screen.getByRole("tab", { name: "请求配置" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("preserves the custom JSON draft while switching thinking modes", async () => {
+    mockChatPanelDependencies();
+    const user = userEvent.setup();
+
+    render(
+      <ChatPanel knowledgeBaseId={1} knowledgeBaseName="Test KB" isAdmin />,
+    );
+    await openModelConfig(user);
+    await user.click(screen.getByRole("tab", { name: "请求配置" }));
+    await user.click(screen.getByRole("button", { name: "自定义" }));
+    const editor = screen.getByRole("textbox", {
+      name: "请求体 JSON（自定义）",
+    });
+    fireEvent.change(editor, { target: { value: '{"draft":"kept"}' } });
+    await user.click(
+      screen.getByRole("button", { name: "关闭", pressed: false }),
+    );
+    await user.click(screen.getByRole("button", { name: "标准" }));
+    await user.click(screen.getByRole("button", { name: "自定义" }));
+
+    expect(
+      screen.getByRole("textbox", { name: "请求体 JSON（自定义）" }),
+    ).toHaveValue('{"draft":"kept"}');
   });
 
   it("hides global provider and Tavily configuration controls from regular users", async () => {

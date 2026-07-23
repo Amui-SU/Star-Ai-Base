@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { ModelConfigProvider } from "@/components/chat/types";
+import type { ApiCredentialEditorTab } from "@/components/api-credentials/ApiCredentialEditorShell";
 import {
   buildModelSwitchFailureHealth,
   checkModelHealth,
@@ -57,6 +58,8 @@ export function useChatModelSettings({
   const [configApiKey, setConfigApiKey] = useState("");
   const [configBaseUrl, setConfigBaseUrl] = useState("");
   const [configModel, setConfigModel] = useState("");
+  const [configActiveTab, setConfigActiveTab] =
+    useState<ApiCredentialEditorTab>("basic");
   const [configThinkingMode, setConfigThinkingMode] =
     useState<ThinkingMode>("off");
   const [configThinkingJson, setConfigThinkingJson] = useState("{}");
@@ -70,6 +73,7 @@ export function useChatModelSettings({
       setConfigApiKey("");
       setConfigBaseUrl("");
       setConfigModel("");
+      setConfigActiveTab("basic");
       setConfigThinkingMode("off");
       setConfigThinkingJson("{}");
       setConfigError("");
@@ -87,15 +91,12 @@ export function useChatModelSettings({
       setConfigApiKey("");
       setConfigBaseUrl(provider.base_url || "");
       setConfigModel(provider.model || "");
+      setConfigActiveTab("basic");
       const thinkingConfig = provider.thinking_config || {};
       const thinkingTemplate = provider.thinking_template || {};
       const mode = inferThinkingMode(thinkingConfig, thinkingTemplate);
       setConfigThinkingMode(mode);
-      setConfigThinkingJson(
-        formatThinkingConfig(
-          mode === "standard" ? thinkingTemplate : thinkingConfig,
-        ),
-      );
+      setConfigThinkingJson(formatThinkingConfig(thinkingConfig));
       setConfigError("");
       setModelMenuOpen(false);
     },
@@ -114,6 +115,7 @@ export function useChatModelSettings({
         thinkingConfig = parseThinkingConfig(configThinkingJson);
       } catch (err) {
         setConfigError(err instanceof Error ? err.message : "思考配置无效");
+        setConfigActiveTab("request");
         return;
       }
     }
@@ -267,6 +269,7 @@ export function useChatModelSettings({
   return {
     activeProvider,
     closeProviderConfig,
+    configActiveTab,
     configApiKey,
     configBaseUrl,
     configError,
@@ -290,6 +293,7 @@ export function useChatModelSettings({
     openProviderConfig,
     providersForMenu,
     setConfigApiKey,
+    setConfigActiveTab,
     setConfigBaseUrl,
     setConfigError,
     setConfigModel,
