@@ -119,13 +119,16 @@ _PROTECTED_HEADER_NAMES = {
     "via",
     "x-amzn-trace-id",
     "x-client-ip",
+    "x-cloud-trace-context",
     "x-correlation-id",
     "x-real-ip",
     "x-request-id",
+    "x-trace-id",
 }
 _PROTECTED_HEADER_PREFIXES = (
     "cf-connecting-",
     "x-b3-",
+    "x-datadog-",
     "x-envoy-",
     "x-forwarded-",
     "x-original-",

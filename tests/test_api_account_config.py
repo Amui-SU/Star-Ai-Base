@@ -156,6 +156,9 @@ def test_normalize_advanced_config_rejects_invalid_types_and_values(value, field
         "X-Forwarded-For",
         "Traceparent",
         "X-Request-ID",
+        "X-Cloud-Trace-Context",
+        "X-Datadog-Trace-Id",
+        "X-Trace-Id",
     ],
 )
 def test_normalize_advanced_config_rejects_protected_headers_without_value_leak(
@@ -169,6 +172,12 @@ def test_normalize_advanced_config_rejects_protected_headers_without_value_leak(
     assert exc_info.value.status_code == 400
     assert header in detail
     assert secret not in detail
+
+
+def test_normalize_advanced_config_allows_business_x_headers():
+    assert normalize_advanced_config({"headers": {"X-Workspace": "research"}})[
+        "headers"
+    ] == {"X-Workspace": "research"}
 
 
 @pytest.mark.parametrize(
