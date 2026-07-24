@@ -328,6 +328,42 @@
   display: none;
 }
 
+@media (min-width: 721px) {
+  .api-account-workspace-header {
+    min-height: 64px;
+    align-items: center;
+    padding: 8px clamp(16px, 3vw, 36px);
+  }
+
+  .api-account-workspace-title {
+    display: grid;
+    align-content: center;
+    gap: 2px;
+  }
+
+  .api-account-workspace-title h1 {
+    line-height: 1.15;
+  }
+
+  .api-account-workspace-title span {
+    line-height: 1.1;
+  }
+
+  .api-account-workspace-actions {
+    align-items: center;
+    min-height: 36px;
+  }
+
+  .api-account-workspace-actions .btn {
+    height: 36px;
+    padding: 0 16px;
+  }
+
+  .api-account-workspace-actions .btn-primary:hover {
+    transform: none;
+  }
+}
+
 @media (max-width: 720px) {
   .api-account-workspace {
     grid-template-rows: auto minmax(0, 1fr) auto;

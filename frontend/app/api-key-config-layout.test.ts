@@ -52,6 +52,24 @@ describe("personal API account layout", () => {
     );
   });
 
+  it("aligns the desktop workspace header on one stable center line", () => {
+    expect(stylesheet).toMatch(
+      /@media \(min-width:\s*721px\)\s*\{[\s\S]*?\.api-account-workspace-header\s*\{[^}]*min-height:\s*64px;[^}]*align-items:\s*center;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.api-account-workspace-actions\s*\{[^}]*align-items:\s*center;[^}]*min-height:\s*36px;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.api-account-workspace-actions\s+\.btn\s*\{[^}]*height:\s*36px;[^}]*padding:\s*0 16px;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.api-account-workspace-title\s*\{[^}]*display:\s*grid;[^}]*align-content:\s*center;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.api-account-workspace-actions\s+\.btn-primary:hover\s*\{[^}]*transform:\s*none;/s,
+    );
+  });
+
   it("collapses the list and workspace on mobile with safe-area actions", () => {
     expect(stylesheet).toMatch(
       /@media \(max-width:\s*720px\)\s*\{[\s\S]*?\.api-account-section-nav\s*\{[^}]*display:\s*none;[\s\S]*?\.api-account-mobile-actions\s*\{[^}]*display:\s*grid;[^}]*padding-bottom:\s*max\([^;]*safe-area-inset-bottom/s,
