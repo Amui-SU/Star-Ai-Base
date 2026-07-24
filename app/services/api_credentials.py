@@ -6,14 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ApiAccountResponse, SystemUser, UsageEvent, UserApiAccount
 from app.security import decrypt_text, encrypt_text
+from app.services.api_account_config import (
+    PROVIDER_PRESETS as PROVIDER_DEFAULTS,
+    SUPPORTED_API_PROVIDERS,
+    ProviderPreset,
+    normalize_provider,
+    provider_defaults,
+)
 from app.time_utils import utc_now
 
-
-@dataclass(frozen=True)
-class ProviderDefaults:
-    label: str
-    base_url: str
-    model: str
+ProviderDefaults = ProviderPreset
 
 
 @dataclass(frozen=True)
@@ -40,55 +42,6 @@ class ResolvedApiCredential:
         }
 
 
-PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
-    "dashscope": ProviderDefaults(
-        label="阿里云 DashScope",
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        model="qwen-max",
-    ),
-    "deepseek": ProviderDefaults(
-        label="DeepSeek",
-        base_url="https://api.deepseek.com/v1",
-        model="deepseek-chat",
-    ),
-    "openai": ProviderDefaults(
-        label="OpenAI",
-        base_url="https://api.openai.com/v1",
-        model="gpt-4o-mini",
-    ),
-    "agnes": ProviderDefaults(
-        label="Agnes",
-        base_url="https://apihub.agnes-ai.com/v1",
-        model="agnes-2.0-flash",
-    ),
-    "claude": ProviderDefaults(
-        label="Claude",
-        base_url="https://api.anthropic.com/v1",
-        model="claude-haiku-4-5",
-    ),
-    "kimi": ProviderDefaults(
-        label="Moonshot Kimi",
-        base_url="https://api.moonshot.cn/v1",
-        model="moonshot-v1-8k",
-    ),
-    "siliconflow": ProviderDefaults(
-        label="SiliconFlow",
-        base_url="https://api.siliconflow.cn/v1",
-        model="Qwen/Qwen2.5-7B-Instruct",
-    ),
-    "zhipu": ProviderDefaults(
-        label="智谱 GLM",
-        base_url="https://open.bigmodel.cn/api/paas/v4",
-        model="glm-4-flash",
-    ),
-    "tavily": ProviderDefaults(
-        label="Tavily",
-        base_url="https://api.tavily.com",
-        model="tavily-search",
-    ),
-}
-
-SUPPORTED_API_PROVIDERS = set(PROVIDER_DEFAULTS)
 LLM_API_SOURCE_OFFICIAL = "official"
 LLM_API_SOURCE_PERSONAL = "personal"
 SUPPORTED_LLM_API_SOURCES = {LLM_API_SOURCE_OFFICIAL, LLM_API_SOURCE_PERSONAL}
@@ -99,17 +52,6 @@ LLM_API_SOURCE_ALIASES = {
     "user": LLM_API_SOURCE_PERSONAL,
     "personal": LLM_API_SOURCE_PERSONAL,
 }
-
-
-def normalize_provider(value: str) -> str:
-    provider = (value or "").strip().lower()
-    if provider not in SUPPORTED_API_PROVIDERS:
-        raise HTTPException(status_code=400, detail=f"不支持的 API 服务商: {value}")
-    return provider
-
-
-def provider_defaults(provider: str) -> ProviderDefaults:
-    return PROVIDER_DEFAULTS[normalize_provider(provider)]
 
 
 def normalize_llm_api_source(
