@@ -1,3 +1,16 @@
+@media (max-width: 860px) {
+  .modal-card.api-accounts-panel {
+    width: calc(100vw - 20px);
+    height: calc(100dvh - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .api-accounts-grid,
+  .api-account-basic-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 640px) {
   .user-menu-popover {
     right: -4px;
