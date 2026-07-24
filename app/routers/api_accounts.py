@@ -6,6 +6,8 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import (
     ApiAccountCreateRequest,
+    ApiAccountDraftValidationRequest,
+    ApiAccountDraftValidationResponse,
     ApiAccountResponse,
     ApiAccountUpdateRequest,
     SystemUser,
@@ -15,6 +17,7 @@ from app.services.api_account_persistence import (
     apply_api_account_update,
     build_api_account,
 )
+from app.services.api_account_validation import validate_api_account_draft
 from app.services.api_credentials import (
     account_response,
     ensure_single_default,
@@ -76,6 +79,15 @@ async def create_api_account(
     await db.commit()
     await db.refresh(account)
     return account_response(account)
+
+
+@router.post("/validate-draft", response_model=ApiAccountDraftValidationResponse)
+async def validate_api_account_draft_route(
+    body: ApiAccountDraftValidationRequest,
+    current_user: SystemUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await validate_api_account_draft(db, current_user, body)
 
 
 @router.patch("/{account_id}", response_model=ApiAccountResponse)

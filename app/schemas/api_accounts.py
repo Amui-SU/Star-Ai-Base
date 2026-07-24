@@ -1,7 +1,7 @@
 """User-owned third-party API account schemas."""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -34,6 +34,36 @@ class ApiAccountUpdateRequest(BaseModel):
     advanced_config: Any = None
     enabled: Optional[bool] = None
     is_default: Optional[bool] = None
+
+
+class ApiAccountDraftValidationRequest(BaseModel):
+    account_id: Optional[int] = None
+    provider: str
+    display_name: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    thinking_config: Optional[dict] = None
+    protocol: Optional[str] = None
+    auth_scheme: Optional[str] = None
+    website_url: Optional[str] = None
+    notes: Optional[str] = None
+    advanced_config: Any = Field(default_factory=dict)
+
+
+class ApiAccountDraftValidationResponse(BaseModel):
+    status: Literal[
+        "success",
+        "authentication_failed",
+        "endpoint_unreachable",
+        "timeout",
+        "model_unavailable",
+        "invalid_configuration",
+    ]
+    message: str
+    http_status: Optional[int] = None
+    section: str
+    latency_ms: int
 
 
 class ApiAccountResponse(BaseModel):
