@@ -1,4 +1,11 @@
 import pytest
+from types import SimpleNamespace
+
+from app.security import decrypt_text
+from app.services.api_credentials import (
+    account_response,
+    resolved_credential_from_account,
+)
 
 
 def test_provider_defaults_include_agnes_and_claude():
@@ -197,3 +204,157 @@ async def test_user_can_set_one_default_api_account(client):
     by_provider = {account["provider"]: account for account in listing.json()}
     assert by_provider["deepseek"]["is_default"] is False
     assert by_provider["kimi"]["is_default"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_account_expanded_fields_round_trip_and_update(
+    client, db_session_factory
+):
+    auth = await _register_user(client, "api-expanded@example.com")
+    client.cookies.clear()
+    headers = {"Authorization": f"Bearer {auth['session_token']}"}
+
+    created = await client.post(
+        "/api-accounts",
+        json={
+            "provider": "deepseek",
+            "api_key": "expanded-secret",
+            "model": "chat-alias",
+            "protocol": "openai_compatible",
+            "auth_scheme": "bearer",
+            "website_url": "https://example.test/models",
+            "notes": "team gateway",
+            "advanced_config": {
+                "model_mapping": {"chat-alias": "deepseek-chat"},
+                "fallback_model": "chat-alias",
+                "headers": {"X-Tenant": "alpha"},
+                "vendor_extension": {"region": "cn"},
+            },
+        },
+        headers=headers,
+    )
+
+    assert created.status_code == 200
+    body = created.json()
+    assert body["protocol"] == "openai_compatible"
+    assert body["auth_scheme"] == "bearer"
+    assert body["website_url"] == "https://example.test/models"
+    assert body["notes"] == "team gateway"
+    assert body["advanced_config"]["model_mapping"] == {"chat-alias": "deepseek-chat"}
+    assert body["advanced_config"]["vendor_extension"] == {"region": "cn"}
+    assert body["advanced_config"]["fallback_model"] == body["model"]
+    assert "api_key" not in body
+    account_id = body["id"]
+
+    updated = await client.patch(
+        f"/api-accounts/{account_id}",
+        json={
+            "api_key": "   ",
+            "model": "new-alias",
+            "website_url": "https://updated.example.test",
+            "notes": "updated",
+            "advanced_config": {
+                "model_mapping": {"new-alias": "deepseek-reasoner"},
+                "fallback_model": "",
+                "body": {"top_p": 0.8},
+            },
+        },
+        headers=headers,
+    )
+
+    assert updated.status_code == 200
+    updated_body = updated.json()
+    assert updated_body["model"] == "new-alias"
+    assert updated_body["advanced_config"]["fallback_model"] == "new-alias"
+    assert updated_body["advanced_config"]["body"] == {"top_p": 0.8}
+    assert updated_body["website_url"] == "https://updated.example.test"
+    assert updated_body["notes"] == "updated"
+
+    from app.models import UserApiAccount
+
+    async with db_session_factory() as db:
+        account = await db.get(UserApiAccount, account_id)
+        assert decrypt_text(account.api_key_encrypted) == "expanded-secret"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"protocol": "anthropic_messages"},
+        {"auth_scheme": "x_api_key"},
+        {"advanced_config": {"headers": {"Authorization": "secret"}}},
+        {"advanced_config": ["not", "an", "object"]},
+    ],
+)
+async def test_api_account_rejects_unsafe_provider_settings(client, payload):
+    auth = await _register_user(client, f"unsafe-{next(iter(payload))}@example.com")
+    client.cookies.clear()
+    response = await client.post(
+        "/api-accounts",
+        json={"provider": "deepseek", "api_key": "safe-key", **payload},
+        headers={"Authorization": f"Bearer {auth['session_token']}"},
+    )
+
+    assert response.status_code == 400
+    assert "safe-key" not in response.text
+
+
+def test_legacy_account_response_infers_provider_defaults_without_mutation():
+    account = SimpleNamespace(
+        id=7,
+        provider="deepseek",
+        display_name="Legacy",
+        api_key_encrypted="encrypted",
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-chat",
+        thinking_config=None,
+        protocol=None,
+        auth_scheme=None,
+        website_url=None,
+        notes=None,
+        advanced_config=None,
+        enabled=True,
+        is_default=False,
+        last_validated_at=None,
+        last_error=None,
+    )
+
+    response = account_response(account)
+
+    assert response.protocol == "openai_compatible"
+    assert response.auth_scheme == "bearer"
+    assert response.website_url == "https://www.deepseek.com/"
+    assert response.advanced_config["fallback_model"] == "deepseek-chat"
+    assert account.protocol is None
+    assert account.advanced_config is None
+
+
+def test_resolved_credential_maps_account_model_alias_and_keeps_legacy_fallback(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.api_credentials.decrypt_api_key", lambda _encrypted: "secret"
+    )
+    account = SimpleNamespace(
+        id=9,
+        provider="deepseek",
+        api_key_encrypted="encrypted",
+        base_url="https://gateway.example.test/v1",
+        model="chat-alias",
+        thinking_config={},
+        protocol="openai_compatible",
+        auth_scheme="bearer",
+        advanced_config={
+            "model_mapping": {"chat-alias": "deepseek-chat"},
+            "fallback_model": "fallback-model",
+        },
+    )
+
+    resolved = resolved_credential_from_account(account)
+
+    assert resolved.model == "deepseek-chat"
+    assert resolved.protocol == "openai_compatible"
+    assert resolved.auth_scheme == "bearer"
+    assert resolved.advanced_config["fallback_model"] == "fallback-model"
+    assert resolved.to_llm_config()["advanced_config"] == resolved.advanced_config

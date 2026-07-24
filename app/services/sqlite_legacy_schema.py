@@ -15,7 +15,6 @@ from app.services.sqlite_video_cache_migration import (
     sqlite_rebuild_video_cache_without_unique_bvid,
 )
 
-
 SQLITE_LEGACY_COLUMNS: dict[str, dict[str, str]] = {
     "video_cache": {
         "cid": "INTEGER",
@@ -59,6 +58,11 @@ SQLITE_LEGACY_COLUMNS: dict[str, dict[str, str]] = {
     },
     "user_api_accounts": {
         "thinking_config": "JSON",
+        "protocol": "VARCHAR(40)",
+        "auth_scheme": "VARCHAR(40)",
+        "website_url": "VARCHAR(500)",
+        "notes": "TEXT",
+        "advanced_config": "JSON",
         "enabled": "BOOLEAN",
         "is_default": "BOOLEAN",
         "last_validated_at": "DATETIME",

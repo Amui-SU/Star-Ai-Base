@@ -10,8 +10,11 @@ from app.services.api_account_config import (
     PROVIDER_PRESETS as PROVIDER_DEFAULTS,
     SUPPORTED_API_PROVIDERS,
     ProviderPreset,
+    default_advanced_config,
+    normalize_advanced_config,
     normalize_provider,
     provider_defaults,
+    resolve_account_model,
 )
 from app.time_utils import utc_now
 
@@ -27,6 +30,9 @@ class ResolvedApiCredential:
     base_url: str
     model: str
     thinking_config: dict
+    protocol: str | None
+    auth_scheme: str | None
+    advanced_config: dict
     account_id: int | None
 
     def to_llm_config(self) -> dict:
@@ -37,6 +43,9 @@ class ResolvedApiCredential:
             "base_url": self.base_url,
             "model": self.model,
             "thinking_config": self.thinking_config,
+            "protocol": self.protocol,
+            "auth_scheme": self.auth_scheme,
+            "advanced_config": self.advanced_config,
             "api_account_id": self.account_id,
             "api_source": self.api_source,
         }
@@ -82,6 +91,11 @@ def decrypt_api_key(encrypted: str) -> str:
 
 def account_response(account: UserApiAccount) -> ApiAccountResponse:
     defaults = provider_defaults(account.provider)
+    advanced_config = normalize_advanced_config(
+        getattr(account, "advanced_config", None), account.model
+    )
+    if not advanced_config["fallback_model"]:
+        advanced_config["fallback_model"] = account.model
     return ApiAccountResponse(
         id=account.id,
         provider=account.provider,
@@ -90,6 +104,11 @@ def account_response(account: UserApiAccount) -> ApiAccountResponse:
         base_url=account.base_url,
         model=account.model,
         thinking_config=account.thinking_config or {},
+        protocol=getattr(account, "protocol", None) or defaults.protocol,
+        auth_scheme=getattr(account, "auth_scheme", None) or defaults.auth_scheme,
+        website_url=getattr(account, "website_url", None) or defaults.website_url,
+        notes=getattr(account, "notes", None),
+        advanced_config=advanced_config,
         enabled=bool(account.enabled),
         is_default=bool(account.is_default),
         configured=bool(account.api_key_encrypted),
@@ -145,14 +164,20 @@ class OfficialApiRequired(HTTPException):
 
 def resolved_credential_from_account(account: UserApiAccount) -> ResolvedApiCredential:
     defaults = provider_defaults(account.provider)
+    advanced_config = normalize_advanced_config(
+        getattr(account, "advanced_config", None), account.model
+    )
     return ResolvedApiCredential(
         api_source=LLM_API_SOURCE_PERSONAL,
         provider=account.provider,
         provider_label=defaults.label,
         api_key=decrypt_api_key(account.api_key_encrypted),
         base_url=account.base_url,
-        model=account.model,
+        model=resolve_account_model(account.model, advanced_config, account.model),
         thinking_config=account.thinking_config or {},
+        protocol=getattr(account, "protocol", None) or defaults.protocol,
+        auth_scheme=getattr(account, "auth_scheme", None) or defaults.auth_scheme,
+        advanced_config=advanced_config,
         account_id=account.id,
     )
 
@@ -160,6 +185,10 @@ def resolved_credential_from_account(account: UserApiAccount) -> ResolvedApiCred
 def resolved_credential_from_official_config(config: dict) -> ResolvedApiCredential:
     provider = normalize_provider(config["provider"])
     defaults = provider_defaults(provider)
+    advanced_config = normalize_advanced_config(
+        config.get("advanced_config") or default_advanced_config(config["model"]),
+        config["model"],
+    )
     return ResolvedApiCredential(
         api_source=LLM_API_SOURCE_OFFICIAL,
         provider=provider,
@@ -168,6 +197,9 @@ def resolved_credential_from_official_config(config: dict) -> ResolvedApiCredent
         base_url=config["base_url"],
         model=config["model"],
         thinking_config=config.get("thinking_config") or {},
+        protocol=config.get("protocol") or defaults.protocol,
+        auth_scheme=config.get("auth_scheme") or defaults.auth_scheme,
+        advanced_config=advanced_config,
         account_id=None,
     )
 

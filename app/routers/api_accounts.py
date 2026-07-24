@@ -11,12 +11,13 @@ from app.models import (
     SystemUser,
     UserApiAccount,
 )
+from app.services.api_account_persistence import (
+    apply_api_account_update,
+    build_api_account,
+)
 from app.services.api_credentials import (
     account_response,
-    encrypt_api_key,
     ensure_single_default,
-    normalize_provider,
-    provider_defaults,
     user_has_api_accounts,
     utc_now,
 )
@@ -62,18 +63,10 @@ async def create_api_account(
     current_user: SystemUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    provider = normalize_provider(body.provider)
-    defaults = provider_defaults(provider)
     has_accounts = await user_has_api_accounts(db, current_user)
-    account = UserApiAccount(
+    account = build_api_account(
+        body,
         user_id=current_user.id,
-        provider=provider,
-        display_name=(body.display_name or defaults.label).strip() or defaults.label,
-        api_key_encrypted=encrypt_api_key(body.api_key),
-        base_url=(body.base_url or defaults.base_url).strip() or defaults.base_url,
-        model=(body.model or defaults.model).strip() or defaults.model,
-        thinking_config=body.thinking_config or {},
-        enabled=True,
         is_default=body.is_default or not has_accounts,
     )
     db.add(account)
@@ -93,28 +86,7 @@ async def update_api_account(
     db: AsyncSession = Depends(get_db),
 ):
     account = await _get_user_account(db, current_user, account_id)
-    if body.display_name is not None:
-        display_name = body.display_name.strip()
-        if not display_name:
-            raise HTTPException(status_code=400, detail="密钥名称不能为空")
-        account.display_name = display_name
-    if body.api_key is not None:
-        account.api_key_encrypted = encrypt_api_key(body.api_key)
-        account.last_error = None
-    if body.base_url is not None:
-        base_url = body.base_url.strip()
-        if not base_url:
-            raise HTTPException(status_code=400, detail="Base URL 不能为空")
-        account.base_url = base_url
-    if body.model is not None:
-        model = body.model.strip()
-        if not model:
-            raise HTTPException(status_code=400, detail="模型不能为空")
-        account.model = model
-    if body.thinking_config is not None:
-        account.thinking_config = body.thinking_config
-    if body.enabled is not None:
-        account.enabled = body.enabled
+    apply_api_account_update(account, body)
     if body.is_default is True:
         await ensure_single_default(db, current_user, account)
     elif body.is_default is False:

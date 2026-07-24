@@ -3,6 +3,42 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 
 @pytest.mark.asyncio
+async def test_init_db_adds_expanded_api_account_columns_to_legacy_table(test_db_url):
+    from app.database import _ensure_sqlite_legacy_columns
+
+    engine = create_async_engine(test_db_url, echo=False, future=True)
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE user_api_accounts (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                provider VARCHAR(50) NOT NULL,
+                display_name VARCHAR(120) NOT NULL,
+                api_key_encrypted TEXT NOT NULL,
+                base_url VARCHAR(500) NOT NULL,
+                model VARCHAR(200) NOT NULL
+            )
+            """
+        )
+
+        await _ensure_sqlite_legacy_columns(conn)
+
+        result = await conn.exec_driver_sql("PRAGMA table_info(user_api_accounts)")
+        columns = {row[1] for row in result.fetchall()}
+
+    await engine.dispose()
+
+    assert {
+        "protocol",
+        "auth_scheme",
+        "website_url",
+        "notes",
+        "advanced_config",
+    } <= columns
+
+
+@pytest.mark.asyncio
 async def test_init_db_adds_knowledge_scope_columns_to_legacy_tables(test_db_url):
     from app.database import _ensure_sqlite_legacy_columns
     from app.services.sqlite_legacy_schema import ensure_sqlite_legacy_columns
