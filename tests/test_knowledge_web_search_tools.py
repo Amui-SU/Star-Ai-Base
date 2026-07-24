@@ -112,3 +112,37 @@ async def test_execute_fetch_web_page_tool_enforces_limit_and_appends_source():
     assert state["errors"] == [
         {"source": "web_page", "message": "网页读取次数已达到上限"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_execute_fetch_web_page_tool_sanitizes_failure_results():
+    secret = "sk-secret?tenant=private"
+
+    async def fetch_web_page(url, *, max_chars):
+        return {
+            "url": url,
+            "title": "",
+            "content": "",
+            "error": "fetch_failed",
+            "message": f"upstream rejected {secret}",
+        }
+
+    state = {}
+    result = await execute_fetch_web_page_tool(
+        {"url": "https://example.com/private"},
+        [],
+        state,
+        fetch_web_page=fetch_web_page,
+    )
+
+    assert result["error"] == "fetch_failed"
+    assert result["message"] == "网页读取失败"
+    assert state["errors"] == [
+        {
+            "source": "web_page",
+            "url": "https://example.com/private",
+            "message": "网页读取失败",
+        }
+    ]
+    assert secret not in str(result)
+    assert secret not in str(state)

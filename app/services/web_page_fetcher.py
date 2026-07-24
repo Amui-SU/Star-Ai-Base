@@ -136,13 +136,13 @@ async def fetch_web_page(
                     body.extend(chunk[:remaining])
                     if len(body) >= limit:
                         break
-    except Exception as exc:
+    except Exception:
         return {
             "url": normalized_url,
             "title": "",
             "content": "",
             "error": "fetch_failed",
-            "message": str(exc),
+            "message": "网页读取失败",
         }
 
     parser = ReadableHTMLParser()

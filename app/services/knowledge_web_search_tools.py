@@ -124,6 +124,8 @@ async def execute_fetch_web_page_tool(
     state["fetch_count"] = fetch_count + 1
     result = await fetch_web_page(url, max_chars=FETCH_WEB_PAGE_CONTEXT_CHARS)
     if result.get("error"):
+        if result["error"] == "fetch_failed":
+            result = {**result, "message": "网页读取失败"}
         state["failed"] = True
         state.setdefault("errors", []).append(
             {

@@ -300,3 +300,30 @@ async def test_fetch_web_page_rejects_non_text_content_type(monkeypatch):
 
     assert result["error"] == "unsupported_content_type"
     assert result["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_fetch_web_page_sanitizes_upstream_failures(monkeypatch):
+    secret = "sk-secret?tenant=private"
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            raise web_search.httpx.ConnectError(f"connection failed for {secret}")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    async def fake_resolve_hostname(hostname, port=80):
+        return [FakeResolverResult("93.184.216.34")]
+
+    monkeypatch.setattr(web_search.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(web_search, "_resolve_hostname", fake_resolve_hostname)
+
+    result = await web_search.fetch_web_page("https://example.com/private")
+
+    assert result["error"] == "fetch_failed"
+    assert result["message"] == "网页读取失败"
+    assert secret not in str(result)
