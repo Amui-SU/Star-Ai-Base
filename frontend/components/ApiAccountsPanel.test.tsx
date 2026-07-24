@@ -93,8 +93,13 @@ describe("ApiAccountsPanel", () => {
     expect(screen.getByLabelText("服务商")).toBeDisabled();
     await user.clear(screen.getByLabelText("备注"));
     await user.type(screen.getByLabelText("备注"), "updated");
-    await user.clear(screen.getByLabelText("默认模型"));
-    await user.type(screen.getByLabelText("默认模型"), "deepseek-v3-updated");
+    expect(screen.queryByLabelText("默认模型")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("兜底模型")).not.toBeInTheDocument();
+    await user.clear(screen.getByLabelText("默认兜底模型"));
+    await user.type(
+      screen.getByLabelText("默认兜底模型"),
+      "deepseek-v3-updated",
+    );
     await user.click(screen.getByRole("button", { name: "保存配置" }));
     expect(apiAccountApi.update).toHaveBeenCalledWith(
       7,

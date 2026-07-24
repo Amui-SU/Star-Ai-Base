@@ -49,6 +49,24 @@ function isHttpUrl(value: string) {
   }
 }
 
+function isEmptyThinking(
+  mode: ApiAccountWorkspaceDraft["thinkingMode"],
+  raw: string,
+) {
+  if (mode !== "off") return false;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 function initialDraft(
   account: ApiAccount | null,
   templates: ThinkingTemplates,
@@ -69,7 +87,7 @@ function initialDraft(
     websiteUrl: account?.website_url ?? preset.websiteUrl,
     apiKey: "",
     baseUrl: account?.base_url ?? preset.baseUrl,
-    model: account?.model ?? preset.model,
+    model: advancedConfig.fallback_model,
     protocol: account?.protocol ?? preset.protocol,
     authScheme: account?.auth_scheme ?? preset.authScheme,
     enabled: account?.enabled ?? true,
@@ -101,25 +119,29 @@ function payload(
   templates: ThinkingTemplates,
 ) {
   const preset = providerPresetMap.get(draft.provider) ?? firstPreset;
+  const advancedConfig = normalizeApiAccountConfig({
+    ...draft.advancedConfig,
+    model_mapping: Object.fromEntries(
+      draft.modelMappingRows.map((row) => [row.alias, row.model]),
+    ),
+    headers: Object.fromEntries(
+      draft.headerRows.map((row) => [row.name, row.value]),
+    ),
+    body: JSON.parse(draft.bodyRaw),
+  });
+  const model = advancedConfig.fallback_model.trim();
+  if (preset.kind === "llm" && !model)
+    throw new Error("fallback_model 不能为空");
   return {
     provider: draft.provider,
     display_name: draft.displayName.trim() || preset.label,
     base_url: draft.baseUrl.trim(),
-    model: draft.model.trim(),
+    model,
     protocol: draft.protocol,
     auth_scheme: draft.authScheme,
     website_url: draft.websiteUrl.trim(),
     notes: draft.notes.trim(),
-    advanced_config: normalizeApiAccountConfig({
-      ...draft.advancedConfig,
-      model_mapping: Object.fromEntries(
-        draft.modelMappingRows.map((row) => [row.alias, row.model]),
-      ),
-      headers: Object.fromEntries(
-        draft.headerRows.map((row) => [row.name, row.value]),
-      ),
-      body: JSON.parse(draft.bodyRaw),
-    }),
+    advanced_config: advancedConfig,
     thinking_config:
       preset.kind === "search" ? {} : thinkingConfig(draft, templates),
     enabled: draft.enabled,
@@ -200,7 +222,14 @@ export function useApiAccountWorkspace({
           fields,
         );
         if (!jsonError) setRawJson(formatApiAccountConfig(advancedConfig));
-        return { ...previous, advancedConfig };
+        return {
+          ...previous,
+          advancedConfig,
+          model:
+            fields.fallback_model === undefined
+              ? previous.model
+              : advancedConfig.fallback_model,
+        };
       });
     },
     [jsonError],
@@ -221,36 +250,50 @@ export function useApiAccountWorkspace({
       const next = providerPresetMap.get(provider) ?? firstPreset;
       setDraft((previous) => {
         const old = providerPresetMap.get(previous.provider) ?? firstPreset;
-        const manual =
-          (previous.baseUrl && previous.baseUrl !== old.baseUrl) ||
-          (previous.model && previous.model !== old.model) ||
-          (previous.websiteUrl && previous.websiteUrl !== old.websiteUrl) ||
-          previous.thinkingMode !== "off" ||
-          previous.thinkingJson !== JSON.stringify({}, null, 2);
-        const restore = manual
+        const baseUrlManual =
+          Boolean(previous.baseUrl.trim()) &&
+          previous.baseUrl.trim() !== old.baseUrl;
+        const modelManual =
+          Boolean(previous.advancedConfig.fallback_model.trim()) &&
+          previous.advancedConfig.fallback_model.trim() !== old.model;
+        const websiteManual =
+          Boolean(previous.websiteUrl.trim()) &&
+          previous.websiteUrl.trim() !== old.websiteUrl;
+        const thinkingManual = !isEmptyThinking(
+          previous.thinkingMode,
+          previous.thinkingJson,
+        );
+        const hasManual =
+          baseUrlManual || modelManual || websiteManual || thinkingManual;
+        const restore = hasManual
           ? window.confirm(
               "已手动修改连接配置。确定恢复为新服务商默认值？取消将保留手动值。",
             )
           : true;
-        const advancedConfig = updateApiAccountConfig(previous.advancedConfig, {
-          fallback_model: restore
+        const model =
+          restore || !modelManual
             ? next.model
-            : previous.advancedConfig.fallback_model,
+            : previous.advancedConfig.fallback_model;
+        const advancedConfig = updateApiAccountConfig(previous.advancedConfig, {
+          fallback_model: model,
         });
         if (!jsonError) setRawJson(formatApiAccountConfig(advancedConfig));
         return {
           ...previous,
           provider: next.provider,
-          baseUrl: restore ? next.baseUrl : previous.baseUrl,
-          model: restore ? next.model : previous.model,
-          websiteUrl: restore ? next.websiteUrl : previous.websiteUrl,
+          baseUrl: restore || !baseUrlManual ? next.baseUrl : previous.baseUrl,
+          model,
+          websiteUrl:
+            restore || !websiteManual ? next.websiteUrl : previous.websiteUrl,
           protocol: next.protocol,
           authScheme: next.authScheme,
           advancedConfig,
-          thinkingMode: restore ? "off" : previous.thinkingMode,
-          thinkingJson: restore
-            ? JSON.stringify({}, null, 2)
-            : previous.thinkingJson,
+          thinkingMode:
+            restore || !thinkingManual ? "off" : previous.thinkingMode,
+          thinkingJson:
+            restore || !thinkingManual
+              ? JSON.stringify({}, null, 2)
+              : previous.thinkingJson,
         };
       });
     },
@@ -290,7 +333,7 @@ export function useApiAccountWorkspace({
         "api-account-website-url",
         "官网地址必须是有效的 HTTP 或 HTTPS 地址",
       );
-    if (preset.kind === "llm" && !draft.model.trim())
+    if (preset.kind === "llm" && !draft.advancedConfig.fallback_model.trim())
       return locate("models", "api-account-model", "请填写模型");
     const aliases = draft.modelMappingRows.map((row) => row.alias.trim());
     if (
@@ -397,6 +440,7 @@ export function useApiAccountWorkspace({
         const advancedConfig = parseApiAccountConfig(raw);
         setDraft((previous) => ({
           ...previous,
+          model: advancedConfig.fallback_model,
           advancedConfig,
           modelMappingRows: Object.entries(advancedConfig.model_mapping).map(
             ([alias, model], index) => ({ id: `model-${index}`, alias, model }),

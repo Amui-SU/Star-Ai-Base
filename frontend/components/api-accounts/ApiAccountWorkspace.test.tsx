@@ -64,7 +64,7 @@ async function openCreate() {
 }
 
 describe("ApiAccountWorkspace", () => {
-  it("keeps manually edited connection and thinking values when preset restore is cancelled", async () => {
+  it("keeps only a manually edited URL when preset restore is cancelled", async () => {
     vi.stubGlobal(
       "confirm",
       vi.fn(() => false),
@@ -75,19 +75,45 @@ describe("ApiAccountWorkspace", () => {
       screen.getByLabelText("Base URL"),
       "https://manual.example/v1",
     );
+    await user.selectOptions(screen.getByLabelText("服务商"), "claude");
+    expect(window.confirm).toHaveBeenCalled();
+    expect(screen.getByLabelText("Base URL")).toHaveValue(
+      "https://manual.example/v1",
+    );
+    expect(screen.getByLabelText("默认兜底模型")).toHaveValue(
+      "claude-haiku-4-5",
+    );
+    expect(screen.getByLabelText("官网地址")).toHaveValue(
+      "https://www.anthropic.com/",
+    );
+    expect(screen.getByRole("button", { name: "关闭" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("keeps only manually edited thinking when preset restore is cancelled", async () => {
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => false),
+    );
+    const user = await openCreate();
     await user.click(screen.getByRole("button", { name: "请求配置" }));
     await user.click(screen.getByRole("button", { name: "自定义" }));
     fireEvent.change(screen.getByLabelText("请求体 JSON（自定义）"), {
       target: { value: '{"reasoning":{"effort":"high"}}' },
     });
     await user.selectOptions(screen.getByLabelText("服务商"), "claude");
+
     expect(window.confirm).toHaveBeenCalled();
     expect(screen.getByLabelText("Base URL")).toHaveValue(
-      "https://manual.example/v1",
+      "https://api.anthropic.com/v1",
     );
-    expect(screen.getByLabelText("默认模型")).toHaveValue("deepseek-chat");
+    expect(screen.getByLabelText("默认兜底模型")).toHaveValue(
+      "claude-haiku-4-5",
+    );
     expect(screen.getByLabelText("官网地址")).toHaveValue(
-      "https://www.deepseek.com/",
+      "https://www.anthropic.com/",
     );
     expect(screen.getByRole("button", { name: "自定义" })).toHaveAttribute(
       "aria-pressed",
@@ -109,6 +135,13 @@ describe("ApiAccountWorkspace", () => {
       screen.getByLabelText("Base URL"),
       "https://manual.example/v1",
     );
+    await user.clear(screen.getByLabelText("默认兜底模型"));
+    await user.type(screen.getByLabelText("默认兜底模型"), "manual-model");
+    await user.clear(screen.getByLabelText("官网地址"));
+    await user.type(
+      screen.getByLabelText("官网地址"),
+      "https://manual.example/",
+    );
     await user.click(screen.getByRole("button", { name: "请求配置" }));
     await user.click(screen.getByRole("button", { name: "自定义" }));
     fireEvent.change(screen.getByLabelText("请求体 JSON（自定义）"), {
@@ -119,7 +152,9 @@ describe("ApiAccountWorkspace", () => {
     expect(screen.getByLabelText("Base URL")).toHaveValue(
       "https://api.anthropic.com/v1",
     );
-    expect(screen.getByLabelText("默认模型")).toHaveValue("claude-haiku-4-5");
+    expect(screen.getByLabelText("默认兜底模型")).toHaveValue(
+      "claude-haiku-4-5",
+    );
     expect(screen.getByLabelText("官网地址")).toHaveValue(
       "https://www.anthropic.com/",
     );
@@ -139,7 +174,7 @@ describe("ApiAccountWorkspace", () => {
     const user = await openCreate();
 
     expect(screen.getByLabelText("API Key")).toBeVisible();
-    expect(screen.getByLabelText("默认模型")).toBeVisible();
+    expect(screen.getByLabelText("默认兜底模型")).toBeVisible();
     expect(screen.getByLabelText("完整 advanced_config JSON")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "模型映射" }));
     expect(scrollIntoView).toHaveBeenCalled();
@@ -171,9 +206,9 @@ describe("ApiAccountWorkspace", () => {
           '{"version":1,"fallback_model":"from-json","vendor":{"keep":true}}',
       },
     });
-    expect(screen.getByLabelText("兜底模型")).not.toHaveValue("from-json");
+    expect(screen.getByLabelText("默认兜底模型")).not.toHaveValue("from-json");
     await user.click(screen.getByRole("button", { name: "应用 JSON" }));
-    expect(screen.getByLabelText("兜底模型")).toHaveValue("from-json");
+    expect(screen.getByLabelText("默认兜底模型")).toHaveValue("from-json");
     await user.click(screen.getByRole("button", { name: "专注编辑 JSON" }));
     await user.type(screen.getByLabelText("专注 JSON 编辑器"), " broken");
     await user.click(screen.getByRole("button", { name: "取消专注编辑" }));
@@ -183,7 +218,30 @@ describe("ApiAccountWorkspace", () => {
     fireEvent.change(raw, { target: { value: "{bad" } });
     await user.click(screen.getByRole("button", { name: "应用 JSON" }));
     expect(screen.getByRole("alert")).toHaveTextContent(/line 1, column/i);
-    expect(screen.getByLabelText("兜底模型")).toHaveValue("from-json");
+    expect(screen.getByLabelText("默认兜底模型")).toHaveValue("from-json");
+  });
+
+  it("saves an applied JSON fallback as both canonical model fields", async () => {
+    const user = await openCreate();
+    await user.type(screen.getByLabelText("API Key"), "draft-secret");
+    await user.click(screen.getByRole("button", { name: "配置 JSON" }));
+    fireEvent.change(screen.getByLabelText("完整 advanced_config JSON"), {
+      target: {
+        value: '{"version":1,"fallback_model":"json-canonical"}',
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "应用 JSON" }));
+    expect(screen.getByLabelText("默认兜底模型")).toHaveValue("json-canonical");
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+
+    expect(apiAccountApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "json-canonical",
+        advanced_config: expect.objectContaining({
+          fallback_model: "json-canonical",
+        }),
+      }),
+    );
   });
 
   it("validates the current unsaved draft without clearing dirty state", async () => {

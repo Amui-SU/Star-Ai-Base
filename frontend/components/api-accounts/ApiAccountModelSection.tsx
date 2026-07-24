@@ -34,23 +34,10 @@ export default function ApiAccountModelSection({
   return (
     <div className="api-account-model-editor">
       <label className="api-account-field">
-        <span>默认模型</span>
+        <span>默认兜底模型</span>
         <input
           id="api-account-model"
           className="input"
-          value={draft.model}
-          onChange={(event) => {
-            const model = event.target.value;
-            update({ model });
-            updateAdvanced({ fallback_model: model });
-          }}
-        />
-      </label>
-      <label className="api-account-field">
-        <span>兜底模型</span>
-        <input
-          className="input"
-          aria-label="兜底模型"
           value={draft.advancedConfig.fallback_model}
           onChange={(event) =>
             updateAdvanced({ fallback_model: event.target.value })
