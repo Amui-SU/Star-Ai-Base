@@ -5,6 +5,7 @@ import httpx
 from loguru import logger
 
 from app.config import settings
+from app.services.llm_errors import classify_upstream_error
 from app.services.web_page_fetcher import truncate_text
 from app.services.web_search_parsers import (
     DuckDuckGoResultParser,
@@ -126,14 +127,17 @@ async def try_search_provider(
             **search_kwargs,
         )
     except Exception as exc:
-        logger.debug(f"联网搜索源 {provider} 查询失败，继续尝试备用源: {exc}")
+        failure = classify_upstream_error(exc)
+        logger.debug(
+            failure.log_message(f"联网搜索源 {provider} 查询失败，继续尝试备用源")
+        )
         if diagnostics is not None:
             diagnostics.append(
                 {
                     "provider": provider,
                     "status": "failed",
-                    "error": exc.__class__.__name__,
-                    "message": truncate_text(str(exc), 240) or "搜索源请求失败",
+                    "error": failure.code,
+                    "message": failure.message,
                     "proxy_configured": bool(settings.http_proxy.strip()),
                 }
             )

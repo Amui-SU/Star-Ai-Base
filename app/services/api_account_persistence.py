@@ -45,6 +45,8 @@ def _validate_protocol_and_auth(
 
 
 def _normalized_advanced(value: object, model: str) -> dict:
+    if value is None:
+        value = {}
     if not isinstance(value, dict):
         raise HTTPException(status_code=400, detail="Invalid advanced_config")
     normalized = normalize_advanced_config(value, model)
@@ -120,10 +122,15 @@ def apply_api_account_update(
     model = account.model
     if "model" in fields:
         model = _required_text(body.model, "Model")
-    if "advanced_config" in fields and body.advanced_config is not None:
-        advanced = normalize_advanced_config(body.advanced_config, model)
-        if "model" not in fields and advanced["fallback_model"]:
-            model = advanced["fallback_model"]
+    if "advanced_config" in fields:
+        if body.advanced_config is None:
+            advanced = normalize_advanced_config({}, model)
+        elif not isinstance(body.advanced_config, dict):
+            raise HTTPException(status_code=400, detail="Invalid advanced_config")
+        else:
+            advanced = normalize_advanced_config(body.advanced_config, model)
+            if "model" not in fields and advanced["fallback_model"]:
+                model = advanced["fallback_model"]
     else:
         advanced = normalize_advanced_config(
             getattr(account, "advanced_config", None), model

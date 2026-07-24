@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 from langchain.schema import Document
 
 from app.services.rag_qa import (
@@ -106,8 +107,12 @@ async def test_answer_rag_question_searches_with_normalized_bvids_and_completes(
 
 
 @pytest.mark.asyncio
-async def test_answer_rag_question_handles_search_and_llm_failures():
+async def test_answer_rag_question_handles_search_and_llm_failures(monkeypatch):
     fallback_calls = []
+    logged = []
+    monkeypatch.setattr(
+        "app.services.rag_qa.logger", SimpleNamespace(error=logged.append)
+    )
 
     async def fallback_answer(question, reason):
         fallback_calls.append((question, reason))
@@ -129,7 +134,7 @@ async def test_answer_rag_question_handles_search_and_llm_failures():
     assert fallback_calls == [("检索失败问题", "检索时遇到问题")]
 
     async def broken_complete_answer(_question, _context):
-        raise RuntimeError("llm down")
+        raise RuntimeError("llm down sk-secret X-Tenant=alpha body={temperature:1}")
 
     result = await answer_rag_question(
         "LLM失败问题",
@@ -144,7 +149,7 @@ async def test_answer_rag_question_handles_search_and_llm_failures():
     )
 
     assert result == {
-        "answer": "AI 回答时发生错误: llm down",
+        "answer": "上游模型服务请求失败",
         "sources": [
             {
                 "bvid": "BV1",
@@ -153,6 +158,8 @@ async def test_answer_rag_question_handles_search_and_llm_failures():
             }
         ],
     }
+    assert "sk-secret" not in str(result)
+    assert all("sk-secret" not in message for message in logged)
 
 
 @pytest.mark.asyncio

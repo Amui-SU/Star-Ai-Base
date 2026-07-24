@@ -91,6 +91,7 @@ from app.services.chat_route_runtime import (
     stream_legacy_chat_from_router,
 )
 from app.services.llm_client import get_llm_client as _get_llm_client
+from app.services.llm_errors import classify_upstream_error
 from app.services.rag_runtime import get_rag_service, reset_rag_service
 
 router = APIRouter(prefix="/chat", tags=["对话"])
@@ -352,9 +353,10 @@ async def ask_question(
         )
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"问答失败: {e}")
-        raise HTTPException(status_code=500, detail=f"问答失败: {str(e)}")
+    except Exception as exc:
+        failure = classify_upstream_error(exc)
+        logger.error(failure.log_message("问答失败"))
+        raise HTTPException(status_code=500, detail=failure.detail()) from exc
 
 
 @router.post("/ask/stream")
@@ -376,9 +378,10 @@ async def ask_question_stream(
         return StreamingResponse(stream, media_type="text/plain; charset=utf-8")
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"流式问答失败: {e}")
-        raise HTTPException(status_code=500, detail=f"流式问答失败: {str(e)}")
+    except Exception as exc:
+        failure = classify_upstream_error(exc)
+        logger.error(failure.log_message("流式问答失败"))
+        raise HTTPException(status_code=500, detail=failure.detail()) from exc
 
 
 @router.post("/search")

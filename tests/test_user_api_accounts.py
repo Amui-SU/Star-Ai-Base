@@ -358,3 +358,69 @@ def test_resolved_credential_maps_account_model_alias_and_keeps_legacy_fallback(
     assert resolved.auth_scheme == "bearer"
     assert resolved.advanced_config["fallback_model"] == "fallback-model"
     assert resolved.to_llm_config()["advanced_config"] == resolved.advanced_config
+
+
+@pytest.mark.asyncio
+async def test_advanced_config_null_defaults_and_patch_reset_are_explicit(client):
+    auth = await _register_user(client, "api-null-config@example.com")
+    client.cookies.clear()
+    headers = {"Authorization": f"Bearer {auth['session_token']}"}
+
+    created = await client.post(
+        "/api-accounts",
+        json={
+            "provider": "deepseek",
+            "api_key": "null-config-secret",
+            "model": "deepseek-chat",
+            "advanced_config": None,
+        },
+        headers=headers,
+    )
+
+    assert created.status_code == 200
+    account_id = created.json()["id"]
+    assert created.json()["advanced_config"]["fallback_model"] == "deepseek-chat"
+
+    configured = await client.patch(
+        f"/api-accounts/{account_id}",
+        json={"advanced_config": {"headers": {"X-Tenant": "alpha"}}},
+        headers=headers,
+    )
+    assert configured.status_code == 200
+    assert configured.json()["advanced_config"]["headers"] == {"X-Tenant": "alpha"}
+
+    reset = await client.patch(
+        f"/api-accounts/{account_id}",
+        json={"advanced_config": None},
+        headers=headers,
+    )
+    assert reset.status_code == 200
+    assert reset.json()["advanced_config"]["headers"] == {}
+    assert reset.json()["advanced_config"]["fallback_model"] == "deepseek-chat"
+
+
+@pytest.mark.asyncio
+async def test_patch_non_object_advanced_config_does_not_modify_saved_config(client):
+    auth = await _register_user(client, "api-invalid-patch@example.com")
+    client.cookies.clear()
+    headers = {"Authorization": f"Bearer {auth['session_token']}"}
+    created = await client.post(
+        "/api-accounts",
+        json={
+            "provider": "deepseek",
+            "api_key": "invalid-patch-secret",
+            "advanced_config": {"headers": {"X-Tenant": "preserved"}},
+        },
+        headers=headers,
+    )
+    account_id = created.json()["id"]
+
+    invalid = await client.patch(
+        f"/api-accounts/{account_id}",
+        json={"advanced_config": ["not", "an", "object"]},
+        headers=headers,
+    )
+
+    assert invalid.status_code == 400
+    listing = await client.get("/api-accounts", headers=headers)
+    assert listing.json()[0]["advanced_config"]["headers"] == {"X-Tenant": "preserved"}

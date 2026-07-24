@@ -1,4 +1,54 @@
 import pytest
+from types import SimpleNamespace
+
+from app.services.knowledge_web_search import (
+    exception_summary,
+    web_search_failed_status_from_exception,
+)
+
+
+def test_web_search_failure_summary_never_exposes_upstream_request_data():
+    secret = "sk-secret X-Tenant=alpha body={temperature:1}"
+    error = RuntimeError(f"upstream rejected {secret}")
+
+    status = web_search_failed_status_from_exception(error)
+
+    assert exception_summary(error) == "上游模型服务请求失败"
+    assert status["errors"] == [
+        {"source": "web_search", "message": "上游模型服务请求失败"}
+    ]
+    assert secret not in str(status)
+
+
+@pytest.mark.asyncio
+async def test_web_search_provider_diagnostic_and_log_are_sanitized(monkeypatch):
+    from app.services import web_search_providers
+
+    secret = "sk-secret X-Tenant=alpha body={temperature:1}"
+    logged = []
+    diagnostics = []
+
+    async def failing_searcher(*_args, **_kwargs):
+        raise RuntimeError(f"provider rejected {secret}")
+
+    monkeypatch.setattr(
+        web_search_providers, "logger", SimpleNamespace(debug=logged.append)
+    )
+
+    result = await web_search_providers.try_search_provider(
+        "test-provider",
+        failing_searcher,
+        object(),
+        "query",
+        max_results=3,
+        diagnostics=diagnostics,
+    )
+
+    assert result == []
+    assert diagnostics[0]["error"] == "upstream_request_failed"
+    assert diagnostics[0]["message"] == "上游模型服务请求失败"
+    assert secret not in str(diagnostics)
+    assert logged and secret not in logged[0]
 
 
 def test_web_search_context_is_marked_as_sandboxed_but_usable(monkeypatch):

@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 
 from app.services.knowledge_base_presenters import supports_keyword_argument
+from app.services.llm_errors import classify_upstream_error
 from app.services.knowledge_web_search import (
     append_web_result,
     append_web_search_diagnostics,
@@ -71,7 +72,8 @@ async def execute_web_search_tool(
         state.setdefault("errors", []).append(
             {"source": "web_search", "query": query, "message": "联网搜索失败"}
         )
-        logger.warning(f"联网搜索工具调用失败，将仅使用知识库回答: {exc}")
+        failure = classify_upstream_error(exc)
+        logger.warning(failure.log_message("联网搜索工具调用失败，将仅使用知识库回答"))
         return {
             "source_type": "web_search",
             "query": query,

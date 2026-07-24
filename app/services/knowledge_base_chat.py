@@ -12,6 +12,7 @@ from app.models import (
 )
 from app.schemas.chat import ChatResponse
 from app.schemas.knowledge_base import KnowledgeBaseChatRequest
+from app.services.llm_errors import classify_upstream_error
 
 
 async def answer_knowledge_base_chat(
@@ -93,7 +94,8 @@ async def answer_knowledge_base_chat(
             error_code=exc.__class__.__name__,
         )
         await db.commit()
-        warning_logger(f"知识库模型回答失败，回退到检索内容: {exc}")
+        failure = classify_upstream_error(exc)
+        warning_logger(failure.log_message("知识库模型回答失败，回退到检索内容"))
         response = answer_from_documents(question, documents)
         if payload.web_search:
             response.web_search = web_search_failed_status_from_exception(exc)

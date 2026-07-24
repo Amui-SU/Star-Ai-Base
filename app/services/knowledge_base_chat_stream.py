@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import KnowledgeBase, SystemUser, Workspace
 from app.schemas.knowledge_base import KnowledgeBaseChatRequest
+from app.services.llm_errors import classify_upstream_error
 
 
 async def stream_knowledge_base_chat(
@@ -96,7 +97,10 @@ async def stream_knowledge_base_chat(
                     tool_run.messages
                 )
             except Exception as exc:
-                warning_logger(f"知识库联网工具链准备失败，将仅使用知识库回答: {exc!r}")
+                failure = classify_upstream_error(exc)
+                warning_logger(
+                    failure.log_message("知识库联网工具链准备失败，将仅使用知识库回答")
+                )
                 web_search_status = web_search_failed_status_from_exception(exc)
             finally:
                 yield encode_web_search_progress("")
@@ -121,7 +125,10 @@ async def stream_knowledge_base_chat(
                     answer_started = True
                     yield content
         except Exception as exc:
-            warning_logger(f"知识库流式模型回答失败，回退到检索内容: {exc}")
+            failure = classify_upstream_error(exc)
+            warning_logger(
+                failure.log_message("知识库流式模型回答失败，回退到检索内容")
+            )
             if not answer_started:
                 yield answer_from_documents(question, documents).answer
 

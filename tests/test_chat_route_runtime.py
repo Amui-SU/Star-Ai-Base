@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
+
+from app.schemas.chat import ChatRequest
 
 
 @pytest.mark.asyncio
@@ -104,3 +107,48 @@ async def test_stream_route_runtime_uses_router_module_dependencies(monkeypatch)
         captured["build_llm_unavailable_answer"] is module._build_llm_unavailable_answer
     )
     assert captured["warning_logger"] is warning_logger
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("handler_name", "runtime_name"),
+    [
+        ("ask_question", "answer_legacy_chat_from_router"),
+        ("ask_question_stream", "stream_legacy_chat_from_router"),
+    ],
+)
+async def test_legacy_chat_handlers_do_not_expose_upstream_exception_text(
+    monkeypatch,
+    handler_name,
+    runtime_name,
+):
+    from app.routers import chat
+
+    secret = "sk-secret X-Tenant=alpha body={temperature:1}"
+    logged = []
+
+    async def fail_runtime(*_args, **_kwargs):
+        raise RuntimeError(f"upstream rejected {secret}")
+
+    monkeypatch.setattr(chat, "_raise_legacy_scoped_api_required", lambda: None)
+    monkeypatch.setattr(chat, runtime_name, fail_runtime)
+    monkeypatch.setattr(
+        chat,
+        "logger",
+        SimpleNamespace(error=logged.append, warning=lambda _message: None),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await getattr(chat, handler_name)(
+            request=ChatRequest(question="question"),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == {
+        "code": "upstream_request_failed",
+        "message": "上游模型服务请求失败",
+    }
+    assert secret not in str(exc_info.value.detail)
+    assert logged
+    assert secret not in logged[0]

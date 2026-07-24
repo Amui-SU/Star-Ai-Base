@@ -1,5 +1,7 @@
 import re
 
+from app.services.llm_errors import classify_upstream_error
+
 
 MAX_WEB_CONTEXT_RESULTS = 5
 MAX_INITIAL_WEB_SEARCH_QUERIES = 3
@@ -109,33 +111,26 @@ def web_search_status(
 
 
 def exception_summary(exc: Exception) -> str:
-    return str(exc).strip() or exc.__class__.__name__
+    return classify_upstream_error(exc).message
 
 
 def web_search_failed_status_from_exception(exc: Exception) -> dict:
-    detail = exception_summary(exc)
-    lowered = detail.lower()
-    if "socksio" in lowered or "httpx[socks]" in lowered or "socks proxy" in lowered:
+    failure = classify_upstream_error(exc)
+    if failure.code == "socks_proxy_dependency_missing":
         message = (
             "联网搜索代理依赖缺失：当前配置了 SOCKS 代理，但后端未安装 socksio，"
             "已仅参考知识库。请重新安装后端依赖或运行 pip install socksio。"
         )
-    elif (
-        isinstance(exc, TimeoutError) or "timeout" in lowered or "timed out" in lowered
-    ):
+    elif failure.code == "upstream_timeout":
         message = "联网搜索工具链准备超时，已仅参考知识库。"
-    elif "tool" in lowered and (
-        "not support" in lowered
-        or "unsupported" in lowered
-        or "not supported" in lowered
-    ):
+    elif failure.code == "upstream_tools_unsupported":
         message = "当前模型接口可能不支持联网搜索工具调用，已仅参考知识库。"
     else:
         message = "联网搜索工具链准备失败，已仅参考知识库。"
     return web_search_status(
         "failed",
         message=message,
-        errors=[{"source": "web_search", "message": detail}],
+        errors=[{"source": "web_search", "message": failure.message}],
     )
 
 

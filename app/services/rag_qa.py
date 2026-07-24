@@ -9,6 +9,8 @@ from langchain.schema.output_parser import StrOutputParser
 from langchain.schema.runnable import RunnablePassthrough
 from loguru import logger
 
+from app.services.llm_errors import classify_upstream_error
+
 
 FallbackAnswer = Callable[[str, str], Awaitable[dict[str, Any]]]
 CompleteAnswer = Callable[[str, str], Awaitable[str]]
@@ -34,7 +36,8 @@ async def fallback_rag_answer(
         answer = await chain.ainvoke(question)
         return {"answer": answer, "sources": []}
     except Exception as exc:
-        logger.error(f"Fallback 回复失败: {exc}")
+        failure = classify_upstream_error(exc)
+        logger.error(failure.log_message("Fallback 回复失败"))
         return {
             "answer": f"抱歉，{reason}。您可以尝试构建更多收藏夹内容，或者换个问法试试。",
             "sources": [],
@@ -130,5 +133,6 @@ async def answer_rag_question(
         answer = await complete_answer(question, context)
         return {"answer": answer, "sources": sources}
     except Exception as exc:
-        logger.error(f"LLM 调用失败: {exc}")
-        return {"answer": f"AI 回答时发生错误: {str(exc)}", "sources": sources}
+        failure = classify_upstream_error(exc)
+        logger.error(failure.log_message("LLM 调用失败"))
+        return {"answer": failure.message, "sources": sources}
