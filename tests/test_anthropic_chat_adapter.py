@@ -1,7 +1,10 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.anthropic_chat_adapter import AnthropicChatClientFacade
+from app.services.chat_provider_catalog import PROVIDER_THINKING_TEMPLATES
 
 
 def ns(**kwargs):
@@ -178,3 +181,73 @@ def test_stream_normalizes_text_thinking_and_tool_json_and_closes():
     assert chunks[4].choices[0].delta.content == "Done"
     assert chunks[-1].choices[0].finish_reason == "stop"
     assert stream.closed is True
+
+
+def test_extended_thinking_removes_temperature_and_expands_max_tokens():
+    client, sdk = facade(ns(content=[], stop_reason="end_turn"))
+
+    client.chat.completions.create(
+        model="claude-test",
+        messages=[{"role": "user", "content": "Think"}],
+        temperature=0.5,
+        extra_body=PROVIDER_THINKING_TEMPLATES["claude"],
+    )
+
+    request = sdk.calls[0]
+    assert "temperature" not in request
+    assert request["max_tokens"] == 4096
+    assert request["max_tokens"] > request["extra_body"]["thinking"]["budget_tokens"]
+
+
+def test_extended_thinking_preserves_sufficient_explicit_max_tokens():
+    client, sdk = facade(ns(content=[], stop_reason="end_turn"))
+
+    client.chat.completions.create(
+        model="claude-test",
+        messages=[{"role": "user", "content": "Think"}],
+        max_tokens=5000,
+        temperature=0.5,
+        extra_body={"thinking": {"type": "enabled", "budget_tokens": 2000}},
+    )
+
+    assert sdk.calls[0]["max_tokens"] == 5000
+    assert "temperature" not in sdk.calls[0]
+
+
+def test_disabled_thinking_keeps_temperature_and_max_tokens():
+    client, sdk = facade(ns(content=[], stop_reason="end_turn"))
+
+    client.chat.completions.create(
+        model="claude-test",
+        messages=[{"role": "user", "content": "Answer"}],
+        max_tokens=512,
+        temperature=0.5,
+        extra_body={"thinking": {"type": "disabled", "budget_tokens": 2000}},
+    )
+
+    assert sdk.calls[0]["max_tokens"] == 512
+    assert sdk.calls[0]["temperature"] == 0.5
+
+
+@pytest.mark.parametrize(
+    ("stop_reason", "expected"),
+    [("tool_use", "tool_calls"), ("end_turn", "stop")],
+)
+def test_stream_maps_message_delta_stop_reason(stop_reason, expected):
+    stream = FakeStream(
+        [
+            ns(type="message_delta", delta=ns(stop_reason=stop_reason)),
+            ns(type="message_stop"),
+        ]
+    )
+    client, _sdk = facade(stream)
+
+    chunks = list(
+        client.chat.completions.create(
+            model="claude-test",
+            messages=[{"role": "user", "content": "Hi"}],
+            stream=True,
+        )
+    )
+
+    assert [chunk.choices[0].finish_reason for chunk in chunks] == [expected, expected]

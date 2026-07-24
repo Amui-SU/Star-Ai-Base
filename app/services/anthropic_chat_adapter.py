@@ -134,7 +134,12 @@ def _normalize_response(response: Any) -> SimpleNamespace:
     return _ns(choices=[_ns(message=message, finish_reason=finish)])
 
 
+def _finish_reason(stop_reason: str | None) -> str:
+    return "tool_calls" if stop_reason == "tool_use" else "stop"
+
+
 def _stream_chunks(stream: Any):
+    latest_stop_reason = None
     try:
         for event in stream:
             event_type = getattr(event, "type", "")
@@ -169,10 +174,15 @@ def _stream_chunks(stream: Any):
                         function=_ns(name=None, arguments=block.partial_json),
                     )
                     delta = _ns(content=None, reasoning_content=None, tool_calls=[call])
+            elif event_type == "message_delta":
+                latest_stop_reason = getattr(event.delta, "stop_reason", None)
+                if latest_stop_reason:
+                    delta = _ns(content=None, reasoning_content=None, tool_calls=[])
+                    finish = _finish_reason(latest_stop_reason)
             elif event_type == "message_stop":
                 delta, finish = (
                     _ns(content=None, reasoning_content=None, tool_calls=[]),
-                    "stop",
+                    _finish_reason(latest_stop_reason),
                 )
             if delta is not None:
                 yield _ns(choices=[_ns(delta=delta, finish_reason=finish)])
@@ -213,6 +223,13 @@ class _Completions:
         if extra_body:
             request["extra_body"] = extra_body
         request.setdefault("max_tokens", 1024)
+        thinking = extra_body.get("thinking")
+        if isinstance(thinking, dict) and thinking.get("type") == "enabled":
+            budget = thinking.get("budget_tokens")
+            if isinstance(budget, int) and not isinstance(budget, bool):
+                request.pop("temperature", None)
+                if request["max_tokens"] <= budget:
+                    request["max_tokens"] = max(budget + 1024, 4096)
         for field in (
             "frequency_penalty",
             "presence_penalty",
