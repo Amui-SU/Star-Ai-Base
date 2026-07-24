@@ -5,8 +5,7 @@
     max-height: calc(100dvh - 20px);
   }
 
-  .api-accounts-grid,
-  .api-account-basic-grid {
+  .api-accounts-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -127,8 +127,7 @@ html.light .modal-card.api-accounts-panel {
   font-size: 11px;
 }
 
-.api-account-badges,
-.api-account-switches {
+.api-account-badges {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -217,40 +216,6 @@ html.light .modal-card.api-accounts-panel {
   font-size: 11px;
 }
 
-.api-account-basic-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.api-account-field {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 7px;
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.api-account-field .input {
-  width: 100%;
-  min-width: 0;
-}
-
-.api-account-switches {
-  margin-top: 16px;
-}
-
-.api-account-switches label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 650;
-}
-
 .api-account-message {
   border: 1px solid rgba(47, 124, 120, 0.28);
   border-radius: 8px;
@@ -273,8 +238,7 @@ html.light .modal-card.api-accounts-panel {
     max-height: calc(100dvh - 20px);
   }
 
-  .api-accounts-grid,
-  .api-account-basic-grid {
+  .api-accounts-grid {
     grid-template-columns: 1fr;
   }
 

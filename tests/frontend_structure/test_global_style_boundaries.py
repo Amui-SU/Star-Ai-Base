@@ -101,6 +101,10 @@ def test_global_styles_delegate_account_panel_styles_to_feature_file():
     ]:
         assert selector not in globals_css
 
+    workspace_css = project_root / "frontend/app/styles/api-account-workspace.css"
+    assert workspace_css.exists()
+    assert '@import "./api-account-workspace.css";' in account_css.read_text(encoding="utf-8")
+
 
 def test_global_styles_delegate_sources_styles_to_feature_file():
     project_root = get_project_root()

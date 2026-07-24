@@ -1,0 +1,412 @@
+.api-account-workspace {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--panel-bg);
+  color: var(--ink);
+}
+
+.api-account-workspace-header {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 38px 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 68px;
+  border-bottom: 1px solid var(--border);
+  padding: 10px clamp(16px, 3vw, 36px);
+  background: var(--panel-bg);
+}
+
+.api-account-workspace-header img,
+.api-account-provider-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-2);
+  object-fit: contain;
+}
+
+.api-account-workspace-back {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.api-account-workspace-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.api-account-workspace-title {
+  min-width: 0;
+}
+
+.api-account-workspace-title h1 {
+  overflow: hidden;
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-account-workspace-title span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.api-account-workspace-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.api-account-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.api-account-section-nav {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  border-right: 1px solid var(--border);
+  padding: 24px 14px;
+  background: var(--paper-2);
+}
+
+.api-account-section-nav button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.api-account-section-nav button.active,
+.api-account-section-nav button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+}
+
+.api-account-workspace-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-padding-block: 80px;
+}
+
+.api-account-workspace-content {
+  width: min(100%, 1120px);
+  margin: 0 auto;
+  padding: 20px clamp(20px, 4vw, 56px) 72px;
+}
+
+.api-account-workspace-section {
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0;
+}
+
+.api-account-workspace-section summary {
+  padding: 22px 0 14px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.api-account-workspace-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.api-account-section-body {
+  min-width: 0;
+  padding: 0 0 24px;
+}
+
+.api-account-fields {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.api-account-fields.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.api-account-fields label,
+.api-account-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.api-account-fields .wide {
+  grid-column: 1 / -1;
+}
+
+.api-account-fields .check {
+  flex-direction: row;
+  align-items: center;
+}
+
+.api-account-fields input,
+.api-account-fields select,
+.api-account-fields textarea,
+.api-account-field input,
+.api-account-field textarea,
+.api-account-repeat-row input {
+  width: 100%;
+  min-width: 0;
+}
+
+.api-account-fields textarea,
+.api-account-field textarea,
+.api-account-json-editor {
+  min-height: 112px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: var(--input-bg);
+  color: var(--ink);
+}
+
+.api-account-model-editor,
+.api-account-request-editor {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+}
+
+.api-account-repeat-list {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.api-account-repeat-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.api-account-repeat-row button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.api-account-add-row {
+  width: fit-content;
+}
+
+.api-account-subsection h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.api-account-json-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.api-account-json-editor {
+  width: 100%;
+  min-width: 0;
+  min-height: 360px;
+  font:
+    12px/1.55 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.api-account-inline-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.api-account-validation {
+  border: 1px solid rgba(47, 124, 120, 0.35);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #8bded1;
+  overflow-wrap: anywhere;
+}
+
+.api-account-focus-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 280;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 18px;
+  background: var(--panel-bg);
+}
+
+.api-account-focus-overlay header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.api-account-focus-overlay header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.api-account-focus-overlay header div {
+  display: flex;
+  gap: 8px;
+}
+
+.api-account-focus-overlay textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  resize: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--input-bg);
+  color: var(--ink);
+  font:
+    13px/1.6 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+
+.api-account-mobile-actions {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .api-account-workspace {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .api-account-workspace-header {
+    grid-template-columns: 36px 34px minmax(0, 1fr);
+    min-height: 58px;
+    padding: 8px 12px;
+  }
+
+  .api-account-workspace-header img,
+  .api-account-provider-mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .api-account-workspace-actions {
+    display: none;
+  }
+
+  .api-account-workspace-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .api-account-section-nav {
+    display: none;
+  }
+
+  .api-account-workspace-content {
+    padding: 4px 14px 32px;
+  }
+
+  .api-account-workspace-section summary {
+    display: flex;
+    cursor: pointer;
+  }
+
+  .api-account-workspace-section:not([open]) .api-account-section-body {
+    display: none;
+  }
+
+  .api-account-fields.two-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .api-account-fields .wide {
+    grid-column: auto;
+  }
+
+  .api-account-repeat-row {
+    grid-template-columns: minmax(0, 1fr) 34px;
+  }
+
+  .api-account-repeat-row > span {
+    display: none;
+  }
+
+  .api-account-mobile-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    border-top: 1px solid var(--border);
+    padding: 10px 12px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    background: var(--panel-bg);
+  }
+
+  .api-account-focus-overlay {
+    padding: 10px 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .api-account-focus-overlay header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .api-account-focus-overlay header div {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}

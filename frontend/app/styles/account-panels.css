@@ -4,6 +4,7 @@
 @import "./local-connection-qr.css";
 @import "./admin-users-panel.css";
 @import "./api-accounts-panel.css";
+@import "./api-account-workspace.css";
 @import "./account-panels-theme-overrides.css";
 @import "./api-account-empty-hint.css";
 @import "./local-connection-settings.css";

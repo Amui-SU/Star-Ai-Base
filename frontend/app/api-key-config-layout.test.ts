@@ -37,23 +37,30 @@ describe("personal API account layout", () => {
     );
   });
 
-  it("uses a two-column account grid and two-column basic field grid", () => {
+  it("keeps account cards in a two-column list and uses a full viewport workspace", () => {
     expect(stylesheet).toMatch(
       /\.api-accounts-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
     );
     expect(stylesheet).toMatch(
-      /\.api-account-basic-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
+      /\.api-account-workspace\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.api-account-workspace-layout\s*\{[^}]*grid-template-columns:\s*minmax\(180px,\s*240px\)\s+minmax\(0,\s*1fr\);/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.api-account-workspace-scroll\s*\{[^}]*overflow-y:\s*auto;/s,
     );
   });
 
-  it("collapses account and basic grids to one column on mobile", () => {
+  it("collapses the list and workspace on mobile with safe-area actions", () => {
     expect(stylesheet).toMatch(
-      /@media \(max-width:\s*640px\)\s*\{[\s\S]*?\.api-accounts-grid,[\s\S]*?\.api-account-basic-grid\s*\{[^}]*grid-template-columns:\s*1fr;/s,
+      /@media \(max-width:\s*720px\)\s*\{[\s\S]*?\.api-account-section-nav\s*\{[^}]*display:\s*none;[\s\S]*?\.api-account-mobile-actions\s*\{[^}]*display:\s*grid;[^}]*padding-bottom:\s*max\([^;]*safe-area-inset-bottom/s,
     );
   });
 
   it("removes the legacy split list and form layout", () => {
     expect(stylesheet).not.toMatch(/\.api-accounts-layout\s*\{/);
+    expect(stylesheet).not.toMatch(/\.api-account-basic-grid\s*\{/);
   });
 });
 
