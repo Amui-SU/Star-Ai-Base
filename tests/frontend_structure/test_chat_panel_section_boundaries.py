@@ -142,8 +142,19 @@ def test_frontend_provider_presets_are_shared():
     chat_model_status = (
         project_root / "frontend" / "components" / "chat" / "ChatModelStatus.tsx"
     ).read_text(encoding="utf-8")
-    api_account_form = (
-        project_root / "frontend" / "components" / "api-accounts" / "ApiAccountForm.tsx"
+    api_account_identity = (
+        project_root
+        / "frontend"
+        / "components"
+        / "api-accounts"
+        / "ApiAccountIdentitySection.tsx"
+    ).read_text(encoding="utf-8")
+    api_account_workspace = (
+        project_root
+        / "frontend"
+        / "components"
+        / "api-accounts"
+        / "useApiAccountWorkspace.ts"
     ).read_text(encoding="utf-8")
 
     assert providers_file.exists()
@@ -152,7 +163,9 @@ def test_frontend_provider_presets_are_shared():
     assert "@/components/chat/ChatPanelHeader" in view_source
     assert "@/components/chat/ChatModelStatus" in chat_panel_header
     assert "@/lib/providers" in chat_model_status
-    assert "@/lib/providers" in api_account_form
-    assert "const PROVIDERS" not in api_account_form
+    assert "@/lib/providers" in api_account_identity
+    assert "@/lib/providers" in api_account_workspace
+    assert "const PROVIDERS" not in api_account_identity
+    assert "const PROVIDERS" not in api_account_workspace
     assert "const builtInProviders" not in chat_panel
     assert "const providerLogoMap" not in chat_panel

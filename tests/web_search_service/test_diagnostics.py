@@ -43,8 +43,18 @@ async def test_search_web_records_provider_diagnostics_when_all_sources_fail(
         "sogou",
     ]
     assert all(item["status"] == "failed" for item in diagnostics)
-    assert diagnostics[0]["error"] == "ConnectError"
-    assert diagnostics[0]["message"] == "proxy connection refused"
+    assert [item["error"] for item in diagnostics] == [
+        "search_connection_failed",
+        "search_timeout",
+        "search_timeout",
+    ]
+    assert [item["message"] for item in diagnostics] == [
+        "上游搜索服务连接失败",
+        "上游搜索服务请求超时",
+        "上游搜索服务请求超时",
+    ]
+    assert "proxy connection refused" not in str(diagnostics)
+    assert "timed out" not in str(diagnostics)
     assert diagnostics[0]["proxy_configured"] is False
 
 
@@ -86,10 +96,13 @@ async def test_search_web_reports_provider_diagnostics_in_stable_order(monkeypat
         "sogou",
     ]
     assert [item["message"] for item in diagnostics] == [
-        "duckduckgo failed last",
-        "yahoo failed second",
-        "sogou failed first",
+        "上游搜索服务连接失败",
+        "上游搜索服务请求超时",
+        "上游搜索服务请求超时",
     ]
+    assert "duckduckgo failed last" not in str(diagnostics)
+    assert "yahoo failed second" not in str(diagnostics)
+    assert "sogou failed first" not in str(diagnostics)
 
 
 @pytest.mark.asyncio

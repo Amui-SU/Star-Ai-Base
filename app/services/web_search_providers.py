@@ -38,7 +38,11 @@ def classify_search_provider_failure(exc: Exception) -> SearchProviderFailure:
             "search_proxy_dependency_missing",
             "搜索代理依赖缺失（socksio）",
         )
-    if isinstance(exc, TimeoutError) or "timeout" in text or "timed out" in text:
+    if (
+        isinstance(exc, (TimeoutError, httpx.TimeoutException))
+        or "timeout" in text
+        or "timed out" in text
+    ):
         return SearchProviderFailure("search_timeout", "上游搜索服务请求超时")
     if any(
         marker in text or marker in class_name
