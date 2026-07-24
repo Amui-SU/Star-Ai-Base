@@ -1,5 +1,6 @@
 from copy import deepcopy
 from dataclasses import dataclass
+import string
 from typing import Literal
 import unicodedata
 
@@ -11,10 +12,10 @@ class ProviderPreset:
     label: str
     base_url: str
     model: str
-    protocol: Literal["openai_compatible", "anthropic_messages"] | None
-    auth_scheme: Literal["bearer", "x_api_key"] | None
-    website_url: str
-    kind: Literal["llm", "search"]
+    protocol: Literal["openai_compatible", "anthropic_messages"] | None = None
+    auth_scheme: Literal["bearer", "x_api_key"] | None = None
+    website_url: str = ""
+    kind: Literal["llm", "search"] = "llm"
 
 
 PROVIDER_PRESETS: dict[str, ProviderPreset] = {
@@ -134,15 +135,22 @@ _PROTECTED_HEADER_PREFIXES = (
     "x-original-",
     "x-proxy-",
 )
+_HEADER_TCHARS = frozenset(string.ascii_letters + string.digits + "!#$%&'*+-.^_`|~")
 _PROTECTED_BODY_FIELDS = {
+    "apikey",
+    "authorization",
+    "baseurl",
     "input",
     "messages",
     "model",
     "prompt",
-    "response_format",
+    "requestid",
+    "responseformat",
     "stream",
-    "tool_choice",
+    "toolchoice",
     "tools",
+    "traceid",
+    "url",
 }
 
 
@@ -186,15 +194,17 @@ def _contains_control_character(value: str) -> bool:
 def _normalize_model_mapping(value: object) -> dict[str, str]:
     if not isinstance(value, dict):
         raise _bad_config("model_mapping")
+    normalized = {}
     for alias, mapped_model in value.items():
         if not isinstance(alias, str) or not alias.strip():
             raise _bad_config("model_mapping")
+        normalized_alias = alias.strip()
         if not isinstance(mapped_model, str) or not mapped_model.strip():
-            field = (
-                f"model_mapping.{alias}" if isinstance(alias, str) else "model_mapping"
-            )
-            raise _bad_config(field)
-    return value
+            raise _bad_config(f"model_mapping.{normalized_alias}")
+        if normalized_alias in normalized:
+            raise _bad_config(f"model_mapping.{normalized_alias}")
+        normalized[normalized_alias] = mapped_model.strip()
+    return normalized
 
 
 def _is_protected_header(header: str) -> bool:
@@ -217,7 +227,9 @@ def _normalize_headers(value: object) -> dict[str, str]:
         field = f"headers.{header}"
         if not isinstance(header_value, str):
             raise _bad_config(field)
-        if _contains_control_character(header) or _is_protected_header(header):
+        if any(character not in _HEADER_TCHARS for character in header):
+            raise _bad_config(field)
+        if _is_protected_header(header):
             raise _bad_config(field)
         if _contains_control_character(header_value):
             raise _bad_config(field)
@@ -230,7 +242,10 @@ def _normalize_body(value: object) -> dict:
     for field in value:
         if not isinstance(field, str):
             raise _bad_config("body")
-        if field.lower() in _PROTECTED_BODY_FIELDS:
+        normalized_field = "".join(
+            character for character in field.lower() if character.isalnum()
+        )
+        if normalized_field in _PROTECTED_BODY_FIELDS:
             raise _bad_config(f"body.{field}")
     return value
 
@@ -249,6 +264,7 @@ def normalize_advanced_config(value: object, model: str = "") -> dict:
     fallback_model = normalized.get("fallback_model")
     if not isinstance(fallback_model, str):
         raise _bad_config("fallback_model")
+    normalized["fallback_model"] = fallback_model.strip()
 
     user_agent = normalized.get("user_agent")
     if not isinstance(user_agent, str) or _contains_control_character(user_agent):

@@ -74,6 +74,17 @@ def test_provider_defaults_and_normalization_remain_compatible():
     assert exc_info.value.status_code == 400
 
 
+def test_provider_defaults_keeps_legacy_three_argument_constructor():
+    from app.services.api_credentials import ProviderDefaults
+
+    defaults = ProviderDefaults("Custom", "https://example.com/v1", "custom-model")
+
+    assert defaults.label == "Custom"
+    assert defaults.base_url == "https://example.com/v1"
+    assert defaults.model == "custom-model"
+    assert provider_defaults("claude").protocol == "anthropic_messages"
+
+
 def test_default_advanced_config_uses_v1_shape():
     assert default_advanced_config("gpt-test") == {
         "version": 1,
@@ -181,6 +192,25 @@ def test_normalize_advanced_config_allows_business_x_headers():
 
 
 @pytest.mark.parametrize(
+    "header",
+    [
+        "X Workspace",
+        "X-Workspace: injected",
+        "X-Workspace/Name",
+        "X-Wörkspace",
+    ],
+)
+def test_normalize_advanced_config_rejects_non_rfc_token_header_names(header):
+    with pytest.raises(HTTPException) as exc_info:
+        normalize_advanced_config({"headers": {header: "must-not-be-reflected"}})
+
+    detail = str(exc_info.value.detail)
+    assert exc_info.value.status_code == 400
+    assert f"headers.{header}" in detail
+    assert "must-not-be-reflected" not in detail
+
+
+@pytest.mark.parametrize(
     "field",
     [
         "model",
@@ -191,6 +221,20 @@ def test_normalize_advanced_config_allows_business_x_headers():
         "tool_choice",
         "stream",
         "response_format",
+        "api_key",
+        "apiKey",
+        "api-key",
+        "authorization",
+        "base_url",
+        "baseUrl",
+        "base-url",
+        "url",
+        "trace_id",
+        "traceId",
+        "trace-id",
+        "request_id",
+        "requestId",
+        "request-id",
     ],
 )
 def test_normalize_advanced_config_rejects_protected_body_fields(field):
@@ -213,6 +257,31 @@ def test_resolve_account_model_uses_alias_before_fallback():
 
     assert resolve_account_model("chat", config, "legacy") == "provider-chat"
     assert resolve_account_model("unmapped", config, "legacy") == "provider-fallback"
+
+
+def test_normalize_advanced_config_strips_models_and_resolve_strips_request():
+    config = normalize_advanced_config(
+        {
+            "model_mapping": {" chat ": " provider-chat "},
+            "fallback_model": " provider-fallback ",
+            "body": {"temperature": 0.3},
+        }
+    )
+
+    assert config["model_mapping"] == {"chat": "provider-chat"}
+    assert config["fallback_model"] == "provider-fallback"
+    assert config["body"] == {"temperature": 0.3}
+    assert resolve_account_model(" chat ", config, "legacy") == "provider-chat"
+
+
+def test_normalize_advanced_config_rejects_aliases_that_conflict_after_strip():
+    with pytest.raises(HTTPException) as exc_info:
+        normalize_advanced_config(
+            {"model_mapping": {"chat": "first", " chat ": "second"}}
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "model_mapping.chat" in str(exc_info.value.detail)
 
 
 def test_resolve_account_model_does_not_remap_fallback():
