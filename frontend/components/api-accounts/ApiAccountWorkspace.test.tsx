@@ -42,6 +42,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function mockViewport(mobile: boolean) {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: mobile && query === "(max-width: 720px)",
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
 async function openCreate() {
   const user = userEvent.setup();
   render(<ApiAccountsPanel open onClose={vi.fn()} />);
@@ -51,7 +64,7 @@ async function openCreate() {
 }
 
 describe("ApiAccountWorkspace", () => {
-  it("protects manually edited connection values on preset switch", async () => {
+  it("keeps manually edited connection and thinking values when preset restore is cancelled", async () => {
     vi.stubGlobal(
       "confirm",
       vi.fn(() => false),
@@ -62,11 +75,90 @@ describe("ApiAccountWorkspace", () => {
       screen.getByLabelText("Base URL"),
       "https://manual.example/v1",
     );
+    await user.click(screen.getByRole("button", { name: "请求配置" }));
+    await user.click(screen.getByRole("button", { name: "自定义" }));
+    fireEvent.change(screen.getByLabelText("请求体 JSON（自定义）"), {
+      target: { value: '{"reasoning":{"effort":"high"}}' },
+    });
     await user.selectOptions(screen.getByLabelText("服务商"), "claude");
     expect(window.confirm).toHaveBeenCalled();
     expect(screen.getByLabelText("Base URL")).toHaveValue(
       "https://manual.example/v1",
     );
+    expect(screen.getByLabelText("默认模型")).toHaveValue("deepseek-chat");
+    expect(screen.getByLabelText("官网地址")).toHaveValue(
+      "https://www.deepseek.com/",
+    );
+    expect(screen.getByRole("button", { name: "自定义" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("请求体 JSON（自定义）")).toHaveValue(
+      '{"reasoning":{"effort":"high"}}',
+    );
+  });
+
+  it("restores connection and thinking defaults when preset restore is confirmed", async () => {
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    const user = await openCreate();
+    await user.clear(screen.getByLabelText("Base URL"));
+    await user.type(
+      screen.getByLabelText("Base URL"),
+      "https://manual.example/v1",
+    );
+    await user.click(screen.getByRole("button", { name: "请求配置" }));
+    await user.click(screen.getByRole("button", { name: "自定义" }));
+    fireEvent.change(screen.getByLabelText("请求体 JSON（自定义）"), {
+      target: { value: '{"reasoning":true}' },
+    });
+    await user.selectOptions(screen.getByLabelText("服务商"), "claude");
+
+    expect(screen.getByLabelText("Base URL")).toHaveValue(
+      "https://api.anthropic.com/v1",
+    );
+    expect(screen.getByLabelText("默认模型")).toHaveValue("claude-haiku-4-5");
+    expect(screen.getByLabelText("官网地址")).toHaveValue(
+      "https://www.anthropic.com/",
+    );
+    expect(screen.getByRole("button", { name: "关闭" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.queryByLabelText("请求体 JSON（自定义）"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps every desktop section visible and uses navigation only for scrolling", async () => {
+    mockViewport(false);
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const user = await openCreate();
+
+    expect(screen.getByLabelText("API Key")).toBeVisible();
+    expect(screen.getByLabelText("默认模型")).toBeVisible();
+    expect(screen.getByLabelText("完整 advanced_config JSON")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "模型映射" }));
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(screen.getByText("模型映射", { selector: "summary" })).toHaveFocus();
+    expect(screen.getByLabelText("API Key")).toBeVisible();
+  });
+
+  it("uses collapsible accordion sections on mobile", async () => {
+    mockViewport(true);
+    const user = await openCreate();
+    const identity = screen.getByText("基本信息", { selector: "summary" })
+      .parentElement as HTMLDetailsElement;
+    const connection = screen.getByText("连接设置", { selector: "summary" })
+      .parentElement as HTMLDetailsElement;
+    expect(identity.open).toBe(true);
+    expect(connection.open).toBe(false);
+    await user.click(screen.getByText("连接设置", { selector: "summary" }));
+    expect(connection.open).toBe(true);
+    expect(identity.open).toBe(false);
   });
 
   it("applies JSON only on command, preserves invalid raw text, and focus cancel discards edits", async () => {
@@ -117,6 +209,39 @@ describe("ApiAccountWorkspace", () => {
     expect(screen.getByText("未保存")).toBeVisible();
   });
 
+  it.each([
+    ["authentication_failed", "authentication", "api-account-api-key"],
+    ["endpoint_unreachable", "endpoint", "api-account-base-url"],
+    ["model_unavailable", "model", "api-account-model"],
+    ["invalid_configuration", "basic", "api-account-provider"],
+    ["invalid_configuration", "configuration", "api-account-headers"],
+    ["invalid_configuration", "json", "api-account-advanced-json"],
+  ] as const)(
+    "locates %s validation failures from the %s section without exposing the key",
+    async (status, section, targetId) => {
+      mockViewport(true);
+      vi.mocked(apiAccountApi.validateDraft).mockResolvedValue({
+        status,
+        message: "failure contained draft-secret",
+        http_status: 400,
+        section,
+        latency_ms: 12,
+      });
+      const user = await openCreate();
+      await user.type(screen.getByLabelText("API Key"), "draft-secret");
+      await user.click(screen.getByRole("button", { name: "测试连接" }));
+
+      await waitFor(() =>
+        expect(document.getElementById(targetId)).toHaveFocus(),
+      );
+      expect(screen.queryByText(/failure contained draft-secret/)).toBeNull();
+      expect(screen.getByText(/failure contained \[redacted\]/)).toBeVisible();
+      expect(
+        document.getElementById(targetId)?.closest("details"),
+      ).toHaveAttribute("open");
+    },
+  );
+
   it("does local validation before requests and reduces Tavily to service configuration", async () => {
     const user = await openCreate();
     await user.click(screen.getByRole("button", { name: "测试连接" }));
@@ -153,5 +278,21 @@ describe("ApiAccountWorkspace", () => {
       /headers\.Authorization/,
     );
     expect(apiAccountApi.validateDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Base URL", "not-a-url", "测试连接"],
+    ["Base URL", "ftp://api.example.com", "保存配置"],
+    ["官网地址", "https:///", "测试连接"],
+  ])("rejects invalid %s value %s before %s", async (label, value, action) => {
+    const user = await openCreate();
+    await user.type(screen.getByLabelText("API Key"), "draft-secret");
+    await user.clear(screen.getByLabelText(label));
+    await user.type(screen.getByLabelText(label), value);
+    await user.click(screen.getByRole("button", { name: action }));
+
+    expect(apiAccountApi.validateDraft).not.toHaveBeenCalled();
+    expect(apiAccountApi.create).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(label)).toHaveFocus();
   });
 });

@@ -26,9 +26,11 @@ export default function ApiAccountSectionNav({
           className={active === section ? "active" : ""}
           onClick={() => {
             onSelect(section);
-            document
-              .getElementById(`api-account-section-${section}`)
-              ?.scrollIntoView?.({ behavior: "smooth" });
+            const element = document.getElementById(
+              `api-account-section-${section}`,
+            );
+            element?.scrollIntoView?.({ behavior: "smooth" });
+            element?.querySelector("summary")?.focus();
           }}
         >
           {labels[section]}
@@ -42,11 +44,13 @@ export function ApiAccountSection({
   section,
   title,
   open,
+  onOpen,
   children,
 }: {
   section: ApiAccountSection;
   title: string;
   open: boolean;
+  onOpen: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -54,8 +58,11 @@ export function ApiAccountSection({
       id={`api-account-section-${section}`}
       className="api-account-workspace-section"
       open={open}
+      onToggle={(event) => {
+        if (event.currentTarget.open) onOpen();
+      }}
     >
-      <summary>{title}</summary>
+      <summary tabIndex={-1}>{title}</summary>
       <div className="api-account-section-body">{children}</div>
     </details>
   );

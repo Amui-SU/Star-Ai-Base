@@ -39,7 +39,11 @@ export default function ApiAccountModelSection({
           id="api-account-model"
           className="input"
           value={draft.model}
-          onChange={(event) => update({ model: event.target.value })}
+          onChange={(event) => {
+            const model = event.target.value;
+            update({ model });
+            updateAdvanced({ fallback_model: model });
+          }}
         />
       </label>
       <label className="api-account-field">

@@ -115,7 +115,10 @@ export default function ApiAccountWorkspace(props: Props) {
             <ApiAccountSection
               section="identity"
               title="基本信息"
-              open={workspace.activeSection === "identity"}
+              open={
+                !workspace.isMobile || workspace.activeSection === "identity"
+              }
+              onOpen={() => workspace.openMobileSection("identity")}
             >
               <ApiAccountIdentitySection
                 draft={workspace.draft}
@@ -128,7 +131,10 @@ export default function ApiAccountWorkspace(props: Props) {
             <ApiAccountSection
               section="connection"
               title="连接设置"
-              open={workspace.activeSection === "connection"}
+              open={
+                !workspace.isMobile || workspace.activeSection === "connection"
+              }
+              onOpen={() => workspace.openMobileSection("connection")}
             >
               <ApiAccountConnectionSection
                 draft={workspace.draft}
@@ -142,7 +148,10 @@ export default function ApiAccountWorkspace(props: Props) {
                 <ApiAccountSection
                   section="models"
                   title="模型映射"
-                  open={workspace.activeSection === "models"}
+                  open={
+                    !workspace.isMobile || workspace.activeSection === "models"
+                  }
+                  onOpen={() => workspace.openMobileSection("models")}
                 >
                   <ApiAccountModelSection
                     draft={workspace.draft}
@@ -153,7 +162,10 @@ export default function ApiAccountWorkspace(props: Props) {
                 <ApiAccountSection
                   section="request"
                   title="请求配置"
-                  open={workspace.activeSection === "request"}
+                  open={
+                    !workspace.isMobile || workspace.activeSection === "request"
+                  }
+                  onOpen={() => workspace.openMobileSection("request")}
                 >
                   <ApiAccountRequestSection
                     draft={workspace.draft}
@@ -165,7 +177,10 @@ export default function ApiAccountWorkspace(props: Props) {
                 <ApiAccountSection
                   section="json"
                   title="配置 JSON"
-                  open={workspace.activeSection === "json"}
+                  open={
+                    !workspace.isMobile || workspace.activeSection === "json"
+                  }
+                  onOpen={() => workspace.openMobileSection("json")}
                 >
                   <AdvancedConfigEditor
                     raw={workspace.rawJson}

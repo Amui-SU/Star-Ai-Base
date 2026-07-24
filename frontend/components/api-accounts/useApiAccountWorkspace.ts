@@ -23,6 +23,31 @@ import type {
 } from "./types";
 
 const firstPreset = PROVIDER_PRESETS[0];
+const MOBILE_QUERY = "(max-width: 720px)";
+
+const validationLocations: Record<string, [ApiAccountSection, string]> = {
+  identity: ["identity", "api-account-provider"],
+  basic: ["identity", "api-account-provider"],
+  connection: ["connection", "api-account-base-url"],
+  authentication: ["connection", "api-account-api-key"],
+  endpoint: ["connection", "api-account-base-url"],
+  model: ["models", "api-account-model"],
+  request: ["request", "api-account-headers"],
+  configuration: ["request", "api-account-headers"],
+  json: ["json", "api-account-advanced-json"],
+};
+
+function isHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      Boolean(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
 
 function initialDraft(
   account: ApiAccount | null,
@@ -132,6 +157,11 @@ export function useApiAccountWorkspace({
     useState<ApiAccountDraftValidationResponse | null>(null);
   const [activeSection, setActiveSection] =
     useState<ApiAccountSection>("identity");
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window === "undefined"
+      ? false
+      : window.matchMedia(MOBILE_QUERY).matches,
+  );
   const preset = providerPresetMap.get(draft.provider) ?? firstPreset;
   const editing = account !== null;
   const dirty =
@@ -146,6 +176,14 @@ export function useApiAccountWorkspace({
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [dirty]);
+
+  useEffect(() => {
+    const media = window.matchMedia(MOBILE_QUERY);
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const updateDraft = useCallback(
     (fields: Partial<ApiAccountWorkspaceDraft>) => {
@@ -186,38 +224,33 @@ export function useApiAccountWorkspace({
         const manual =
           (previous.baseUrl && previous.baseUrl !== old.baseUrl) ||
           (previous.model && previous.model !== old.model) ||
-          (previous.websiteUrl && previous.websiteUrl !== old.websiteUrl);
+          (previous.websiteUrl && previous.websiteUrl !== old.websiteUrl) ||
+          previous.thinkingMode !== "off" ||
+          previous.thinkingJson !== JSON.stringify({}, null, 2);
         const restore = manual
           ? window.confirm(
               "已手动修改连接配置。确定恢复为新服务商默认值？取消将保留手动值。",
             )
           : true;
         const advancedConfig = updateApiAccountConfig(previous.advancedConfig, {
-          fallback_model:
-            restore || previous.advancedConfig.fallback_model === old.model
-              ? next.model
-              : previous.advancedConfig.fallback_model,
+          fallback_model: restore
+            ? next.model
+            : previous.advancedConfig.fallback_model,
         });
         if (!jsonError) setRawJson(formatApiAccountConfig(advancedConfig));
         return {
           ...previous,
           provider: next.provider,
-          baseUrl:
-            restore || previous.baseUrl === old.baseUrl
-              ? next.baseUrl
-              : previous.baseUrl,
-          model:
-            restore || previous.model === old.model
-              ? next.model
-              : previous.model,
-          websiteUrl:
-            restore || previous.websiteUrl === old.websiteUrl
-              ? next.websiteUrl
-              : previous.websiteUrl,
+          baseUrl: restore ? next.baseUrl : previous.baseUrl,
+          model: restore ? next.model : previous.model,
+          websiteUrl: restore ? next.websiteUrl : previous.websiteUrl,
           protocol: next.protocol,
           authScheme: next.authScheme,
           advancedConfig,
-          thinkingMode: "off",
+          thinkingMode: restore ? "off" : previous.thinkingMode,
+          thinkingJson: restore
+            ? JSON.stringify({}, null, 2)
+            : previous.thinkingJson,
         };
       });
     },
@@ -228,7 +261,13 @@ export function useApiAccountWorkspace({
     (section: ApiAccountSection, id: string, message: string) => {
       setActiveSection(section);
       setError(message);
-      document.getElementById(id)?.focus();
+      window.setTimeout(() => {
+        const target = document.getElementById(id);
+        target
+          ?.closest("details")
+          ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+        target?.focus();
+      });
       return false;
     },
     [],
@@ -239,6 +278,18 @@ export function useApiAccountWorkspace({
       return locate("connection", "api-account-api-key", "请填写 API Key");
     if (!draft.baseUrl.trim())
       return locate("connection", "api-account-base-url", "请填写 Base URL");
+    if (!isHttpUrl(draft.baseUrl.trim()))
+      return locate(
+        "connection",
+        "api-account-base-url",
+        "Base URL 必须是有效的 HTTP 或 HTTPS 地址",
+      );
+    if (draft.websiteUrl.trim() && !isHttpUrl(draft.websiteUrl.trim()))
+      return locate(
+        "identity",
+        "api-account-website-url",
+        "官网地址必须是有效的 HTTP 或 HTTPS 地址",
+      );
     if (preset.kind === "llm" && !draft.model.trim())
       return locate("models", "api-account-model", "请填写模型");
     const aliases = draft.modelMappingRows.map((row) => row.alias.trim());
@@ -310,18 +361,35 @@ export function useApiAccountWorkspace({
     setValidating(true);
     setValidation(null);
     try {
-      setValidation(
-        await apiAccountApi.validateDraft({
-          ...buildPayload(),
-          account_id: draft.accountId ?? undefined,
-        }),
-      );
+      const result = await apiAccountApi.validateDraft({
+        ...buildPayload(),
+        account_id: draft.accountId ?? undefined,
+      });
+      const secret = draft.apiKey.trim();
+      setValidation({
+        ...result,
+        message: secret
+          ? result.message.replaceAll(secret, "[redacted]")
+          : result.message,
+      });
+      if (result.status !== "success") {
+        const [section, id] =
+          validationLocations[result.section] ?? validationLocations.connection;
+        locate(section, id, "");
+      }
     } catch (value) {
       setError(value instanceof Error ? value.message : "连接测试失败");
     } finally {
       setValidating(false);
     }
-  }, [buildPayload, draft.accountId, validateLocal, validating]);
+  }, [
+    buildPayload,
+    draft.accountId,
+    draft.apiKey,
+    locate,
+    validateLocal,
+    validating,
+  ]);
 
   const applyJson = useCallback(
     (raw = rawJson) => {
@@ -362,8 +430,12 @@ export function useApiAccountWorkspace({
     saving,
     validating,
     validation,
+    isMobile,
     activeSection,
     setActiveSection,
+    openMobileSection: (section: ApiAccountSection) => {
+      if (isMobile) setActiveSection(section);
+    },
     setRawJson,
     setJsonError,
     updateDraft,

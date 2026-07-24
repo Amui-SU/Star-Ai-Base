@@ -19,6 +19,7 @@ export default function ApiAccountIdentitySection({
       <label>
         <span>服务商</span>
         <select
+          id="api-account-provider"
           className="input"
           aria-label="服务商"
           value={draft.provider}
@@ -51,6 +52,7 @@ export default function ApiAccountIdentitySection({
       <label className="wide">
         <span>官网地址</span>
         <input
+          id="api-account-website-url"
           className="input"
           value={draft.websiteUrl}
           onChange={(event) => update({ websiteUrl: event.target.value })}

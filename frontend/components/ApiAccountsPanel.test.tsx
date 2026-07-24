@@ -93,6 +93,8 @@ describe("ApiAccountsPanel", () => {
     expect(screen.getByLabelText("服务商")).toBeDisabled();
     await user.clear(screen.getByLabelText("备注"));
     await user.type(screen.getByLabelText("备注"), "updated");
+    await user.clear(screen.getByLabelText("默认模型"));
+    await user.type(screen.getByLabelText("默认模型"), "deepseek-v3-updated");
     await user.click(screen.getByRole("button", { name: "保存配置" }));
     expect(apiAccountApi.update).toHaveBeenCalledWith(
       7,
@@ -101,7 +103,12 @@ describe("ApiAccountsPanel", () => {
         protocol: "openai_compatible",
         auth_scheme: "bearer",
         website_url: "https://deepseek.com",
-        advanced_config: expect.objectContaining({ vendor: { keep: true } }),
+        model: "deepseek-v3-updated",
+        advanced_config: expect.objectContaining({
+          fallback_model: "deepseek-v3-updated",
+          model_mapping: { chat: "deepseek-chat" },
+          vendor: { keep: true },
+        }),
         thinking_config: { reasoning: { enabled: true } },
       }),
     );

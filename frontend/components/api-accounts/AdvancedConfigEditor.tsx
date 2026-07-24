@@ -68,6 +68,7 @@ export default function AdvancedConfigEditor({
         </button>
       </div>
       <textarea
+        id="api-account-advanced-json"
         className="api-account-json-editor"
         aria-label="完整 advanced_config JSON"
         value={raw}
