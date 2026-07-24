@@ -12,7 +12,33 @@ const focusableSelector = [
 function focusableElements(container: HTMLElement) {
   return Array.from(
     container.querySelectorAll<HTMLElement>(focusableSelector),
-  ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+  ).filter((element) => isSemanticallyVisible(element, container));
+}
+
+function isSemanticallyVisible(element: HTMLElement, container: HTMLElement) {
+  let current: HTMLElement | null = element;
+  let insideContainer = false;
+  while (current) {
+    if (current === container) insideContainer = true;
+    const inert = (current as HTMLElement & { inert?: boolean }).inert;
+    if (
+      current.hidden ||
+      current.getAttribute("aria-hidden") === "true" ||
+      current.hasAttribute("inert") ||
+      inert
+    )
+      return false;
+    const style = window.getComputedStyle(current);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    if (current instanceof HTMLDetailsElement && !current.open) {
+      const summary = Array.from(current.children).find(
+        (child) => child instanceof HTMLElement && child.tagName === "SUMMARY",
+      );
+      if (!summary?.contains(element)) return false;
+    }
+    current = current.parentElement;
+  }
+  return insideContainer;
 }
 
 export function useDialogFocusTrap({
@@ -36,10 +62,10 @@ export function useDialogFocusTrap({
     const container = containerRef.current;
     if (!container) return;
     const previous = document.activeElement as HTMLElement | null;
-    (
-      initialFocusRef?.current ??
-      focusableElements(container)[0] ??
-      container
+    const initial = initialFocusRef?.current;
+    (initial && isSemanticallyVisible(initial, container)
+      ? initial
+      : (focusableElements(container)[0] ?? container)
     ).focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target;

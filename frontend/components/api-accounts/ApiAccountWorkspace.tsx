@@ -70,7 +70,12 @@ export default function ApiAccountWorkspace(props: Props) {
                 : "已保存"}
           </span>
         </div>
-        <div className="api-account-workspace-actions">
+        <div
+          className="api-account-workspace-actions"
+          hidden={workspace.isMobile}
+          aria-hidden={workspace.isMobile}
+          inert={workspace.isMobile ? true : undefined}
+        >
           <button
             type="button"
             className="btn btn-outline"
@@ -209,7 +214,12 @@ export default function ApiAccountWorkspace(props: Props) {
           </div>
         </main>
       </div>
-      <footer className="api-account-mobile-actions">
+      <footer
+        className="api-account-mobile-actions"
+        hidden={!workspace.isMobile}
+        aria-hidden={!workspace.isMobile}
+        inert={!workspace.isMobile ? true : undefined}
+      >
         <button
           type="button"
           className="btn btn-outline"

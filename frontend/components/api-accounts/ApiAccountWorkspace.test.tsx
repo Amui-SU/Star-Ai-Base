@@ -95,6 +95,7 @@ describe("ApiAccountWorkspace", () => {
   );
 
   it("traps workspace focus and restores create focus after confirmed Escape", async () => {
+    mockViewport(false);
     const confirm = vi
       .fn()
       .mockReturnValueOnce(false)
@@ -103,11 +104,18 @@ describe("ApiAccountWorkspace", () => {
     const user = await openCreate();
     const back = screen.getByRole("button", { name: "返回密钥列表" });
     await waitFor(() => expect(back).toHaveFocus());
-    screen.getByRole("button", { name: "保存" }).focus();
+    const lastVisible = screen.getByLabelText("完整 advanced_config JSON");
+    lastVisible.focus();
     await user.tab();
     expect(back).toHaveFocus();
     await user.tab({ shift: true });
-    expect(screen.getByRole("button", { name: "保存" })).toHaveFocus();
+    expect(lastVisible).toHaveFocus();
+    expect(
+      document.querySelector(".api-account-workspace-actions"),
+    ).not.toHaveAttribute("hidden");
+    expect(
+      document.querySelector(".api-account-mobile-actions"),
+    ).toHaveAttribute("hidden");
 
     await user.type(screen.getByLabelText("API Key"), "dirty");
     await user.keyboard("{Escape}");
@@ -260,6 +268,12 @@ describe("ApiAccountWorkspace", () => {
       .parentElement as HTMLDetailsElement;
     const connection = screen.getByText("连接设置", { selector: "summary" })
       .parentElement as HTMLDetailsElement;
+    expect(
+      document.querySelector(".api-account-workspace-actions"),
+    ).toHaveAttribute("hidden");
+    expect(
+      document.querySelector(".api-account-mobile-actions"),
+    ).not.toHaveAttribute("hidden");
     expect(identity.open).toBe(true);
     expect(connection.open).toBe(false);
     await user.click(screen.getByText("连接设置", { selector: "summary" }));
@@ -358,7 +372,7 @@ describe("ApiAccountWorkspace", () => {
       });
       const user = await openCreate();
       await user.type(screen.getByLabelText("API Key"), "draft-secret");
-      await user.click(screen.getByRole("button", { name: "测试连接" }));
+      await user.click(screen.getByRole("button", { name: "测试" }));
 
       await waitFor(() =>
         expect(document.getElementById(targetId)).toHaveFocus(),
