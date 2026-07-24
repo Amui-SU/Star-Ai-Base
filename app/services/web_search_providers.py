@@ -1,11 +1,11 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 import httpx
 from loguru import logger
 
 from app.config import settings
-from app.services.llm_errors import classify_upstream_error
 from app.services.web_page_fetcher import truncate_text
 from app.services.web_search_parsers import (
     DuckDuckGoResultParser,
@@ -22,6 +22,44 @@ SearchResult = dict[str, str]
 SearchResults = list[SearchResult]
 Diagnostics = list[dict] | None
 SearchNormalizer = Callable[[SearchResults, int], Awaitable[SearchResults]]
+
+
+@dataclass(frozen=True)
+class SearchProviderFailure:
+    code: str
+    message: str
+
+
+def classify_search_provider_failure(exc: Exception) -> SearchProviderFailure:
+    text = str(exc).lower()
+    class_name = type(exc).__name__.lower()
+    if "socksio" in text or "httpx[socks]" in text or "socks proxy" in text:
+        return SearchProviderFailure(
+            "search_proxy_dependency_missing",
+            "搜索代理依赖缺失（socksio）",
+        )
+    if isinstance(exc, TimeoutError) or "timeout" in text or "timed out" in text:
+        return SearchProviderFailure("search_timeout", "上游搜索服务请求超时")
+    if any(
+        marker in text or marker in class_name
+        for marker in ("authentication", "unauthorized", "permission", "api key")
+    ):
+        return SearchProviderFailure(
+            "search_authentication_failed",
+            "上游搜索服务认证失败",
+        )
+    if any(
+        marker in text or marker in class_name
+        for marker in ("connection", "connecterror", "network")
+    ):
+        return SearchProviderFailure(
+            "search_connection_failed",
+            "上游搜索服务连接失败",
+        )
+    return SearchProviderFailure(
+        "search_provider_failed",
+        "上游搜索服务请求失败",
+    )
 
 
 async def cancel_pending_tasks(tasks: list[asyncio.Task]) -> None:
@@ -127,10 +165,8 @@ async def try_search_provider(
             **search_kwargs,
         )
     except Exception as exc:
-        failure = classify_upstream_error(exc)
-        logger.debug(
-            failure.log_message(f"联网搜索源 {provider} 查询失败，继续尝试备用源")
-        )
+        failure = classify_search_provider_failure(exc)
+        logger.debug(f"联网搜索源 {provider} 查询失败，继续尝试备用源 [{failure.code}]")
         if diagnostics is not None:
             diagnostics.append(
                 {

@@ -45,10 +45,39 @@ async def test_web_search_provider_diagnostic_and_log_are_sanitized(monkeypatch)
     )
 
     assert result == []
-    assert diagnostics[0]["error"] == "upstream_request_failed"
-    assert diagnostics[0]["message"] == "上游模型服务请求失败"
+    assert diagnostics[0]["error"] == "search_provider_failed"
+    assert diagnostics[0]["message"] == "上游搜索服务请求失败"
+    assert "模型" not in str(diagnostics)
     assert secret not in str(diagnostics)
-    assert logged and secret not in logged[0]
+    assert logged and "模型" not in logged[0]
+    assert secret not in logged[0]
+
+
+@pytest.mark.parametrize(
+    ("error", "code", "message"),
+    [
+        (TimeoutError("timeout sk-secret"), "search_timeout", "上游搜索服务请求超时"),
+        (
+            RuntimeError("unauthorized api key sk-secret"),
+            "search_authentication_failed",
+            "上游搜索服务认证失败",
+        ),
+        (
+            RuntimeError("SOCKS proxy requires socksio sk-secret"),
+            "search_proxy_dependency_missing",
+            "搜索代理依赖缺失（socksio）",
+        ),
+    ],
+)
+def test_search_provider_failure_classification_is_neutral(error, code, message):
+    from app.services.web_search_providers import classify_search_provider_failure
+
+    failure = classify_search_provider_failure(error)
+
+    assert failure.code == code
+    assert failure.message == message
+    assert "模型" not in failure.message
+    assert "sk-secret" not in failure.message
 
 
 def test_web_search_context_is_marked_as_sandboxed_but_usable(monkeypatch):
