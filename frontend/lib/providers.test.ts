@@ -34,4 +34,25 @@ describe("provider presets", () => {
   it("uses the official Agnes icon in provider menus", () => {
     expect(providerLogoMap.get("agnes")).toBe("/logos/agnes-icon.svg");
   });
+
+  it("describes connection protocols and reduced search sections", () => {
+    const claude = PROVIDER_PRESETS.find(
+      ({ provider }) => provider === "claude",
+    );
+    const tavily = PROVIDER_PRESETS.find(
+      ({ provider }) => provider === "tavily",
+    );
+
+    expect(claude).toMatchObject({
+      protocol: "anthropic_messages",
+      authScheme: "x_api_key",
+      websiteUrl: "https://www.anthropic.com/",
+    });
+    expect(tavily).toMatchObject({
+      protocol: null,
+      authScheme: null,
+      kind: "search",
+      sections: ["identity", "connection"],
+    });
+  });
 });

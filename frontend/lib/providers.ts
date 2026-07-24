@@ -5,6 +5,22 @@ export type ProviderPreset = {
   model: string;
   logo?: string;
   kind: "llm" | "search";
+  protocol: "openai_compatible" | "anthropic_messages" | null;
+  authScheme: "bearer" | "x_api_key" | null;
+  websiteUrl: string;
+  sections: Array<"identity" | "connection" | "models" | "request" | "json">;
+};
+
+const llmMetadata = {
+  protocol: "openai_compatible" as const,
+  authScheme: "bearer" as const,
+  sections: [
+    "identity",
+    "connection",
+    "models",
+    "request",
+    "json",
+  ] as ProviderPreset["sections"],
 };
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -15,6 +31,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     model: "deepseek-chat",
     logo: "/logos/deepseek-icon.png",
     kind: "llm",
+    ...llmMetadata,
+    websiteUrl: "https://www.deepseek.com/",
   },
   {
     provider: "dashscope",
@@ -23,6 +41,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     model: "qwen-max",
     logo: "/logos/dashscope-icon.png",
     kind: "llm",
+    ...llmMetadata,
+    websiteUrl: "https://www.aliyun.com/product/bailian",
   },
   {
     provider: "openai",
@@ -31,6 +51,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     model: "gpt-4o-mini",
     logo: "/logos/openai-icon.png",
     kind: "llm",
+    ...llmMetadata,
+    websiteUrl: "https://openai.com/",
   },
   {
     provider: "agnes",
@@ -39,6 +61,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     model: "agnes-2.0-flash",
     logo: "/logos/agnes-icon.svg",
     kind: "llm",
+    ...llmMetadata,
+    websiteUrl: "https://agnes-ai.com/",
   },
   {
     provider: "claude",
@@ -46,6 +70,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://api.anthropic.com/v1",
     model: "claude-haiku-4-5",
     kind: "llm",
+    ...llmMetadata,
+    protocol: "anthropic_messages",
+    authScheme: "x_api_key",
+    websiteUrl: "https://www.anthropic.com/",
   },
   {
     provider: "kimi",
@@ -54,6 +82,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     model: "moonshot-v1-8k",
     logo: "/logos/kimi-icon.png",
     kind: "llm",
+    ...llmMetadata,
+    websiteUrl: "https://www.moonshot.cn/",
   },
   {
     provider: "siliconflow",
@@ -62,6 +92,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     model: "Qwen/Qwen2.5-7B-Instruct",
     logo: "/logos/siliconflow-icon.png",
     kind: "llm",
+    ...llmMetadata,
+    websiteUrl: "https://siliconflow.cn/",
   },
   {
     provider: "zhipu",
@@ -70,6 +102,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     model: "glm-4-flash",
     logo: "/logos/zhipu-icon.png",
     kind: "llm",
+    ...llmMetadata,
+    websiteUrl: "https://www.bigmodel.cn/",
   },
   {
     provider: "tavily",
@@ -77,6 +111,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://api.tavily.com",
     model: "tavily-search",
     kind: "search",
+    protocol: null,
+    authScheme: null,
+    websiteUrl: "https://tavily.com/",
+    sections: ["identity", "connection"],
   },
 ];
 

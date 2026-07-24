@@ -3,6 +3,9 @@ export type {
   ApiAccount,
   ApiAccountCreateRequest,
   ApiAccountUpdateRequest,
+  ApiAccountDraftValidationRequest,
+  ApiAccountDraftValidationResponse,
+  ApiAccountDraftValidationStatus,
 } from "./api/apiAccountTypes";
 export { API_BASE_URL, getApiBaseUrl, request } from "./api/client";
 export { chatApi } from "./api/chat";

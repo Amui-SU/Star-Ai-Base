@@ -73,6 +73,18 @@ describe("user API accounts", () => {
           },
         ),
       )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: "success",
+            message: "连接成功",
+            http_status: 200,
+            section: "connection",
+            latency_ms: 42,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     globalThis.fetch = fetchMock;
 
@@ -96,6 +108,15 @@ describe("user API accounts", () => {
     await expect(api.apiAccountApi.setDefault(1)).resolves.toMatchObject({
       is_default: true,
     });
+    await expect(
+      api.apiAccountApi.validateDraft({
+        provider: "claude",
+        api_key: "sk-current-draft",
+        protocol: "anthropic_messages",
+        auth_scheme: "x_api_key",
+        advanced_config: { version: 1 },
+      }),
+    ).resolves.toMatchObject({ status: "success", latency_ms: 42 });
     await expect(api.apiAccountApi.remove(1)).resolves.toBeUndefined();
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -130,6 +151,14 @@ describe("user API accounts", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       5,
+      "http://localhost:8000/api-accounts/validate-draft",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("sk-current-draft"),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
       "http://localhost:8000/api-accounts/1",
       expect.objectContaining({ method: "DELETE" }),
     );

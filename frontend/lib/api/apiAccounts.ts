@@ -3,6 +3,8 @@ import type {
   ApiAccount,
   ApiAccountCreateRequest,
   ApiAccountUpdateRequest,
+  ApiAccountDraftValidationRequest,
+  ApiAccountDraftValidationResponse,
 } from "./apiAccountTypes";
 
 export const apiAccountApi = {
@@ -28,6 +30,12 @@ export const apiAccountApi = {
   validate: (accountId: number) =>
     request<ApiAccount>(`/api-accounts/${accountId}/validate`, {
       method: "POST",
+    }),
+
+  validateDraft: (data: ApiAccountDraftValidationRequest) =>
+    request<ApiAccountDraftValidationResponse>("/api-accounts/validate-draft", {
+      method: "POST",
+      body: JSON.stringify(data),
     }),
 
   remove: (accountId: number) =>
