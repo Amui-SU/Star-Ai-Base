@@ -5,11 +5,13 @@ export default function ApiAccountConnectionSection({
   draft,
   preset,
   editing,
+  disabled,
   update,
 }: {
   draft: ApiAccountWorkspaceDraft;
   preset: ProviderPreset;
   editing: boolean;
+  disabled: boolean;
   update: (fields: Partial<ApiAccountWorkspaceDraft>) => void;
 }) {
   return (
@@ -22,6 +24,7 @@ export default function ApiAccountConnectionSection({
           aria-label="API Key"
           type="password"
           value={draft.apiKey}
+          disabled={disabled}
           placeholder={editing ? "留空沿用已保存的 Key" : "粘贴 API Key"}
           onChange={(event) => update({ apiKey: event.target.value })}
         />
@@ -33,6 +36,7 @@ export default function ApiAccountConnectionSection({
           className="input"
           aria-label="Base URL"
           value={draft.baseUrl}
+          disabled={disabled}
           onChange={(event) => update({ baseUrl: event.target.value })}
         />
       </label>
@@ -44,6 +48,7 @@ export default function ApiAccountConnectionSection({
               className="input"
               aria-label="协议"
               value={draft.protocol ?? ""}
+              disabled={disabled}
               onChange={(event) => update({ protocol: event.target.value })}
             >
               <option value={preset.protocol ?? ""}>
@@ -59,6 +64,7 @@ export default function ApiAccountConnectionSection({
               className="input"
               aria-label="认证方式"
               value={draft.authScheme ?? ""}
+              disabled={disabled}
               onChange={(event) => update({ authScheme: event.target.value })}
             >
               <option value={preset.authScheme ?? ""}>

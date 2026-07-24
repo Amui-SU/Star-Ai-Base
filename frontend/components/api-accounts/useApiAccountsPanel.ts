@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiAccountApi, chatApi, type ApiAccount } from "@/lib/api";
 import type { ApiAccountsPanelView, ThinkingTemplates } from "./types";
 
@@ -20,16 +20,28 @@ export function useApiAccountsPanel({ open, onChanged }: Params) {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const returnFocusRef = useRef("create");
 
   const loadAccounts = useCallback(async () => {
     setLoading(true);
     try {
       setAccounts(await apiAccountApi.list());
+      return true;
     } catch (value) {
       setError(value instanceof Error ? value.message : "AI 服务密钥加载失败");
+      return false;
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const restoreListFocus = useCallback(() => {
+    const key = returnFocusRef.current;
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-api-account-return="${key}"]`)
+        ?.focus();
+    });
   }, []);
 
   useEffect(() => {
@@ -100,23 +112,28 @@ export function useApiAccountsPanel({ open, onChanged }: Params) {
     selectedAccount,
     loadAccounts,
     createAccount: () => {
+      returnFocusRef.current = "create";
       setSelectedAccount(null);
       setView("create");
     },
     editAccount: (account: ApiAccount) => {
+      returnFocusRef.current = `account-${account.id}`;
       setSelectedAccount(account);
       setView("edit");
     },
     returnToList: () => {
       setView("list");
       setSelectedAccount(null);
+      restoreListFocus();
     },
     workspaceSaved: async () => {
-      await loadAccounts();
       onChanged?.();
+      if (!(await loadAccounts()))
+        throw new Error("密钥已保存，但列表刷新失败，请稍后返回列表刷新");
       setNotice("API 密钥已保存");
       setView("list");
       setSelectedAccount(null);
+      restoreListFocus();
     },
     setDefault: (account: ApiAccount) => mutate(account, "default"),
     validateAccount: (account: ApiAccount) => mutate(account, "validate"),

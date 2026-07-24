@@ -154,7 +154,7 @@ interface Params {
   templates: ThinkingTemplates;
   onBack: () => void;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: () => Promise<void>;
 }
 
 export function useApiAccountWorkspace({
@@ -186,8 +186,10 @@ export function useApiAccountWorkspace({
   );
   const preset = providerPresetMap.get(draft.provider) ?? firstPreset;
   const editing = account !== null;
-  const dirty =
+  const draftDirty =
     stableApiAccountConfig(draft) !== stableApiAccountConfig(baseline);
+  const rawDirty = rawJson !== formatApiAccountConfig(draft.advancedConfig);
+  const dirty = draftDirty || rawDirty;
 
   useEffect(() => {
     if (!dirty) return;
@@ -209,19 +211,22 @@ export function useApiAccountWorkspace({
 
   const updateDraft = useCallback(
     (fields: Partial<ApiAccountWorkspaceDraft>) => {
+      if (saving) return;
       setDraft((previous) => ({ ...previous, ...fields }));
     },
-    [],
+    [saving],
   );
 
   const updateAdvanced = useCallback(
     (fields: Parameters<typeof updateApiAccountConfig>[1]) => {
+      if (saving) return;
       setDraft((previous) => {
         const advancedConfig = updateApiAccountConfig(
           previous.advancedConfig,
           fields,
         );
-        if (!jsonError) setRawJson(formatApiAccountConfig(advancedConfig));
+        if (rawJson === formatApiAccountConfig(previous.advancedConfig))
+          setRawJson(formatApiAccountConfig(advancedConfig));
         return {
           ...previous,
           advancedConfig,
@@ -232,7 +237,7 @@ export function useApiAccountWorkspace({
         };
       });
     },
-    [jsonError],
+    [rawJson, saving],
   );
 
   const leave = useCallback(
@@ -277,7 +282,8 @@ export function useApiAccountWorkspace({
         const advancedConfig = updateApiAccountConfig(previous.advancedConfig, {
           fallback_model: model,
         });
-        if (!jsonError) setRawJson(formatApiAccountConfig(advancedConfig));
+        if (rawJson === formatApiAccountConfig(previous.advancedConfig))
+          setRawJson(formatApiAccountConfig(advancedConfig));
         return {
           ...previous,
           provider: next.provider,
@@ -297,7 +303,7 @@ export function useApiAccountWorkspace({
         };
       });
     },
-    [editing, jsonError, saving],
+    [editing, rawJson, saving],
   );
 
   const locate = useCallback(
@@ -317,6 +323,8 @@ export function useApiAccountWorkspace({
   );
 
   const validateLocal = useCallback(() => {
+    if (rawDirty)
+      return locate("json", "api-account-advanced-json", "请先应用 JSON 配置");
     if (!editing && !draft.apiKey.trim())
       return locate("connection", "api-account-api-key", "请填写 API Key");
     if (!draft.baseUrl.trim())
@@ -369,7 +377,7 @@ export function useApiAccountWorkspace({
     }
     setError("");
     return true;
-  }, [draft, editing, locate, preset.kind, templates]);
+  }, [draft, editing, locate, preset.kind, rawDirty, templates]);
 
   const buildPayload = useCallback(() => {
     const result = payload(draft, templates);
@@ -391,7 +399,7 @@ export function useApiAccountWorkspace({
           api_key: draft.apiKey.trim(),
         });
       setBaseline(draft);
-      onSaved();
+      await onSaved();
     } catch (value) {
       setError(value instanceof Error ? value.message : "保存失败");
     } finally {
@@ -436,6 +444,7 @@ export function useApiAccountWorkspace({
 
   const applyJson = useCallback(
     (raw = rawJson) => {
+      if (saving) return false;
       try {
         const advancedConfig = parseApiAccountConfig(raw);
         setDraft((previous) => ({
@@ -460,7 +469,14 @@ export function useApiAccountWorkspace({
         return false;
       }
     },
-    [rawJson],
+    [rawJson, saving],
+  );
+
+  const updateRawJson = useCallback(
+    (raw: string) => {
+      if (!saving) setRawJson(raw);
+    },
+    [saving],
   );
 
   return {
@@ -480,7 +496,7 @@ export function useApiAccountWorkspace({
     openMobileSection: (section: ApiAccountSection) => {
       if (isMobile) setActiveSection(section);
     },
-    setRawJson,
+    updateRawJson,
     setJsonError,
     updateDraft,
     updateAdvanced,

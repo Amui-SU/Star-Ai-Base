@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useDialogFocusTrap } from "@/components/ui/useDialogFocusTrap";
 
 export default function AdvancedConfigEditor({
   raw,
   error,
+  disabled,
   onRawChange,
   onApply,
 }: {
   raw: string;
   error: string;
+  disabled: boolean;
   onRawChange: (raw: string) => void;
   onApply: (raw?: string) => boolean;
 }) {
@@ -16,52 +19,35 @@ export default function AdvancedConfigEditor({
   const [focusError, setFocusError] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const open = () => {
     setFocusRaw(raw);
     setFocusError("");
     setFocused(true);
   };
   const close = () => setFocused(false);
-  useEffect(() => {
-    if (focused) textareaRef.current?.focus();
-  }, [focused]);
-  useEffect(() => {
-    if (!focused) return;
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        close();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = Array.from(
-        overlayRef.current?.querySelectorAll<HTMLElement>("button, textarea") ??
-          [],
-      );
-      if (!focusable.length) return;
-      const current = focusable.indexOf(document.activeElement as HTMLElement);
-      const next = event.shiftKey
-        ? current <= 0
-          ? focusable.length - 1
-          : current - 1
-        : current === focusable.length - 1
-          ? 0
-          : current + 1;
-      event.preventDefault();
-      focusable[next]?.focus();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [focused]);
+  useDialogFocusTrap({
+    active: focused,
+    containerRef: overlayRef,
+    initialFocusRef: textareaRef,
+    onEscape: close,
+  });
   return (
     <>
       <div className="api-account-json-toolbar">
-        <button type="button" className="btn btn-outline" onClick={open}>
+        <button
+          ref={triggerRef}
+          type="button"
+          className="btn btn-outline"
+          disabled={disabled}
+          onClick={open}
+        >
           专注编辑 JSON
         </button>
         <button
           type="button"
           className="btn btn-primary"
+          disabled={disabled}
           onClick={() => onApply()}
         >
           应用 JSON
@@ -73,6 +59,7 @@ export default function AdvancedConfigEditor({
         aria-label="完整 advanced_config JSON"
         value={raw}
         aria-invalid={Boolean(error)}
+        disabled={disabled}
         onChange={(event) => onRawChange(event.target.value)}
       />
       {error ? (
@@ -94,6 +81,7 @@ export default function AdvancedConfigEditor({
               <button
                 type="button"
                 className="btn btn-outline"
+                disabled={disabled}
                 onClick={() => {
                   try {
                     setFocusRaw(JSON.stringify(JSON.parse(focusRaw), null, 2));
@@ -105,12 +93,18 @@ export default function AdvancedConfigEditor({
               >
                 格式化
               </button>
-              <button type="button" className="btn btn-outline" onClick={close}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled={disabled}
+                onClick={close}
+              >
                 取消专注编辑
               </button>
               <button
                 type="button"
                 className="btn btn-primary"
+                disabled={disabled}
                 onClick={() => {
                   if (onApply(focusRaw)) close();
                   else setFocusError("JSON 格式错误");
@@ -124,6 +118,7 @@ export default function AdvancedConfigEditor({
             ref={textareaRef}
             aria-label="专注 JSON 编辑器"
             aria-invalid={Boolean(focusError)}
+            disabled={disabled}
             value={focusRaw}
             onChange={(event) => setFocusRaw(event.target.value)}
           />

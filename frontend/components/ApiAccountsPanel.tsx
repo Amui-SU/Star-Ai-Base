@@ -21,7 +21,7 @@ export default function ApiAccountsPanel({ open, onClose, onChanged }: Props) {
         templates={panel.templates}
         onBack={panel.returnToList}
         onClose={onClose}
-        onSaved={() => void panel.workspaceSaved()}
+        onSaved={panel.workspaceSaved}
       />
     );
   }

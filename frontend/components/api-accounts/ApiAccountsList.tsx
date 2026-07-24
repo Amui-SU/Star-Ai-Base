@@ -53,7 +53,12 @@ export default function ApiAccountsList({
           >
             刷新
           </button>
-          <button type="button" className="btn btn-primary" onClick={onCreate}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            data-api-account-return="create"
+            onClick={onCreate}
+          >
             添加密钥
           </button>
         </div>
@@ -71,6 +76,7 @@ export default function ApiAccountsList({
                   <button
                     type="button"
                     className="api-account-main"
+                    data-api-account-return={`account-${account.id}`}
                     onClick={() => onEdit(account)}
                   >
                     <span className="api-account-name">

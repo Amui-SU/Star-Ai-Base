@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -141,8 +141,17 @@ describe("ApiAccountsPanel", () => {
     expect(screen.getByRole("dialog", { name: "添加 API 密钥" })).toBeVisible();
   });
 
-  it("locks navigation and duplicate submission while saving", async () => {
+  it("locks every editor through save and refresh before returning to the list", async () => {
     let resolveCreate: ((value: ApiAccount) => void) | undefined;
+    let resolveRefresh: ((value: ApiAccount[]) => void) | undefined;
+    vi.mocked(apiAccountApi.list)
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
     vi.mocked(apiAccountApi.create).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -159,8 +168,65 @@ describe("ApiAccountsPanel", () => {
     expect(screen.getByRole("button", { name: "返回密钥列表" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "关闭密钥管理" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "保存中..." })).toBeDisabled();
+    expect(screen.getByLabelText("API Key")).toBeDisabled();
+    expect(screen.getByLabelText("Base URL")).toBeDisabled();
+    expect(screen.getByLabelText("默认兜底模型")).toBeDisabled();
+    expect(screen.getByLabelText("完整 advanced_config JSON")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "添加模型映射" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "专注编辑 JSON" }),
+    ).toBeDisabled();
     expect(apiAccountApi.create).toHaveBeenCalledOnce();
     expect(onClose).not.toHaveBeenCalled();
     resolveCreate?.(account);
+    await waitFor(() => expect(apiAccountApi.list).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "保存中..." })).toBeDisabled();
+    expect(screen.getByLabelText("API Key")).toBeDisabled();
+    resolveRefresh?.([account]);
+    await screen.findByRole("button", { name: /^Work DeepSeek/ });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "添加密钥" })).toHaveFocus(),
+    );
+  });
+
+  it("restores focus to an edited account after returning with Escape", async () => {
+    vi.mocked(apiAccountApi.list).mockResolvedValue([account]);
+    const user = userEvent.setup();
+    render(<ApiAccountsPanel open onClose={vi.fn()} />);
+    const accountButton = await screen.findByRole("button", {
+      name: /^Work DeepSeek/,
+    });
+    await user.click(accountButton);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "返回密钥列表" }),
+      ).toHaveFocus(),
+    );
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^Work DeepSeek/ }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("keeps the saved workspace visible when the list refresh fails", async () => {
+    vi.mocked(apiAccountApi.list)
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("refresh unavailable"));
+    vi.mocked(apiAccountApi.create).mockResolvedValue(account);
+    const user = userEvent.setup();
+    render(<ApiAccountsPanel open onClose={vi.fn()} />);
+    await screen.findByText("还没有 AI 服务密钥");
+    await user.click(screen.getByRole("button", { name: "添加密钥" }));
+    await user.type(screen.getByLabelText("API Key"), "secret");
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "密钥已保存，但列表刷新失败",
+    );
+    expect(screen.getByRole("dialog", { name: "添加 API 密钥" })).toBeVisible();
+    expect(screen.getByLabelText("API Key")).toBeEnabled();
+    expect(apiAccountApi.create).toHaveBeenCalledOnce();
   });
 });

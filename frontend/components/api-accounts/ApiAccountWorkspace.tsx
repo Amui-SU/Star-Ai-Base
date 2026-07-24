@@ -1,7 +1,9 @@
 "use client";
 
 import Image from "next/image";
+import { useRef } from "react";
 import type { ApiAccount } from "@/lib/api";
+import { useDialogFocusTrap } from "@/components/ui/useDialogFocusTrap";
 import ApiAccountConnectionSection from "./ApiAccountConnectionSection";
 import ApiAccountIdentitySection from "./ApiAccountIdentitySection";
 import ApiAccountModelSection from "./ApiAccountModelSection";
@@ -18,15 +20,23 @@ interface Props {
   templates: ThinkingTemplates;
   onBack: () => void;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: () => Promise<void>;
 }
 
 export default function ApiAccountWorkspace(props: Props) {
   const workspace = useApiAccountWorkspace(props);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
+  useDialogFocusTrap({
+    containerRef: dialogRef,
+    initialFocusRef: backRef,
+    onEscape: workspace.back,
+  });
   const sections = workspace.preset.sections;
   const title = workspace.editing ? "编辑 API 密钥" : "添加 API 密钥";
   return (
     <div
+      ref={dialogRef}
       className="api-account-workspace"
       role="dialog"
       aria-modal="true"
@@ -34,6 +44,7 @@ export default function ApiAccountWorkspace(props: Props) {
     >
       <header className="api-account-workspace-header">
         <button
+          ref={backRef}
           type="button"
           className="api-account-workspace-back"
           aria-label="返回密钥列表"
@@ -140,6 +151,7 @@ export default function ApiAccountWorkspace(props: Props) {
                 draft={workspace.draft}
                 preset={workspace.preset}
                 editing={workspace.editing}
+                disabled={workspace.saving}
                 update={workspace.updateDraft}
               />
             </ApiAccountSection>
@@ -155,6 +167,7 @@ export default function ApiAccountWorkspace(props: Props) {
                 >
                   <ApiAccountModelSection
                     draft={workspace.draft}
+                    disabled={workspace.saving}
                     update={workspace.updateDraft}
                     updateAdvanced={workspace.updateAdvanced}
                   />
@@ -169,6 +182,7 @@ export default function ApiAccountWorkspace(props: Props) {
                 >
                   <ApiAccountRequestSection
                     draft={workspace.draft}
+                    disabled={workspace.saving}
                     template={props.templates[workspace.draft.provider] ?? {}}
                     update={workspace.updateDraft}
                     updateAdvanced={workspace.updateAdvanced}
@@ -185,7 +199,8 @@ export default function ApiAccountWorkspace(props: Props) {
                   <AdvancedConfigEditor
                     raw={workspace.rawJson}
                     error={workspace.jsonError}
-                    onRawChange={workspace.setRawJson}
+                    disabled={workspace.saving}
+                    onRawChange={workspace.updateRawJson}
                     onApply={workspace.applyJson}
                   />
                 </ApiAccountSection>

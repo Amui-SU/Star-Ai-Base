@@ -64,6 +64,77 @@ async function openCreate() {
 }
 
 describe("ApiAccountWorkspace", () => {
+  it.each(['{"version":1,"fallback_model":"raw-only"}', "{invalid"])(
+    "protects unapplied raw JSON before requests and navigation: %s",
+    async (rawValue) => {
+      const confirm = vi.fn(() => false);
+      vi.stubGlobal("confirm", confirm);
+      const user = await openCreate();
+      await user.click(screen.getByRole("button", { name: "配置 JSON" }));
+      fireEvent.change(screen.getByLabelText("完整 advanced_config JSON"), {
+        target: { value: rawValue },
+      });
+
+      expect(screen.getByText("未保存")).toBeVisible();
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      await user.click(screen.getByRole("button", { name: "返回密钥列表" }));
+      expect(confirm).toHaveBeenCalledWith("当前配置尚未保存，确认离开？");
+      expect(
+        screen.getByRole("dialog", { name: "添加 API 密钥" }),
+      ).toBeVisible();
+      await user.type(screen.getByLabelText("API Key"), "draft-secret");
+      await user.click(screen.getByRole("button", { name: "保存配置" }));
+      await user.click(screen.getByRole("button", { name: "测试连接" }));
+      expect(apiAccountApi.create).not.toHaveBeenCalled();
+      expect(apiAccountApi.validateDraft).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("请先应用 JSON 配置");
+      expect(screen.getByLabelText("完整 advanced_config JSON")).toHaveFocus();
+    },
+  );
+
+  it("traps workspace focus and restores create focus after confirmed Escape", async () => {
+    const confirm = vi
+      .fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    vi.stubGlobal("confirm", confirm);
+    const user = await openCreate();
+    const back = screen.getByRole("button", { name: "返回密钥列表" });
+    await waitFor(() => expect(back).toHaveFocus());
+    screen.getByRole("button", { name: "保存" }).focus();
+    await user.tab();
+    expect(back).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "保存" })).toHaveFocus();
+
+    await user.type(screen.getByLabelText("API Key"), "dirty");
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "添加 API 密钥" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "添加密钥" })).toHaveFocus(),
+    );
+  });
+
+  it("traps focused JSON editing and restores its trigger on Escape", async () => {
+    const user = await openCreate();
+    const trigger = screen.getByRole("button", { name: "专注编辑 JSON" });
+    await user.click(trigger);
+    const textarea = screen.getByLabelText("专注 JSON 编辑器");
+    await waitFor(() => expect(textarea).toHaveFocus());
+    await user.tab();
+    expect(screen.getByRole("button", { name: "格式化" })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(textarea).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("dialog", { name: "专注编辑 advanced_config" }),
+    ).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("keeps only a manually edited URL when preset restore is cancelled", async () => {
     vi.stubGlobal(
       "confirm",

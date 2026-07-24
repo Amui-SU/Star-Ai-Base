@@ -8,11 +8,13 @@ import type { ApiAccountWorkspaceDraft } from "./types";
 
 export default function ApiAccountRequestSection({
   draft,
+  disabled,
   template,
   update,
   updateAdvanced,
 }: {
   draft: ApiAccountWorkspaceDraft;
+  disabled: boolean;
   template: ThinkingConfig;
   update: (fields: Partial<ApiAccountWorkspaceDraft>) => void;
   updateAdvanced: (fields: Partial<ApiAccountAdvancedConfig>) => void;
@@ -45,6 +47,7 @@ export default function ApiAccountRequestSection({
         <input
           className="input"
           value={draft.advancedConfig.user_agent}
+          disabled={disabled}
           onChange={(event) =>
             updateAdvanced({ user_agent: event.target.value })
           }
@@ -63,6 +66,7 @@ export default function ApiAccountRequestSection({
                 className="input"
                 aria-label={`Header 名称 ${index + 1}`}
                 value={item.name}
+                disabled={disabled}
                 onChange={(event) =>
                   setHeader(index, "name", event.target.value)
                 }
@@ -71,6 +75,7 @@ export default function ApiAccountRequestSection({
                 className="input"
                 aria-label={`Header 值 ${index + 1}`}
                 value={item.value}
+                disabled={disabled}
                 onChange={(event) =>
                   setHeader(index, "value", event.target.value)
                 }
@@ -79,6 +84,7 @@ export default function ApiAccountRequestSection({
                 type="button"
                 title="删除 Header"
                 aria-label={`删除 Header ${index + 1}`}
+                disabled={disabled}
                 onClick={() =>
                   syncHeaders(headerRows.filter((_, row) => row !== index))
                 }
@@ -92,6 +98,7 @@ export default function ApiAccountRequestSection({
           type="button"
           className="btn btn-outline api-account-add-row"
           aria-label="添加 Header"
+          disabled={disabled}
           onClick={() =>
             syncHeaders([
               ...headerRows,
@@ -107,6 +114,7 @@ export default function ApiAccountRequestSection({
         <textarea
           aria-label="Body 覆盖 JSON"
           value={draft.bodyRaw}
+          disabled={disabled}
           onChange={(event) => {
             const bodyRaw = event.target.value;
             update({ bodyRaw });
@@ -124,6 +132,7 @@ export default function ApiAccountRequestSection({
           customJson={draft.thinkingJson}
           template={template}
           error=""
+          disabled={disabled}
           onModeChange={(thinkingMode) => update({ thinkingMode })}
           onCustomJsonChange={(thinkingJson) => update({ thinkingJson })}
           onErrorChange={() => undefined}

@@ -3,10 +3,12 @@ import type { ApiAccountWorkspaceDraft } from "./types";
 
 export default function ApiAccountModelSection({
   draft,
+  disabled,
   update,
   updateAdvanced,
 }: {
   draft: ApiAccountWorkspaceDraft;
+  disabled: boolean;
   update: (fields: Partial<ApiAccountWorkspaceDraft>) => void;
   updateAdvanced: (fields: Partial<ApiAccountAdvancedConfig>) => void;
 }) {
@@ -39,6 +41,7 @@ export default function ApiAccountModelSection({
           id="api-account-model"
           className="input"
           value={draft.advancedConfig.fallback_model}
+          disabled={disabled}
           onChange={(event) =>
             updateAdvanced({ fallback_model: event.target.value })
           }
@@ -55,6 +58,7 @@ export default function ApiAccountModelSection({
               className="input"
               aria-label={`模型别名 ${index + 1}`}
               value={item.alias}
+              disabled={disabled}
               onChange={(event) => replace(index, "alias", event.target.value)}
             />
             <span>→</span>
@@ -62,12 +66,14 @@ export default function ApiAccountModelSection({
               className="input"
               aria-label={`真实模型 ID ${index + 1}`}
               value={item.model}
+              disabled={disabled}
               onChange={(event) => replace(index, "model", event.target.value)}
             />
             <button
               type="button"
               title="删除映射"
               aria-label={`删除模型映射 ${index + 1}`}
+              disabled={disabled}
               onClick={() => sync(rows.filter((_, row) => row !== index))}
             >
               ×
@@ -79,6 +85,7 @@ export default function ApiAccountModelSection({
         type="button"
         className="btn btn-outline api-account-add-row"
         aria-label="添加模型映射"
+        disabled={disabled}
         onClick={() =>
           sync([...rows, { id: crypto.randomUUID(), alias: "", model: "" }])
         }

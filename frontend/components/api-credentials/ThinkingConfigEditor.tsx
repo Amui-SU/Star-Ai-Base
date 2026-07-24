@@ -13,6 +13,7 @@ type ThinkingConfigEditorProps = {
   onModeChange: (mode: ThinkingMode) => void;
   onCustomJsonChange: (value: string) => void;
   onErrorChange: (error: string) => void;
+  disabled?: boolean;
 };
 
 const modes: Array<{ value: ThinkingMode; label: string }> = [
@@ -29,6 +30,7 @@ export function ThinkingConfigEditor({
   onModeChange,
   onCustomJsonChange,
   onErrorChange,
+  disabled = false,
 }: ThinkingConfigEditorProps) {
   const hasStandardTemplate = Object.keys(template).length > 0;
 
@@ -49,7 +51,9 @@ export function ThinkingConfigEditor({
             key={value}
             type="button"
             aria-pressed={mode === value}
-            disabled={value === "standard" && !hasStandardTemplate}
+            disabled={
+              disabled || (value === "standard" && !hasStandardTemplate)
+            }
             onClick={() => onModeChange(value)}
           >
             {label}
@@ -62,6 +66,7 @@ export function ThinkingConfigEditor({
           <span>请求体 JSON（标准模板）</span>
           <textarea
             readOnly
+            disabled={disabled}
             value={formatThinkingConfig(template)}
             aria-label="请求体 JSON（标准模板）"
           />
@@ -74,12 +79,13 @@ export function ThinkingConfigEditor({
             <span>请求体 JSON（自定义）</span>
             <textarea
               value={customJson}
+              disabled={disabled}
               aria-label="请求体 JSON（自定义）"
               aria-invalid={Boolean(error)}
               onChange={(event) => onCustomJsonChange(event.target.value)}
             />
           </label>
-          <button type="button" onClick={formatCustomJson}>
+          <button type="button" disabled={disabled} onClick={formatCustomJson}>
             格式化 JSON
           </button>
         </div>

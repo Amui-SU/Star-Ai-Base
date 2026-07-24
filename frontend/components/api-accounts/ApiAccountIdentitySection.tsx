@@ -38,6 +38,7 @@ export default function ApiAccountIdentitySection({
         <input
           className="input"
           value={draft.displayName}
+          disabled={saving}
           onChange={(event) => update({ displayName: event.target.value })}
         />
       </label>
@@ -46,6 +47,7 @@ export default function ApiAccountIdentitySection({
         <textarea
           aria-label="备注"
           value={draft.notes}
+          disabled={saving}
           onChange={(event) => update({ notes: event.target.value })}
         />
       </label>
@@ -55,6 +57,7 @@ export default function ApiAccountIdentitySection({
           id="api-account-website-url"
           className="input"
           value={draft.websiteUrl}
+          disabled={saving}
           onChange={(event) => update({ websiteUrl: event.target.value })}
         />
       </label>
@@ -63,6 +66,7 @@ export default function ApiAccountIdentitySection({
           <input
             type="checkbox"
             checked={draft.enabled}
+            disabled={saving}
             onChange={(event) => update({ enabled: event.target.checked })}
           />
           启用
@@ -72,6 +76,7 @@ export default function ApiAccountIdentitySection({
         <input
           type="checkbox"
           checked={draft.isDefault}
+          disabled={saving}
           onChange={(event) => update({ isDefault: event.target.checked })}
         />
         设为默认
