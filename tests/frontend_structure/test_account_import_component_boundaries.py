@@ -48,13 +48,13 @@ def test_api_accounts_panel_view_is_extracted():
         / "api-accounts"
         / "ApiAccountsList.tsx"
     )
-    account_form = (
-        project_root / "frontend" / "components" / "api-accounts" / "ApiAccountForm.tsx"
-    )
+    workspace = project_root / "frontend/components/api-accounts/ApiAccountWorkspace.tsx"
+    workspace_hook = project_root / "frontend/components/api-accounts/useApiAccountWorkspace.ts"
 
     assert view.exists()
     assert account_list.exists()
-    assert account_form.exists()
+    assert workspace.exists()
+    assert workspace_hook.exists()
     assert "@/components/api-accounts/ApiAccountsPanelView" in panel_source
     assert "PROVIDER_PRESETS" not in panel_source
     assert "api-accounts-layout" not in panel_source
@@ -62,6 +62,10 @@ def test_api_accounts_panel_view_is_extracted():
     assert "api-account-form" not in panel_source
     assert "api-account-row" not in panel_source
     assert "api-account-field" not in panel_source
+    assert "apiAccountApi." not in workspace.read_text(encoding="utf-8")
+    assert "useApiAccountWorkspace" in workspace.read_text(encoding="utf-8")
+    assert "ApiCredentialEditorShell" not in workspace.read_text(encoding="utf-8")
+    assert "api-accounts-panel" not in workspace.read_text(encoding="utf-8")
 
 
 def test_common_modals_use_shared_shell():

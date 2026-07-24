@@ -1,6 +1,7 @@
 "use client";
 
 import ApiAccountsPanelView from "@/components/api-accounts/ApiAccountsPanelView";
+import ApiAccountWorkspace from "@/components/api-accounts/ApiAccountWorkspace";
 import { useApiAccountsPanel } from "@/components/api-accounts/useApiAccountsPanel";
 import ModalShell from "@/components/ui/ModalShell";
 
@@ -11,67 +12,34 @@ interface Props {
 }
 
 export default function ApiAccountsPanel({ open, onClose, onChanged }: Props) {
-  const {
-    accounts,
-    activeTab,
-    busyId,
-    createAccount,
-    editAccount,
-    editing,
-    error,
-    form,
-    isSearchProvider,
-    loadAccounts,
-    loading,
-    notice,
-    removeAccount,
-    returnToList,
-    saveAccount,
-    saving,
-    selectedPreset,
-    selectedTemplate,
-    selectProvider,
-    setDefault,
-    setForm,
-    setActiveTab,
-    setThinkingError,
-    thinkingError,
-    validateAccount,
-    view,
-  } = useApiAccountsPanel({ open, onChanged });
-
+  const panel = useApiAccountsPanel({ open, onChanged });
   if (!open) return null;
-
+  if (panel.view !== "list") {
+    return (
+      <ApiAccountWorkspace
+        account={panel.selectedAccount}
+        templates={panel.templates}
+        onBack={panel.returnToList}
+        onClose={onClose}
+        onSaved={() => void panel.workspaceSaved()}
+      />
+    );
+  }
   return (
     <ModalShell cardClassName="api-accounts-panel" onClose={onClose}>
       <ApiAccountsPanelView
-        accounts={accounts}
-        activeTab={activeTab}
-        busyId={busyId}
-        editing={editing}
-        error={error}
-        form={form}
-        isSearchProvider={isSearchProvider}
-        loading={loading}
-        notice={notice}
-        saving={saving}
-        selectedPreset={selectedPreset}
-        selectedTemplate={selectedTemplate}
-        thinkingError={thinkingError}
-        view={view}
-        setForm={setForm}
+        accounts={panel.accounts}
+        busyId={panel.busyId}
+        error={panel.error}
+        loading={panel.loading}
+        notice={panel.notice}
         onClose={onClose}
-        onCreateAccount={createAccount}
-        onEditAccount={editAccount}
-        onRefreshAccounts={() => void loadAccounts()}
-        onRemoveAccount={(account) => void removeAccount(account)}
-        onReturnToList={returnToList}
-        onSaveAccount={() => void saveAccount()}
-        onSelectProvider={selectProvider}
-        onSetDefault={(account) => void setDefault(account)}
-        onTabChange={setActiveTab}
-        onThinkingErrorChange={setThinkingError}
-        onValidateAccount={(account) => void validateAccount(account)}
+        onCreateAccount={panel.createAccount}
+        onEditAccount={panel.editAccount}
+        onRefreshAccounts={() => void panel.loadAccounts()}
+        onRemoveAccount={(account) => void panel.removeAccount(account)}
+        onSetDefault={(account) => void panel.setDefault(account)}
+        onValidateAccount={(account) => void panel.validateAccount(account)}
       />
     </ModalShell>
   );
