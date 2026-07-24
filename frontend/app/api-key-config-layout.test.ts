@@ -28,6 +28,15 @@ describe("official model API configuration layout", () => {
 });
 
 describe("personal API account layout", () => {
+  it("keeps the list heading and close action aligned", () => {
+    expect(stylesheet).toMatch(
+      /(?:^|\n)\.provider-config-head\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/s,
+    );
+    expect(stylesheet).toMatch(
+      /(?:^|\n)\.provider-config-close\s*\{[^}]*width:\s*36px;[^}]*height:\s*36px;/s,
+    );
+  });
+
   it("uses a two-column account grid and two-column basic field grid", () => {
     expect(stylesheet).toMatch(
       /\.api-accounts-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,

@@ -108,7 +108,7 @@ export default function ApiAccountsPanelView({
           onClick={onClose}
           aria-label="关闭 AI 服务密钥管理"
         >
-          x
+          ×
         </button>
       </div>
 

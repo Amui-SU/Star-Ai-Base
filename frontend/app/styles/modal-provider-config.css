@@ -11,6 +11,59 @@
   padding: 16px;
 }
 
+.provider-config-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.provider-config-title-block {
+  min-width: 0;
+}
+
+.provider-config-title {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.provider-config-subtitle {
+  max-width: 100%;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.provider-config-close {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--ink-soft);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.provider-config-close:hover {
+  border-color: rgba(217, 119, 87, 0.45);
+  color: var(--accent-strong);
+}
+
+.provider-config-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .thinking-provider-modal .api-credential-editor-body {
   overflow-y: auto;
   scrollbar-width: none;
@@ -20,9 +73,17 @@
   display: none;
 }
 
-/* Kept for the legacy modal layout contract; the shared editor owns new UI. */
+/* The web-search configuration modal still uses this scroll container. */
 .provider-config-body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 16px;
+  overflow-x: hidden;
   overflow-y: auto;
+  padding: 2px 2px 2px 0;
+  scrollbar-gutter: stable;
   scrollbar-width: none;
 }
 
