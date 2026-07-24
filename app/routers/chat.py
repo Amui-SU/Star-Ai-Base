@@ -57,6 +57,7 @@ from app.services.chat_messages import (
 )
 from app.services.chat_completion import (
     build_llm_unavailable_answer,
+    build_completion_request_options,
     build_thinking_completion_options,
     complete_llm_answer,
     complete_llm_answer_with_tools,
@@ -272,6 +273,7 @@ def _log_final_payload(route: str, messages: list[dict], sources: list[dict]) ->
 
 
 _build_thinking_completion_options = build_thinking_completion_options
+_build_completion_request_options = build_completion_request_options
 
 
 _verify_provider_configuration = lambda llm_config: verify_provider_configuration(

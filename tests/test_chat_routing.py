@@ -61,14 +61,21 @@ def test_route_with_llm_uses_injected_dependencies_and_parses_route():
 
     route, raw = route_with_llm(
         "中西方文化的差异是什么",
-        resolve_llm_config=lambda: {"model": "fake-model"},
+        resolve_llm_config=lambda: {
+            "model": "fake-model",
+            "advanced_config": {
+                "user_agent": "Router/1.0",
+                "body": {"temperature": 0.3},
+            },
+        },
         get_llm_client=lambda config: client,
     )
 
     assert route == "vector"
     assert raw == "vector"
     assert calls["kwargs"]["model"] == "fake-model"
-    assert calls["kwargs"]["temperature"] == 0
+    assert calls["kwargs"]["extra_headers"] == {"User-Agent": "Router/1.0"}
+    assert calls["kwargs"]["extra_body"] == {"temperature": 0.3}
 
 
 def test_route_with_llm_returns_empty_route_and_logs_warning_on_failure():

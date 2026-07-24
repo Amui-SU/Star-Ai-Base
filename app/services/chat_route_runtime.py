@@ -21,8 +21,8 @@ async def answer_legacy_chat_from_router(
         enforce_markdown_output=router_module._enforce_markdown_output,
         apply_mode_instructions=router_module._apply_mode_instructions,
         get_llm_client=router_module._get_llm_client,
-        build_thinking_completion_options=(
-            router_module._build_thinking_completion_options
+        build_completion_request_options=(
+            router_module._build_completion_request_options
         ),
         extract_thinking_and_answer=router_module._extract_thinking_and_answer,
         is_llm_connection_error=router_module._is_llm_connection_error,

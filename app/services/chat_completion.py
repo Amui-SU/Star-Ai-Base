@@ -9,6 +9,7 @@ from typing import Any, Optional
 from fastapi import HTTPException
 from openai import APIConnectionError, APITimeoutError
 
+from app.services.api_account_requests import build_account_request_options
 from app.services.llm_tool_calls import (
     LLMToolRunResult,
     append_no_more_tool_calls_instruction,
@@ -44,12 +45,17 @@ def build_llm_unavailable_answer() -> str:
     )
 
 
+def build_completion_request_options(
+    llm_config: dict,
+    *,
+    system_body: dict | None = None,
+) -> dict:
+    return build_account_request_options(llm_config, system_body=system_body)
+
+
 def build_thinking_completion_options(llm_config: dict) -> dict:
     """把已保存的请求体 JSON 注入 OpenAI 兼容客户端。"""
-    thinking_config = llm_config.get("thinking_config") or {}
-    if not thinking_config:
-        return {}
-    return {"extra_body": thinking_config}
+    return build_completion_request_options(llm_config)
 
 
 def verify_provider_configuration(
@@ -63,14 +69,15 @@ def verify_provider_configuration(
         client.chat.completions.create(
             model=llm_config["model"],
             messages=[{"role": "user", "content": "请只回复 OK"}],
-            max_tokens=16,
             stream=False,
-            **build_thinking_completion_options(llm_config),
+            **build_completion_request_options(
+                llm_config, system_body={"max_tokens": 16}
+            ),
         )
     except Exception as exc:
         raise HTTPException(
             status_code=400,
-            detail=f"模型配置验证失败: {str(exc)}",
+            detail="模型配置验证失败",
         ) from exc
     return int((time.perf_counter() - start) * 1000)
 
@@ -94,9 +101,8 @@ def stream_llm_events(
     stream = client.chat.completions.create(
         model=cfg["model"],
         messages=messages,
-        temperature=0.5,
         stream=True,
-        **build_thinking_completion_options(cfg),
+        **build_completion_request_options(cfg, system_body={"temperature": 0.5}),
     )
     for chunk in stream:
         if not chunk.choices:
@@ -121,8 +127,7 @@ def complete_llm_answer(
     response = client.chat.completions.create(
         model=cfg["model"],
         messages=messages,
-        temperature=0.5,
-        **build_thinking_completion_options(cfg),
+        **build_completion_request_options(cfg, system_body={"temperature": 0.5}),
     )
     message = response.choices[0].message
     thinking, answer = extract_thinking_and_answer(
@@ -158,8 +163,9 @@ async def complete_llm_answer_with_tools(
         client,
         model=llm_config["model"],
         messages=append_no_more_tool_calls_instruction(tool_run.messages),
-        temperature=0.5,
-        **build_thinking_completion_options(llm_config),
+        **build_completion_request_options(
+            llm_config, system_body={"temperature": 0.5}
+        ),
     )
     message = response.choices[0].message
     thinking, answer = extract_thinking_and_answer(
@@ -179,8 +185,9 @@ async def complete_llm_answer_with_tools(
                     },
                 ]
             ),
-            temperature=0.5,
-            **build_thinking_completion_options(llm_config),
+            **build_completion_request_options(
+                llm_config, system_body={"temperature": 0.5}
+            ),
         )
         message = response.choices[0].message
         thinking, answer = extract_thinking_and_answer(
@@ -212,9 +219,12 @@ async def prepare_llm_messages_with_tools(
             client,
             model=cfg["model"],
             messages=working_messages,
-            temperature=0.5,
             tools=tools,
             tool_choice="auto",
+            **build_completion_request_options(
+                {**cfg, "thinking_config": {}},
+                system_body={"temperature": 0.5},
+            ),
         )
         message = response.choices[0].message
         tool_calls = getattr(message, "tool_calls", None) or []

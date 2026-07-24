@@ -6,6 +6,8 @@ from typing import Any, Optional
 
 from langchain.schema import Document
 
+from app.services.api_account_requests import build_account_request_options
+
 
 def is_list_question(question: str) -> bool:
     """列表/清单类问题"""
@@ -137,14 +139,14 @@ def route_with_llm(
                 {"role": "system", "content": system},
                 {"role": "user", "content": question},
             ],
-            temperature=0,
+            **build_account_request_options(llm_config, system_body={"temperature": 0}),
         )
         text = (resp.choices[0].message.content or "").strip()
         match = re.search(r"(direct|db_list|db_content|vector)", text)
         return (match.group(1) if match else None), text
     except Exception as e:
         if log_warning is not None:
-            log_warning(f"LLM 路由失败: {e}")
+            log_warning(f"LLM 路由失败 ({type(e).__name__})")
         return None, ""
 
 

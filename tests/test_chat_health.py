@@ -39,6 +39,10 @@ async def test_llm_health_response_uses_resolved_credentials_for_ping():
         "model": "deepseek-chat",
         "api_key": "personal-key",
         "base_url": "https://api.deepseek.com",
+        "advanced_config": {
+            "headers": {"X-Health": "probe"},
+            "body": {"temperature": 0.2},
+        },
     }
     calls = []
 
@@ -69,8 +73,8 @@ async def test_llm_health_response_uses_resolved_credentials_for_ping():
         {
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 1,
-            "temperature": 0,
+            "extra_headers": {"X-Health": "probe"},
+            "extra_body": {"max_tokens": 1, "temperature": 0.2},
         }
     ]
 
@@ -132,9 +136,9 @@ async def test_llm_health_response_reports_probe_failure_with_latency_and_model(
 
     assert result == {
         "status": "down",
-        "message": "network timeout",
+        "message": "模型服务不可用",
         "latency_ms": 250,
         "model": "qwen-plus",
         "provider": "dashscope",
     }
-    assert warnings == ["LLM 健康检查失败: network timeout"]
+    assert warnings == ["LLM 健康检查失败 (RuntimeError)"]

@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from app.services.chat_completion import (
     build_llm_unavailable_answer,
+    build_completion_request_options,
     build_thinking_completion_options,
     complete_llm_answer,
     encode_thinking_delta,
@@ -18,6 +19,9 @@ def test_build_thinking_completion_options_uses_extra_body():
         {"thinking_config": {"reasoning_effort": "high"}}
     ) == {"extra_body": {"reasoning_effort": "high"}}
     assert build_thinking_completion_options({"thinking_config": {}}) == {}
+    assert build_completion_request_options(
+        {"advanced_config": {"headers": {"X-Route": "chat"}}}
+    ) == {"extra_headers": {"X-Route": "chat"}}
 
 
 def test_encode_thinking_delta_json_encodes_content():
@@ -49,13 +53,25 @@ def test_verify_provider_configuration_uses_injected_client():
     client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
 
     latency_ms = verify_provider_configuration(
-        {"model": "fake-model", "thinking_config": {"enable_thinking": True}},
+        {
+            "model": "fake-model",
+            "thinking_config": {"enable_thinking": True},
+            "advanced_config": {
+                "user_agent": "Verifier/1.0",
+                "body": {"top_p": 0.7},
+            },
+        },
         get_llm_client=lambda config: client,
     )
 
     assert captured["model"] == "fake-model"
     assert captured["messages"] == [{"role": "user", "content": "请只回复 OK"}]
-    assert captured["extra_body"] == {"enable_thinking": True}
+    assert captured["extra_headers"] == {"User-Agent": "Verifier/1.0"}
+    assert captured["extra_body"] == {
+        "max_tokens": 16,
+        "top_p": 0.7,
+        "enable_thinking": True,
+    }
     assert isinstance(latency_ms, int)
 
 
@@ -96,4 +112,7 @@ def test_complete_llm_answer_uses_injected_runtime_dependencies():
     assert answer == "最终答案"
     assert thinking == "先分析"
     assert captured["model"] == "fake-model"
-    assert captured["extra_body"] == {"reasoning_effort": "high"}
+    assert captured["extra_body"] == {
+        "temperature": 0.5,
+        "reasoning_effort": "high",
+    }

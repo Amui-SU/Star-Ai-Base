@@ -6,6 +6,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from app.services.api_account_requests import build_account_request_options
+
 
 async def llm_health_response(
     db: Any,
@@ -42,8 +44,10 @@ async def llm_health_response(
         client.chat.completions.create(
             model=llm_config["model"],
             messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-            temperature=0,
+            **build_account_request_options(
+                llm_config,
+                system_body={"max_tokens": 1, "temperature": 0},
+            ),
         )
         latency_ms = int((perf_counter() - start) * 1000)
         return {
@@ -55,10 +59,10 @@ async def llm_health_response(
         }
     except Exception as exc:
         latency_ms = int((perf_counter() - start) * 1000)
-        warning_logger(f"LLM 健康检查失败: {exc}")
+        warning_logger(f"LLM 健康检查失败 ({type(exc).__name__})")
         return {
             "status": "down",
-            "message": str(exc) or "模型服务不可用",
+            "message": "模型服务不可用",
             "latency_ms": latency_ms,
             "model": llm_config["model"],
             "provider": llm_config["provider"],

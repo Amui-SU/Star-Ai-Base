@@ -16,7 +16,7 @@ async def answer_legacy_chat(
     enforce_markdown_output: Callable[[list[dict]], list[dict]],
     apply_mode_instructions: Callable[[list[dict], bool], list[dict]],
     get_llm_client: Callable[[dict[str, Any]], Any],
-    build_thinking_completion_options: Callable[[dict[str, Any]], dict[str, Any]],
+    build_completion_request_options: Callable[..., dict[str, Any]],
     extract_thinking_and_answer: Callable[[str, Any], tuple[str, str]],
     is_llm_connection_error: Callable[[Exception], bool],
     build_llm_unavailable_answer: Callable[[], str],
@@ -35,8 +35,9 @@ async def answer_legacy_chat(
         response = client.chat.completions.create(
             model=llm_config["model"],
             messages=messages,
-            temperature=0.5,
-            **build_thinking_completion_options(llm_config),
+            **build_completion_request_options(
+                llm_config, system_body={"temperature": 0.5}
+            ),
         )
         message = response.choices[0].message
         raw_answer = message.content or ""
@@ -47,7 +48,7 @@ async def answer_legacy_chat(
         )
     except Exception as exc:
         if is_llm_connection_error(exc):
-            warning_logger(f"模型连接异常，使用降级回答: {exc}")
+            warning_logger(f"模型连接异常，使用降级回答 ({type(exc).__name__})")
             return ChatResponse(
                 answer=build_llm_unavailable_answer(),
                 sources=sources[:5],
@@ -90,7 +91,7 @@ async def stream_legacy_chat(
                     yield content
         except Exception as exc:
             if is_llm_connection_error(exc):
-                warning_logger(f"流式模型连接异常，使用降级回答: {exc}")
+                warning_logger(f"流式模型连接异常，使用降级回答 ({type(exc).__name__})")
                 yield build_llm_unavailable_answer()
             else:
                 raise

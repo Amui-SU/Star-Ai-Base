@@ -22,8 +22,11 @@ def _apply_mode_instructions(messages, _thinking_enabled):
     return [*messages, {"role": "system", "content": "mode"}]
 
 
-def _thinking_options(_config):
-    return {"extra_body": {"enabled": True}}
+def _completion_options(_config, *, system_body=None):
+    return {
+        "extra_headers": {"X-Runtime": "legacy"},
+        "extra_body": {**(system_body or {}), "enabled": True},
+    }
 
 
 def _extract_thinking_and_answer(_content, reasoning):
@@ -50,7 +53,7 @@ async def test_answer_legacy_chat_builds_chat_response_with_runtime_dependencies
         enforce_markdown_output=_identity_messages,
         apply_mode_instructions=_apply_mode_instructions,
         get_llm_client=lambda _config: client,
-        build_thinking_completion_options=_thinking_options,
+        build_completion_request_options=_completion_options,
         extract_thinking_and_answer=_extract_thinking_and_answer,
         is_llm_connection_error=lambda _exc: False,
         build_llm_unavailable_answer=lambda: "fallback",
@@ -62,7 +65,8 @@ async def test_answer_legacy_chat_builds_chat_response_with_runtime_dependencies
     assert response.sources == [{"title": "来源"}]
     assert captured["model"] == "fake-model"
     assert captured["messages"][-1] == {"role": "system", "content": "mode"}
-    assert captured["extra_body"] == {"enabled": True}
+    assert captured["extra_headers"] == {"X-Runtime": "legacy"}
+    assert captured["extra_body"] == {"temperature": 0.5, "enabled": True}
 
 
 @pytest.mark.asyncio
@@ -82,7 +86,7 @@ async def test_answer_legacy_chat_falls_back_on_connection_error():
         enforce_markdown_output=_identity_messages,
         apply_mode_instructions=_apply_mode_instructions,
         get_llm_client=lambda _config: client,
-        build_thinking_completion_options=_thinking_options,
+        build_completion_request_options=_completion_options,
         extract_thinking_and_answer=_extract_thinking_and_answer,
         is_llm_connection_error=lambda _exc: True,
         build_llm_unavailable_answer=lambda: "模型暂不可用",

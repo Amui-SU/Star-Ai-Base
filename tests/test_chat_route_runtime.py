@@ -22,7 +22,7 @@ async def test_answer_route_runtime_uses_router_module_dependencies(monkeypatch)
         _enforce_markdown_output=object(),
         _apply_mode_instructions=object(),
         _get_llm_client=object(),
-        _build_thinking_completion_options=object(),
+        _build_completion_request_options=object(),
         _extract_thinking_and_answer=object(),
         _is_llm_connection_error=object(),
         _build_llm_unavailable_answer=object(),
@@ -45,8 +45,8 @@ async def test_answer_route_runtime_uses_router_module_dependencies(monkeypatch)
     assert captured["apply_mode_instructions"] is module._apply_mode_instructions
     assert captured["get_llm_client"] is module._get_llm_client
     assert (
-        captured["build_thinking_completion_options"]
-        is module._build_thinking_completion_options
+        captured["build_completion_request_options"]
+        is module._build_completion_request_options
     )
     assert (
         captured["extract_thinking_and_answer"] is module._extract_thinking_and_answer
