@@ -1,6 +1,5 @@
 import { request } from "./client";
 import type {
-  ChatResponse,
   LLMApiSource,
   LLMConfigResponse,
   LLMHealthResponse,
@@ -10,16 +9,6 @@ import type {
 } from "./chatTypes";
 
 export const chatApi = {
-  ask: (question: string, sessionId?: string | null, folderIds?: number[]) =>
-    request<ChatResponse>("/chat/ask", {
-      method: "POST",
-      body: JSON.stringify({
-        question,
-        session_id: sessionId,
-        folder_ids: folderIds,
-      }),
-    }),
-
   getModelConfig: () => request<LLMConfigResponse>("/chat/llm/config"),
 
   getWebSearchConfig: () =>

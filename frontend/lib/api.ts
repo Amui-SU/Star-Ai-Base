@@ -29,7 +29,6 @@ export type {
   WebSearchConfigResponse,
   WebSearchProvider,
 } from "./api/chatTypes";
-export { favoritesApi } from "./api/favorites";
 export { importApi } from "./api/imports";
 export type { ImportMethod, ImportUrlResponse } from "./api/importTypes";
 export { knowledgeBaseApi } from "./api/knowledgeBases";
@@ -51,8 +50,6 @@ export type {
   FolderStatus,
   KnowledgeStats,
 } from "./api/knowledgeTypes";
-export { authApi } from "./api/legacyAuth";
-export { knowledgeApi } from "./api/legacyKnowledge";
 export { localConnectionApi } from "./api/localConnection";
 export type { LocalLanAddressResponse } from "./api/localConnectionTypes";
 export { sourceBindingApi } from "./api/sourceBindings";
@@ -77,21 +74,11 @@ export type {
 } from "./api/videoNoteTypes";
 export type {
   FavoriteFolder,
-  FavoriteVideosResponse,
-  LoginStatusResponse,
   OrganizePreviewItem,
   OrganizePreviewResponse,
   QRCodeResponse,
   SourceBinding,
-  UserInfo,
   Video,
 } from "./api/sourceTypes";
 export { systemAuthApi } from "./api/systemAuth";
-export type {
-  AdminPasswordResetResponse,
-  AdminUser,
-  OAuthProvider,
-  SystemAuthResponse,
-  SystemUser,
-  Workspace,
-} from "./api/systemAuthTypes";
+export type { AdminUser, SystemUser } from "./api/systemAuthTypes";

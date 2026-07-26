@@ -3,11 +3,13 @@ import json
 import pytest
 from fastapi import HTTPException
 
+from app.services.chat_completion import (
+    build_thinking_completion_options as _build_thinking_completion_options,
+)
+from app.services.chat_config import _get_provider_thinking_config
 from app.routers.chat import (
     LLMProviderConfigRequest,
     WebSearchConfigRequest,
-    _build_thinking_completion_options,
-    _get_provider_thinking_config,
     _get_provider_thinking_template,
     _parse_thinking_config,
     get_web_search_config,

@@ -120,6 +120,27 @@ async def test_legacy_global_endpoints_return_410_without_legacy_inputs(client):
 
 
 @pytest.mark.asyncio
+async def test_legacy_auth_and_favorites_endpoints_return_410(client):
+    endpoints = [
+        ("GET", "/auth/qrcode"),
+        ("GET", "/auth/qrcode/poll/legacy-key"),
+        ("GET", "/auth/session/legacy-session"),
+        ("DELETE", "/auth/session/legacy-session"),
+        ("GET", "/favorites/list?session_id=legacy"),
+        ("GET", "/favorites/123/videos?session_id=legacy"),
+        ("GET", "/favorites/123/all-videos?session_id=legacy"),
+        ("POST", "/favorites/organize/preview?session_id=legacy"),
+        ("POST", "/favorites/organize/execute?session_id=legacy"),
+        ("POST", "/favorites/organize/clean-invalid?session_id=legacy"),
+    ]
+
+    for method, path in endpoints:
+        response = await client.request(method, path)
+        assert response.status_code == 410, path
+        assert "/source-bindings" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_video_cache_allows_same_bvid_in_distinct_knowledge_bases(
     db_session_factory,
 ):

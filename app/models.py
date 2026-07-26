@@ -74,30 +74,6 @@ from app.schemas.source_bindings import (
 # ==================== SQLAlchemy 模型 ====================
 
 
-class UserSession(Base):
-    """用户会话表"""
-
-    __tablename__ = "user_sessions"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String(64), unique=True, index=True, nullable=False)
-
-    # B站用户信息
-    bili_mid = Column(Integer, nullable=True)  # B站用户ID
-    bili_uname = Column(String(100), nullable=True)  # B站用户名
-    bili_face = Column(String(500), nullable=True)  # 头像URL
-
-    # B站 Cookie 信息；新写入的敏感字段由 auth router 加密，仍兼容旧明文数据读取。
-    sessdata = Column(Text, nullable=True)
-    bili_jct = Column(Text, nullable=True)
-    dedeuserid = Column(String(50), nullable=True)
-
-    # 状态
-    is_valid = Column(Boolean, default=True)
-    last_active_at = Column(DateTime, default=_utc_now)
-    created_at = Column(DateTime, default=_utc_now)
-
-
 class SystemUser(Base):
     """系统用户表"""
 

@@ -7,6 +7,5 @@ def test_chat_router_boundary_file_delegates_to_focused_files():
     for file_name in [
         "test_chat_router_config_boundaries.py",
         "test_chat_router_llm_message_boundaries.py",
-        "test_chat_router_context_runtime_boundaries.py",
     ]:
         assert (service_boundary_dir / file_name).exists()

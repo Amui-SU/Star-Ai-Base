@@ -208,17 +208,3 @@ def test_rag_service_delegates_document_and_filter_helpers_to_services():
     assert "self.vectorstore._collection.count(" not in rag_source
     assert 'filters = [\n            {"workspace_id": workspace_id}' not in rag_source
     assert '{"bvid": {"$in": normalized_bvids}}' not in rag_source
-
-
-def test_favorite_router_uses_shared_default_folder_detection():
-    project_root = get_project_root()
-    router_source = (project_root / "app/routers/favorites.py").read_text(
-        encoding="utf-8"
-    )
-    runtime_source = (
-        project_root / "app/services/favorites_route_runtime.py"
-    ).read_text(encoding="utf-8")
-
-    assert "def _is_default_folder" not in router_source
-    assert "def _is_default_folder" not in runtime_source
-    assert "is_legacy_default_favorite_folder" in (router_source + runtime_source)

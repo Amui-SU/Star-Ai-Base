@@ -4,33 +4,40 @@ import time
 
 import pytest
 
-from app.routers.chat import (
-    _complete_llm_answer_with_tools,
-    _parse_tool_arguments,
-    _prepare_llm_messages_with_tools,
+from app.services.chat_completion import (
+    complete_llm_answer_with_tools,
+    prepare_llm_messages_with_tools,
 )
+from app.services.llm_tool_calls import parse_tool_arguments
+
+
+def _llm_runtime_kwargs(fake_client, config):
+    return {
+        "resolve_llm_config": lambda: config,
+        "get_llm_client": lambda _config: fake_client,
+    }
 
 
 def test_parse_tool_arguments_accepts_dict_payloads_from_compatible_apis():
-    assert _parse_tool_arguments({"query": "external query"}) == {
+    assert parse_tool_arguments({"query": "external query"}) == {
         "query": "external query"
     }
 
 
 def test_parse_tool_arguments_accepts_common_search_aliases():
-    assert _parse_tool_arguments({"search_query": "external query"}) == {
+    assert parse_tool_arguments({"search_query": "external query"}) == {
         "query": "external query"
     }
-    assert _parse_tool_arguments({"keyword": "external query"}) == {
+    assert parse_tool_arguments({"keyword": "external query"}) == {
         "query": "external query"
     }
-    assert _parse_tool_arguments({"queries": ["first query", "second query"]}) == {
+    assert parse_tool_arguments({"queries": ["first query", "second query"]}) == {
         "query": "first query second query"
     }
 
 
 @pytest.mark.asyncio
-async def test_prepare_llm_messages_with_tools_does_not_block_event_loop(monkeypatch):
+async def test_prepare_llm_messages_with_tools_does_not_block_event_loop():
     class FakeMessage:
         content = "answer"
         reasoning_content = ""
@@ -51,20 +58,8 @@ async def test_prepare_llm_messages_with_tools_does_not_block_event_loop(monkeyp
         {"chat": type("Chat", (), {"completions": FakeCompletions()})()},
     )()
 
-    monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
-    )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
-
     task = asyncio.create_task(
-        _prepare_llm_messages_with_tools(
+        prepare_llm_messages_with_tools(
             [{"role": "user", "content": "question"}],
             tools=[
                 {
@@ -76,6 +71,16 @@ async def test_prepare_llm_messages_with_tools_does_not_block_event_loop(monkeyp
                 }
             ],
             tool_handlers={},
+            **_llm_runtime_kwargs(
+                fake_client,
+                {
+                    "provider": "test",
+                    "model": "tool-model",
+                    "api_key": "test",
+                    "base_url": "https://example.com",
+                    "thinking_config": {},
+                },
+            ),
         )
     )
     await asyncio.sleep(0.03)
@@ -86,7 +91,7 @@ async def test_prepare_llm_messages_with_tools_does_not_block_event_loop(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_complete_llm_answer_with_tools_executes_requested_tool(monkeypatch):
+async def test_complete_llm_answer_with_tools_executes_requested_tool():
     captured = {"calls": []}
 
     class FakeToolFunction:
@@ -177,19 +182,7 @@ async def test_complete_llm_answer_with_tools_executes_requested_tool(monkeypatc
         captured["tool_arguments"] = arguments
         return {"results": [{"title": "结果"}]}
 
-    monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
-    )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
-
-    answer, thinking, messages = await _complete_llm_answer_with_tools(
+    answer, thinking, messages = await complete_llm_answer_with_tools(
         [{"role": "user", "content": "问题"}],
         tools=[
             {
@@ -198,6 +191,16 @@ async def test_complete_llm_answer_with_tools_executes_requested_tool(monkeypatc
             }
         ],
         tool_handlers={"web_search": fake_handler},
+        **_llm_runtime_kwargs(
+            fake_client,
+            {
+                "provider": "test",
+                "model": "tool-model",
+                "api_key": "test",
+                "base_url": "https://example.com",
+                "thinking_config": {},
+            },
+        ),
     )
 
     assert answer == "最终答案"
@@ -207,7 +210,7 @@ async def test_complete_llm_answer_with_tools_executes_requested_tool(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_tool_planning_skips_thinking_request_body(monkeypatch):
+async def test_tool_planning_skips_thinking_request_body():
     captured = {"calls": []}
 
     class FakeMessage:
@@ -230,22 +233,7 @@ async def test_tool_planning_skips_thinking_request_body(monkeypatch):
         {"chat": type("Chat", (), {"completions": FakeCompletions()})()},
     )()
 
-    monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "deepseek",
-            "model": "deepseek-v4-pro",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {
-                "thinking": {"type": "enabled"},
-                "reasoning_effort": "high",
-            },
-        },
-    )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
-
-    await _prepare_llm_messages_with_tools(
+    await prepare_llm_messages_with_tools(
         [{"role": "user", "content": "question"}],
         tools=[
             {
@@ -254,6 +242,19 @@ async def test_tool_planning_skips_thinking_request_body(monkeypatch):
             }
         ],
         tool_handlers={},
+        **_llm_runtime_kwargs(
+            fake_client,
+            {
+                "provider": "deepseek",
+                "model": "deepseek-v4-pro",
+                "api_key": "test",
+                "base_url": "https://example.com",
+                "thinking_config": {
+                    "thinking": {"type": "enabled"},
+                    "reasoning_effort": "high",
+                },
+            },
+        ),
     )
 
     assert captured["calls"][0]["tools"][0]["function"]["name"] == "web_search"
@@ -261,9 +262,7 @@ async def test_tool_planning_skips_thinking_request_body(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_complete_llm_answer_with_tools_executes_dsml_text_tool_call(
-    monkeypatch,
-):
+async def test_complete_llm_answer_with_tools_executes_dsml_text_tool_call():
     captured = {"calls": []}
 
     dsml_tool_call = (
@@ -331,19 +330,7 @@ async def test_complete_llm_answer_with_tools_executes_dsml_text_tool_call(
         captured["tool_arguments"] = arguments
         return {"results": [{"title": "result"}]}
 
-    monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
-    )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
-
-    answer, thinking, messages = await _complete_llm_answer_with_tools(
+    answer, thinking, messages = await complete_llm_answer_with_tools(
         [{"role": "user", "content": "question"}],
         tools=[
             {
@@ -352,6 +339,16 @@ async def test_complete_llm_answer_with_tools_executes_dsml_text_tool_call(
             }
         ],
         tool_handlers={"web_search": fake_handler},
+        **_llm_runtime_kwargs(
+            fake_client,
+            {
+                "provider": "test",
+                "model": "tool-model",
+                "api_key": "test",
+                "base_url": "https://example.com",
+                "thinking_config": {},
+            },
+        ),
     )
 
     assert answer == "final answer"

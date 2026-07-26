@@ -108,7 +108,7 @@ def test_chat_router_delegates_llm_health_check_to_service():
 
     route_source = chat_source[
         chat_source.index("async def llm_health_check(") : chat_source.index(
-            "_create_chat_completion_async ="
+            "_verify_provider_configuration ="
         )
     ]
 

@@ -133,9 +133,9 @@ async def test_bilibili_qrcode_upstream_error_returns_readable_502(client, monke
 async def test_bilibili_qrcode_poll_survives_empty_memory_cache(client, monkeypatch):
     await _register_user(client, "binding-pending@example.com")
 
-    import app.routers.auth as auth_router
+    from app.services import legacy_bilibili_sessions
 
-    auth_router.login_sessions.clear()
+    legacy_bilibili_sessions.login_sessions.clear()
 
     class FakeBilibiliService:
         async def generate_qrcode(self):
@@ -160,7 +160,7 @@ async def test_bilibili_qrcode_poll_survives_empty_memory_cache(client, monkeypa
     response = await client.get("/source-bindings/bilibili/qrcode")
     assert response.status_code == 200
 
-    auth_router.login_sessions.clear()
+    legacy_bilibili_sessions.login_sessions.clear()
 
     poll_response = await client.get(
         "/source-bindings/bilibili/qrcode/poll/persistent-binding-qrcode"

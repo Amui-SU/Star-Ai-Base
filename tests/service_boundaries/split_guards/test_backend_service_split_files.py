@@ -143,9 +143,6 @@ def test_auth_database_ingestion_boundary_tests_are_split_by_domain():
                 "test_bilibili_service_delegates_media_helpers_to_service",
                 "test_bilibili_service_delegates_favorite_helpers_to_service",
             ],
-            "test_favorites_router_boundaries.py": [
-                "test_favorites_router_delegates_listing_runtime_to_service",
-            ],
         },
     )
 
@@ -193,7 +190,6 @@ def test_knowledge_base_router_boundary_tests_are_split_by_domain():
             "test_rag_ingestion_boundaries.py": [
                 "test_folder_ingestion_delegates_records_and_content_helpers_to_services",
                 "test_rag_service_delegates_document_and_filter_helpers_to_services",
-                "test_favorite_router_uses_shared_default_folder_detection",
             ],
         },
     )
@@ -221,17 +217,9 @@ def test_chat_router_boundary_tests_are_split_by_domain():
                 "test_chat_router_uses_admin_service_instead_of_system_auth_router",
             ],
             "test_chat_router_llm_message_boundaries.py": [
-                "test_chat_router_delegates_llm_tool_helpers_to_service",
                 "test_chat_router_delegates_message_helpers_to_service",
-                "test_chat_router_delegates_question_routing_helpers_to_service",
                 "test_chat_router_delegates_completion_helpers_to_service",
                 "test_chat_router_delegates_llm_client_factory_to_service",
-            ],
-            "test_chat_router_context_runtime_boundaries.py": [
-                "test_chat_router_delegates_video_context_helpers_to_service",
-                "test_chat_router_delegates_message_preparation_to_service",
-                "test_chat_router_delegates_legacy_ask_runtime_to_service",
-                "test_chat_router_legacy_search_keeps_only_disabled_entrypoint",
             ],
         },
     )

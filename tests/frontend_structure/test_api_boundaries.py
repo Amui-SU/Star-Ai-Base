@@ -56,23 +56,18 @@ def test_frontend_api_delegates_import_favorites_and_legacy_boundaries():
     for relative_path in [
         "frontend/lib/api/imports.ts",
         "frontend/lib/api/importTypes.ts",
-        "frontend/lib/api/legacyAuth.ts",
-        "frontend/lib/api/favorites.ts",
-        "frontend/lib/api/legacyKnowledge.ts",
         "frontend/lib/api/knowledgeTypes.ts",
     ]:
         assert (project_root / relative_path).exists()
 
     assert 'from "./api/imports"' in api_source
     assert 'from "./api/importTypes"' in api_source
-    assert 'from "./api/legacyAuth"' in api_source
-    assert 'from "./api/favorites"' in api_source
-    assert 'from "./api/legacyKnowledge"' in api_source
     assert 'from "./api/knowledgeTypes"' in api_source
     assert "export const importApi" not in api_source
-    assert "export const authApi" not in api_source
-    assert "export const favoritesApi" not in api_source
-    assert "export const knowledgeApi" not in api_source
+    # 遗留封装（authApi/favoritesApi/knowledgeApi）已随死代码清理删除，不应回归 barrel
+    assert 'from "./api/legacyAuth"' not in api_source
+    assert 'from "./api/favorites"' not in api_source
+    assert 'from "./api/legacyKnowledge"' not in api_source
     assert "export interface ImportMethod" not in api_source
     assert "export interface BuildStatus" not in api_source
     assert "export interface KnowledgeStats" not in api_source

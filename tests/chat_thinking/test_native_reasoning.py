@@ -1,10 +1,10 @@
-from app.routers.chat import (
-    THINKING_DELTA_MARKER,
-    _complete_llm_answer,
-    _encode_thinking_delta,
-    _message_to_openai_dict,
-    _stream_llm_events,
+from app.services.chat_completion import (
+    DEFAULT_THINKING_DELTA_MARKER,
+    complete_llm_answer,
+    encode_thinking_delta,
+    stream_llm_events,
 )
+from app.services.llm_tool_calls import message_to_openai_dict
 
 
 def test_message_to_openai_dict_keeps_only_request_safe_assistant_fields():
@@ -25,7 +25,7 @@ def test_message_to_openai_dict_keeps_only_request_safe_assistant_fields():
                 "audio": {"id": "response-only"},
             }
 
-    assert _message_to_openai_dict(FakeMessage()) == {
+    assert message_to_openai_dict(FakeMessage()) == {
         "role": "assistant",
         "content": "",
         "tool_calls": [
@@ -39,12 +39,12 @@ def test_message_to_openai_dict_keeps_only_request_safe_assistant_fields():
 
 
 def test_thinking_delta_is_json_encoded_for_mixed_text_stream():
-    encoded = _encode_thinking_delta("分析\n下一步")
+    encoded = encode_thinking_delta("分析\n下一步")
 
-    assert encoded == f'{THINKING_DELTA_MARKER}"分析\\n下一步"\n'
+    assert encoded == f'{DEFAULT_THINKING_DELTA_MARKER}"分析\\n下一步"\n'
 
 
-def test_stream_llm_events_forwards_native_reasoning_and_answer(monkeypatch):
+def test_stream_llm_events_forwards_native_reasoning_and_answer():
     captured = {}
 
     class FakeCompletions:
@@ -78,28 +78,29 @@ def test_stream_llm_events_forwards_native_reasoning_and_answer(monkeypatch):
         (),
         {"chat": type("Chat", (), {"completions": FakeCompletions()})()},
     )()
-    monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "deepseek",
-            "model": "deepseek-v4-pro",
-            "api_key": "test",
-            "base_url": "https://api.deepseek.com",
-            "thinking_config": {
-                "thinking": {"type": "enabled"},
-                "reasoning_effort": "high",
-            },
-        },
-    )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
 
-    events = list(_stream_llm_events([{"role": "user", "content": "问题"}]))
+    events = list(
+        stream_llm_events(
+            [{"role": "user", "content": "问题"}],
+            resolve_llm_config=lambda: {
+                "provider": "deepseek",
+                "model": "deepseek-v4-pro",
+                "api_key": "test",
+                "base_url": "https://api.deepseek.com",
+                "thinking_config": {
+                    "thinking": {"type": "enabled"},
+                    "reasoning_effort": "high",
+                },
+            },
+            get_llm_client=lambda config: fake_client,
+        )
+    )
 
     assert captured["extra_body"]["thinking"] == {"type": "enabled"}
     assert events == [("thinking", "先分析"), ("answer", "最终答案")]
 
 
-def test_complete_llm_answer_returns_native_reasoning(monkeypatch):
+def test_complete_llm_answer_returns_native_reasoning():
     captured = {}
     message = type(
         "Message",
@@ -121,9 +122,10 @@ def test_complete_llm_answer_returns_native_reasoning(monkeypatch):
         (),
         {"chat": type("Chat", (), {"completions": FakeCompletions()})()},
     )()
-    monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
+
+    answer, thinking = complete_llm_answer(
+        [{"role": "user", "content": "问题"}],
+        resolve_llm_config=lambda: {
             "provider": "deepseek",
             "model": "deepseek-v4-pro",
             "api_key": "test",
@@ -133,11 +135,7 @@ def test_complete_llm_answer_returns_native_reasoning(monkeypatch):
                 "reasoning_effort": "high",
             },
         },
-    )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
-
-    answer, thinking = _complete_llm_answer(
-        [{"role": "user", "content": "问题"}],
+        get_llm_client=lambda config: fake_client,
     )
 
     assert captured["extra_body"]["thinking"] == {"type": "enabled"}

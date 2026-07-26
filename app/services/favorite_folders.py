@@ -1,6 +1,5 @@
 from typing import Any, Mapping
 
-
 DEFAULT_FAVORITE_FOLDER_TITLE = "默认收藏夹"
 
 
@@ -31,12 +30,3 @@ def is_default_favorite_folder(
         return True
     title = (folder.get("title") or "").strip()
     return title == DEFAULT_FAVORITE_FOLDER_TITLE
-
-
-def is_legacy_default_favorite_folder(folder: Mapping[str, Any]) -> bool:
-    return is_default_favorite_folder(
-        folder,
-        explicit_flag_overrides=True,
-        include_alias_flags=True,
-        include_attr=True,
-    )

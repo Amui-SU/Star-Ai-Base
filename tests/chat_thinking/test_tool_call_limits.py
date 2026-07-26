@@ -2,13 +2,19 @@ import json
 
 import pytest
 
-from app.routers.chat import _complete_llm_answer_with_tools
+from app.services.chat_completion import complete_llm_answer_with_tools
+
+_LLM_RUNTIME_CONFIG = {
+    "provider": "test",
+    "model": "tool-model",
+    "api_key": "test",
+    "base_url": "https://example.com",
+    "thinking_config": {},
+}
 
 
 @pytest.mark.asyncio
-async def test_complete_llm_answer_with_tools_supports_bounded_tool_rounds(
-    monkeypatch,
-):
+async def test_complete_llm_answer_with_tools_supports_bounded_tool_rounds():
     captured = {"queries": [], "calls": []}
 
     class FakeToolFunction:
@@ -130,19 +136,7 @@ async def test_complete_llm_answer_with_tools_supports_bounded_tool_rounds(
         captured["queries"].append(arguments["query"])
         return {"results": [{"title": arguments["query"]}]}
 
-    monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
-    )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
-
-    answer, thinking, messages = await _complete_llm_answer_with_tools(
+    answer, thinking, messages = await complete_llm_answer_with_tools(
         [{"role": "user", "content": "问题"}],
         tools=[
             {
@@ -152,6 +146,8 @@ async def test_complete_llm_answer_with_tools_supports_bounded_tool_rounds(
         ],
         tool_handlers={"web_search": fake_handler},
         max_tool_calls=2,
+        resolve_llm_config=lambda: _LLM_RUNTIME_CONFIG,
+        get_llm_client=lambda _config: fake_client,
     )
 
     assert answer == "多轮最终答案"
@@ -161,9 +157,7 @@ async def test_complete_llm_answer_with_tools_supports_bounded_tool_rounds(
 
 
 @pytest.mark.asyncio
-async def test_complete_llm_answer_with_tools_counts_limit_exceeded_tool_calls(
-    monkeypatch,
-):
+async def test_complete_llm_answer_with_tools_counts_limit_exceeded_tool_calls():
     captured = {"queries": [], "calls": []}
 
     class FakeToolFunction:
@@ -245,19 +239,7 @@ async def test_complete_llm_answer_with_tools_counts_limit_exceeded_tool_calls(
         captured["queries"].append(arguments["query"])
         return {"results": [{"title": arguments["query"]}]}
 
-    monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
-    )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
-
-    answer, _, messages = await _complete_llm_answer_with_tools(
+    answer, _, messages = await complete_llm_answer_with_tools(
         [{"role": "user", "content": "问题"}],
         tools=[
             {
@@ -267,6 +249,8 @@ async def test_complete_llm_answer_with_tools_counts_limit_exceeded_tool_calls(
         ],
         tool_handlers={"web_search": fake_handler},
         max_tool_calls=1,
+        resolve_llm_config=lambda: _LLM_RUNTIME_CONFIG,
+        get_llm_client=lambda _config: fake_client,
     )
 
     tool_messages = [message for message in messages if message["role"] == "tool"]
@@ -280,9 +264,7 @@ async def test_complete_llm_answer_with_tools_counts_limit_exceeded_tool_calls(
 
 
 @pytest.mark.asyncio
-async def test_complete_llm_answer_with_tools_does_not_return_dsml_tool_text_after_limit(
-    monkeypatch,
-):
+async def test_complete_llm_answer_with_tools_does_not_return_dsml_tool_text_after_limit():
     captured = {"calls": []}
     dsml_tool_call = (
         "<｜｜DSML｜｜tool_calls>"
@@ -379,19 +361,7 @@ async def test_complete_llm_answer_with_tools_does_not_return_dsml_tool_text_aft
     async def fake_handler(arguments):
         return {"results": [{"title": "result"}]}
 
-    monkeypatch.setattr(
-        "app.routers.chat._resolve_llm_config",
-        lambda: {
-            "provider": "test",
-            "model": "tool-model",
-            "api_key": "test",
-            "base_url": "https://example.com",
-            "thinking_config": {},
-        },
-    )
-    monkeypatch.setattr("app.routers.chat._get_llm_client", lambda config: fake_client)
-
-    answer, thinking, _messages = await _complete_llm_answer_with_tools(
+    answer, thinking, _messages = await complete_llm_answer_with_tools(
         [{"role": "user", "content": "问题"}],
         tools=[
             {
@@ -401,6 +371,8 @@ async def test_complete_llm_answer_with_tools_does_not_return_dsml_tool_text_aft
         ],
         tool_handlers={"web_search": fake_handler},
         max_tool_calls=1,
+        resolve_llm_config=lambda: _LLM_RUNTIME_CONFIG,
+        get_llm_client=lambda _config: fake_client,
     )
 
     assert answer == "最终答案"

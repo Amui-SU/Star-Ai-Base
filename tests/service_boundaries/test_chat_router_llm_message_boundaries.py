@@ -2,44 +2,6 @@ from tests.service_boundaries.helpers import declared_callable_names
 from tests.service_boundaries.helpers import get_project_root
 
 
-def test_chat_router_delegates_llm_tool_helpers_to_service():
-    project_root = get_project_root()
-    service_path = project_root / "app/services/llm_tool_calls.py"
-    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
-    declared_names = declared_callable_names(chat_source)
-
-    expected_service_names = {
-        "LLMToolRunResult",
-        "message_to_openai_dict",
-        "append_no_more_tool_calls_instruction",
-        "append_tool_call_results",
-        "parse_tool_arguments",
-        "extract_thinking_and_answer",
-        "extract_dsml_text_tool_calls",
-        "contains_dsml_tool_call_text",
-    }
-    router_private_names = {
-        "_message_to_openai_dict",
-        "_tool_call_to_dict",
-        "_tool_call_id",
-        "_tool_call_function",
-        "_extract_dsml_text_tool_calls",
-        "_contains_dsml_tool_call_text",
-        "_append_no_more_tool_calls_instruction",
-        "_normalize_tool_arguments",
-        "_parse_tool_arguments",
-        "_append_tool_call_results",
-        "_extract_thinking_and_answer",
-    }
-
-    assert service_path.exists()
-    service_source = service_path.read_text(encoding="utf-8")
-    for name in expected_service_names:
-        assert f"def {name}" in service_source or f"class {name}" in service_source
-    assert "from app.services.llm_tool_calls import" in chat_source
-    assert declared_names.isdisjoint(router_private_names)
-
-
 def test_chat_router_delegates_message_helpers_to_service():
     project_root = get_project_root()
     service_path = project_root / "app/services/chat_messages.py"
@@ -76,47 +38,9 @@ def test_chat_router_delegates_message_helpers_to_service():
     service_source = service_path.read_text(encoding="utf-8")
     for name in expected_service_names:
         assert f"def {name}" in service_source
-    assert "from app.services.chat_messages import" in chat_source
     assert "from app.services.chat_messages import" in knowledge_source
     assert "    _apply_mode_instructions," not in knowledge_source
     assert "    _enforce_markdown_output," not in knowledge_source
-    assert declared_names.isdisjoint(router_private_names)
-
-
-def test_chat_router_delegates_question_routing_helpers_to_service():
-    project_root = get_project_root()
-    service_path = project_root / "app/services/chat_routing.py"
-    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
-    declared_names = declared_callable_names(chat_source)
-
-    expected_service_names = {
-        "is_list_question",
-        "is_summary_question",
-        "is_general_question",
-        "is_collection_intent",
-        "is_overview_question",
-        "route_with_rules",
-        "route_with_llm",
-        "extract_keywords",
-        "filter_docs_by_keywords",
-    }
-    router_private_names = {
-        "_is_list_question",
-        "_is_summary_question",
-        "_is_general_question",
-        "_is_collection_intent",
-        "_is_overview_question",
-        "_route_with_rules",
-        "_route_with_llm",
-        "_extract_keywords",
-        "_filter_docs_by_keywords",
-    }
-
-    assert service_path.exists()
-    service_source = service_path.read_text(encoding="utf-8")
-    for name in expected_service_names:
-        assert f"def {name}" in service_source
-    assert "from app.services.chat_routing import" in chat_source
     assert declared_names.isdisjoint(router_private_names)
 
 
@@ -157,47 +81,6 @@ def test_chat_router_delegates_completion_helpers_to_service():
         assert f"def {name}" in service_source or f"async def {name}" in service_source
     assert "from app.services.chat_completion import" in chat_source
     assert declared_names.isdisjoint(router_private_names)
-
-
-def test_chat_router_uses_services_for_llm_runtime_adapters():
-    project_root = get_project_root()
-    service_path = project_root / "app/services/chat_llm_runtime.py"
-    adapter_path = project_root / "app/services/chat_router_adapters.py"
-    chat_source = (project_root / "app/routers/chat.py").read_text(encoding="utf-8")
-    declared_names = declared_callable_names(chat_source)
-
-    assert service_path.exists()
-    service_source = service_path.read_text(encoding="utf-8")
-    for name in {
-        "build_stream_llm_events_adapter",
-        "build_complete_llm_answer_adapter",
-        "build_complete_llm_answer_with_tools_adapter",
-        "build_prepare_llm_messages_with_tools_adapter",
-    }:
-        assert f"def {name}" in service_source
-    assert adapter_path.exists()
-    adapter_source = adapter_path.read_text(encoding="utf-8")
-    assert "def build_chat_router_adapters" in adapter_source
-    assert "from app.services.chat_llm_runtime import" in adapter_source
-    assert "from app.services.chat_router_adapters import" in chat_source
-    assert "from app.services.chat_llm_runtime import" not in chat_source
-    assert "stream_llm_events(" not in chat_source
-    assert "complete_llm_answer(" not in chat_source
-    assert "complete_llm_answer_with_tools(" not in chat_source
-    assert "prepare_llm_messages_with_tools(" not in chat_source
-    assert "build_stream_llm_events_adapter(" not in chat_source
-    assert "build_complete_llm_answer_adapter(" not in chat_source
-    assert "build_complete_llm_answer_with_tools_adapter(" not in chat_source
-    assert "build_prepare_llm_messages_with_tools_adapter(" not in chat_source
-    assert declared_names.isdisjoint(
-        {
-            "_stream_llm_events",
-            "_complete_llm_answer",
-            "_complete_llm_answer_with_tools",
-            "_prepare_llm_messages_with_tools",
-        }
-    )
-    assert "_get_llm_client" in chat_source
 
 
 def test_chat_router_delegates_llm_client_factory_to_service():

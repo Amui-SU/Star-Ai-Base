@@ -11,7 +11,7 @@ def test_bilibili_service_from_cookies_maps_common_cookie_names(monkeypatch):
 
     monkeypatch.setattr(bilibili.httpx, "AsyncClient", FakeAsyncClient)
 
-    service = bilibili.BilibiliService.from_cookies(
+    service = bilibili.bilibili_service_from_cookies(
         {
             "SESSDATA": "sess",
             "bili_jct": "csrf",
@@ -34,7 +34,7 @@ def test_bilibili_service_from_cookies_accepts_lowercase_aliases(monkeypatch):
 
     monkeypatch.setattr(bilibili.httpx, "AsyncClient", FakeAsyncClient)
 
-    service = bilibili.BilibiliService.from_cookies(
+    service = bilibili.bilibili_service_from_cookies(
         {
             "sessdata": "sess",
             "bili_jct": "csrf",

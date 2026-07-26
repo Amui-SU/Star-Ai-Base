@@ -12,12 +12,6 @@ def test_legacy_bilibili_session_helpers_live_in_service_not_auth_router():
     favorites_source = (project_root / "app/routers/favorites.py").read_text(
         encoding="utf-8"
     )
-    legacy_knowledge_source = (project_root / "app/routers/knowledge.py").read_text(
-        encoding="utf-8"
-    )
-    legacy_knowledge_runtime_source = (
-        project_root / "app/services/knowledge_legacy_runtime.py"
-    ).read_text(encoding="utf-8")
     declared_names = declared_callable_names(auth_source)
 
     assert service_path.exists()
@@ -26,36 +20,17 @@ def test_legacy_bilibili_session_helpers_live_in_service_not_auth_router():
         "login_sessions",
         "_set_session",
         "_get_session",
-        "_encrypt_session_cookie",
-        "_decrypt_session_cookie",
-        "_cookies_from_db_session",
-        "get_session",
     }
     for name in expected_service_names:
         assert f"def {name}" in service_source or f"{name}:" in service_source
 
-    assert "from app.services.legacy_bilibili_sessions import" in auth_source
+    # 绑定二维码流程仍使用进程内热缓存；旧登录/收藏夹路由已降级为 410 stub
     assert "from app.services.legacy_bilibili_sessions import" in source_bindings_source
-    assert "from app.services.legacy_bilibili_sessions import" in favorites_source
-    assert (
-        "from app.services.legacy_bilibili_sessions import"
-        in legacy_knowledge_runtime_source
-    )
-    assert (
-        "from app.services.knowledge_legacy_runtime import" in legacy_knowledge_source
-    )
+    assert "from app.services.legacy_bilibili_sessions import" not in auth_source
+    assert "from app.services.legacy_bilibili_sessions import" not in favorites_source
     assert "from app.routers.auth import" not in source_bindings_source
-    assert "from app.routers.auth import get_session" not in favorites_source
-    assert "from app.routers.auth import get_session" not in legacy_knowledge_source
-    assert (
-        "from app.services.legacy_bilibili_sessions import"
-        not in legacy_knowledge_source
-    )
     assert declared_names.isdisjoint(
         {
-            "_encrypt_session_cookie",
-            "_decrypt_session_cookie",
-            "_cookies_from_db_session",
             "_cleanup_expired_sessions",
             "_set_session",
             "_get_session",

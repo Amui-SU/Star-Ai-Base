@@ -47,11 +47,6 @@ export interface Video {
   cid?: number;
 }
 
-export interface FavoriteVideosResponse {
-  total: number;
-  videos: Video[];
-}
-
 export interface OrganizePreviewItem {
   bvid: string;
   title: string;

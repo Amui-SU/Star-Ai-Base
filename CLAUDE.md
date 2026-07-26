@@ -58,12 +58,12 @@ app/
 ├── security.py       # bcrypt 密码哈希、session token (SHA-256)、Fernet 加密（开发环境用稳定派生 key）
 ├── dependencies.py   # get_current_user / get_current_workspace / get_knowledge_base_for_user
 ├── routers/
-│   ├── auth.py           # B 站扫码登录（QR → poll → session 持久化到 user_sessions）
+│   ├── auth.py           # 旧 B 站扫码登录已禁用，全部为 410 Gone stub（改用 source_bindings 绑定）
 │   ├── system_auth.py    # 系统用户注册/登录/登出/me（HttpOnly cookie 会话，14天过期）
-│   ├── chat.py           # 核心对话（智能路由 + 流式 + 6 种 LLM 提供方切换）
-│   ├── knowledge.py      # 知识库构建/同步/统计/清空（旧 B 站 session_id 驱动）
+│   ├── chat.py           # LLM 配置/健康检查端点；旧 /chat/ask|ask/stream|search 仅剩 410 stub
+│   ├── knowledge.py      # 旧全局知识库接口，全部为 410 Gone stub（实现已删除）
 │   ├── knowledge_bases.py# 多用户知识库 CRUD + scoped search/chat/chat-stream/build/delete/scope-options
-│   ├── favorites.py      # 收藏夹列表/视频/整理/清理
+│   ├── favorites.py      # 旧收藏夹接口已禁用，全部为 410 Gone stub（改用 /source-bindings/{id}/favorites）
 │   ├── imports.py        # 多来源导入入口：B 站视频 URL 与本地视频已接入，抖音/通用 URL 预留
 │   └── source_bindings.py# B 站账号绑定到 workspace（QR 绑定流程 + 凭据加密存储 + 自定义视频名）
 └── services/
@@ -90,21 +90,19 @@ SystemUser → Workspace (1:1 via WorkspaceMember) → KnowledgeBase (1:N)
 
 | 层级       | 旧接口（session_id 驱动）                                                         | 主路径（系统用户 + workspace 隔离）                                                                                                                                                                                                          |
 | ---------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 认证       | `/auth/qrcode` + `/auth/session/{id}`                                             | `/system-auth/register`, `/system-auth/login`, `/system-auth/logout`, `/system-auth/me`, `/system-auth/me/display-name`                                                                                                                      |
+| 认证       | `/auth/*` 已返回 `410 Gone`                                                       | `/system-auth/register`, `/system-auth/login`, `/system-auth/logout`, `/system-auth/me`, `/system-auth/me/display-name`                                                                                                                      |
 | 知识库/RAG | `/knowledge/*`、`/chat/ask`、`/chat/ask/stream`、`/chat/search` 已返回 `410 Gone` | `/knowledge-bases/{id}/search`, `/knowledge-bases/{id}/chat`, `/knowledge-bases/{id}/chat/stream`, `/knowledge-bases/{id}/build`, `/knowledge-bases/{id}/build/status`, `/knowledge-bases/{id}/stats`, `/knowledge-bases/{id}/scope-options` |
 | 绑定       | —                                                                                 | `/source-bindings` + `/source-bindings/bilibili/qrcode`                                                                                                                                                                                      |
-| 收藏夹     | `/favorites/*`                                                                    | `/source-bindings/{id}/favorites` + `/source-bindings/{id}/favorites/{media_id}/videos`                                                                                                                                                      |
+| 收藏夹     | `/favorites/*` 已返回 `410 Gone`                                                  | `/source-bindings/{id}/favorites` + `/source-bindings/{id}/favorites/{media_id}/videos`                                                                                                                                                      |
 | 导入       | —                                                                                 | `/imports/methods` + `/imports/url` + `/imports/local-video`                                                                                                                                                                                 |
 | 视频名     | —                                                                                 | `/source-bindings/{id}/videos/title`                                                                                                                                                                                                         |
 | 本地连接   | —                                                                                 | `/local-connection/lan-address`、`/local-connection/mobile-connect`、`/local-connection/mobile-connect.png`                                                                                                                                  |
 
-旧的全局知识库/RAG 接口已禁用，统一提示迁移到 `/knowledge-bases/*` scoped API。前端主流程只走 `systemAuthApi/sourceBindingApi/knowledgeBaseApi/importApi`；`authApi/favoritesApi/knowledgeApi/chatApi` 仅作为历史封装保留，不应接入新业务。
+全部旧接口（`/auth/*`、`/favorites/*`、`/knowledge/*`、`/chat/ask|ask/stream|search`）已禁用为 410 Gone stub，统一走 `services/legacy_api.py` 的帮助函数；其后端实现（`knowledge_legacy_runtime`、`chat_runtime`/`chat_route_runtime`/`chat_routing`/`chat_video_context`/`chat_message_preparation`/`chat_router_adapters`/`chat_llm_runtime`、`favorites_route_runtime`）已随死代码清理删除。前端主流程只走 `systemAuthApi/sourceBindingApi/knowledgeBaseApi/importApi`；旧 `authApi/favoritesApi/knowledgeApi` 封装已删除，`chatApi` 仅保留模型配置/网络搜索配置/健康检查方法。
 
 ### 关键设计决策
 
-**智能路由**（`chat.py` `_prepare_messages`）：LLM 路由优先（direct/db_list/db_content/vector），失败降级规则路由。`direct` — 闲聊；`db_list` — 清单只用标题；`db_content` — 总结用全量数据库内容；`vector` — 语义检索后 RAG。
-
-**多 LLM 提供方**：`chat_provider_catalog.py` `PROVIDER_META` 管理 8 种（dashscope/deepseek/openai/agnes/claude/kimi/siliconflow/zhipu），运行时可通过 API 切换，配置持久化到 `.env.local`。切换后重置 `knowledge.py` 全局 `_rag_service`。
+**多 LLM 提供方**：`chat_provider_catalog.py` `PROVIDER_META` 管理 8 种（dashscope/deepseek/openai/agnes/claude/kimi/siliconflow/zhipu），运行时可通过 API 切换，配置持久化到 `.env.local`。切换后通过 `rag_runtime.reset_rag_service()` 重置 RAG 单例。
 
 **Embedding**：`rag.py` 优先 `DashScopeEmbeddings`，导入失败回退 `OpenAIEmbeddings`。
 
@@ -169,7 +167,7 @@ Next.js 16 App Router，单页应用。
                    └─ UserMenu(头像+改名+登出)
 ```
 
-`lib/api.ts` 仍保留历史 API 客户端定义，但登录后页面以 `systemAuthApi.me()` 判断登录态，并通过 `sourceBindingApi/knowledgeBaseApi/importApi` 访问内容源、知识库、导入与聊天能力；不再依赖旧 `bili_session`。
+`lib/api.ts` 是各领域 API 客户端的 barrel；登录后页面以 `systemAuthApi.me()` 判断登录态，并通过 `sourceBindingApi/knowledgeBaseApi/importApi` 访问内容源、知识库、导入与聊天能力；不再依赖旧 `bili_session`，旧 `legacyAuth/legacyKnowledge/favorites` 客户端已删除。
 
 **手机端连接测试重点**：后端覆盖 `tests/test_local_connection.py`；前端覆盖 `frontend/lib/localConnection.test.ts`、`frontend/lib/localConnectionScanner.test.ts`、`frontend/lib/nativeHttp.test.ts`、`frontend/components/LocalConnectionSettings.test.tsx`、`frontend/components/UserMenu.test.tsx`、`frontend/lib/api.test.ts`。改动 APK 连接能力时至少运行这些测试，并检查 `frontend/android/app/src/main/assets/capacitor.config.json` 内仍有 `webDir: out` 和 `CapacitorHttp.enabled: true`，且没有 `server.url`。改动本地视频导入时还要运行 `pytest tests/test_imports.py tests/test_knowledge_base_scoping.py -q` 与 `cd frontend && npm test -- api.test.ts nativeHttp.test.ts ImportModal.test.tsx`，覆盖 multipart、FormData、URL 兼容和任务入库。
 
@@ -203,7 +201,7 @@ SMTP_PASSWORD=授权码
 HTTP_PROXY=http://127.0.0.1:7890                      # Google OAuth 后端回调需要（国内访问 Google API）
 CORS 锁定域名                                          # main.py 中 allow_origins
 Alembic 初始化                                         # 替换 Base.metadata.create_all
-legacy login_sessions 可选 Redis                       # 仅作旧 B 站已登录 session 热缓存；二维码 pending state 已持久化
+login_sessions 可选 Redis                              # 仅作绑定二维码热缓存；pending state 已持久化
 ```
 
 **开发模式自动跳过**：SMTP 邮件（验证码直接返回）、Fernet 加密（SHA-256 派生开发密钥）、CORS 宽松。
@@ -213,7 +211,7 @@ legacy login_sessions 可选 Redis                       # 仅作旧 B 站已登
 - **旧全局知识库/RAG 接口已禁用**：`/knowledge/*` 与 `/chat/ask|ask/stream|search` 返回 `410 Gone`，新业务必须使用 `/knowledge-bases/*`
 - **旧向量数据不自动清空**：缺失 scoped 向量时依赖 DB fallback 和后续重建补齐，不建议无备份清空 ChromaDB
 - **前端完全迁移**：SourcesPanel + ChatPanel 均走 scoped API，`bili_session` 已从 page.tsx 移除
-- **legacy `login_sessions` 内存字典**（已加 TTL 清理）：仅作为旧 B 站已登录 session 与二维码状态热缓存；旧 `/auth/qrcode` 与新 `/source-bindings/bilibili/qrcode` pending state 均已持久化到数据库，可跨 worker 轮询。
+- **`login_sessions` 内存字典**（已加 TTL 清理）：仅作为 `/source-bindings/bilibili/qrcode` 绑定流程的进程内热缓存；pending state 已持久化到数据库，可跨 worker 轮询。旧 `/auth/*` 与 `/favorites/*` 接口已降级为 410 stub（统一走 `services/legacy_api.py`），`UserSession` 模型与 legacy DB 会话回退已删除。
 - **OAuth state**：HMAC 签名自包含 token，并通过 HttpOnly/SameSite=Lax 临时 nonce cookie 绑定同一浏览器回调；成功登录后清理临时 cookie。
 - **验证码 IP 限流**：邮箱验证码发送窗口已持久化到数据库，避免多 worker 绕过；生产仍建议叠加网关层限流。
 - **bcrypt 4.0.1 固定**：bcrypt 5.x 与 passlib 1.7.4 不兼容，不要升级

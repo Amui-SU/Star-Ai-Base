@@ -19,7 +19,6 @@ from app.services.bilibili_service_mixins import (
     BilibiliVideoMixin,
 )
 
-
 _service_kwargs_from_cookies = service_kwargs_from_cookies
 
 
@@ -64,10 +63,6 @@ class BilibiliService(
             headers=self.HEADERS,
             trust_env=False,
         )
-
-    @classmethod
-    def from_cookies(cls, cookies: Mapping[str, Any] | None) -> "BilibiliService":
-        return cls(**service_kwargs_from_cookies(cookies))
 
     def _get_cookies(self) -> Dict[str, str]:
         """获取 Cookie"""
