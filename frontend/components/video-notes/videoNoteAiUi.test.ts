@@ -69,6 +69,39 @@ describe("getVideoNoteAiOverwriteTargets", () => {
       "时间戳提纲",
     ]);
   });
+
+  it("recognizes stable AI block ids after Markdown changes their types", () => {
+    const blocks = [
+      { id: "ai-summary", type: "paragraph", text: "往返后的摘要" },
+      {
+        id: "key-points",
+        type: "bulleted_list",
+        items: [{ text: "往返后的观点" }],
+      },
+      {
+        id: "questions",
+        type: "bulleted_list",
+        items: [{ text: "往返后的问题" }],
+      },
+      {
+        id: "timestamp-outline",
+        type: "bulleted_list",
+        items: [{ text: "往返后的时间戳" }],
+      },
+      { id: "ordinary", type: "paragraph", text: "普通正文" },
+    ];
+
+    expect(getVideoNoteAiOverwriteTargets(blocks, "summary")).toEqual([
+      "摘要",
+      "关键观点",
+    ]);
+    expect(getVideoNoteAiOverwriteTargets(blocks, "questions")).toEqual([
+      "复盘问题",
+    ]);
+    expect(getVideoNoteAiOverwriteTargets(blocks, "timestamps")).toEqual([
+      "时间戳提纲",
+    ]);
+  });
 });
 
 describe("VIDEO_NOTE_AI_RESULT_META", () => {

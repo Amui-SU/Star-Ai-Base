@@ -7,6 +7,7 @@ import type {
 export type VideoNoteAiAction = "summary" | "questions" | "timestamps";
 
 interface VideoNoteAiTarget {
+  blockIds: string[];
   blockTypes: VideoNoteBlockType[];
   label: string;
 }
@@ -20,12 +21,27 @@ export interface VideoNoteAiResultMeta {
 
 const ACTION_TARGETS: Record<VideoNoteAiAction, VideoNoteAiTarget[]> = {
   summary: [
-    { blockTypes: ["ai_summary", "ai-summary"], label: "摘要" },
-    { blockTypes: ["key_points", "key-points"], label: "关键观点" },
+    {
+      blockIds: ["ai-summary"],
+      blockTypes: ["ai_summary", "ai-summary"],
+      label: "摘要",
+    },
+    {
+      blockIds: ["key-points"],
+      blockTypes: ["key_points", "key-points"],
+      label: "关键观点",
+    },
   ],
-  questions: [{ blockTypes: ["questions"], label: "复盘问题" }],
+  questions: [
+    {
+      blockIds: ["questions", "ai-review-questions"],
+      blockTypes: ["questions"],
+      label: "复盘问题",
+    },
+  ],
   timestamps: [
     {
+      blockIds: ["timestamp-outline"],
       blockTypes: ["timestamp_outline", "timestamp-outline"],
       label: "时间戳提纲",
     },
@@ -71,7 +87,9 @@ export function getVideoNoteAiOverwriteTargets(
     .filter((target) =>
       blocks.some(
         (block) =>
-          target.blockTypes.includes(block.type) && hasNonEmptyContent(block),
+          (target.blockIds.includes(block.id) ||
+            target.blockTypes.includes(block.type)) &&
+          hasNonEmptyContent(block),
       ),
     )
     .map((target) => target.label);

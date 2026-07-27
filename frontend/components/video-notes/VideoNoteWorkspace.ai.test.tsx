@@ -291,16 +291,16 @@ it("discards in-flight AI results and undo history when switching videos", async
   expect(screen.getByRole("button", { name: "撤销 AI 编辑" })).toBeDisabled();
 });
 
-it("asks before overwriting non-empty summary content and only runs after confirmation", async () => {
+it("asks before overwriting Markdown-round-tripped summary blocks and only runs after confirmation", async () => {
   const user = userEvent.setup();
   const noteWithSummary = {
     ...baseNote,
     blocks: [
       ...baseNote.blocks,
-      { id: "summary", type: "ai_summary", text: "已有摘要" },
+      { id: "ai-summary", type: "paragraph", text: "已有摘要" },
       {
-        id: "points",
-        type: "key_points",
+        id: "key-points",
+        type: "bulleted_list",
         items: [{ text: "已有观点" }],
       },
     ],
@@ -330,8 +330,8 @@ it("asks before overwriting non-empty summary content and only runs after confir
     operations: [
       {
         kind: "replace_or_insert_block",
-        target_block_id: "summary",
-        block: { id: "summary", type: "ai_summary", text: "新摘要" },
+        target_block_id: "ai-summary",
+        block: { id: "ai-summary", type: "ai_summary", text: "新摘要" },
       },
     ],
   });
