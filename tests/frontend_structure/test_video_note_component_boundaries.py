@@ -157,7 +157,7 @@ def test_video_note_workspace_tests_are_split_by_workflow():
             assert expected_name in source
 
     assert not original_path.exists()
-    assert focused_source.count("it(") == 20
+    assert focused_source.count("it(") == 22
 
 
 def test_video_note_workspace_uses_focused_view_component():

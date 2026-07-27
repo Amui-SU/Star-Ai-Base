@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 
@@ -9,6 +9,7 @@ import {
   video,
   videoNoteApi,
 } from "./VideoNoteWorkspace.test-utils";
+import VideoNoteWorkspace from "./VideoNoteWorkspace";
 
 it("collapses and restores the right AI tools without removing editor tools", async () => {
   const user = userEvent.setup();
@@ -289,6 +290,119 @@ it("discards in-flight AI results and undo history when switching videos", async
 
   expect((await findMarkdownEditor()).value).not.toContain("过期的 AI 摘要");
   expect(screen.getByRole("button", { name: "撤销 AI 编辑" })).toBeDisabled();
+});
+
+it("clears AI result, overwrite intent, and undo history when changing knowledge bases", async () => {
+  const user = userEvent.setup();
+  vi.mocked(videoNoteApi.list).mockImplementation(
+    async ({ knowledgeBaseId }) => ({
+      knowledge_base_id: knowledgeBaseId,
+      items: [
+        {
+          bvid: knowledgeBaseId === 7 ? "BVOLD" : "BVNEW",
+          title: knowledgeBaseId === 7 ? "旧知识库视频" : "新知识库视频",
+          has_note: true,
+          note_id: knowledgeBaseId === 7 ? 9 : 10,
+          summary_status: "seeded",
+          tags: [],
+        },
+      ],
+    }),
+  );
+  vi.mocked(videoNoteApi.detail).mockImplementation(
+    async (knowledgeBaseId, bvid) => ({
+      note: {
+        ...baseNote,
+        id: knowledgeBaseId === 7 ? 9 : 10,
+        knowledge_base_id: knowledgeBaseId,
+        bvid,
+        title: knowledgeBaseId === 7 ? "旧知识库笔记" : "新知识库笔记",
+      },
+      video: { ...video, bvid },
+      can_create: false,
+    }),
+  );
+  vi.mocked(videoNoteApi.generateSummary).mockResolvedValue({
+    message: "旧知识库 AI 摘要",
+    tag_suggestions: [],
+    result_source: "ai",
+    operations: [
+      {
+        kind: "replace_or_insert_block",
+        target_block_id: "p1",
+        block: { id: "p1", type: "ai_summary", text: "旧知识库 AI 内容" },
+      },
+    ],
+  });
+
+  const { rerender } = renderWorkspace({ initialBvid: "BVOLD" });
+  await findMarkdownEditor();
+  await user.click(screen.getByRole("button", { name: "生成摘要" }));
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "旧知识库 AI 摘要",
+  );
+  expect(screen.getByText("AI 生成")).toBeVisible();
+  expect(screen.getByRole("button", { name: "撤销 AI 编辑" })).toBeEnabled();
+
+  await user.click(screen.getByRole("button", { name: "生成摘要" }));
+  expect(screen.getByRole("dialog", { name: "覆盖现有内容？" })).toBeVisible();
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+
+  expect(screen.queryByRole("dialog", { name: "覆盖现有内容？" })).toBeNull();
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.queryByText("AI 生成")).toBeNull();
+  expect(screen.getByRole("button", { name: "撤销 AI 编辑" })).toBeDisabled();
+  expect(screen.queryByLabelText("Vditor mock editor")).toBeNull();
+
+  expect((await findMarkdownEditor()).value).not.toContain("旧知识库 AI 内容");
+  expect(screen.getByLabelText("笔记标题")).toHaveValue("新知识库笔记");
+
+  let resolveLateSummary: (value: {
+    message: string;
+    tag_suggestions: string[];
+    result_source: "ai";
+    operations: Array<{
+      kind: "replace_or_insert_block";
+      target_block_id: string;
+      block: { id: string; type: "ai_summary"; text: string };
+    }>;
+  }) => void = () => {};
+  vi.mocked(videoNoteApi.generateSummary).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveLateSummary = resolve;
+      }) as never,
+  );
+  await user.click(screen.getByRole("button", { name: "生成摘要" }));
+  expect(screen.getByRole("status")).toHaveTextContent("正在生成摘要");
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={9} autosaveDelayMs={2000} />);
+  await act(async () => {
+    resolveLateSummary({
+      message: "过期的跨知识库摘要",
+      tag_suggestions: [],
+      result_source: "ai",
+      operations: [
+        {
+          kind: "replace_or_insert_block",
+          target_block_id: "p1",
+          block: {
+            id: "p1",
+            type: "ai_summary",
+            text: "过期的跨知识库内容",
+          },
+        },
+      ],
+    });
+    await Promise.resolve();
+  });
+
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.getByRole("button", { name: "撤销 AI 编辑" })).toBeDisabled();
+  expect((await findMarkdownEditor()).value).not.toContain(
+    "过期的跨知识库内容",
+  );
 });
 
 it("asks before overwriting Markdown-round-tripped summary blocks and only runs after confirmation", async () => {

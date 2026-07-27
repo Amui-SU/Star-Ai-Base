@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   videoNoteApi,
@@ -54,7 +61,10 @@ export default function VideoNoteWorkspace({
   const [effectiveQuery, setEffectiveQuery] = useState("");
   const [includeBodySearch, setIncludeBodySearch] = useState(false);
   const [listFilter, setListFilter] = useState<WorkspaceListFilter>("all");
-  const [selectedBvid, setSelectedBvid] = useState<string | null>(initialBvid);
+  const [selectedVideo, setSelectedVideo] = useState<{
+    knowledgeBaseId: number;
+    bvid: string;
+  } | null>(initialBvid ? { knowledgeBaseId, bvid: initialBvid } : null);
   const [note, setNote] = useState<VideoNote | null>(null);
   const [video, setVideo] = useState<VideoNoteVideo | null>(null);
   const [title, setTitle] = useState("");
@@ -75,6 +85,11 @@ export default function VideoNoteWorkspace({
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const listRequestIdRef = useRef(0);
+  const detailRequestIdRef = useRef(0);
+  const activeSelectedBvid =
+    selectedVideo?.knowledgeBaseId === knowledgeBaseId
+      ? selectedVideo.bvid
+      : null;
 
   useEffect(() => {
     const timer = window.setTimeout(() => setEffectiveQuery(query), 300);
@@ -118,11 +133,16 @@ export default function VideoNoteWorkspace({
       if (listRequestIdRef.current !== requestId) return;
       setWorkspaceError(null);
       setItems(response.items);
-      setSelectedBvid((current) => {
-        if (current || response.items.length === 0) return current;
+      setSelectedVideo((current) => {
+        if (current?.knowledgeBaseId === knowledgeBaseId && current.bvid) {
+          return current;
+        }
+        if (response.items.length === 0) {
+          return null;
+        }
         const preferred =
           response.items.find((item) => item.has_note) ?? response.items[0];
-        return preferred.bvid;
+        return { knowledgeBaseId, bvid: preferred.bvid };
       });
     } catch (error) {
       if (listRequestIdRef.current !== requestId) return;
@@ -153,12 +173,15 @@ export default function VideoNoteWorkspace({
 
   const loadDetail = useCallback(
     async (bvid: string) => {
+      const requestId = ++detailRequestIdRef.current;
       try {
         const detail = await videoNoteApi.detail(knowledgeBaseId, bvid);
+        if (detailRequestIdRef.current !== requestId) return;
         setWorkspaceError(null);
         setVideo(detail.video);
         syncNoteState(detail.note);
       } catch (error) {
+        if (detailRequestIdRef.current !== requestId) return;
         setVideo(null);
         syncNoteState(null);
         setWorkspaceError(formatWorkspaceError("无法加载视频信息", error));
@@ -178,12 +201,15 @@ export default function VideoNoteWorkspace({
   }, [loadList]);
 
   useEffect(() => {
-    if (!selectedBvid) return;
+    if (!activeSelectedBvid) return;
     const timer = window.setTimeout(() => {
-      void loadDetail(selectedBvid);
+      void loadDetail(activeSelectedBvid);
     }, 0);
-    return () => window.clearTimeout(timer);
-  }, [loadDetail, selectedBvid]);
+    return () => {
+      window.clearTimeout(timer);
+      detailRequestIdRef.current += 1;
+    };
+  }, [activeSelectedBvid, loadDetail]);
 
   const saveState = useVideoNoteAutosave({
     note,
@@ -207,31 +233,45 @@ export default function VideoNoteWorkspace({
     noteIdRef.current = note?.id ?? null;
   }, [note]);
 
+  const resetSelectedVideoState = useCallback(() => {
+    detailRequestIdRef.current += 1;
+    setSelectedVideo(null);
+    setVideo(null);
+    syncNoteState(null);
+    setExported(null);
+    setAiMessage(null);
+    setAiResultSource(null);
+    setPendingAiAction(null);
+    setAiLoading(false);
+    aiRequestIdRef.current += 1;
+    setWorkspaceError(null);
+    resetAiEditing();
+  }, [resetAiEditing, syncNoteState]);
+
+  const previousKnowledgeBaseIdRef = useRef(knowledgeBaseId);
+  useLayoutEffect(() => {
+    if (previousKnowledgeBaseIdRef.current === knowledgeBaseId) return;
+    previousKnowledgeBaseIdRef.current = knowledgeBaseId;
+    setItems([]);
+    resetSelectedVideoState();
+  }, [knowledgeBaseId, resetSelectedVideoState]);
+
   const selectVideo = useCallback(
     (bvid: string) => {
-      setSelectedBvid(bvid);
-      setVideo(null);
-      syncNoteState(null);
-      setExported(null);
-      setAiMessage(null);
-      setAiResultSource(null);
-      setPendingAiAction(null);
-      setAiLoading(false);
-      aiRequestIdRef.current += 1;
-      setWorkspaceError(null);
+      resetSelectedVideoState();
+      setSelectedVideo({ knowledgeBaseId, bvid });
       setNoteChooserOpen(false);
-      resetAiEditing();
     },
-    [resetAiEditing, syncNoteState],
+    [knowledgeBaseId, resetSelectedVideoState],
   );
 
   const createNote = async (templateId: VideoNoteTemplateId) => {
-    if (!selectedBvid) return;
+    if (!activeSelectedBvid) return;
     setCreating(true);
     try {
       const created = await videoNoteApi.create({
         knowledge_base_id: knowledgeBaseId,
-        bvid: selectedBvid,
+        bvid: activeSelectedBvid,
         template_id: templateId,
       });
       syncNoteState(created);
@@ -354,7 +394,7 @@ export default function VideoNoteWorkspace({
       query={query}
       includeBodySearch={includeBodySearch}
       totalCount={items.length}
-      selectedBvid={selectedBvid}
+      selectedBvid={activeSelectedBvid}
       title={title}
       knowledgeBaseName={knowledgeBaseName}
       saveStatus={saveState.status}

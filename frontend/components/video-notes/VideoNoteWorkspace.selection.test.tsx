@@ -309,6 +309,44 @@ it("ignores a pending list rejection as soon as the knowledge base changes", asy
   expect(screen.getByText("新知识库结果")).toBeVisible();
 });
 
+it("resets the selected video before loading a different knowledge base", async () => {
+  vi.useFakeTimers();
+  vi.mocked(videoNoteApi.list)
+    .mockResolvedValueOnce(searchResult("BVOLD", "旧知识库视频"))
+    .mockResolvedValueOnce(searchResult("BVNEW", "新知识库视频", 8));
+  vi.mocked(videoNoteApi.detail).mockImplementation(
+    async (knowledgeBaseId, bvid) => ({
+      note: {
+        ...baseNote,
+        knowledge_base_id: knowledgeBaseId,
+        bvid,
+        title: bvid === "BVOLD" ? "旧知识库笔记" : "新知识库笔记",
+      },
+      video: {
+        ...video,
+        bvid,
+        title: bvid === "BVOLD" ? "旧知识库视频" : "新知识库视频",
+      },
+      can_create: false,
+    }),
+  );
+
+  const { rerender } = renderWorkspace({ initialBvid: "BVOLD" });
+  await advanceTimersByTime(0);
+  expect(screen.getByLabelText("笔记标题")).toHaveValue("旧知识库笔记");
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+  expect(screen.queryByLabelText("Vditor mock editor")).toBeNull();
+
+  await advanceTimersByTime(0);
+  await advanceTimersByTime(0);
+
+  expect(videoNoteApi.detail).toHaveBeenCalledWith(7, "BVOLD");
+  expect(videoNoteApi.detail).not.toHaveBeenCalledWith(8, "BVOLD");
+  expect(videoNoteApi.detail).toHaveBeenCalledWith(8, "BVNEW");
+  expect(screen.getByLabelText("笔记标题")).toHaveValue("新知识库笔记");
+});
+
 it("opens directly into the first existing note when no video is preselected", async () => {
   vi.mocked(videoNoteApi.list).mockResolvedValue({
     knowledge_base_id: 7,
@@ -483,15 +521,23 @@ it("shows a workspace error when the selected note detail fails to load", async 
       },
     ],
   });
-  vi.mocked(videoNoteApi.detail).mockRejectedValue(new Error("后端暂时不可用"));
+  vi.mocked(videoNoteApi.detail).mockImplementation(async (knowledgeBaseId) => {
+    if (knowledgeBaseId === 7) throw new Error("后端暂时不可用");
+    return { note: baseNote, video, can_create: false };
+  });
 
   try {
-    renderWorkspace({ initialBvid: "BVNOTE123" });
+    const { rerender } = renderWorkspace({ initialBvid: "BVNOTE123" });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "无法加载视频信息：后端暂时不可用",
     );
     expect(consoleError).not.toHaveBeenCalled();
+
+    rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(await findMarkdownEditor()).toBeVisible();
+    expect(videoNoteApi.detail).toHaveBeenCalledWith(8, "BVNOTE123");
   } finally {
     consoleError.mockRestore();
   }
