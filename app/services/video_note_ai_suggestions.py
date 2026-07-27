@@ -3,7 +3,11 @@
 from typing import Literal
 
 from app.models import VideoNote
-from app.schemas.video_notes import VideoNoteAiEditRequest, VideoNoteAiResponse
+from app.schemas.video_notes import (
+    VideoNoteAiEditRequest,
+    VideoNoteAiResponse,
+    VideoNoteAiResultSource,
+)
 from app.services.video_note_ai_text import (
     _append_unique,
     _clean_text,
@@ -23,6 +27,15 @@ TIMESTAMP_KEYS = (
     "startTime",
     "seconds",
 )
+
+
+def _result_source_for(status: AiStatus) -> VideoNoteAiResultSource:
+    return {
+        "generated": "ai",
+        "official": "official",
+        "unavailable": "fallback",
+        "failed": "fallback",
+    }[status]
 
 
 def _summary_text(source: VideoNoteSource) -> str:
@@ -166,6 +179,7 @@ def build_summary_suggestions(
 
     return VideoNoteAiResponse(
         message=_message_for("summary", ai_status),
+        result_source=_result_source_for(ai_status),
         tag_suggestions=_tag_suggestions(source, (ai_payload or {}).get("tags")),
         operations=[
             {
@@ -305,6 +319,7 @@ def build_ai_edit_suggestions(
     if action == "generate_questions":
         return VideoNoteAiResponse(
             message=_message_for("questions", ai_status),
+            result_source=_result_source_for(ai_status),
             tag_suggestions=[],
             operations=[
                 {
@@ -330,6 +345,7 @@ def build_ai_edit_suggestions(
                 if timestamp_items
                 else EMPTY_TIMESTAMPS_MESSAGE
             ),
+            result_source=_result_source_for(ai_status),
             tag_suggestions=[],
             operations=[
                 {
@@ -345,6 +361,7 @@ def build_ai_edit_suggestions(
         )
     return VideoNoteAiResponse(
         message=_message_for("edit", ai_status),
+        result_source=_result_source_for(ai_status),
         tag_suggestions=[],
         operations=[
             {
