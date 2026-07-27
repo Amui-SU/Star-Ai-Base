@@ -57,24 +57,226 @@ export function blocksToMarkdown(blocks: VideoNoteBlock[]): string {
   return blocks.map(blockToMarkdown).filter(Boolean).join("\n\n");
 }
 
-function resolveBlockId(
-  blockIndex: number,
-  previousBlocks: VideoNoteBlock[],
-): string {
-  return previousBlocks[blockIndex]?.id ?? createMarkdownBlockId();
-}
-
 function createParsedBlock(
-  parsedBlocks: VideoNoteBlock[],
   type: VideoNoteBlock["type"],
-  previousBlocks: VideoNoteBlock[],
   values: Omit<VideoNoteBlock, "id" | "type"> = {},
 ): VideoNoteBlock {
   return {
-    id: resolveBlockId(parsedBlocks.length, previousBlocks),
+    id: createMarkdownBlockId(),
     type,
     ...values,
   };
+}
+
+const semanticSections = [
+  {
+    heading: "AI 摘要",
+    titleIds: ["ai-summary-title"],
+    contentIds: ["ai-summary"],
+  },
+  {
+    heading: "关键观点",
+    titleIds: ["key-points-title"],
+    contentIds: ["key-points"],
+  },
+  {
+    heading: "时间戳提纲",
+    titleIds: ["timestamp-title"],
+    contentIds: ["timestamp-outline"],
+  },
+  {
+    heading: "我的笔记",
+    titleIds: ["my-notes-title"],
+    contentIds: ["my-notes"],
+  },
+  {
+    heading: "问题与待办",
+    titleIds: ["questions-title"],
+    contentIds: ["questions", "ai-review-questions"],
+  },
+] as const;
+
+function reconciliationKind(block: VideoNoteBlock) {
+  if (block.type === "heading") return "heading";
+  if (listLikeTypes.has(block.type) || block.items) return "list";
+  if (block.type === "ai_summary" || block.type === "paragraph") return "text";
+  return block.type;
+}
+
+function blockFingerprint(block: VideoNoteBlock) {
+  const markdown = blockToMarkdown(block).trim();
+  return markdown ? `${reconciliationKind(block)}\u0000${markdown}` : null;
+}
+
+interface BlockIdAssignment {
+  id: string;
+  previousIndex: number;
+}
+
+function reconcileBlockIds(
+  parsedBlocks: VideoNoteBlock[],
+  previousBlocks: VideoNoteBlock[],
+) {
+  if (parsedBlocks.length === 0 || previousBlocks.length === 0) {
+    return parsedBlocks;
+  }
+
+  const previousIndexById = new Map(
+    previousBlocks.map((block, index) => [block.id, index]),
+  );
+  const assignments = new Map<number, BlockIdAssignment>();
+  const usedPreviousIndices = new Set<number>();
+  const assign = (parsedIndex: number, candidateIds: readonly string[]) => {
+    if (assignments.has(parsedIndex)) return;
+    const id = candidateIds.find((candidate) => {
+      const previousIndex = previousIndexById.get(candidate);
+      return (
+        previousIndex !== undefined && !usedPreviousIndices.has(previousIndex)
+      );
+    });
+    if (!id) return;
+    const previousIndex = previousIndexById.get(id);
+    if (previousIndex === undefined) return;
+    assignments.set(parsedIndex, { id, previousIndex });
+    usedPreviousIndices.add(previousIndex);
+  };
+
+  for (const section of semanticSections) {
+    const headingIndex = parsedBlocks.findIndex(
+      (block) =>
+        block.type === "heading" && block.text?.trim() === section.heading,
+    );
+    if (headingIndex === -1) continue;
+    assign(headingIndex, section.titleIds);
+    const contentIndex = headingIndex + 1;
+    if (
+      contentIndex < parsedBlocks.length &&
+      parsedBlocks[contentIndex].type !== "heading"
+    ) {
+      assign(contentIndex, section.contentIds);
+    }
+  }
+
+  const previousCandidates = previousBlocks
+    .map((block, index) => ({ fingerprint: blockFingerprint(block), index }))
+    .filter(
+      (candidate): candidate is { fingerprint: string; index: number } =>
+        candidate.fingerprint !== null &&
+        !usedPreviousIndices.has(candidate.index),
+    );
+  const parsedCandidates = parsedBlocks
+    .map((block, index) => ({ fingerprint: blockFingerprint(block), index }))
+    .filter(
+      (candidate): candidate is { fingerprint: string; index: number } =>
+        candidate.fingerprint !== null && !assignments.has(candidate.index),
+    );
+  const lcs = Array.from({ length: previousCandidates.length + 1 }, () =>
+    Array<number>(parsedCandidates.length + 1).fill(0),
+  );
+  for (
+    let previous = previousCandidates.length - 1;
+    previous >= 0;
+    previous--
+  ) {
+    for (let parsed = parsedCandidates.length - 1; parsed >= 0; parsed--) {
+      lcs[previous][parsed] =
+        previousCandidates[previous].fingerprint ===
+        parsedCandidates[parsed].fingerprint
+          ? lcs[previous + 1][parsed + 1] + 1
+          : Math.max(lcs[previous + 1][parsed], lcs[previous][parsed + 1]);
+    }
+  }
+  let previous = 0;
+  let parsed = 0;
+  while (
+    previous < previousCandidates.length &&
+    parsed < parsedCandidates.length
+  ) {
+    const previousCandidate = previousCandidates[previous];
+    const parsedCandidate = parsedCandidates[parsed];
+    if (previousCandidate.fingerprint === parsedCandidate.fingerprint) {
+      assign(parsedCandidate.index, [
+        previousBlocks[previousCandidate.index].id,
+      ]);
+      previous += 1;
+      parsed += 1;
+    } else if (lcs[previous + 1][parsed] >= lcs[previous][parsed + 1]) {
+      previous += 1;
+    } else {
+      parsed += 1;
+    }
+  }
+
+  const anchors = Array.from(assignments.entries())
+    .map(([parsedIndex, assignment]) => ({ parsedIndex, ...assignment }))
+    .sort((left, right) => left.parsedIndex - right.parsedIndex);
+  let parsedStart = -1;
+  let previousStart = -1;
+  for (const anchor of [
+    ...anchors,
+    {
+      parsedIndex: parsedBlocks.length,
+      previousIndex: previousBlocks.length,
+      id: "",
+    },
+  ]) {
+    if (anchor.previousIndex <= previousStart) continue;
+    const parsedGap = parsedBlocks
+      .map((block, index) => ({ block, index }))
+      .filter(
+        ({ block, index }) =>
+          index > parsedStart &&
+          index < anchor.parsedIndex &&
+          blockFingerprint(block) !== null &&
+          !assignments.has(index),
+      );
+    const previousGap = previousBlocks
+      .map((block, index) => ({ block, index }))
+      .filter(
+        ({ block, index }) =>
+          index > previousStart &&
+          index < anchor.previousIndex &&
+          blockFingerprint(block) !== null &&
+          !usedPreviousIndices.has(index),
+      );
+    if (
+      parsedGap.length === previousGap.length &&
+      parsedGap.every(
+        ({ block }, index) =>
+          reconciliationKind(block) ===
+          reconciliationKind(previousGap[index].block),
+      )
+    ) {
+      parsedGap.forEach(({ index }, gapIndex) => {
+        assign(index, [previousGap[gapIndex].block.id]);
+      });
+    }
+    parsedStart = anchor.parsedIndex;
+    previousStart = anchor.previousIndex;
+  }
+
+  if (assignments.size === 0) {
+    const visiblePrevious = previousBlocks.filter(
+      (block) => blockFingerprint(block) !== null,
+    );
+    for (
+      let index = 0;
+      index < Math.min(parsedBlocks.length, visiblePrevious.length);
+      index += 1
+    ) {
+      if (
+        reconciliationKind(parsedBlocks[index]) !==
+        reconciliationKind(visiblePrevious[index])
+      )
+        break;
+      assign(index, [visiblePrevious[index].id]);
+    }
+  }
+
+  return parsedBlocks.map((block, index) => ({
+    ...block,
+    id: assignments.get(index)?.id ?? block.id,
+  }));
 }
 
 function isBlank(line: string): boolean {
@@ -140,7 +342,7 @@ export function markdownToVideoNoteBlocks(
     const heading = matchHeading(line);
     if (heading) {
       parsedBlocks.push(
-        createParsedBlock(parsedBlocks, "heading", previousBlocks, {
+        createParsedBlock("heading", {
           level: heading[1].length,
           text: heading[2].trim(),
         }),
@@ -150,9 +352,7 @@ export function markdownToVideoNoteBlocks(
     }
 
     if (isDivider(line)) {
-      parsedBlocks.push(
-        createParsedBlock(parsedBlocks, "divider", previousBlocks),
-      );
+      parsedBlocks.push(createParsedBlock("divider"));
       index += 1;
       continue;
     }
@@ -163,7 +363,7 @@ export function markdownToVideoNoteBlocks(
         const taskMatch = matchTask(lines[index]);
         if (!taskMatch) break;
         parsedBlocks.push(
-          createParsedBlock(parsedBlocks, "todo", previousBlocks, {
+          createParsedBlock("todo", {
             checked: taskMatch[1].toLowerCase() === "x",
             text: taskMatch[2].trim(),
           }),
@@ -187,11 +387,9 @@ export function markdownToVideoNoteBlocks(
         .filter((item): item is VideoNoteBlockItem => item !== null);
       parsedBlocks.push(
         createParsedBlock(
-          parsedBlocks,
           timestampItems.length === items.length
             ? "timestamp_outline"
             : "bulleted_list",
-          previousBlocks,
           {
             items:
               timestampItems.length === items.length ? timestampItems : items,
@@ -211,7 +409,7 @@ export function markdownToVideoNoteBlocks(
         index += 1;
       }
       parsedBlocks.push(
-        createParsedBlock(parsedBlocks, "quote", previousBlocks, {
+        createParsedBlock("quote", {
           text: quoteLines.join("\n").trim(),
         }),
       );
@@ -224,11 +422,11 @@ export function markdownToVideoNoteBlocks(
       index += 1;
     }
     parsedBlocks.push(
-      createParsedBlock(parsedBlocks, "paragraph", previousBlocks, {
+      createParsedBlock("paragraph", {
         text: paragraphLines.join("\n").trim(),
       }),
     );
   }
 
-  return parsedBlocks;
+  return reconcileBlockIds(parsedBlocks, previousBlocks);
 }

@@ -1,4 +1,10 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 
@@ -410,13 +416,16 @@ it("asks before overwriting Markdown-round-tripped summary blocks and only runs 
   const noteWithSummary = {
     ...baseNote,
     blocks: [
-      ...baseNote.blocks,
-      { id: "ai-summary", type: "paragraph", text: "已有摘要" },
+      { id: "title", type: "heading", level: 1, text: "AI 视频学习法" },
+      { id: "ai-summary-title", type: "heading", level: 2, text: "AI 摘要" },
+      { id: "ai-summary", type: "ai_summary", text: "" },
       {
-        id: "key-points",
-        type: "bulleted_list",
-        items: [{ text: "已有观点" }],
+        id: "key-points-title",
+        type: "heading",
+        level: 2,
+        text: "关键观点",
       },
+      { id: "key-points", type: "key_points", items: [] },
     ],
   };
   vi.mocked(videoNoteApi.list).mockResolvedValue({
@@ -451,7 +460,24 @@ it("asks before overwriting Markdown-round-tripped summary blocks and only runs 
   });
 
   renderWorkspace({ initialBvid: "BVNOTE123" });
-  await findMarkdownEditor();
+  const markdownEditor = await findMarkdownEditor();
+  fireEvent.input(markdownEditor, {
+    target: {
+      value: [
+        "# AI 视频学习法",
+        "",
+        "新插入的普通段落",
+        "",
+        "## AI 摘要",
+        "",
+        "已有摘要",
+        "",
+        "## 关键观点",
+        "",
+        "- 已有观点",
+      ].join("\n"),
+    },
+  });
 
   await user.click(screen.getByRole("button", { name: "生成摘要" }));
   const dialog = screen.getByRole("dialog", { name: "覆盖现有内容？" });
@@ -468,6 +494,8 @@ it("asks before overwriting Markdown-round-tripped summary blocks and only runs 
 
   expect(videoNoteApi.generateSummary).toHaveBeenCalledWith(9);
   expect((await findMarkdownEditor()).value).toContain("新摘要");
+  expect((await findMarkdownEditor()).value).toContain("## AI 摘要");
+  expect((await findMarkdownEditor()).value).toContain("## 关键观点");
 });
 
 it("runs immediately when the target section is empty", async () => {
