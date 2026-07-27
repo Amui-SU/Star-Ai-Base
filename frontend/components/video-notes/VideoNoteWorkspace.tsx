@@ -86,6 +86,8 @@ export default function VideoNoteWorkspace({
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const listRequestIdRef = useRef(0);
   const detailRequestIdRef = useRef(0);
+  const createRequestIdRef = useRef(0);
+  const exportRequestIdRef = useRef(0);
   const activeSelectedBvid =
     selectedVideo?.knowledgeBaseId === knowledgeBaseId
       ? selectedVideo.bvid
@@ -235,6 +237,8 @@ export default function VideoNoteWorkspace({
 
   const resetSelectedVideoState = useCallback(() => {
     detailRequestIdRef.current += 1;
+    createRequestIdRef.current += 1;
+    exportRequestIdRef.current += 1;
     setSelectedVideo(null);
     setVideo(null);
     syncNoteState(null);
@@ -243,6 +247,8 @@ export default function VideoNoteWorkspace({
     setAiResultSource(null);
     setPendingAiAction(null);
     setAiLoading(false);
+    setCreating(false);
+    setExporting(false);
     aiRequestIdRef.current += 1;
     setWorkspaceError(null);
     resetAiEditing();
@@ -267,6 +273,7 @@ export default function VideoNoteWorkspace({
 
   const createNote = async (templateId: VideoNoteTemplateId) => {
     if (!activeSelectedBvid) return;
+    const requestId = ++createRequestIdRef.current;
     setCreating(true);
     try {
       const created = await videoNoteApi.create({
@@ -274,26 +281,34 @@ export default function VideoNoteWorkspace({
         bvid: activeSelectedBvid,
         template_id: templateId,
       });
+      if (createRequestIdRef.current !== requestId) return;
       syncNoteState(created);
+      if (createRequestIdRef.current !== requestId) return;
       await loadList();
     } finally {
-      setCreating(false);
+      if (createRequestIdRef.current === requestId) setCreating(false);
     }
   };
 
   const exportMarkdown = async () => {
     if (!note) return null;
+    const requestId = ++exportRequestIdRef.current;
+    const requestNoteId = note.id;
     setExporting(true);
     try {
       await saveState.flush();
-      const response = await videoNoteApi.exportMarkdown(note.id);
+      if (exportRequestIdRef.current !== requestId) return null;
+      const response = await videoNoteApi.exportMarkdown(requestNoteId);
+      if (exportRequestIdRef.current !== requestId) return null;
       setExported(response);
       return response;
     } catch (error) {
-      console.error("导出 Markdown 失败:", error);
+      if (exportRequestIdRef.current === requestId) {
+        console.error("导出 Markdown 失败:", error);
+      }
       return null;
     } finally {
-      setExporting(false);
+      if (exportRequestIdRef.current === requestId) setExporting(false);
     }
   };
 

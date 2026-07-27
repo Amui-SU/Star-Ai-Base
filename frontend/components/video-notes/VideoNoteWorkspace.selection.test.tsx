@@ -347,6 +347,89 @@ it("resets the selected video before loading a different knowledge base", async 
   expect(screen.getByLabelText("笔记标题")).toHaveValue("新知识库笔记");
 });
 
+it("discards a stale create while a new knowledge base create stays pending", async () => {
+  const user = userEvent.setup();
+  const oldCreate = deferred<typeof baseNote>();
+  const newCreate = deferred<typeof baseNote>();
+  vi.mocked(videoNoteApi.list).mockImplementation(
+    async ({ knowledgeBaseId }) => ({
+      knowledge_base_id: knowledgeBaseId,
+      items: [
+        {
+          bvid: knowledgeBaseId === 7 ? "BVOLD" : "BVNEW",
+          title: knowledgeBaseId === 7 ? "旧知识库视频" : "新知识库视频",
+          has_note: false,
+          summary_status: "not_created",
+          tags: [],
+        },
+      ],
+    }),
+  );
+  vi.mocked(videoNoteApi.detail).mockImplementation(
+    async (_knowledgeBaseId, bvid) => ({
+      note: null,
+      video: {
+        ...video,
+        bvid,
+        title: bvid === "BVOLD" ? "旧知识库视频" : "新知识库视频",
+      },
+      can_create: true,
+    }),
+  );
+  vi.mocked(videoNoteApi.create)
+    .mockReturnValueOnce(oldCreate.promise)
+    .mockReturnValueOnce(newCreate.promise);
+
+  const { rerender } = renderWorkspace({ initialBvid: "BVOLD" });
+  await user.click(await screen.findByRole("button", { name: /标准模板/ }));
+  expect(videoNoteApi.create).toHaveBeenCalledWith({
+    knowledge_base_id: 7,
+    bvid: "BVOLD",
+    template_id: "standard",
+  });
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+  await user.click(await screen.findByRole("button", { name: /标准模板/ }));
+  const newCreateButton = screen.getByRole("button", { name: /标准模板/ });
+  expect(newCreateButton).toBeDisabled();
+  expect(videoNoteApi.create).toHaveBeenLastCalledWith({
+    knowledge_base_id: 8,
+    bvid: "BVNEW",
+    template_id: "standard",
+  });
+
+  await act(async () => {
+    oldCreate.resolve({
+      ...baseNote,
+      bvid: "BVOLD",
+      title: "过期创建结果",
+    });
+    await oldCreate.promise;
+  });
+
+  expect(newCreateButton).toBeDisabled();
+  expect(screen.queryByDisplayValue("过期创建结果")).toBeNull();
+  expect(
+    vi
+      .mocked(videoNoteApi.list)
+      .mock.calls.filter(([options]) => options.knowledgeBaseId === 7),
+  ).toHaveLength(1);
+
+  await act(async () => {
+    newCreate.resolve({
+      ...baseNote,
+      id: 10,
+      knowledge_base_id: 8,
+      bvid: "BVNEW",
+      title: "新知识库创建结果",
+    });
+    await newCreate.promise;
+  });
+
+  expect(await findMarkdownEditor()).toBeVisible();
+  expect(screen.getByLabelText("笔记标题")).toHaveValue("新知识库创建结果");
+});
+
 it("opens directly into the first existing note when no video is preselected", async () => {
   vi.mocked(videoNoteApi.list).mockResolvedValue({
     knowledge_base_id: 7,
