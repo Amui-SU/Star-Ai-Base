@@ -141,12 +141,53 @@ function reconcileBlockIds(
     usedPreviousIndices.add(previousIndex);
   };
 
+  const ambiguousSections: Array<{
+    section: (typeof semanticSections)[number];
+    headingIndices: number[];
+  }> = [];
+  const ambiguousParsedHeadingIndices = new Set<number>();
+  const ambiguousParsedContentIndices = new Set<number>();
+  const ambiguousPreviousHeadingIndices = new Set<number>();
+  const ambiguousPreviousContentIndices = new Set<number>();
+
   for (const section of semanticSections) {
-    const headingIndex = parsedBlocks.findIndex(
-      (block) =>
-        block.type === "heading" && block.text?.trim() === section.heading,
-    );
-    if (headingIndex === -1) continue;
+    const headingIndices = parsedBlocks
+      .map((block, index) => ({ block, index }))
+      .filter(
+        ({ block }) =>
+          block.type === "heading" && block.text?.trim() === section.heading,
+      )
+      .map(({ index }) => index);
+    if (headingIndices.length > 1) {
+      ambiguousSections.push({ section, headingIndices });
+      headingIndices.forEach((index) =>
+        ambiguousParsedHeadingIndices.add(index),
+      );
+      headingIndices.forEach((index) => {
+        const contentIndex = index + 1;
+        if (
+          contentIndex < parsedBlocks.length &&
+          parsedBlocks[contentIndex].type !== "heading"
+        ) {
+          ambiguousParsedContentIndices.add(contentIndex);
+        }
+      });
+      section.titleIds.forEach((id) => {
+        const previousIndex = previousIndexById.get(id);
+        if (previousIndex !== undefined) {
+          ambiguousPreviousHeadingIndices.add(previousIndex);
+        }
+      });
+      section.contentIds.forEach((id) => {
+        const previousIndex = previousIndexById.get(id);
+        if (previousIndex !== undefined) {
+          ambiguousPreviousContentIndices.add(previousIndex);
+        }
+      });
+      continue;
+    }
+    const headingIndex = headingIndices[0];
+    if (headingIndex === undefined) continue;
     assign(headingIndex, section.titleIds);
     const contentIndex = headingIndex + 1;
     if (
@@ -162,13 +203,18 @@ function reconcileBlockIds(
     .filter(
       (candidate): candidate is { fingerprint: string; index: number } =>
         candidate.fingerprint !== null &&
+        !ambiguousPreviousHeadingIndices.has(candidate.index) &&
+        !ambiguousPreviousContentIndices.has(candidate.index) &&
         !usedPreviousIndices.has(candidate.index),
     );
   const parsedCandidates = parsedBlocks
     .map((block, index) => ({ fingerprint: blockFingerprint(block), index }))
     .filter(
       (candidate): candidate is { fingerprint: string; index: number } =>
-        candidate.fingerprint !== null && !assignments.has(candidate.index),
+        candidate.fingerprint !== null &&
+        !ambiguousParsedHeadingIndices.has(candidate.index) &&
+        !ambiguousParsedContentIndices.has(candidate.index) &&
+        !assignments.has(candidate.index),
     );
   const lcs = Array.from({ length: previousCandidates.length + 1 }, () =>
     Array<number>(parsedCandidates.length + 1).fill(0),
@@ -207,6 +253,35 @@ function reconcileBlockIds(
     }
   }
 
+  for (const { section, headingIndices } of ambiguousSections) {
+    const previousContentIndex = section.contentIds
+      .map((id) => previousIndexById.get(id))
+      .find((index): index is number => index !== undefined);
+    if (previousContentIndex === undefined) continue;
+    const previousContentFingerprint = blockFingerprint(
+      previousBlocks[previousContentIndex],
+    );
+    if (!previousContentFingerprint) continue;
+
+    const matchingHeadingIndices = headingIndices.filter((headingIndex) => {
+      const contentIndex = headingIndex + 1;
+      if (
+        contentIndex >= parsedBlocks.length ||
+        parsedBlocks[contentIndex].type === "heading" ||
+        blockFingerprint(parsedBlocks[contentIndex]) !==
+          previousContentFingerprint
+      ) {
+        return false;
+      }
+      return true;
+    });
+    if (matchingHeadingIndices.length !== 1) continue;
+
+    const headingIndex = matchingHeadingIndices[0];
+    assign(headingIndex, section.titleIds);
+    assign(headingIndex + 1, section.contentIds);
+  }
+
   const anchors = Array.from(assignments.entries())
     .map(([parsedIndex, assignment]) => ({ parsedIndex, ...assignment }))
     .sort((left, right) => left.parsedIndex - right.parsedIndex);
@@ -228,6 +303,8 @@ function reconcileBlockIds(
           index > parsedStart &&
           index < anchor.parsedIndex &&
           blockFingerprint(block) !== null &&
+          !ambiguousParsedHeadingIndices.has(index) &&
+          !ambiguousParsedContentIndices.has(index) &&
           !assignments.has(index),
       );
     const previousGap = previousBlocks
@@ -237,6 +314,8 @@ function reconcileBlockIds(
           index > previousStart &&
           index < anchor.previousIndex &&
           blockFingerprint(block) !== null &&
+          !ambiguousPreviousHeadingIndices.has(index) &&
+          !ambiguousPreviousContentIndices.has(index) &&
           !usedPreviousIndices.has(index),
       );
     if (
@@ -255,7 +334,7 @@ function reconcileBlockIds(
     previousStart = anchor.previousIndex;
   }
 
-  if (assignments.size === 0) {
+  if (assignments.size === 0 && ambiguousSections.length === 0) {
     const visiblePrevious = previousBlocks.filter(
       (block) => blockFingerprint(block) !== null,
     );

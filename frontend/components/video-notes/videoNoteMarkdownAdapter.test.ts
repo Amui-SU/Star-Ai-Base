@@ -239,6 +239,110 @@ describe("video note markdown adapter", () => {
     ).toBe(false);
   });
 
+  it.each([
+    {
+      position: "before",
+      markdown: [
+        "# 课程标题",
+        "",
+        "## AI 摘要",
+        "",
+        "新增的同名区块",
+        "",
+        "## AI 摘要",
+        "",
+        "原摘要",
+        "",
+        "## 关键观点",
+        "",
+        "- 原观点",
+      ].join("\n"),
+    },
+    {
+      position: "after",
+      markdown: [
+        "# 课程标题",
+        "",
+        "## AI 摘要",
+        "",
+        "原摘要",
+        "",
+        "## AI 摘要",
+        "",
+        "新增的同名区块",
+        "",
+        "## 关键观点",
+        "",
+        "- 原观点",
+      ].join("\n"),
+    },
+  ])(
+    "keeps semantic ids on the original section when a duplicate is inserted $position it",
+    ({ markdown }) => {
+      const previousBlocks: VideoNoteBlock[] = [
+        { id: "title", type: "heading", level: 1, text: "课程标题" },
+        {
+          id: "ai-summary-title",
+          type: "heading",
+          level: 2,
+          text: "AI 摘要",
+        },
+        { id: "ai-summary", type: "ai_summary", text: "原摘要" },
+        {
+          id: "key-points-title",
+          type: "heading",
+          level: 2,
+          text: "关键观点",
+        },
+        {
+          id: "key-points",
+          type: "key_points",
+          items: [{ text: "原观点" }],
+        },
+      ];
+
+      const parsed = markdownToVideoNoteBlocks(markdown, previousBlocks);
+      const originalHeadingIndex = parsed.findIndex(
+        (block, index) =>
+          block.type === "heading" &&
+          block.text === "AI 摘要" &&
+          parsed[index + 1]?.text === "原摘要",
+      );
+      const duplicateHeadingIndex = parsed.findIndex(
+        (block, index) =>
+          block.type === "heading" &&
+          block.text === "AI 摘要" &&
+          parsed[index + 1]?.text === "新增的同名区块",
+      );
+
+      expect(parsed[originalHeadingIndex].id).toBe("ai-summary-title");
+      expect(parsed[originalHeadingIndex + 1].id).toBe("ai-summary");
+      expect(parsed[duplicateHeadingIndex].id).not.toBe("ai-summary-title");
+      expect(parsed[duplicateHeadingIndex + 1].id).not.toBe("ai-summary");
+    },
+  );
+
+  it("does not guess a semantic id when duplicate sections are indistinguishable", () => {
+    const previousBlocks: VideoNoteBlock[] = [
+      {
+        id: "ai-summary-title",
+        type: "heading",
+        level: 2,
+        text: "AI 摘要",
+      },
+      { id: "ai-summary", type: "ai_summary", text: "相同摘要" },
+    ];
+    const parsed = markdownToVideoNoteBlocks(
+      ["## AI 摘要", "", "相同摘要", "", "## AI 摘要", "", "相同摘要"].join(
+        "\n",
+      ),
+      previousBlocks,
+    );
+
+    expect(parsed.some((block) => block.id === "ai-summary-title")).toBe(false);
+    expect(parsed.some((block) => block.id === "ai-summary")).toBe(false);
+  });
+
   it("parses task lists, bullet lists, blockquotes, and dividers", () => {
     const parsed = markdownToVideoNoteBlocks(
       [

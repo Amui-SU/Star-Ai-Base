@@ -418,7 +418,7 @@ it("asks before overwriting Markdown-round-tripped summary blocks and only runs 
     blocks: [
       { id: "title", type: "heading", level: 1, text: "AI 视频学习法" },
       { id: "ai-summary-title", type: "heading", level: 2, text: "AI 摘要" },
-      { id: "ai-summary", type: "ai_summary", text: "" },
+      { id: "ai-summary", type: "ai_summary", text: "已有摘要" },
       {
         id: "key-points-title",
         type: "heading",
@@ -470,6 +470,10 @@ it("asks before overwriting Markdown-round-tripped summary blocks and only runs 
         "",
         "## AI 摘要",
         "",
+        "新增的同名摘要",
+        "",
+        "## AI 摘要",
+        "",
         "已有摘要",
         "",
         "## 关键观点",
@@ -493,9 +497,12 @@ it("asks before overwriting Markdown-round-tripped summary blocks and only runs 
   await user.click(screen.getByRole("button", { name: "继续生成并覆盖" }));
 
   expect(videoNoteApi.generateSummary).toHaveBeenCalledWith(9);
-  expect((await findMarkdownEditor()).value).toContain("新摘要");
-  expect((await findMarkdownEditor()).value).toContain("## AI 摘要");
-  expect((await findMarkdownEditor()).value).toContain("## 关键观点");
+  const updatedMarkdown = (await findMarkdownEditor()).value;
+  expect(updatedMarkdown).toContain("新增的同名摘要");
+  expect(updatedMarkdown).toContain("新摘要");
+  expect(updatedMarkdown).not.toContain("已有摘要");
+  expect(updatedMarkdown.match(/## AI 摘要/g)).toHaveLength(2);
+  expect(updatedMarkdown).toContain("## 关键观点");
 });
 
 it("runs immediately when the target section is empty", async () => {
