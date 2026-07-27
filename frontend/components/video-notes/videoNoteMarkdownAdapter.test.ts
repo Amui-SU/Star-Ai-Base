@@ -20,6 +20,23 @@ const blocks: VideoNoteBlock[] = [
 ];
 
 describe("video note markdown adapter", () => {
+  it("serializes timestamp outlines with adaptive time segments", () => {
+    const timestampBlocks: VideoNoteBlock[] = [
+      {
+        id: "timestamps",
+        type: "timestamp_outline",
+        items: [
+          { time: 204, text: "Chapter" },
+          { time: 3723, text: "Long chapter" },
+        ],
+      },
+    ];
+
+    expect(blocksToMarkdown(timestampBlocks)).toBe(
+      ["- [03:24] Chapter", "- [01:02:03] Long chapter"].join("\n"),
+    );
+  });
+
   it("serializes note blocks into editable Markdown", () => {
     expect(blocksToMarkdown(blocks)).toBe(
       [

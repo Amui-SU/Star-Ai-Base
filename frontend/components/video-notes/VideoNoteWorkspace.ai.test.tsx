@@ -196,10 +196,10 @@ it("applies AI suggestions with status, timestamp generation, and undo", async (
   );
   expect(screen.getByText("官方章节")).toBeVisible();
   expect(screen.getByText("根据 B 站官方章节整理")).toBeVisible();
-  expect((await findMarkdownEditor()).value).toContain("[0:24] 开场目标");
+  expect((await findMarkdownEditor()).value).toContain("[00:24] 开场目标");
 
   await user.click(screen.getByRole("button", { name: "撤销 AI 编辑" }));
-  expect((await findMarkdownEditor()).value).not.toContain("[0:24] 开场目标");
+  expect((await findMarkdownEditor()).value).not.toContain("[00:24] 开场目标");
 });
 
 it("discards in-flight AI results and undo history when switching videos", async () => {

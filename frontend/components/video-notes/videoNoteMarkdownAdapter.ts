@@ -1,4 +1,5 @@
 import type { VideoNoteBlock, VideoNoteBlockItem } from "@/lib/api";
+import { formatVideoNoteTime } from "./videoNoteTime";
 
 const createMarkdownBlockId = () =>
   `md-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -18,14 +19,7 @@ function itemText(item: VideoNoteBlockItem): string {
   const text = textValue(item.text ?? item.content);
   const timestamp = item.timestamp ?? item.time;
   if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return text;
-  return `[${formatTimestamp(timestamp)}] ${text}`.trim();
-}
-
-function formatTimestamp(seconds: number): string {
-  const totalSeconds = Math.max(0, Math.floor(seconds));
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainingSeconds = totalSeconds % 60;
-  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+  return `[${formatVideoNoteTime(timestamp)}] ${text}`.trim();
 }
 
 function blockToMarkdown(block: VideoNoteBlock): string {

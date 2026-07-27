@@ -18,7 +18,16 @@ def _format_date(value: datetime | None) -> str:
 
 
 def _format_timestamp(seconds: Any) -> str:
-    total_seconds = max(int(seconds or 0), 0)
+    import math
+
+    try:
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+            raise TypeError("timestamp must be numeric")
+        if not math.isfinite(seconds):
+            raise ValueError("timestamp must be finite")
+        total_seconds = max(math.floor(seconds), 0)
+    except (TypeError, ValueError, OverflowError):
+        total_seconds = 0
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     if hours:
