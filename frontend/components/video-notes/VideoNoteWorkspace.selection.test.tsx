@@ -1,4 +1,10 @@
-import { screen, within, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  within,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 
@@ -10,6 +16,222 @@ import {
   videoNoteApi,
   vditorState,
 } from "./VideoNoteWorkspace.test-utils";
+import VideoNoteWorkspace from "./VideoNoteWorkspace";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+async function advanceTimersByTime(ms: number) {
+  await act(async () => {
+    vi.advanceTimersByTime(ms);
+    await Promise.resolve();
+  });
+}
+
+const searchResult = (bvid: string, title: string) => ({
+  knowledge_base_id: 7,
+  items: [
+    {
+      bvid,
+      title,
+      folder_title: "搜索结果",
+      has_note: true,
+      note_id: 9,
+      summary_status: "seeded" as const,
+      tags: [],
+    },
+  ],
+});
+
+it("debounces incremental search input and requests only the final query", async () => {
+  vi.useFakeTimers();
+  vi.mocked(videoNoteApi.list).mockResolvedValue(
+    searchResult("BVINITIAL", "初始结果"),
+  );
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  renderWorkspace({ initialBvid: "BVINITIAL" });
+  await advanceTimersByTime(0);
+
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+  const searchInput = screen.getByRole("searchbox", {
+    name: "搜索视频笔记",
+  });
+  fireEvent.change(searchInput, { target: { value: "视" } });
+  fireEvent.change(searchInput, { target: { value: "视频" } });
+  fireEvent.change(searchInput, { target: { value: "视频笔记" } });
+
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(1);
+  await advanceTimersByTime(299);
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(1);
+
+  await advanceTimersByTime(1);
+  await advanceTimersByTime(0);
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(2);
+  expect(videoNoteApi.list).toHaveBeenLastCalledWith({
+    knowledgeBaseId: 7,
+    q: "视频笔记",
+    includeBodySearch: false,
+  });
+});
+
+it("ignores an old search response that resolves after the final query", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  const newRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockReturnValueOnce(newRequest.promise);
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "搜索视频笔记" }), {
+    target: { value: "最终" },
+  });
+  await advanceTimersByTime(300);
+  await advanceTimersByTime(0);
+
+  await act(async () => {
+    newRequest.resolve(searchResult("BVNEW", "最终结果"));
+    await newRequest.promise;
+  });
+  await advanceTimersByTime(0);
+  expect(screen.getByText("最终结果")).toBeVisible();
+  expect(videoNoteApi.detail).toHaveBeenCalledWith(7, "BVNEW");
+
+  await act(async () => {
+    oldRequest.resolve(searchResult("BVOLD", "过期结果"));
+    await oldRequest.promise;
+  });
+  expect(screen.queryByText("过期结果")).toBeNull();
+  expect(screen.getByText("最终结果")).toBeVisible();
+  expect(videoNoteApi.detail).not.toHaveBeenCalledWith(7, "BVOLD");
+});
+
+it("ignores an old search rejection after the query changes", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockResolvedValueOnce(searchResult("BVNEW", "最终结果"));
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "搜索视频笔记" }), {
+    target: { value: "最终" },
+  });
+
+  await act(async () => {
+    oldRequest.reject(new Error("过期请求失败"));
+    try {
+      await oldRequest.promise;
+    } catch {
+      // The component handles the rejection; this await only flushes it.
+    }
+  });
+
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  await advanceTimersByTime(300);
+  await advanceTimersByTime(0);
+  expect(screen.getByText("最终结果")).toBeVisible();
+});
+
+it("keeps the final query loading when an old request settles", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  const newRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockReturnValueOnce(newRequest.promise);
+
+  renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "搜索视频笔记" }), {
+    target: { value: "最终" },
+  });
+  await advanceTimersByTime(300);
+  await advanceTimersByTime(0);
+
+  await act(async () => {
+    oldRequest.resolve(searchResult("BVOLD", "过期结果"));
+    await oldRequest.promise;
+  });
+
+  expect(screen.getByText("加载中...")).toBeVisible();
+  expect(screen.queryByText("过期结果")).toBeNull();
+
+  await act(async () => {
+    newRequest.resolve(searchResult("BVNEW", "最终结果"));
+    await newRequest.promise;
+  });
+  expect(screen.queryByText("加载中...")).toBeNull();
+  expect(screen.getByText("最终结果")).toBeVisible();
+});
+
+it("requests immediately when body search or the knowledge base changes", async () => {
+  vi.useFakeTimers();
+  vi.mocked(videoNoteApi.list).mockResolvedValue(
+    searchResult("BVINITIAL", "初始结果"),
+  );
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  const { rerender } = renderWorkspace({ initialBvid: "BVINITIAL" });
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "搜索正文" }));
+  await advanceTimersByTime(0);
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(2);
+  expect(videoNoteApi.list).toHaveBeenLastCalledWith({
+    knowledgeBaseId: 7,
+    q: undefined,
+    includeBodySearch: true,
+  });
+
+  rerender(
+    <VideoNoteWorkspace
+      knowledgeBaseId={8}
+      initialBvid="BVINITIAL"
+      autosaveDelayMs={2000}
+    />,
+  );
+  await advanceTimersByTime(0);
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(3);
+  expect(videoNoteApi.list).toHaveBeenLastCalledWith({
+    knowledgeBaseId: 8,
+    q: undefined,
+    includeBodySearch: true,
+  });
+});
 
 it("opens directly into the first existing note when no video is preselected", async () => {
   vi.mocked(videoNoteApi.list).mockResolvedValue({

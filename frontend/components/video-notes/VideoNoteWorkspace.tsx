@@ -51,6 +51,7 @@ export default function VideoNoteWorkspace({
   const [items, setItems] = useState<VideoNoteListItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [query, setQuery] = useState("");
+  const [effectiveQuery, setEffectiveQuery] = useState("");
   const [includeBodySearch, setIncludeBodySearch] = useState(false);
   const [listFilter, setListFilter] = useState<WorkspaceListFilter>("all");
   const [selectedBvid, setSelectedBvid] = useState<string | null>(initialBvid);
@@ -73,6 +74,22 @@ export default function VideoNoteWorkspace({
     useState<VideoNoteAiAction | null>(null);
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const listRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setEffectiveQuery(query), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  const updateQuery = useCallback((nextQuery: string) => {
+    listRequestIdRef.current += 1;
+    setQuery(nextQuery);
+  }, []);
+
+  const updateIncludeBodySearch = useCallback((include: boolean) => {
+    listRequestIdRef.current += 1;
+    setIncludeBodySearch(include);
+  }, []);
 
   const syncNoteState = useCallback((nextNote: VideoNote | null) => {
     setNote(nextNote);
@@ -90,13 +107,15 @@ export default function VideoNoteWorkspace({
   }, []);
 
   const loadList = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
     setListLoading(true);
     try {
       const response = await videoNoteApi.list({
         knowledgeBaseId,
-        q: query || undefined,
+        q: effectiveQuery || undefined,
         includeBodySearch,
       });
+      if (listRequestIdRef.current !== requestId) return;
       setWorkspaceError(null);
       setItems(response.items);
       setSelectedBvid((current) => {
@@ -106,11 +125,12 @@ export default function VideoNoteWorkspace({
         return preferred.bvid;
       });
     } catch (error) {
+      if (listRequestIdRef.current !== requestId) return;
       setWorkspaceError(formatWorkspaceError("无法加载视频笔记列表", error));
     } finally {
-      setListLoading(false);
+      if (listRequestIdRef.current === requestId) setListLoading(false);
     }
-  }, [includeBodySearch, knowledgeBaseId, query]);
+  }, [effectiveQuery, includeBodySearch, knowledgeBaseId]);
 
   const noteCounts = useMemo(
     () => ({
@@ -350,8 +370,8 @@ export default function VideoNoteWorkspace({
       workspaceError={workspaceError}
       onClose={onClose}
       onFilterChange={setListFilter}
-      onQueryChange={setQuery}
-      onIncludeBodySearchChange={setIncludeBodySearch}
+      onQueryChange={updateQuery}
+      onIncludeBodySearchChange={updateIncludeBodySearch}
       onCloseNoteChooser={() => setNoteChooserOpen(false)}
       onSelectVideo={selectVideo}
       onToggleNoteChooser={() => setNoteChooserOpen((value) => !value)}
