@@ -35,8 +35,8 @@ async function advanceTimersByTime(ms: number) {
   });
 }
 
-const searchResult = (bvid: string, title: string) => ({
-  knowledge_base_id: 7,
+const searchResult = (bvid: string, title: string, knowledgeBaseId = 7) => ({
+  knowledge_base_id: knowledgeBaseId,
   items: [
     {
       bvid,
@@ -231,6 +231,82 @@ it("requests immediately when body search or the knowledge base changes", async 
     q: undefined,
     includeBodySearch: true,
   });
+});
+
+it("invalidates a pending list response as soon as the knowledge base changes", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  const newRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockReturnValueOnce(newRequest.promise);
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  const { rerender } = renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+  await act(async () => {
+    oldRequest.resolve(searchResult("BVOLD", "旧知识库结果"));
+    await oldRequest.promise;
+  });
+
+  expect(screen.queryByText("旧知识库结果")).toBeNull();
+  expect(screen.getByText("加载中...")).toBeVisible();
+  expect(videoNoteApi.detail).not.toHaveBeenCalledWith(7, "BVOLD");
+
+  await advanceTimersByTime(0);
+  await act(async () => {
+    newRequest.resolve(searchResult("BVNEW", "新知识库结果", 8));
+    await newRequest.promise;
+  });
+  await advanceTimersByTime(0);
+
+  expect(screen.getByText("新知识库结果")).toBeVisible();
+  expect(screen.queryByText("加载中...")).toBeNull();
+  expect(videoNoteApi.detail).toHaveBeenCalledWith(8, "BVNEW");
+  expect(videoNoteApi.detail).not.toHaveBeenCalledWith(7, "BVOLD");
+});
+
+it("ignores a pending list rejection as soon as the knowledge base changes", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  const newRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockReturnValueOnce(newRequest.promise);
+
+  const { rerender } = renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+  await act(async () => {
+    oldRequest.reject(new Error("旧知识库请求失败"));
+    try {
+      await oldRequest.promise;
+    } catch {
+      // The component handles the rejection; this await only flushes it.
+    }
+  });
+
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText("加载中...")).toBeVisible();
+
+  await advanceTimersByTime(0);
+  await act(async () => {
+    newRequest.resolve(searchResult("BVNEW", "新知识库结果", 8));
+    await newRequest.promise;
+  });
+
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText("加载中...")).toBeNull();
+  expect(screen.getByText("新知识库结果")).toBeVisible();
 });
 
 it("opens directly into the first existing note when no video is preselected", async () => {

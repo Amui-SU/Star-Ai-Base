@@ -171,7 +171,10 @@ export default function VideoNoteWorkspace({
     const timer = window.setTimeout(() => {
       void loadList();
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      listRequestIdRef.current += 1;
+    };
   }, [loadList]);
 
   useEffect(() => {
