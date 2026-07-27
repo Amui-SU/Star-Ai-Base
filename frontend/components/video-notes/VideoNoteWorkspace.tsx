@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   videoNoteApi,
   type VideoNote,
+  type VideoNoteAiResponse,
+  type VideoNoteAiResultSource,
   type VideoNoteBlock,
   type VideoNoteExportResponse,
   type VideoNoteListItem,
@@ -15,6 +17,10 @@ import { addVideoNoteBlock, createVideoNoteBlock } from "./videoNoteBlocks";
 import { useVideoNoteAiEditing } from "./useVideoNoteAiEditing";
 import { useVideoNoteAutosave } from "./useVideoNoteAutosave";
 import VideoNoteWorkspaceView from "./VideoNoteWorkspaceView";
+import {
+  getVideoNoteAiOverwriteTargets,
+  type VideoNoteAiAction,
+} from "./videoNoteAiUi";
 
 interface VideoNoteWorkspaceProps {
   knowledgeBaseId: number;
@@ -61,6 +67,10 @@ export default function VideoNoteWorkspace({
   );
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
+  const [aiResultSource, setAiResultSource] =
+    useState<VideoNoteAiResultSource | null>(null);
+  const [pendingAiAction, setPendingAiAction] =
+    useState<VideoNoteAiAction | null>(null);
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
@@ -165,6 +175,15 @@ export default function VideoNoteWorkspace({
     blocks,
     onBlocksChange: setBlocks,
   });
+  const { resetAiEditing } = aiEditing;
+
+  // AI 请求进行中切换视频时，用当前笔记 ID 判定并丢弃过期响应
+  const noteIdRef = useRef<number | null>(null);
+  const aiRequestIdRef = useRef(0);
+  useEffect(() => {
+    noteIdRef.current = note?.id ?? null;
+  }, [note]);
+
   const selectVideo = useCallback(
     (bvid: string) => {
       setSelectedBvid(bvid);
@@ -172,10 +191,15 @@ export default function VideoNoteWorkspace({
       syncNoteState(null);
       setExported(null);
       setAiMessage(null);
+      setAiResultSource(null);
+      setPendingAiAction(null);
+      setAiLoading(false);
+      aiRequestIdRef.current += 1;
       setWorkspaceError(null);
       setNoteChooserOpen(false);
+      resetAiEditing();
     },
-    [syncNoteState],
+    [resetAiEditing, syncNoteState],
   );
 
   const createNote = async (templateId: VideoNoteTemplateId) => {
@@ -210,66 +234,79 @@ export default function VideoNoteWorkspace({
     }
   };
 
-  const generateSummary = async () => {
+  const dispatchAiAction = async (
+    action: VideoNoteAiAction,
+  ): Promise<VideoNoteAiResponse | void> => {
     if (!note) return;
+    const requestNoteId = note.id;
+    const requestId = ++aiRequestIdRef.current;
     setAiLoading(true);
-    setAiMessage("正在生成摘要...");
+    setAiResultSource(null);
+    setAiMessage(
+      action === "summary"
+        ? "正在生成摘要..."
+        : action === "questions"
+          ? "正在生成复盘问题..."
+          : "正在生成时间戳提纲...",
+    );
     try {
-      const response = await videoNoteApi.generateSummary(note.id);
+      const response =
+        action === "summary"
+          ? await videoNoteApi.generateSummary(note.id)
+          : await videoNoteApi.aiEdit(note.id, {
+              action:
+                action === "questions"
+                  ? "generate_questions"
+                  : "generate_timestamps",
+              instruction: null,
+              selected_block_ids: [],
+            });
+      if (
+        noteIdRef.current !== requestNoteId ||
+        aiRequestIdRef.current !== requestId
+      )
+        return;
       aiEditing.applyAiOperations(response.operations);
-      setTags((current) =>
-        Array.from(new Set([...current, ...response.tag_suggestions])),
-      );
+      if (action === "summary") {
+        setTags((current) =>
+          Array.from(new Set([...current, ...response.tag_suggestions])),
+        );
+      }
       setAiMessage(response.message);
+      setAiResultSource(response.result_source);
       return response;
     } catch (error) {
-      setAiMessage("生成摘要失败，请检查网络连接或稍后重试");
-      console.error("生成摘要失败:", error);
+      if (
+        noteIdRef.current === requestNoteId &&
+        aiRequestIdRef.current === requestId
+      ) {
+        setAiMessage(
+          `${action === "summary" ? "生成摘要" : action === "questions" ? "生成问题" : "生成时间戳"}失败，请检查网络连接或稍后重试`,
+        );
+      }
+      console.error("AI 生成失败:", error);
     } finally {
-      setAiLoading(false);
+      if (aiRequestIdRef.current === requestId) setAiLoading(false);
     }
   };
 
-  const generateQuestions = async () => {
-    if (!note) return;
-    setAiLoading(true);
-    setAiMessage("正在生成复盘问题...");
-    try {
-      const response = await videoNoteApi.aiEdit(note.id, {
-        action: "generate_questions",
-        instruction: null,
-        selected_block_ids: [],
-      });
-      aiEditing.applyAiOperations(response.operations);
-      setAiMessage(response.message);
-      return response;
-    } catch (error) {
-      setAiMessage("生成问题失败，请检查网络连接或稍后重试");
-      console.error("生成问题失败:", error);
-    } finally {
-      setAiLoading(false);
+  const requestAiAction = (action: VideoNoteAiAction) => {
+    const overwriteTargets = getVideoNoteAiOverwriteTargets(blocks, action);
+    if (overwriteTargets.length > 0) {
+      setPendingAiAction(action);
+      return Promise.resolve();
     }
+    return dispatchAiAction(action);
   };
 
-  const generateTimestamps = async () => {
-    if (!note) return;
-    setAiLoading(true);
-    setAiMessage("正在生成时间戳提纲...");
-    try {
-      const response = await videoNoteApi.aiEdit(note.id, {
-        action: "generate_timestamps",
-        instruction: null,
-        selected_block_ids: [],
-      });
-      aiEditing.applyAiOperations(response.operations);
-      setAiMessage(response.message);
-      return response;
-    } catch (error) {
-      setAiMessage("生成时间戳失败，请检查网络连接或稍后重试");
-      console.error("生成时间戳失败:", error);
-    } finally {
-      setAiLoading(false);
-    }
+  const aiOverwriteTargets = pendingAiAction
+    ? getVideoNoteAiOverwriteTargets(blocks, pendingAiAction)
+    : [];
+
+  const confirmAiOverwrite = () => {
+    const action = pendingAiAction;
+    setPendingAiAction(null);
+    if (action) void dispatchAiAction(action);
   };
 
   const addTodo = () => {
@@ -307,6 +344,8 @@ export default function VideoNoteWorkspace({
       exporting={exporting}
       aiLoading={aiLoading}
       aiMessage={aiMessage}
+      aiResultSource={aiResultSource}
+      aiOverwriteTargets={aiOverwriteTargets}
       canUndoAiEdit={aiEditing.canUndoAiEdit}
       workspaceError={workspaceError}
       onClose={onClose}
@@ -325,10 +364,12 @@ export default function VideoNoteWorkspace({
       onCreateNote={createNote}
       onBlocksChange={setBlocks}
       onCollapseAiPanel={() => setAiPanelCollapsed(true)}
-      onGenerateSummary={generateSummary}
-      onGenerateQuestions={generateQuestions}
-      onGenerateTimestamps={generateTimestamps}
+      onGenerateSummary={() => requestAiAction("summary")}
+      onGenerateQuestions={() => requestAiAction("questions")}
+      onGenerateTimestamps={() => requestAiAction("timestamps")}
       onUndoAiEdit={aiEditing.undoAiEdit}
+      onCancelAiOverwrite={() => setPendingAiAction(null)}
+      onConfirmAiOverwrite={confirmAiOverwrite}
     />
   );
 }
