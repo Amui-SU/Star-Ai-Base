@@ -30,7 +30,15 @@ export type {
   WebSearchProvider,
 } from "./api/chatTypes";
 export { importApi } from "./api/imports";
-export type { ImportMethod, ImportUrlResponse } from "./api/importTypes";
+export type {
+  DetectMultiPartResponse,
+  ImportMethod,
+  ImportMultiPartResponse,
+  ImportTaskStatus,
+  ImportUrlResponse,
+  VideoMultiPartInfo,
+  VideoPageInfo,
+} from "./api/importTypes";
 export { knowledgeBaseApi } from "./api/knowledgeBases";
 export type {
   KnowledgeBase,

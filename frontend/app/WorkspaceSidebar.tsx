@@ -11,11 +11,9 @@ interface WorkspaceSidebarProps {
   activeBindingId: number | null;
   activeKbId: number | null;
   activeKnowledgeBase: KnowledgeBase | null;
-  historyRefreshKey: number;
   isDragging: boolean;
   isSidebarOpen: boolean;
   knowledgeBuilding: boolean;
-  kbRefreshKey: number;
   sidebarMode: SidebarMode;
   sidebarPanelStyle: CSSProperties;
   sidebarWidth: number;
@@ -35,11 +33,9 @@ export default function WorkspaceSidebar({
   activeBindingId,
   activeKbId,
   activeKnowledgeBase,
-  historyRefreshKey,
   isDragging,
   isSidebarOpen,
   knowledgeBuilding,
-  kbRefreshKey,
   sidebarMode,
   sidebarPanelStyle,
   sidebarWidth,
@@ -72,7 +68,6 @@ export default function WorkspaceSidebar({
             activeKbId={activeKbId}
             activeKnowledgeBase={activeKnowledgeBase}
             knowledgeBuilding={knowledgeBuilding}
-            kbRefreshKey={kbRefreshKey}
             onActiveKnowledgeBase={onActiveKnowledgeBase}
             onBuildingChange={onBuildingChange}
             onBuildDone={onBuildDone}
@@ -83,7 +78,6 @@ export default function WorkspaceSidebar({
         ) : sidebarMode === "history" ? (
           <ChatHistorySidebarPanel
             knowledgeBaseId={activeKbId}
-            refreshKey={historyRefreshKey}
             onOpenConversation={onOpenConversation}
             onNewConversation={onNewConversation}
             onCollapse={onCollapse}
@@ -101,7 +95,6 @@ function SourcesSidebarContent({
   activeKbId,
   activeKnowledgeBase,
   knowledgeBuilding,
-  kbRefreshKey,
   onActiveKnowledgeBase,
   onBuildingChange,
   onBuildDone,
@@ -113,7 +106,6 @@ function SourcesSidebarContent({
   activeKbId: number | null;
   activeKnowledgeBase: KnowledgeBase | null;
   knowledgeBuilding: boolean;
-  kbRefreshKey: number;
   onActiveKnowledgeBase: (knowledgeBase: KnowledgeBase | null) => void;
   onBuildingChange: (building: boolean) => void;
   onBuildDone: () => void;
@@ -127,7 +119,6 @@ function SourcesSidebarContent({
         activeId={activeKbId}
         onSelect={onKnowledgeBaseSelect}
         onActiveKnowledgeBase={onActiveKnowledgeBase}
-        refreshKey={kbRefreshKey}
         disabled={knowledgeBuilding}
       />
 

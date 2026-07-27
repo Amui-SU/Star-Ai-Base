@@ -240,3 +240,143 @@ async def test_fetch_bilibili_timestamps_normalizes_cumulative_multi_part_summar
     assert service.player_info_calls == [("BVNOTE123", 222, 123)]
     assert service.summary_calls == [("BVNOTE123", 222, 456)]
     assert service.closed is True
+
+
+def test_normalize_shifts_short_cumulative_chapters_for_later_parts():
+    """P2+ 的章节即使未超过分P时长，只要都落在累计区间起点之后也应换算"""
+    from app.services.video_note_chapters import _normalize_part_relative_timestamps
+
+    source = _source(page_number=2, total_parts=3, duration=300)
+    video_info = {
+        "pages": [
+            {"page": 1, "cid": 111, "duration": 400},
+            {"page": 2, "cid": 456, "duration": 300},
+            {"page": 3, "cid": 333, "duration": 200},
+        ]
+    }
+    # 累计秒（400 起）但都 <= 400+300，旧启发式会漏判
+    items = [
+        {"time": 400, "text": "开场"},
+        {"time": 520, "text": "重点"},
+        {"time": 690, "text": "总结"},
+    ]
+
+    normalized = _normalize_part_relative_timestamps(items, source, video_info)
+
+    assert [item["time"] for item in normalized] == [0, 120, 290]
+
+
+def test_normalize_drops_items_outside_part_instead_of_falling_back():
+    """换算后全部越界时返回空列表，而不是回退成错误的累计秒数"""
+    from app.services.video_note_chapters import _normalize_part_relative_timestamps
+
+    source = _source(page_number=2, total_parts=2, duration=100)
+    video_info = {
+        "pages": [
+            {"page": 1, "cid": 111, "duration": 100},
+            {"page": 2, "cid": 456, "duration": 100},
+        ]
+    }
+    # 全部超出 P2 的累计区间（100-200）
+    items = [
+        {"time": 500, "text": "不属于当前分P"},
+        {"time": 700, "text": "同上"},
+    ]
+
+    normalized = _normalize_part_relative_timestamps(items, source, video_info)
+
+    assert normalized == []
+
+
+def test_normalize_keeps_part_relative_times_untouched():
+    """已是分P内秒数（从 0 附近开始）时不做换算"""
+    from app.services.video_note_chapters import _normalize_part_relative_timestamps
+
+    source = _source(page_number=2, total_parts=2, duration=300)
+    video_info = {
+        "pages": [
+            {"page": 1, "cid": 111, "duration": 400},
+            {"page": 2, "cid": 456, "duration": 300},
+        ]
+    }
+    items = [
+        {"time": 0, "text": "开场"},
+        {"time": 150, "text": "重点"},
+    ]
+
+    normalized = _normalize_part_relative_timestamps(items, source, video_info)
+
+    assert normalized == items
+
+
+def test_normalize_matches_part_by_storage_id_when_page_number_missing():
+    """page_number 为空时通过分P存储ID（bvid_p{n}）匹配分P"""
+    from app.services.video_note_chapters import _normalize_part_relative_timestamps
+
+    source = _source(
+        bvid="BVNOTE123_p2",
+        cid=None,
+        page_number=None,
+        total_parts=2,
+        duration=300,
+    )
+    video_info = {
+        "pages": [
+            {"page": 1, "cid": 111, "duration": 400},
+            {"page": 2, "cid": 456, "duration": 300},
+        ]
+    }
+    items = [{"time": 450, "text": "重点"}]
+
+    normalized = _normalize_part_relative_timestamps(items, source, video_info)
+
+    assert normalized == [{"time": 50, "text": "重点"}]
+
+
+@pytest.mark.asyncio
+async def test_fetch_bilibili_timestamps_caches_results_per_storage_id():
+    """同一存储ID一小时内重复生成时间戳不再重复调 B 站接口"""
+    from app.services.video_note_chapters import fetch_bilibili_view_point_timestamps
+
+    class FakeBilibiliService:
+        instances = []
+
+        def __init__(self):
+            self.calls = 0
+            FakeBilibiliService.instances.append(self)
+
+        async def get_player_info(self, bvid, cid, aid=None):
+            self.calls += 1
+            return {
+                "view_points": [
+                    {"from": 15, "to": 60, "content": "进入案例"},
+                ]
+            }
+
+        async def get_video_summary(self, bvid, cid, up_mid=None):
+            return None
+
+        async def close(self):
+            pass
+
+    source = _source()
+    first = await fetch_bilibili_view_point_timestamps(
+        None,
+        user=None,
+        workspace=None,
+        source=source,
+        service_class=FakeBilibiliService,
+    )
+    second = await fetch_bilibili_view_point_timestamps(
+        None,
+        user=None,
+        workspace=None,
+        source=source,
+        service_class=FakeBilibiliService,
+    )
+
+    assert first == [{"time": 15, "text": "进入案例"}]
+    assert second == first
+    # 第二次命中缓存，不再创建服务、不再请求接口
+    assert len(FakeBilibiliService.instances) == 1
+    assert FakeBilibiliService.instances[0].calls == 1

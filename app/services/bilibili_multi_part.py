@@ -1,6 +1,31 @@
 """B站分P视频处理辅助函数"""
 
+import re
 from typing import Any
+
+_PART_VIDEO_ID_RE = re.compile(r"^(?P<bvid>[0-9A-Za-z]+)_p(?P<page>\d+)$")
+
+
+def make_part_video_id(bvid: str, page: int) -> str:
+    """分P导入的存储ID：让每个分P在缓存/收藏夹/向量/笔记中成为独立视频"""
+    return f"{bvid}_p{page}"
+
+
+def split_part_video_id(video_id: str) -> tuple[str, int | None]:
+    """还原真实 bvid 与分P编号；非分P存储ID原样返回 (video_id, None)"""
+    match = _PART_VIDEO_ID_RE.match(video_id or "")
+    if not match:
+        return video_id, None
+    return match.group("bvid"), int(match.group("page"))
+
+
+def bilibili_video_url(video_id: str) -> str:
+    """由存储ID构造B站视频URL，分P存储ID自动带上 ?p= 参数"""
+    bvid, page = split_part_video_id(video_id)
+    base = f"https://www.bilibili.com/video/{bvid}"
+    if page and page > 1:
+        return f"{base}?p={page}"
+    return base
 
 
 def detect_multi_part_video(video_info: dict[str, Any]) -> dict[str, Any]:

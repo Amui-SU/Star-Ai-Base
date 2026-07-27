@@ -41,6 +41,15 @@ def isolate_auth_ip_rate_limit() -> Iterator[None]:
     _ip_rate_limit.clear()
 
 
+@pytest.fixture(autouse=True)
+def isolate_view_point_cache() -> Iterator[None]:
+    from app.services.video_note_chapters import clear_view_point_timestamp_cache
+
+    clear_view_point_timestamp_cache()
+    yield
+    clear_view_point_timestamp_cache()
+
+
 @pytest.fixture()
 def test_db_url() -> Iterator[str]:
     with tempfile.TemporaryDirectory() as temp_dir:
