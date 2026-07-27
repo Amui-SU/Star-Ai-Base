@@ -18,7 +18,7 @@ function textValue(value: unknown): string {
 function itemText(item: VideoNoteBlockItem): string {
   const text = textValue(item.text ?? item.content);
   const timestamp = item.timestamp ?? item.time;
-  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return text;
+  if (timestamp === undefined || timestamp === null) return text;
   return `[${formatVideoNoteTime(timestamp)}] ${text}`.trim();
 }
 

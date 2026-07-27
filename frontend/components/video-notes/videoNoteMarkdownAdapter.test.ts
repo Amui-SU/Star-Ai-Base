@@ -37,6 +37,36 @@ describe("video note markdown adapter", () => {
     );
   });
 
+  it("normalizes invalid and fractional timestamp outline values", () => {
+    const timestampBlocks = [
+      {
+        id: "timestamp-boundaries",
+        type: "timestamp_outline",
+        items: [
+          { time: 204.9, text: "Fraction" },
+          { time: 360000.9, text: "Long" },
+          { time: "204", text: "String" },
+          { time: true, text: "Boolean" },
+          { time: Number.NaN, text: "NaN" },
+          { time: Number.POSITIVE_INFINITY, text: "Positive infinity" },
+          { time: Number.NEGATIVE_INFINITY, text: "Negative infinity" },
+        ],
+      },
+    ] as unknown as VideoNoteBlock[];
+
+    expect(blocksToMarkdown(timestampBlocks)).toBe(
+      [
+        "- [03:24] Fraction",
+        "- [100:00:00] Long",
+        "- [00:00] String",
+        "- [00:00] Boolean",
+        "- [00:00] NaN",
+        "- [00:00] Positive infinity",
+        "- [00:00] Negative infinity",
+      ].join("\n"),
+    );
+  });
+
   it("serializes note blocks into editable Markdown", () => {
     expect(blocksToMarkdown(blocks)).toBe(
       [

@@ -1,8 +1,11 @@
+export function normalizeVideoNoteTimeSeconds(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : 0;
+}
+
 export function formatVideoNoteTime(value: unknown): string {
-  const totalSeconds =
-    typeof value === "number" && Number.isFinite(value) && value >= 0
-      ? Math.floor(value)
-      : 0;
+  const totalSeconds = normalizeVideoNoteTimeSeconds(value);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
