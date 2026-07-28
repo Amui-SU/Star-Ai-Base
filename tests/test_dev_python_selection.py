@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 import subprocess
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEV_SCRIPT = PROJECT_ROOT / "scripts" / "dev.ps1"
 
@@ -50,7 +49,12 @@ def test_healthy_resolution_skips_runnable_python_that_cannot_import_application
 
     assert result == {
         "resolved": "healthy-python",
-        "rejected": ["broken-python"],
+        "rejected": [
+            {
+                "candidate": "broken-python",
+                "reason": "cannot import app.main",
+            }
+        ],
     }
 
 
@@ -83,7 +87,10 @@ def test_healthy_resolution_returns_null_and_reports_every_rejected_candidate():
 
     assert result == {
         "resolved": None,
-        "rejected": ["not-runnable", "missing-app"],
+        "rejected": [
+            {"candidate": "not-runnable", "reason": "not runnable"},
+            {"candidate": "missing-app", "reason": "cannot import app.main"},
+        ],
     }
 
 
@@ -108,3 +115,44 @@ def test_status_reports_runnable_python_recorded_for_existing_runtime():
 
     assert result.returncode == 0, result.stderr
     assert "(runtime-python)" in result.stdout
+
+
+def test_status_reports_unavailable_recorded_runtime_python_without_reselecting():
+    result = _run_dev_functions(
+        r"""
+        function Read-RuntimeState {
+            [pscustomobject]@{
+                python = 'missing-runtime-python'
+                backend = $null
+                frontend = $null
+            }
+        }
+        function Resolve-ProjectPython { throw 'must not reselect when runtime metadata records Python' }
+        function Test-PythonRunnable { return $false }
+        function Test-CommandExists { return $false }
+        function Test-PortListening { return $false }
+        Invoke-Status -ProjectRoot '.'
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Python: unavailable (recorded: missing-runtime-python)" in result.stdout
+
+
+def test_rejected_candidate_warnings_state_the_exact_failure_reason():
+    result = _run_dev_functions(
+        r"""
+        $rejected = @(
+            [pscustomobject]@{ candidate = 'not-runnable'; reason = 'not runnable' },
+            [pscustomobject]@{ candidate = 'missing-app'; reason = 'cannot import app.main' }
+        )
+        Write-RejectedPythonCandidates -Candidates $rejected
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Rejected Python candidate: not-runnable (not runnable)" in result.stdout
+    assert (
+        "Rejected Python candidate: missing-app (cannot import app.main)"
+        in result.stdout
+    )

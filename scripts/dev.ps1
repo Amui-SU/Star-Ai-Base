@@ -115,13 +115,19 @@ function Resolve-ProjectPython {
     foreach ($candidate in @(Get-ProjectPythonCandidates -ProjectRoot $ProjectRoot)) {
         if (-not (Test-PythonRunnable -PythonExe $candidate)) {
             if ($RejectedCandidates) {
-                $RejectedCandidates.Value += $candidate
+                $RejectedCandidates.Value += [pscustomobject]@{
+                    candidate = $candidate
+                    reason = "not runnable"
+                }
             }
             continue
         }
         if ($RequireBackendDependencies -and -not (Test-BackendApplicationImport -PythonExe $candidate -ProjectRoot $ProjectRoot)) {
             if ($RejectedCandidates) {
-                $RejectedCandidates.Value += $candidate
+                $RejectedCandidates.Value += [pscustomobject]@{
+                    candidate = $candidate
+                    reason = "cannot import app.main"
+                }
             }
             continue
         }
@@ -141,10 +147,10 @@ function Test-BackendDependencies {
 }
 
 function Write-RejectedPythonCandidates {
-    param([string[]]$Candidates)
+    param([object[]]$Candidates)
 
-    foreach ($candidate in @($Candidates)) {
-        Write-WarnMsg "Rejected Python candidate (not runnable or cannot import app.main): $candidate"
+    foreach ($entry in @($Candidates)) {
+        Write-WarnMsg "Rejected Python candidate: $($entry.candidate) ($($entry.reason))"
     }
 }
 
@@ -832,16 +838,25 @@ function Invoke-Status {
 
     $runtime = Read-RuntimeState $ProjectRoot
     $pythonExe = $null
-    if ($runtime -and $runtime.python -and (Test-PythonRunnable -PythonExe $runtime.python)) {
+    $pythonRunnable = $false
+    $usingRecordedPython = [bool]($runtime -and $runtime.python)
+    if ($usingRecordedPython) {
         $pythonExe = $runtime.python
+        $pythonRunnable = Test-PythonRunnable -PythonExe $pythonExe
     }
     else {
         $pythonExe = Resolve-ProjectPython -ProjectRoot $ProjectRoot -RequireBackendDependencies
+        if ($pythonExe) {
+            $pythonRunnable = $true
+        }
     }
 
     Write-Info "Project root: $ProjectRoot"
 
-    if ($pythonExe) {
+    if ($usingRecordedPython -and -not $pythonRunnable) {
+        Write-WarnMsg "Python: unavailable (recorded: $pythonExe)"
+    }
+    elseif ($pythonExe) {
         Write-Ok "Python: $(& $pythonExe --version 2>&1) ($pythonExe)"
     }
     else {
