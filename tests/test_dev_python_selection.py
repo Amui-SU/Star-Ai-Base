@@ -80,6 +80,40 @@ def test_install_resolution_returns_first_runnable_python_without_import_probe()
     assert result == {"resolved": "broken-python", "rejected": []}
 
 
+def test_selected_path_command_is_normalized_to_its_executable_source():
+    result = _run_selection(
+        r"""
+        function Get-ProjectPythonCandidates { @('python') }
+        function Test-PythonRunnable { return $true }
+        function Test-BackendApplicationImport { return $true }
+        $expected = (Get-Command python -CommandType Application | Select-Object -First 1).Source
+        $resolved = Resolve-ProjectPython -ProjectRoot '.' -RequireBackendDependencies
+        [pscustomobject]@{ resolved = $resolved; expected = $expected } | ConvertTo-Json -Compress
+        """
+    )
+
+    assert result["resolved"] == result["expected"]
+    assert Path(result["resolved"]).is_absolute()
+
+
+def test_selected_literal_executable_path_is_preserved():
+    result = _run_selection(
+        r"""
+        $literalPath = 'C:\fake-python\python.exe'
+        function Get-ProjectPythonCandidates { @($literalPath) }
+        function Test-PythonRunnable { return $true }
+        function Test-BackendApplicationImport { return $true }
+        $resolved = Resolve-ProjectPython -ProjectRoot '.' -RequireBackendDependencies
+        [pscustomobject]@{ resolved = $resolved; expected = $literalPath } | ConvertTo-Json -Compress
+        """
+    )
+
+    assert result == {
+        "resolved": r"C:\fake-python\python.exe",
+        "expected": r"C:\fake-python\python.exe",
+    }
+
+
 def test_healthy_resolution_returns_null_and_reports_every_rejected_candidate():
     result = _run_selection(
         r"""

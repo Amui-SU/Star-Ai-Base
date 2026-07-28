@@ -101,6 +101,26 @@ function Test-BackendApplicationImport {
     }
 }
 
+function Resolve-PythonExecutablePath {
+    param([string]$PythonExe)
+
+    if ([System.IO.Path]::IsPathRooted($PythonExe)) {
+        return $PythonExe
+    }
+
+    $command = Get-Command $PythonExe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) {
+        if ($command.Source) {
+            return $command.Source
+        }
+        if ($command.Path) {
+            return $command.Path
+        }
+    }
+
+    return $PythonExe
+}
+
 function Resolve-ProjectPython {
     param(
         [string]$ProjectRoot,
@@ -125,7 +145,7 @@ function Resolve-ProjectPython {
             }
             continue
         }
-        return $candidate
+        return Resolve-PythonExecutablePath -PythonExe $candidate
     }
 
     return $null
