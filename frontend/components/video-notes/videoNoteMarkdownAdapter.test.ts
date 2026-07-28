@@ -392,7 +392,32 @@ describe("video note markdown adapter", () => {
     });
 
     const markdown = blocksToMarkdown(editedBlocks);
-    markdownToVideoNoteBlocks(markdown, previousBlocks);
+    const warmupResult = markdownToVideoNoteBlocks(markdown, previousBlocks);
+
+    expect.soft(warmupResult).toHaveLength(editedBlocks.length);
+    expect
+      .soft(warmupResult.map((block) => block.text))
+      .toEqual(editedBlocks.map((block) => block.text));
+    [1, 1500, 3000].forEach((position) => {
+      const previousBlock = previousBlocks[position - 1];
+      expect
+        .soft(
+          warmupResult.find((block) => block.text === previousBlock.text)?.id,
+        )
+        .toBe(previousBlock.id);
+    });
+    const previousIds = new Set(previousBlocks.map((block) => block.id));
+    const insertedBlocksWithOldIds = editedBlocks
+      .filter((block) => block.id.startsWith("inserted-paragraph-"))
+      .flatMap((insertedBlock) => {
+        const reconciledBlock = warmupResult.find(
+          (block) => block.text === insertedBlock.text,
+        );
+        return reconciledBlock && previousIds.has(reconciledBlock.id)
+          ? [{ text: reconciledBlock.text, id: reconciledBlock.id }]
+          : [];
+      });
+    expect.soft(insertedBlocksWithOldIds).toEqual([]);
 
     const durations = Array.from({ length: 3 }, () => {
       const startedAt = performance.now();
