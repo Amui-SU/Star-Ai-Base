@@ -240,6 +240,34 @@ describe("video note markdown adapter", () => {
     ).toBe(false);
   });
 
+  it("prioritizes semantic ids when an ordinary block moves before its section", () => {
+    const previousBlocks: VideoNoteBlock[] = [
+      {
+        id: "ai-summary-title",
+        type: "heading",
+        level: 2,
+        text: standardBlocks[2].text,
+      },
+      { id: "ai-summary", type: "ai_summary", text: "Original summary" },
+      { id: "ordinary", type: "paragraph", text: "Ordinary paragraph" },
+    ];
+
+    const parsed = markdownToVideoNoteBlocks(
+      [
+        "Ordinary paragraph",
+        "",
+        `## ${standardBlocks[2].text}`,
+        "",
+        "Original summary",
+      ].join("\n"),
+      previousBlocks,
+    );
+
+    expect(parsed[1].id).toBe("ai-summary-title");
+    expect(parsed[2].id).toBe("ai-summary");
+    expect(parsed[0].id).not.toBe("ordinary");
+  });
+
   it.each([
     {
       position: "before",

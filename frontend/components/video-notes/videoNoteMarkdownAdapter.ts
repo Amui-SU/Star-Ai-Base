@@ -112,6 +112,7 @@ function blockFingerprint(block: VideoNoteBlock) {
 interface BlockIdAssignment {
   id: string;
   previousIndex: number;
+  semantic: boolean;
 }
 
 function reconcileBlockIds(
@@ -129,7 +130,11 @@ function reconcileBlockIds(
   );
   const assignments = new Map<number, BlockIdAssignment>();
   const usedPreviousIndices = new Set<number>();
-  const assign = (parsedIndex: number, candidateIds: readonly string[]) => {
+  const assign = (
+    parsedIndex: number,
+    candidateIds: readonly string[],
+    semantic = false,
+  ) => {
     if (assignments.has(parsedIndex)) return;
     const id = candidateIds.find((candidate) => {
       const previousIndex = previousIndexById.get(candidate);
@@ -140,7 +145,7 @@ function reconcileBlockIds(
     if (!id) return;
     const previousIndex = previousIndexById.get(id);
     if (previousIndex === undefined) return;
-    assignments.set(parsedIndex, { id, previousIndex });
+    assignments.set(parsedIndex, { id, previousIndex, semantic });
     usedPreviousIndices.add(previousIndex);
   };
 
@@ -191,13 +196,13 @@ function reconcileBlockIds(
     }
     const headingIndex = headingIndices[0];
     if (headingIndex === undefined) continue;
-    assign(headingIndex, section.titleIds);
+    assign(headingIndex, section.titleIds, true);
     const contentIndex = headingIndex + 1;
     if (
       contentIndex < parsedBlocks.length &&
       parsedBlocks[contentIndex].type !== "heading"
     ) {
-      assign(contentIndex, section.contentIds);
+      assign(contentIndex, section.contentIds, true);
     }
   }
 
@@ -254,8 +259,8 @@ function reconcileBlockIds(
     if (matchingHeadingIndices.length !== 1) continue;
 
     const headingIndex = matchingHeadingIndices[0];
-    assign(headingIndex, section.titleIds);
-    assign(headingIndex + 1, section.contentIds);
+    assign(headingIndex, section.titleIds, true);
+    assign(headingIndex + 1, section.contentIds, true);
   }
 
   const anchors = Array.from(assignments.entries())
@@ -264,13 +269,47 @@ function reconcileBlockIds(
   const orderedAnchors: typeof anchors = [];
   const crossingParsedIndices = new Set<number>();
   const crossingPreviousIndices = new Set<number>();
-  let lastPreviousIndex = -1;
+  const rejectAnchor = (anchor: (typeof anchors)[number]) => {
+    assignments.delete(anchor.parsedIndex);
+    usedPreviousIndices.delete(anchor.previousIndex);
+    crossingParsedIndices.add(anchor.parsedIndex);
+    crossingPreviousIndices.add(anchor.previousIndex);
+  };
+  const acceptedSemanticParsedIndices = new Set<number>();
+  let lastSemanticPreviousIndex = -1;
   for (const anchor of anchors) {
-    if (anchor.previousIndex <= lastPreviousIndex) {
-      assignments.delete(anchor.parsedIndex);
-      usedPreviousIndices.delete(anchor.previousIndex);
-      crossingParsedIndices.add(anchor.parsedIndex);
-      crossingPreviousIndices.add(anchor.previousIndex);
+    if (!anchor.semantic) continue;
+    if (anchor.previousIndex <= lastSemanticPreviousIndex) {
+      rejectAnchor(anchor);
+    } else {
+      acceptedSemanticParsedIndices.add(anchor.parsedIndex);
+      lastSemanticPreviousIndex = anchor.previousIndex;
+    }
+  }
+
+  const nextSemanticPreviousIndices = new Array<number>(anchors.length);
+  let nextSemanticPreviousIndex = previousBlocks.length;
+  for (let index = anchors.length - 1; index >= 0; index -= 1) {
+    nextSemanticPreviousIndices[index] = nextSemanticPreviousIndex;
+    const anchor = anchors[index];
+    if (
+      anchor.semantic &&
+      acceptedSemanticParsedIndices.has(anchor.parsedIndex)
+    ) {
+      nextSemanticPreviousIndex = anchor.previousIndex;
+    }
+  }
+
+  let lastPreviousIndex = -1;
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    if (anchor.semantic) {
+      if (!acceptedSemanticParsedIndices.has(anchor.parsedIndex)) continue;
+    } else if (
+      anchor.previousIndex <= lastPreviousIndex ||
+      anchor.previousIndex >= nextSemanticPreviousIndices[index]
+    ) {
+      rejectAnchor(anchor);
       continue;
     }
     orderedAnchors.push(anchor);
