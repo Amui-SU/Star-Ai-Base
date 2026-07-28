@@ -56,7 +56,7 @@ function Test-PythonRunnable {
     }
 }
 
-function Resolve-ProjectPython {
+function Get-ProjectPythonCandidates {
     param([string]$ProjectRoot)
 
     $candidates = @(
@@ -72,29 +72,79 @@ function Resolve-ProjectPython {
     }
 
     $candidates += "C:\ProgramData\anaconda3\envs\bilibili-rag\python.exe"
-    if (Test-CommandExists "python") {
-        $candidates += "python"
+    $candidates += "python"
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($candidate in $candidates) {
+        if ($candidate -and $seen.Add($candidate)) {
+            $candidate
+        }
+    }
+}
+
+function Test-BackendApplicationImport {
+    param(
+        [string]$PythonExe,
+        [string]$ProjectRoot
+    )
+
+    Push-Location -LiteralPath $ProjectRoot
+    try {
+        & $PythonExe -c "import app.main" *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Resolve-ProjectPython {
+    param(
+        [string]$ProjectRoot,
+        [switch]$RequireBackendDependencies,
+        [ref]$RejectedCandidates
+    )
+
+    if ($RejectedCandidates) {
+        $RejectedCandidates.Value = @()
     }
 
-    foreach ($candidate in $candidates) {
-        if (($candidate -eq "python" -or (Test-Path -LiteralPath $candidate -PathType Leaf)) -and (Test-PythonRunnable $candidate)) {
-            return $candidate
+    foreach ($candidate in @(Get-ProjectPythonCandidates -ProjectRoot $ProjectRoot)) {
+        if (-not (Test-PythonRunnable -PythonExe $candidate)) {
+            if ($RejectedCandidates) {
+                $RejectedCandidates.Value += $candidate
+            }
+            continue
         }
+        if ($RequireBackendDependencies -and -not (Test-BackendApplicationImport -PythonExe $candidate -ProjectRoot $ProjectRoot)) {
+            if ($RejectedCandidates) {
+                $RejectedCandidates.Value += $candidate
+            }
+            continue
+        }
+        return $candidate
     }
 
     return $null
 }
 
 function Test-BackendDependencies {
-    param([string]$PythonExe)
+    param(
+        [string]$PythonExe,
+        [string]$ProjectRoot = (Get-ProjectRoot)
+    )
 
-    $code = "import fastapi, uvicorn, cryptography, jose; from passlib.context import CryptContext; CryptContext(schemes=['bcrypt'], deprecated='auto').hash('dependency-check')"
-    try {
-        & $PythonExe -c $code *> $null
-        return $LASTEXITCODE -eq 0
-    }
-    catch {
-        return $false
+    return Test-BackendApplicationImport -PythonExe $PythonExe -ProjectRoot $ProjectRoot
+}
+
+function Write-RejectedPythonCandidates {
+    param([string[]]$Candidates)
+
+    foreach ($candidate in @($Candidates)) {
+        Write-WarnMsg "Rejected Python candidate (not runnable or cannot import app.main): $candidate"
     }
 }
 
@@ -466,7 +516,9 @@ function Invoke-Doctor {
     $failed = $false
     $frontendPath = Get-FrontendPath $ProjectRoot
     $logsPath = Get-LogsPath $ProjectRoot
-    $pythonExe = Resolve-ProjectPython $ProjectRoot
+    $rejectedCandidates = @()
+    $pythonExe = Resolve-ProjectPython -ProjectRoot $ProjectRoot -RequireBackendDependencies -RejectedCandidates ([ref]$rejectedCandidates)
+    Write-RejectedPythonCandidates -Candidates $rejectedCandidates
 
     Write-Info "Project root: $ProjectRoot"
 
@@ -490,17 +542,11 @@ function Invoke-Doctor {
     if ($pythonExe) {
         $pythonVersion = & $pythonExe --version 2>&1
         Write-Ok "Python: $pythonVersion ($pythonExe)"
-        if (Test-BackendDependencies $pythonExe) {
-            Write-Ok "Backend dependencies are healthy."
-        }
-        else {
-            $failed = $true
-            Write-Fail "Backend dependencies are incomplete. Run: powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 install"
-        }
+        Write-Ok "Backend application import is healthy."
     }
     else {
         $failed = $true
-        Write-Fail "No runnable Python found. Install Python or set BILIBILI_RAG_PYTHON."
+        Write-Fail "No healthy Python can import app.main. Run scripts\dev.ps1 install or set BILIBILI_RAG_PYTHON to a healthy environment."
     }
 
     if (Test-CommandExists "node") {
@@ -625,16 +671,15 @@ function Invoke-Start {
     $backendErrLog = Join-Path $logsPath "backend-start.err.log"
     $frontendLog = Join-Path $logsPath "frontend-start.log"
     $frontendErrLog = Join-Path $logsPath "frontend-start.err.log"
-    $pythonExe = Resolve-ProjectPython $ProjectRoot
+    $rejectedCandidates = @()
+    $pythonExe = Resolve-ProjectPython -ProjectRoot $ProjectRoot -RequireBackendDependencies -RejectedCandidates ([ref]$rejectedCandidates)
+    Write-RejectedPythonCandidates -Candidates $rejectedCandidates
     $quotedProjectRoot = '"' + ($ProjectRoot -replace '"', '\"') + '"'
     $backendProcess = $null
     $frontendProcess = $null
 
     if (-not $pythonExe) {
-        throw "No runnable Python found. Run scripts\dev.ps1 doctor."
-    }
-    if (-not (Test-BackendDependencies $pythonExe)) {
-        throw "Backend dependencies are incomplete. Run scripts\dev.ps1 install."
+        throw "No healthy Python can import app.main. Run scripts\dev.ps1 install or set BILIBILI_RAG_PYTHON to a healthy environment."
     }
     if (-not (Test-CommandExists "npm")) {
         throw "npm is missing. Install Node.js LTS."
@@ -785,8 +830,14 @@ function Invoke-Stop {
 function Invoke-Status {
     param([string]$ProjectRoot)
 
-    $pythonExe = Resolve-ProjectPython $ProjectRoot
     $runtime = Read-RuntimeState $ProjectRoot
+    $pythonExe = $null
+    if ($runtime -and $runtime.python -and (Test-PythonRunnable -PythonExe $runtime.python)) {
+        $pythonExe = $runtime.python
+    }
+    else {
+        $pythonExe = Resolve-ProjectPython -ProjectRoot $ProjectRoot -RequireBackendDependencies
+    }
 
     Write-Info "Project root: $ProjectRoot"
 
@@ -885,4 +936,6 @@ function Invoke-CommandByName {
     }
 }
 
-Invoke-CommandByName -Command $Command
+if ($MyInvocation.InvocationName -ne ".") {
+    Invoke-CommandByName -Command $Command
+}
