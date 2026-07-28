@@ -1,5 +1,6 @@
 import type { VideoNoteBlock, VideoNoteBlockItem } from "@/lib/api";
 import { formatVideoNoteTime } from "./videoNoteTime";
+import { alignUniqueFingerprints } from "./videoNoteSequenceAlignment";
 
 const createMarkdownBlockId = () =>
   `md-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -121,6 +122,8 @@ function reconcileBlockIds(
     return parsedBlocks;
   }
 
+  const parsedFingerprints = parsedBlocks.map(blockFingerprint);
+  const previousFingerprints = previousBlocks.map(blockFingerprint);
   const previousIndexById = new Map(
     previousBlocks.map((block, index) => [block.id, index]),
   );
@@ -199,7 +202,10 @@ function reconcileBlockIds(
   }
 
   const previousCandidates = previousBlocks
-    .map((block, index) => ({ fingerprint: blockFingerprint(block), index }))
+    .map((_, index) => ({
+      fingerprint: previousFingerprints[index],
+      index,
+    }))
     .filter(
       (candidate): candidate is { fingerprint: string; index: number } =>
         candidate.fingerprint !== null &&
@@ -208,7 +214,7 @@ function reconcileBlockIds(
         !usedPreviousIndices.has(candidate.index),
     );
   const parsedCandidates = parsedBlocks
-    .map((block, index) => ({ fingerprint: blockFingerprint(block), index }))
+    .map((_, index) => ({ fingerprint: parsedFingerprints[index], index }))
     .filter(
       (candidate): candidate is { fingerprint: string; index: number } =>
         candidate.fingerprint !== null &&
@@ -216,41 +222,13 @@ function reconcileBlockIds(
         !ambiguousParsedContentIndices.has(candidate.index) &&
         !assignments.has(candidate.index),
     );
-  const lcs = Array.from({ length: previousCandidates.length + 1 }, () =>
-    Array<number>(parsedCandidates.length + 1).fill(0),
-  );
-  for (
-    let previous = previousCandidates.length - 1;
-    previous >= 0;
-    previous--
-  ) {
-    for (let parsed = parsedCandidates.length - 1; parsed >= 0; parsed--) {
-      lcs[previous][parsed] =
-        previousCandidates[previous].fingerprint ===
-        parsedCandidates[parsed].fingerprint
-          ? lcs[previous + 1][parsed + 1] + 1
-          : Math.max(lcs[previous + 1][parsed], lcs[previous][parsed + 1]);
-    }
-  }
-  let previous = 0;
-  let parsed = 0;
-  while (
-    previous < previousCandidates.length &&
-    parsed < parsedCandidates.length
-  ) {
-    const previousCandidate = previousCandidates[previous];
-    const parsedCandidate = parsedCandidates[parsed];
-    if (previousCandidate.fingerprint === parsedCandidate.fingerprint) {
-      assign(parsedCandidate.index, [
-        previousBlocks[previousCandidate.index].id,
-      ]);
-      previous += 1;
-      parsed += 1;
-    } else if (lcs[previous + 1][parsed] >= lcs[previous][parsed + 1]) {
-      previous += 1;
-    } else {
-      parsed += 1;
-    }
+  for (const match of alignUniqueFingerprints(
+    previousCandidates.map((candidate) => candidate.fingerprint),
+    parsedCandidates.map((candidate) => candidate.fingerprint),
+  )) {
+    const previousCandidate = previousCandidates[match.previousIndex];
+    const parsedCandidate = parsedCandidates[match.parsedIndex];
+    assign(parsedCandidate.index, [previousBlocks[previousCandidate.index].id]);
   }
 
   for (const { section, headingIndices } of ambiguousSections) {
@@ -258,9 +236,8 @@ function reconcileBlockIds(
       .map((id) => previousIndexById.get(id))
       .find((index): index is number => index !== undefined);
     if (previousContentIndex === undefined) continue;
-    const previousContentFingerprint = blockFingerprint(
-      previousBlocks[previousContentIndex],
-    );
+    const previousContentFingerprint =
+      previousFingerprints[previousContentIndex];
     if (!previousContentFingerprint) continue;
 
     const matchingHeadingIndices = headingIndices.filter((headingIndex) => {
@@ -268,8 +245,7 @@ function reconcileBlockIds(
       if (
         contentIndex >= parsedBlocks.length ||
         parsedBlocks[contentIndex].type === "heading" ||
-        blockFingerprint(parsedBlocks[contentIndex]) !==
-          previousContentFingerprint
+        parsedFingerprints[contentIndex] !== previousContentFingerprint
       ) {
         return false;
       }
@@ -285,70 +261,128 @@ function reconcileBlockIds(
   const anchors = Array.from(assignments.entries())
     .map(([parsedIndex, assignment]) => ({ parsedIndex, ...assignment }))
     .sort((left, right) => left.parsedIndex - right.parsedIndex);
-  let parsedStart = -1;
-  let previousStart = -1;
+  const orderedAnchors: typeof anchors = [];
+  const crossingParsedIndices = new Set<number>();
+  const crossingPreviousIndices = new Set<number>();
+  let lastPreviousIndex = -1;
+  for (const anchor of anchors) {
+    if (anchor.previousIndex <= lastPreviousIndex) {
+      assignments.delete(anchor.parsedIndex);
+      usedPreviousIndices.delete(anchor.previousIndex);
+      crossingParsedIndices.add(anchor.parsedIndex);
+      crossingPreviousIndices.add(anchor.previousIndex);
+      continue;
+    }
+    orderedAnchors.push(anchor);
+    lastPreviousIndex = anchor.previousIndex;
+  }
+
+  const fingerprintCounts = (candidates: typeof parsedCandidates) => {
+    const counts = new Map<string, number>();
+    for (const candidate of candidates) {
+      counts.set(
+        candidate.fingerprint,
+        (counts.get(candidate.fingerprint) ?? 0) + 1,
+      );
+    }
+    return counts;
+  };
+  const previousFingerprintCounts = fingerprintCounts(previousCandidates);
+  const parsedFingerprintCounts = fingerprintCounts(parsedCandidates);
+  const ambiguousFingerprints = new Set<string>();
+  for (const [fingerprint, count] of previousFingerprintCounts) {
+    if (count > 1) ambiguousFingerprints.add(fingerprint);
+  }
+  for (const [fingerprint, count] of parsedFingerprintCounts) {
+    if (count > 1) ambiguousFingerprints.add(fingerprint);
+  }
+
+  const eligibleParsed = parsedCandidates.filter(
+    (candidate) =>
+      !assignments.has(candidate.index) &&
+      !crossingParsedIndices.has(candidate.index) &&
+      !ambiguousFingerprints.has(candidate.fingerprint),
+  );
+  const eligiblePrevious = previousCandidates.filter(
+    (candidate) =>
+      !usedPreviousIndices.has(candidate.index) &&
+      !crossingPreviousIndices.has(candidate.index) &&
+      !ambiguousFingerprints.has(candidate.fingerprint),
+  );
+  let parsedCursor = 0;
+  let previousCursor = 0;
   for (const anchor of [
-    ...anchors,
+    ...orderedAnchors,
     {
       parsedIndex: parsedBlocks.length,
       previousIndex: previousBlocks.length,
       id: "",
     },
   ]) {
-    if (anchor.previousIndex <= previousStart) continue;
-    const parsedGap = parsedBlocks
-      .map((block, index) => ({ block, index }))
-      .filter(
-        ({ block, index }) =>
-          index > parsedStart &&
-          index < anchor.parsedIndex &&
-          blockFingerprint(block) !== null &&
-          !ambiguousParsedHeadingIndices.has(index) &&
-          !ambiguousParsedContentIndices.has(index) &&
-          !assignments.has(index),
-      );
-    const previousGap = previousBlocks
-      .map((block, index) => ({ block, index }))
-      .filter(
-        ({ block, index }) =>
-          index > previousStart &&
-          index < anchor.previousIndex &&
-          blockFingerprint(block) !== null &&
-          !ambiguousPreviousHeadingIndices.has(index) &&
-          !ambiguousPreviousContentIndices.has(index) &&
-          !usedPreviousIndices.has(index),
-      );
-    if (
-      parsedGap.length === previousGap.length &&
-      parsedGap.every(
-        ({ block }, index) =>
-          reconciliationKind(block) ===
-          reconciliationKind(previousGap[index].block),
-      )
+    const parsedGapStart = parsedCursor;
+    while (
+      parsedCursor < eligibleParsed.length &&
+      eligibleParsed[parsedCursor].index < anchor.parsedIndex
     ) {
-      parsedGap.forEach(({ index }, gapIndex) => {
-        assign(index, [previousGap[gapIndex].block.id]);
-      });
+      parsedCursor += 1;
     }
-    parsedStart = anchor.parsedIndex;
-    previousStart = anchor.previousIndex;
+    const previousGapStart = previousCursor;
+    while (
+      previousCursor < eligiblePrevious.length &&
+      eligiblePrevious[previousCursor].index < anchor.previousIndex
+    ) {
+      previousCursor += 1;
+    }
+
+    const parsedGapLength = parsedCursor - parsedGapStart;
+    const previousGapLength = previousCursor - previousGapStart;
+    let compatible = parsedGapLength === previousGapLength;
+    for (let offset = 0; compatible && offset < parsedGapLength; offset += 1) {
+      const parsedCandidate = eligibleParsed[parsedGapStart + offset];
+      const previousCandidate = eligiblePrevious[previousGapStart + offset];
+      compatible =
+        parsedCandidate.index === previousCandidate.index &&
+        reconciliationKind(parsedBlocks[parsedCandidate.index]) ===
+          reconciliationKind(previousBlocks[previousCandidate.index]);
+    }
+    if (compatible) {
+      for (let offset = 0; offset < parsedGapLength; offset += 1) {
+        const parsedCandidate = eligibleParsed[parsedGapStart + offset];
+        const previousCandidate = eligiblePrevious[previousGapStart + offset];
+        assign(parsedCandidate.index, [
+          previousBlocks[previousCandidate.index].id,
+        ]);
+      }
+    }
   }
 
-  if (assignments.size === 0 && ambiguousSections.length === 0) {
-    const visiblePrevious = previousBlocks.filter(
-      (block) => blockFingerprint(block) !== null,
+  if (
+    assignments.size === 0 &&
+    ambiguousSections.length === 0 &&
+    crossingParsedIndices.size === 0
+  ) {
+    const fallbackLength = Math.min(
+      parsedCandidates.length,
+      previousCandidates.length,
     );
-    for (
-      let index = 0;
-      index < Math.min(parsedBlocks.length, visiblePrevious.length);
-      index += 1
-    ) {
+    for (let index = 0; index < fallbackLength; index += 1) {
+      const parsedCandidate = parsedCandidates[index];
+      const previousCandidate = previousCandidates[index];
       if (
-        reconciliationKind(parsedBlocks[index]) !==
-        reconciliationKind(visiblePrevious[index])
-      )
+        ambiguousFingerprints.has(parsedCandidate.fingerprint) ||
+        ambiguousFingerprints.has(previousCandidate.fingerprint)
+      ) {
+        continue;
+      }
+      if (
+        reconciliationKind(parsedBlocks[parsedCandidate.index]) !==
+        reconciliationKind(previousBlocks[previousCandidate.index])
+      ) {
         break;
-      assign(index, [visiblePrevious[index].id]);
+      }
+      assign(parsedCandidate.index, [
+        previousBlocks[previousCandidate.index].id,
+      ]);
     }
   }
 
