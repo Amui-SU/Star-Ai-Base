@@ -135,6 +135,7 @@ def test_video_note_workspace_tests_are_split_by_workflow():
         "VideoNoteWorkspace.ai.test.tsx": [
             "collapses and restores the right AI tools",
             "applies AI suggestions with status",
+            "discards in-flight AI results and undo history",
         ],
     }
     helper_path = test_dir / "VideoNoteWorkspace.test-utils.tsx"
@@ -156,7 +157,7 @@ def test_video_note_workspace_tests_are_split_by_workflow():
             assert expected_name in source
 
     assert not original_path.exists()
-    assert focused_source.count("it(") == 10
+    assert focused_source.count("it(") == 11
 
 
 def test_video_note_workspace_uses_focused_view_component():

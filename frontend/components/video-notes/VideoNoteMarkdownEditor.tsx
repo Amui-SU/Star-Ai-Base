@@ -11,6 +11,7 @@ import {
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import type { VideoNoteBlock, VideoNoteVideo } from "@/lib/api";
+import { splitPartBvid } from "@/lib/bilibiliVideo";
 import {
   blocksToMarkdown,
   markdownToVideoNoteBlocks,
@@ -44,16 +45,17 @@ export function buildBilibiliTimestampUrl(
   const safeSeconds = Number.isFinite(timeInSeconds)
     ? Math.max(0, Math.floor(timeInSeconds))
     : 0;
+  const { bvid: realBvid, page: pageFromId } = splitPartBvid(bvid);
   const currentPart = video?.parts?.[0];
   const page =
     typeof currentPart?.page === "number" && Number.isFinite(currentPart.page)
       ? Math.max(1, Math.floor(currentPart.page))
-      : null;
+      : pageFromId;
 
   if (page !== null) {
-    return `https://www.bilibili.com/video/${bvid}?p=${page}&t=${safeSeconds}`;
+    return `https://www.bilibili.com/video/${realBvid}?p=${page}&t=${safeSeconds}`;
   }
-  return `https://www.bilibili.com/video/${bvid}?t=${safeSeconds}`;
+  return `https://www.bilibili.com/video/${realBvid}?t=${safeSeconds}`;
 }
 
 interface CaretPositionAtPoint {

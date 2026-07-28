@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from app.models import VideoNote
+from app.services.bilibili_multi_part import split_part_video_id
 from app.services.video_note_presenters import VideoNoteSource
 
 
@@ -28,10 +29,12 @@ def _format_timestamp(seconds: Any) -> str:
 
 def _timestamp_url(source: VideoNoteSource, seconds: Any) -> str:
     safe_seconds = max(int(seconds or 0), 0)
-    if (source.total_parts or 0) > 1 or (source.page_number or 0) > 1:
-        page_number = max(int(source.page_number or 1), 1)
-        return f"{source.url}?p={page_number}&t={safe_seconds}"
-    return f"{source.url}?t={safe_seconds}"
+    real_bvid, id_page = split_part_video_id(source.bvid)
+    base = f"https://www.bilibili.com/video/{real_bvid}"
+    if id_page or (source.total_parts or 0) > 1 or (source.page_number or 0) > 1:
+        page_number = max(int(id_page or source.page_number or 1), 1)
+        return f"{base}?p={page_number}&t={safe_seconds}"
+    return f"{base}?t={safe_seconds}"
 
 
 def _clean_filename(value: str) -> str:

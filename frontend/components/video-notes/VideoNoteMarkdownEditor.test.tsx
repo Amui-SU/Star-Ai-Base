@@ -111,7 +111,8 @@ function mockCaretRangeFromPoint(range: Range) {
     if (originalCaretRangeFromPoint) {
       documentWithCaret.caretRangeFromPoint = originalCaretRangeFromPoint;
     } else {
-      delete documentWithCaret.caretRangeFromPoint;
+      delete (documentWithCaret as { caretRangeFromPoint?: unknown })
+        .caretRangeFromPoint;
     }
   };
 }

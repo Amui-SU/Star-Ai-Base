@@ -9,6 +9,8 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 
+import { useRefreshEmit } from "@/hooks/refreshBus";
+
 export type SidebarMode = "sources" | "history" | "notes";
 
 const MIN_SIDEBAR_WIDTH = 310;
@@ -40,7 +42,7 @@ export function useWorkspaceState() {
     key: number;
   } | null>(null);
   const [newConversationRequestKey, setNewConversationRequestKey] = useState(0);
-  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const emitRefresh = useRefreshEmit();
   const [activeVideoNote, setActiveVideoNote] = useState<{
     bvid: string | null;
     key: number;
@@ -103,8 +105,8 @@ export function useWorkspaceState() {
   }, []);
 
   const refreshHistory = useCallback(() => {
-    setHistoryRefreshKey((key) => key + 1);
-  }, []);
+    emitRefresh("chat-history");
+  }, [emitRefresh]);
 
   const openVideoNoteWorkspace = useCallback((bvid?: string | null) => {
     videoNoteRequestKeyRef.current += 1;
@@ -168,7 +170,6 @@ export function useWorkspaceState() {
     sidebarPanelStyle,
     conversationOpenRequest,
     newConversationRequestKey,
-    historyRefreshKey,
     activeVideoNote,
     openSidebarMode,
     collapseSidebar,

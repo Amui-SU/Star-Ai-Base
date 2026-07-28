@@ -39,4 +39,38 @@ describe("useVideoNoteAiEditing", () => {
 
     expect(onBlocksChange.mock.calls[1][0]).toEqual(initialBlocks);
   });
+
+  it("resetAiEditing clears the undo stack so undo cannot leak old blocks", () => {
+    const initialBlocks: VideoNoteBlock[] = [
+      { id: "p1", type: "paragraph", text: "原文" },
+    ];
+    const onBlocksChange = vi.fn();
+
+    const { result } = renderHook(
+      ({ blocks }) =>
+        useVideoNoteAiEditing({
+          blocks,
+          onBlocksChange,
+        }),
+      { initialProps: { blocks: initialBlocks } },
+    );
+
+    act(() => {
+      result.current.applyAiOperations([
+        {
+          kind: "replace_or_insert_block",
+          target_block_id: "p1",
+          block: { id: "p1", type: "ai_summary", text: "AI 摘要" },
+        },
+      ]);
+    });
+    expect(result.current.canUndoAiEdit).toBe(true);
+
+    act(() => result.current.resetAiEditing());
+
+    expect(result.current.canUndoAiEdit).toBe(false);
+    onBlocksChange.mockClear();
+    act(() => result.current.undoAiEdit());
+    expect(onBlocksChange).not.toHaveBeenCalled();
+  });
 });

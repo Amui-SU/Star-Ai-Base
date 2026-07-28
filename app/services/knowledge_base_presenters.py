@@ -8,6 +8,7 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseResponse,
     KnowledgeBaseSearchResult,
 )
+from app.services.bilibili_multi_part import bilibili_video_url
 
 
 def supports_keyword_argument(callable_obj, keyword: str) -> bool:
@@ -47,7 +48,7 @@ def source_from_document(document) -> dict:
         "type": "knowledge",
         "bvid": bvid,
         "title": metadata.get("title") or bvid or "Untitled",
-        "url": metadata.get("url") or f"https://www.bilibili.com/video/{bvid or ''}",
+        "url": metadata.get("url") or bilibili_video_url(bvid or ""),
     }
 
 

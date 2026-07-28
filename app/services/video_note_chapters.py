@@ -1,18 +1,47 @@
 """Bilibili chapter helpers for video note timestamp generation."""
 
 import logging
+import time
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SystemUser, Workspace
 from app.services.bilibili import BilibiliService
+from app.services.bilibili_multi_part import split_part_video_id
 from app.services.content_summary import parse_ai_summary_result
 from app.services.source_binding_services import get_bilibili_service_for_binding
 from app.services.video_note_ai_text import _append_unique, _clean_text, _coerce_time
 from app.services.video_note_presenters import VideoNoteSource
 
 logger = logging.getLogger(__name__)
+
+# 官方章节结果的进程内 TTL 缓存：避免每次点"生成时间戳"都实时调 3 个 B 站接口
+_VIEW_POINT_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_VIEW_POINT_CACHE_TTL_SECONDS = 3600
+_VIEW_POINT_CACHE_MAX_ENTRIES = 128
+
+
+def _view_point_cache_get(key: str) -> list[dict] | None:
+    entry = _VIEW_POINT_CACHE.get(key)
+    if entry is None:
+        return None
+    cached_at, items = entry
+    if time.monotonic() - cached_at > _VIEW_POINT_CACHE_TTL_SECONDS:
+        _VIEW_POINT_CACHE.pop(key, None)
+        return None
+    return items
+
+
+def _view_point_cache_set(key: str, items: list[dict]) -> None:
+    if len(_VIEW_POINT_CACHE) >= _VIEW_POINT_CACHE_MAX_ENTRIES:
+        oldest_key = min(_VIEW_POINT_CACHE, key=lambda k: _VIEW_POINT_CACHE[k][0])
+        _VIEW_POINT_CACHE.pop(oldest_key, None)
+    _VIEW_POINT_CACHE[key] = (time.monotonic(), items)
+
+
+def clear_view_point_timestamp_cache() -> None:
+    _VIEW_POINT_CACHE.clear()
 
 
 def _first_present(mapping: dict[str, Any], *keys: str) -> Any:
@@ -90,13 +119,17 @@ def _part_timing_from_video_info(
     if not isinstance(pages, list):
         return None, source.duration
 
+    # 旧数据 page_number 可能为空，从分P存储ID（bvid_p{n}）兜底解析
+    _, id_page = split_part_video_id(source.bvid)
+    page_hint = source.page_number or id_page
+
     target_index = None
     for index, page in enumerate(pages):
         if not isinstance(page, dict):
             continue
         page_number = _coerce_positive_int(page.get("page"))
         cid = _coerce_positive_int(page.get("cid"))
-        if source.page_number and page_number == source.page_number:
+        if page_hint and page_number == page_hint:
             target_index = index
             break
         if source.cid and cid == source.cid:
@@ -131,13 +164,18 @@ def _normalize_part_relative_timestamps(
         video_info,
         source,
     )
-    if part_duration is None:
+    if part_duration is None or part_start_seconds is None:
         return items
 
-    max_time = max(_coerce_positive_int(item.get("time")) or 0 for item in items)
-    if max_time <= part_duration:
-        return items
-    if part_start_seconds is None:
+    times = [_coerce_positive_int(item.get("time")) or 0 for item in items]
+    max_time = max(times)
+    min_time = min(times)
+    # 判定是否为全片累计秒数：超出当前分P时长，或全部时间都落在当前分P
+    # 的累计区间起点之后（P2+ 的分P内秒数应从 0 附近开始）
+    is_accumulated = max_time > part_duration or (
+        part_start_seconds > 0 and min_time >= part_start_seconds
+    )
+    if not is_accumulated:
         return items
 
     normalized: list[dict] = []
@@ -147,7 +185,9 @@ def _normalize_part_relative_timestamps(
         if relative_time < 0 or relative_time > part_duration:
             continue
         normalized.append({**item, "time": relative_time})
-    return normalized or items
+    # 换算后全部越界说明数据不属于当前分P，宁可返回空让上层走其他兜底，
+    # 也不要回退成错误的累计秒数
+    return normalized
 
 
 async def _resolve_video_identifiers(
@@ -161,7 +201,8 @@ async def _resolve_video_identifiers(
     if not needs_video_info:
         return cid, aid, up_mid, None
 
-    video_info = await service.get_video_info(source.bvid)
+    real_bvid, _ = split_part_video_id(source.bvid)
+    video_info = await service.get_video_info(real_bvid)
     cid = cid or video_info.get("cid")
     aid = video_info.get("aid")
     owner = video_info.get("owner") or {}
@@ -203,6 +244,11 @@ async def fetch_bilibili_view_point_timestamps(
 ) -> list[dict]:
     """Fetch official Bilibili chapter timestamps for a video source if available."""
 
+    # source.bvid 是存储ID（分P时形如 bvid_p2），每个分P独立缓存
+    cached = _view_point_cache_get(source.bvid)
+    if cached is not None:
+        return cached
+
     service: BilibiliService | None = None
     try:
         service = await _service_for_source(
@@ -218,24 +264,29 @@ async def fetch_bilibili_view_point_timestamps(
         )
         if not cid:
             return []
-        player_info = await service.get_player_info(source.bvid, int(cid), aid=aid)
+        real_bvid, _ = split_part_video_id(source.bvid)
+        player_info = await service.get_player_info(real_bvid, int(cid), aid=aid)
         view_point_items = extract_bilibili_view_point_timestamps(player_info)
         if view_point_items:
-            return _normalize_part_relative_timestamps(
+            items = _normalize_part_relative_timestamps(
                 view_point_items,
                 source,
                 video_info,
             )
-        summary_payload = await service.get_video_summary(
-            source.bvid,
-            int(cid),
-            up_mid=up_mid,
-        )
-        return _normalize_part_relative_timestamps(
-            _summary_outline_timestamps(summary_payload),
-            source,
-            video_info,
-        )
+        else:
+            summary_payload = await service.get_video_summary(
+                real_bvid,
+                int(cid),
+                up_mid=up_mid,
+            )
+            items = _normalize_part_relative_timestamps(
+                _summary_outline_timestamps(summary_payload),
+                source,
+                video_info,
+            )
+        # 只缓存成功查询（含空结果）；失败不缓存以便重试
+        _view_point_cache_set(source.bvid, items)
+        return items
     except Exception as exc:
         logger.info(
             "Bilibili view_points unavailable for video note %s: %s",

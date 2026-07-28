@@ -34,9 +34,15 @@ export function useVideoNoteAiEditing({
     });
   }, [onBlocksChange]);
 
+  // 切换视频时必须清空撤销栈，否则会把上一个视频的内容灌进当前笔记
+  const resetAiEditing = useCallback(() => {
+    setUndoStack([]);
+  }, []);
+
   return {
     applyAiOperations,
     undoAiEdit,
+    resetAiEditing,
     canUndoAiEdit: undoStack.length > 0,
     undoDepth: undoStack.length,
   };

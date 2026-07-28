@@ -1,6 +1,11 @@
-import type { ImportMethod, QRCodeResponse } from "@/lib/api";
+import type {
+  ImportMethod,
+  QRCodeResponse,
+  VideoMultiPartInfo,
+} from "@/lib/api";
 import type {
   ImportModalStep,
+  ImportTaskProgressItem,
   VideoImportMode,
 } from "@/components/import-modal/useImportModal";
 import ImportBilibiliStep from "@/components/import-modal/ImportBilibiliStep";
@@ -16,22 +21,29 @@ interface ImportModalViewProps {
   localVideoMessage: string;
   localVideoSubmitting: boolean;
   methodList: ImportMethod[];
+  multiPartInfo: VideoMultiPartInfo | null;
   qr: QRCodeResponse | null;
   qrErrorMessage: string;
   qrStatus: QRStatus;
+  selectedPages: number[];
   step: ImportModalStep;
+  taskProgress: ImportTaskProgressItem[];
   url: string;
   urlMessage: string;
   urlSubmitting: boolean;
   videoMode: VideoImportMode;
   onCancel: () => void;
+  onCancelMultiPart: () => void;
   onGetQR: () => void;
   onLocalVideoFileChange: (file: File | null) => void;
   onOpenMethod: (method: ImportMethod) => void;
   onReturnToMethods: () => void;
   onSubmitLocalVideo: () => void;
+  onSubmitMultiPart: () => void;
   onSubmitUrl: () => void;
   onSwitchVideoMode: (mode: VideoImportMode) => void;
+  onTogglePage: (page: number) => void;
+  onToggleAllPages: () => void;
   onUrlChange: (value: string) => void;
 }
 
@@ -48,22 +60,29 @@ export default function ImportModalView({
   localVideoMessage,
   localVideoSubmitting,
   methodList,
+  multiPartInfo,
   qr,
   qrErrorMessage,
   qrStatus,
+  selectedPages,
   step,
+  taskProgress,
   url,
   urlMessage,
   urlSubmitting,
   videoMode,
   onCancel,
+  onCancelMultiPart,
   onGetQR,
   onLocalVideoFileChange,
   onOpenMethod,
   onReturnToMethods,
   onSubmitLocalVideo,
+  onSubmitMultiPart,
   onSubmitUrl,
   onSwitchVideoMode,
+  onTogglePage,
+  onToggleAllPages,
   onUrlChange,
 }: ImportModalViewProps) {
   return (
@@ -106,15 +125,22 @@ export default function ImportModalView({
           localVideoFile={localVideoFile}
           localVideoMessage={localVideoMessage}
           localVideoSubmitting={localVideoSubmitting}
+          multiPartInfo={multiPartInfo}
+          selectedPages={selectedPages}
+          taskProgress={taskProgress}
           url={url}
           urlMessage={urlMessage}
           urlSubmitting={urlSubmitting}
           videoMode={videoMode}
           onCancel={onCancel}
+          onCancelMultiPart={onCancelMultiPart}
           onLocalVideoFileChange={onLocalVideoFileChange}
           onSubmitLocalVideo={onSubmitLocalVideo}
+          onSubmitMultiPart={onSubmitMultiPart}
           onSubmitUrl={onSubmitUrl}
           onSwitchVideoMode={onSwitchVideoMode}
+          onTogglePage={onTogglePage}
+          onToggleAllPages={onToggleAllPages}
           onUrlChange={onUrlChange}
         />
       )}

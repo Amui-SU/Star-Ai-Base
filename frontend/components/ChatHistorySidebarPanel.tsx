@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRefreshVersion } from "@/hooks/refreshBus";
 import { chatHistoryApi, type ChatConversationSummary } from "@/lib/api";
 
 interface Props {
   knowledgeBaseId?: number | null;
-  refreshKey?: number;
   onOpenConversation: (conversationId: number) => void;
   onNewConversation: () => void;
   onCollapse?: () => void;
@@ -13,11 +13,11 @@ interface Props {
 
 export default function ChatHistorySidebarPanel({
   knowledgeBaseId,
-  refreshKey = 0,
   onOpenConversation,
   onNewConversation,
   onCollapse,
 }: Props) {
+  const refreshVersion = useRefreshVersion("chat-history");
   const [items, setItems] = useState<ChatConversationSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -54,7 +54,7 @@ export default function ChatHistorySidebarPanel({
     return () => {
       cancelled = true;
     };
-  }, [knowledgeBaseId, refreshKey]);
+  }, [knowledgeBaseId, refreshVersion]);
 
   const groupedItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();

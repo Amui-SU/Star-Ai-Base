@@ -644,6 +644,15 @@ async def test_ai_endpoints_use_model_generated_structured_content(
     ]
     assert summary_payload["tag_suggestions"] == ["AI", "复盘"]
 
+    # 摘要生成成功后，笔记的 summary_status 应同步更新
+    detail = await client.get(
+        f"/video-notes/{kb['id']}/BVNOTE123",
+        headers=headers,
+    )
+    assert detail.status_code == 200
+    assert detail.json()["note"]["summary_status"] == "generated"
+    assert detail.json()["note"]["summary_generated_at"] is not None
+
     questions = await client.post(
         f"/video-notes/{note_id}/ai-edit",
         json={

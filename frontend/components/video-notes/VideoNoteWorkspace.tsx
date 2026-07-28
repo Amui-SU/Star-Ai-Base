@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   videoNoteApi,
@@ -165,6 +165,14 @@ export default function VideoNoteWorkspace({
     blocks,
     onBlocksChange: setBlocks,
   });
+  const { resetAiEditing } = aiEditing;
+
+  // AI 请求进行中切换视频时，用当前笔记 ID 判定并丢弃过期响应
+  const noteIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    noteIdRef.current = note?.id ?? null;
+  }, [note]);
+
   const selectVideo = useCallback(
     (bvid: string) => {
       setSelectedBvid(bvid);
@@ -174,8 +182,9 @@ export default function VideoNoteWorkspace({
       setAiMessage(null);
       setWorkspaceError(null);
       setNoteChooserOpen(false);
+      resetAiEditing();
     },
-    [syncNoteState],
+    [resetAiEditing, syncNoteState],
   );
 
   const createNote = async (templateId: VideoNoteTemplateId) => {
@@ -212,10 +221,12 @@ export default function VideoNoteWorkspace({
 
   const generateSummary = async () => {
     if (!note) return;
+    const requestNoteId = note.id;
     setAiLoading(true);
     setAiMessage("正在生成摘要...");
     try {
       const response = await videoNoteApi.generateSummary(note.id);
+      if (noteIdRef.current !== requestNoteId) return;
       aiEditing.applyAiOperations(response.operations);
       setTags((current) =>
         Array.from(new Set([...current, ...response.tag_suggestions])),
@@ -223,7 +234,9 @@ export default function VideoNoteWorkspace({
       setAiMessage(response.message);
       return response;
     } catch (error) {
-      setAiMessage("生成摘要失败，请检查网络连接或稍后重试");
+      if (noteIdRef.current === requestNoteId) {
+        setAiMessage("生成摘要失败，请检查网络连接或稍后重试");
+      }
       console.error("生成摘要失败:", error);
     } finally {
       setAiLoading(false);
@@ -232,6 +245,7 @@ export default function VideoNoteWorkspace({
 
   const generateQuestions = async () => {
     if (!note) return;
+    const requestNoteId = note.id;
     setAiLoading(true);
     setAiMessage("正在生成复盘问题...");
     try {
@@ -240,11 +254,14 @@ export default function VideoNoteWorkspace({
         instruction: null,
         selected_block_ids: [],
       });
+      if (noteIdRef.current !== requestNoteId) return;
       aiEditing.applyAiOperations(response.operations);
       setAiMessage(response.message);
       return response;
     } catch (error) {
-      setAiMessage("生成问题失败，请检查网络连接或稍后重试");
+      if (noteIdRef.current === requestNoteId) {
+        setAiMessage("生成问题失败，请检查网络连接或稍后重试");
+      }
       console.error("生成问题失败:", error);
     } finally {
       setAiLoading(false);
@@ -253,6 +270,7 @@ export default function VideoNoteWorkspace({
 
   const generateTimestamps = async () => {
     if (!note) return;
+    const requestNoteId = note.id;
     setAiLoading(true);
     setAiMessage("正在生成时间戳提纲...");
     try {
@@ -261,11 +279,14 @@ export default function VideoNoteWorkspace({
         instruction: null,
         selected_block_ids: [],
       });
+      if (noteIdRef.current !== requestNoteId) return;
       aiEditing.applyAiOperations(response.operations);
       setAiMessage(response.message);
       return response;
     } catch (error) {
-      setAiMessage("生成时间戳失败，请检查网络连接或稍后重试");
+      if (noteIdRef.current === requestNoteId) {
+        setAiMessage("生成时间戳失败，请检查网络连接或稍后重试");
+      }
       console.error("生成时间戳失败:", error);
     } finally {
       setAiLoading(false);
