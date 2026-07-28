@@ -481,12 +481,20 @@ function Remove-RuntimeState {
 function Wait-Port {
     param(
         [int]$Port,
-        [int]$TimeoutSeconds = 60
+        [int]$TimeoutSeconds = 60,
+        [System.Diagnostics.Process]$Process
     )
 
     for ($i = 0; $i -lt $TimeoutSeconds; $i++) {
         if (Test-PortListening $Port) {
             return $true
+        }
+
+        if ($Process) {
+            $Process.Refresh()
+            if ($Process.HasExited) {
+                return $false
+            }
         }
 
         Start-Sleep -Seconds 1
@@ -722,15 +730,23 @@ function Invoke-Start {
             -WindowStyle Hidden `
             -PassThru
 
-        if (-not (Wait-Port -Port 8000 -TimeoutSeconds 60)) {
+        if (-not (Wait-Port -Port 8000 -TimeoutSeconds 60 -Process $backendProcess)) {
             Show-LogTail $backendLog
             Show-LogTail $backendErrLog
+            $backendProcess.Refresh()
+            if ($backendProcess.HasExited) {
+                throw "Backend exited before port 8000 was ready (exit code $($backendProcess.ExitCode))."
+            }
             throw "Backend did not become ready on port 8000."
         }
 
-        if (-not (Wait-Port -Port 3000 -TimeoutSeconds 60)) {
+        if (-not (Wait-Port -Port 3000 -TimeoutSeconds 60 -Process $frontendProcess)) {
             Show-LogTail $frontendLog
             Show-LogTail $frontendErrLog
+            $frontendProcess.Refresh()
+            if ($frontendProcess.HasExited) {
+                throw "Frontend exited before port 3000 was ready (exit code $($frontendProcess.ExitCode))."
+            }
             throw "Frontend did not become ready on port 3000."
         }
 

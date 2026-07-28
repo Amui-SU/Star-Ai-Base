@@ -6,6 +6,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEV_SCRIPT = PROJECT_ROOT / "scripts" / "dev.ps1"
 
 
+def _function_block(source: str, name: str) -> str:
+    marker = f"function {name} "
+    start = source.index(marker)
+    next_start = source.find("\nfunction ", start + len(marker))
+    return source[start:] if next_start == -1 else source[start:next_start]
+
+
 def _run_dev_functions(body: str) -> subprocess.CompletedProcess[str]:
     escaped_path = str(DEV_SCRIPT).replace("'", "''")
     return subprocess.run(
@@ -152,4 +159,55 @@ def test_rejected_candidate_warnings_state_the_exact_failure_reason():
     assert (
         "Rejected Python candidate: missing-app (cannot import app.main)"
         in result.stdout
+    )
+
+
+def test_wait_port_returns_promptly_when_child_process_exits():
+    result = _run_dev_functions(
+        r"""
+        $ErrorActionPreference = 'Stop'
+        function Test-PortListening { param([int]$Port) return $false }
+        $child = Start-Process -FilePath 'powershell.exe' `
+            -ArgumentList @('-NoProfile', '-Command', 'exit 23') `
+            -WindowStyle Hidden `
+            -PassThru
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $ready = Wait-Port -Port 65530 -TimeoutSeconds 30 -Process $child
+        $stopwatch.Stop()
+        $child.WaitForExit()
+        [pscustomobject]@{
+            ready = [bool]$ready
+            exitCode = $child.ExitCode
+            elapsedMs = $stopwatch.ElapsedMilliseconds
+        } | ConvertTo-Json -Compress
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout.strip())
+    assert payload["ready"] is False
+    assert payload["exitCode"] == 23
+    assert payload["elapsedMs"] < 2000
+
+
+def test_start_waits_on_each_child_and_reports_early_exit_codes():
+    start_block = _function_block(
+        DEV_SCRIPT.read_text(encoding="utf-8"), "Invoke-Start"
+    )
+
+    assert (
+        "Wait-Port -Port 8000 -TimeoutSeconds 60 -Process $backendProcess"
+        in start_block
+    )
+    assert (
+        "Wait-Port -Port 3000 -TimeoutSeconds 60 -Process $frontendProcess"
+        in start_block
+    )
+    assert (
+        'throw "Backend exited before port 8000 was ready '
+        '(exit code $($backendProcess.ExitCode))."' in start_block
+    )
+    assert (
+        'throw "Frontend exited before port 3000 was ready '
+        '(exit code $($frontendProcess.ExitCode))."' in start_block
     )
