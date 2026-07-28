@@ -14,10 +14,10 @@
 
 **Files:**
 
-- Create: `frontend/e2e/auth-responsive.spec.ts`
+- Create: `frontend/e2e/auth-responsive.e2e.ts`
 
 - [x] Add desktop `2048x1152` and mobile `390x844` tests for visible content, layout geometry, horizontal overflow, console errors, and email input interaction.
-- [x] Run `npm run test:e2e -- e2e/auth-responsive.spec.ts` and confirm it fails because the Playwright script and dependency do not exist.
+- [x] Run the focused E2E command and confirm it fails because the Playwright script and dependency do not exist.
 
 ### Task 2: Add the minimal Playwright runtime
 
