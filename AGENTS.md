@@ -14,6 +14,49 @@ during maintenance.
 - Do not move business logic back into routers, large React containers, or mixed
   structure-test files for convenience.
 
+## Task Risk Tiers
+
+Classify a change before choosing its workflow. If any condition is unclear,
+use the next higher tier.
+
+### Micro task fast lane
+
+A task qualifies only when it changes at most three production files, is easy
+to revert, adds no dependency, stays within one frontend or backend boundary,
+and does not alter APIs, persisted data, authentication, authorization, or
+security behavior.
+
+- Do not create an independent design spec or implementation plan. Record the
+  problem, root cause, change, out-of-scope behavior, acceptance, and exact
+  verification using `docs/micro-task-template.md` or the task/commit body.
+- Work directly in the current checkout only when it is clean. If unrelated
+  changes are present, use a worktree so the micro task remains isolated.
+- Add a failing targeted test first for behavior or boundary changes. Pure
+  documentation, comments, or visual-value-only edits may omit a new automated
+  test when the task record explains why.
+- Run `scripts\verify-fast.ps1` with explicit test and lint targets. Inspect only
+  the affected page, state, and viewport; check desktop and mobile only when a
+  responsive rule changes.
+- Finish with one focused commit.
+
+### Normal task
+
+New interactions, component splits, multi-state behavior, or changes spanning
+four to ten production files require a short design note, an isolated worktree,
+targeted tests, and rendered checks for affected viewports.
+
+### High-risk task
+
+Changes to data models, authentication, security, APIs, migrations,
+dependencies, deployment, or cross-platform releases require the full design,
+implementation plan, test-driven workflow, complete verification, and relevant
+release checklist.
+
+The fast lane does not replace `scripts/verify-before-commit.ps1` for normal or
+high-risk work, releases, deployments, shared build configuration, or any task
+whose targeted checks reveal cross-module impact. CI remains the final full
+verification gate after integration.
+
 ## Worktree Flow
 
 Use an isolated worktree by default for feature, refactor, or maintenance
