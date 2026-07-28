@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
 
 import type { VideoNoteBlock } from "@/lib/api";
@@ -341,6 +342,69 @@ describe("video note markdown adapter", () => {
 
     expect(parsed.some((block) => block.id === "ai-summary-title")).toBe(false);
     expect(parsed.some((block) => block.id === "ai-summary")).toBe(false);
+  });
+
+  it("does not inherit arbitrary ids for indistinguishable ordinary paragraphs", () => {
+    const previousBlocks: VideoNoteBlock[] = [
+      { id: "old-left", type: "paragraph", text: "Unique left anchor" },
+      { id: "old-repeat-1", type: "paragraph", text: "Repeated paragraph" },
+      { id: "old-repeat-2", type: "paragraph", text: "Repeated paragraph" },
+      { id: "old-repeat-3", type: "paragraph", text: "Repeated paragraph" },
+      { id: "old-right", type: "paragraph", text: "Unique right anchor" },
+    ];
+
+    const parsed = markdownToVideoNoteBlocks(
+      blocksToMarkdown(previousBlocks),
+      previousBlocks,
+    );
+
+    expect(parsed[0].id).toBe("old-left");
+    expect(parsed.at(-1)?.id).toBe("old-right");
+    expect(
+      parsed
+        .slice(1, -1)
+        .map((block) => block.id)
+        .filter((id) => id.startsWith("old-repeat-")),
+    ).toEqual([]);
+  });
+
+  it("reconciles 3000 edited blocks within 50ms", () => {
+    const previousBlocks: VideoNoteBlock[] = Array.from(
+      { length: 3000 },
+      (_, index) => ({
+        id: `old-paragraph-${index + 1}`,
+        type: "paragraph",
+        text: `Unique paragraph ${index + 1}`,
+      }),
+    );
+    const editedBlocks: VideoNoteBlock[] = [];
+
+    previousBlocks.forEach((block, index) => {
+      const position = index + 1;
+      if (position % 31 === 0) {
+        editedBlocks.push({
+          id: `inserted-paragraph-${position}`,
+          type: "paragraph",
+          text: `Unique inserted paragraph ${position}`,
+        });
+      }
+      if (position % 17 !== 0) editedBlocks.push(block);
+    });
+
+    const markdown = blocksToMarkdown(editedBlocks);
+    markdownToVideoNoteBlocks(markdown, previousBlocks);
+
+    const durations = Array.from({ length: 3 }, () => {
+      const startedAt = performance.now();
+      markdownToVideoNoteBlocks(markdown, previousBlocks);
+      return performance.now() - startedAt;
+    });
+    const fastestDuration = Math.min(...durations);
+
+    expect(
+      fastestDuration,
+      `durations: ${durations.map((duration) => `${duration.toFixed(2)}ms`).join(", ")}`,
+    ).toBeLessThan(50);
   });
 
   it("parses task lists, bullet lists, blockquotes, and dividers", () => {
