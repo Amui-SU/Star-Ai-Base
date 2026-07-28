@@ -125,6 +125,27 @@ describe("AuthPage third-party login notice", () => {
     );
   });
 
+  it("stacks the desktop login content and account hint vertically", () => {
+    const { container } = render(<AuthPage onAuthSuccess={vi.fn()} />);
+
+    expect(container.querySelector(".auth-form-section")).toHaveClass(
+      "flex-col",
+    );
+  });
+
+  it("marks the brand separately so desktop alignment does not move header actions", () => {
+    const { container } = render(<AuthPage onAuthSuccess={vi.fn()} />);
+    const brand = container.querySelector(".auth-brand");
+
+    expect(brand).toBeInTheDocument();
+    expect(brand).toContainElement(
+      container.querySelector(".auth-brand-title"),
+    );
+    expect(
+      container.querySelector(".auth-header-actions"),
+    ).not.toContainElement(brand);
+  });
+
   it("groups the primary email input and continue button for narrower mobile sizing", () => {
     const { container } = render(<AuthPage onAuthSuccess={vi.fn()} />);
 
