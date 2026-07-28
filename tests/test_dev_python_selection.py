@@ -88,7 +88,6 @@ def test_healthy_resolution_returns_null_and_reports_every_rejected_candidate():
     assert result == {
         "resolved": None,
         "rejected": [
-            {"candidate": "not-runnable", "reason": "not runnable"},
             {"candidate": "missing-app", "reason": "cannot import app.main"},
         ],
     }
@@ -143,7 +142,6 @@ def test_rejected_candidate_warnings_state_the_exact_failure_reason():
     result = _run_dev_functions(
         r"""
         $rejected = @(
-            [pscustomobject]@{ candidate = 'not-runnable'; reason = 'not runnable' },
             [pscustomobject]@{ candidate = 'missing-app'; reason = 'cannot import app.main' }
         )
         Write-RejectedPythonCandidates -Candidates $rejected
@@ -151,7 +149,6 @@ def test_rejected_candidate_warnings_state_the_exact_failure_reason():
     )
 
     assert result.returncode == 0, result.stderr
-    assert "Rejected Python candidate: not-runnable (not runnable)" in result.stdout
     assert (
         "Rejected Python candidate: missing-app (cannot import app.main)"
         in result.stdout

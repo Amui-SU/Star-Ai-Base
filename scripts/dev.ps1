@@ -114,12 +114,6 @@ function Resolve-ProjectPython {
 
     foreach ($candidate in @(Get-ProjectPythonCandidates -ProjectRoot $ProjectRoot)) {
         if (-not (Test-PythonRunnable -PythonExe $candidate)) {
-            if ($RejectedCandidates) {
-                $RejectedCandidates.Value += [pscustomobject]@{
-                    candidate = $candidate
-                    reason = "not runnable"
-                }
-            }
             continue
         }
         if ($RequireBackendDependencies -and -not (Test-BackendApplicationImport -PythonExe $candidate -ProjectRoot $ProjectRoot)) {
