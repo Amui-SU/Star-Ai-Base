@@ -268,6 +268,75 @@ describe("video note markdown adapter", () => {
     expect(parsed[0].id).not.toBe("ordinary");
   });
 
+  it("preserves an edited block id between anchors after an earlier insertion", () => {
+    const previousBlocks: VideoNoteBlock[] = [
+      { id: "anchor-a", type: "paragraph", text: "Anchor A" },
+      { id: "edited", type: "paragraph", text: "Original text" },
+      { id: "anchor-z", type: "paragraph", text: "Anchor Z" },
+    ];
+
+    const parsed = markdownToVideoNoteBlocks(
+      ["Inserted", "", "Anchor A", "", "Edited text", "", "Anchor Z"].join(
+        "\n",
+      ),
+      previousBlocks,
+    );
+
+    expect(parsed.find((block) => block.text === "Edited text")?.id).toBe(
+      "edited",
+    );
+    expect(parsed.find((block) => block.text === "Inserted")?.id).not.toBe(
+      "edited",
+    );
+  });
+
+  it("preserves an edited block id between anchors after an earlier deletion", () => {
+    const previousBlocks: VideoNoteBlock[] = [
+      { id: "removed", type: "paragraph", text: "Removed" },
+      { id: "anchor-a", type: "paragraph", text: "Anchor A" },
+      { id: "edited", type: "paragraph", text: "Original text" },
+      { id: "anchor-z", type: "paragraph", text: "Anchor Z" },
+    ];
+
+    const parsed = markdownToVideoNoteBlocks(
+      ["Anchor A", "", "Edited text", "", "Anchor Z"].join("\n"),
+      previousBlocks,
+    );
+
+    expect(parsed.find((block) => block.text === "Edited text")?.id).toBe(
+      "edited",
+    );
+  });
+
+  it("does not guess a substituted block id during bidirectional structural edits", () => {
+    const previousBlocks: VideoNoteBlock[] = [
+      { id: "removed", type: "paragraph", text: "Removed" },
+      { id: "anchor-a", type: "paragraph", text: "Anchor A" },
+      { id: "anchor-b", type: "paragraph", text: "Anchor B" },
+      { id: "old-substitution", type: "paragraph", text: "Old candidate" },
+      { id: "anchor-z", type: "paragraph", text: "Anchor Z" },
+    ];
+
+    const parsed = markdownToVideoNoteBlocks(
+      [
+        "Anchor A",
+        "",
+        "Inserted",
+        "",
+        "Anchor B",
+        "",
+        "Replacement",
+        "",
+        "Anchor Z",
+      ].join("\n"),
+      previousBlocks,
+    );
+
+    expect(parsed.find((block) => block.text === "Replacement")?.id).not.toBe(
+      "old-substitution",
+    );
+  });
+
   it.each([
     {
       position: "before",
@@ -421,6 +490,9 @@ describe("video note markdown adapter", () => {
 
     const markdown = blocksToMarkdown(editedBlocks);
     const warmupResult = markdownToVideoNoteBlocks(markdown, previousBlocks);
+    const warmupBlockByText = new Map(
+      warmupResult.map((block) => [block.text, block]),
+    );
 
     expect.soft(warmupResult).toHaveLength(editedBlocks.length);
     expect
@@ -429,18 +501,14 @@ describe("video note markdown adapter", () => {
     [1, 1500, 3000].forEach((position) => {
       const previousBlock = previousBlocks[position - 1];
       expect
-        .soft(
-          warmupResult.find((block) => block.text === previousBlock.text)?.id,
-        )
+        .soft(warmupBlockByText.get(previousBlock.text)?.id)
         .toBe(previousBlock.id);
     });
     const previousIds = new Set(previousBlocks.map((block) => block.id));
     const insertedBlocksWithOldIds = editedBlocks
       .filter((block) => block.id.startsWith("inserted-paragraph-"))
       .flatMap((insertedBlock) => {
-        const reconciledBlock = warmupResult.find(
-          (block) => block.text === insertedBlock.text,
-        );
+        const reconciledBlock = warmupBlockByText.get(insertedBlock.text);
         return reconciledBlock && previousIds.has(reconciledBlock.id)
           ? [{ text: reconciledBlock.text, id: reconciledBlock.id }]
           : [];
@@ -452,10 +520,10 @@ describe("video note markdown adapter", () => {
       markdownToVideoNoteBlocks(markdown, previousBlocks);
       return performance.now() - startedAt;
     });
-    const fastestDuration = Math.min(...durations);
+    const slowestDuration = Math.max(...durations);
 
     expect(
-      fastestDuration,
+      slowestDuration,
       `durations: ${durations.map((duration) => `${duration.toFixed(2)}ms`).join(", ")}`,
     ).toBeLessThan(50);
   });

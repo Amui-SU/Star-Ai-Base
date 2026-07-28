@@ -348,16 +348,46 @@ function reconcileBlockIds(
       !crossingPreviousIndices.has(candidate.index) &&
       !ambiguousFingerprints.has(candidate.fingerprint),
   );
-  let parsedCursor = 0;
-  let previousCursor = 0;
-  for (const anchor of [
+  const gapAnchors = [
     ...orderedAnchors,
     {
       parsedIndex: parsedBlocks.length,
       previousIndex: previousBlocks.length,
       id: "",
+      semantic: false,
     },
-  ]) {
+  ];
+  let parsedProbe = 0;
+  let previousProbe = 0;
+  let hasInsertionGap = false;
+  let hasDeletionGap = false;
+  for (const anchor of gapAnchors) {
+    const parsedGapStart = parsedProbe;
+    while (
+      parsedProbe < eligibleParsed.length &&
+      eligibleParsed[parsedProbe].index < anchor.parsedIndex
+    ) {
+      parsedProbe += 1;
+    }
+    const previousGapStart = previousProbe;
+    while (
+      previousProbe < eligiblePrevious.length &&
+      eligiblePrevious[previousProbe].index < anchor.previousIndex
+    ) {
+      previousProbe += 1;
+    }
+    const parsedGapLength = parsedProbe - parsedGapStart;
+    const previousGapLength = previousProbe - previousGapStart;
+    hasInsertionGap ||= parsedGapLength > previousGapLength;
+    hasDeletionGap ||= previousGapLength > parsedGapLength;
+  }
+  // With changes in both directions, a same-kind 1:1 gap could be either an
+  // edit or a coincidental delete+insert. Missing an ID is safer than guessing.
+  const allowPositionFallback = !(hasInsertionGap && hasDeletionGap);
+
+  let parsedCursor = 0;
+  let previousCursor = 0;
+  for (const anchor of gapAnchors) {
     const parsedGapStart = parsedCursor;
     while (
       parsedCursor < eligibleParsed.length &&
@@ -375,14 +405,14 @@ function reconcileBlockIds(
 
     const parsedGapLength = parsedCursor - parsedGapStart;
     const previousGapLength = previousCursor - previousGapStart;
-    let compatible = parsedGapLength === previousGapLength;
+    let compatible =
+      allowPositionFallback && parsedGapLength === previousGapLength;
     for (let offset = 0; compatible && offset < parsedGapLength; offset += 1) {
       const parsedCandidate = eligibleParsed[parsedGapStart + offset];
       const previousCandidate = eligiblePrevious[previousGapStart + offset];
       compatible =
-        parsedCandidate.index === previousCandidate.index &&
         reconciliationKind(parsedBlocks[parsedCandidate.index]) ===
-          reconciliationKind(previousBlocks[previousCandidate.index]);
+        reconciliationKind(previousBlocks[previousCandidate.index]);
     }
     if (compatible) {
       for (let offset = 0; offset < parsedGapLength; offset += 1) {
