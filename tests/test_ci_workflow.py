@@ -87,6 +87,30 @@ def test_github_actions_ci_runs_backend_and_frontend_quality_gates():
         assert required in content
 
 
+def test_ci_blocks_production_audit_failures_and_reports_full_audit():
+    workflow = yaml.safe_load(read_ci_workflow())
+    steps = {
+        step.get("name"): step
+        for step in workflow["jobs"]["frontend"]["steps"]
+        if isinstance(step, dict)
+    }
+
+    production_audit = steps["Audit production dependencies"]
+    assert production_audit["run"] == "npm audit --omit=dev --audit-level=high"
+    assert production_audit.get("continue-on-error") is not True
+
+    full_audit = steps["Report full dependency audit"]
+    assert full_audit["run"] == "npm audit --audit-level=high"
+    assert full_audit["continue-on-error"] is True
+
+
+def test_ci_jobs_have_bounded_runtime():
+    workflow = yaml.safe_load(read_ci_workflow())
+
+    assert workflow["jobs"]["backend"]["timeout-minutes"] == 30
+    assert workflow["jobs"]["frontend"]["timeout-minutes"] == 30
+
+
 def test_pytest_asyncio_fixture_loop_scope_is_explicit():
     config = configparser.ConfigParser()
     read_files = config.read(Path(__file__).resolve().parents[1] / "pytest.ini")
