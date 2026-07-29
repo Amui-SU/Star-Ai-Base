@@ -66,6 +66,7 @@ export type {
   VideoNote,
   VideoNoteAiEditRequest,
   VideoNoteAiOperation,
+  VideoNoteAiResultSource,
   VideoNoteAiResponse,
   VideoNoteBlock,
   VideoNoteBlockItem,

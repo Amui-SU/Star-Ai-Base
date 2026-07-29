@@ -184,6 +184,20 @@
     padding: 9px 12px;
   }
 
+  .video-note-ai-result-card {
+    width: 100%;
+    padding: 10px;
+  }
+
+  .video-note-ai-result-card .video-note-ai-status {
+    max-width: none;
+    padding: 0;
+  }
+
+  .video-note-ai-overwrite-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .video-note-ai-collapse .chevron-left {
     display: none;
   }

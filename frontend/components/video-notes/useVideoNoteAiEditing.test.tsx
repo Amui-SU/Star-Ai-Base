@@ -40,7 +40,7 @@ describe("useVideoNoteAiEditing", () => {
     expect(onBlocksChange.mock.calls[1][0]).toEqual(initialBlocks);
   });
 
-  it("resetAiEditing clears the undo stack so undo cannot leak old blocks", () => {
+  it("resetAiEditing clears all AI edit history so undo cannot leak old blocks", () => {
     const initialBlocks: VideoNoteBlock[] = [
       { id: "p1", type: "paragraph", text: "原文" },
     ];
@@ -69,6 +69,7 @@ describe("useVideoNoteAiEditing", () => {
     act(() => result.current.resetAiEditing());
 
     expect(result.current.canUndoAiEdit).toBe(false);
+    expect(result.current.undoDepth).toBe(0);
     onBlocksChange.mockClear();
     act(() => result.current.undoAiEdit());
     expect(onBlocksChange).not.toHaveBeenCalled();

@@ -18,8 +18,21 @@ def _format_date(value: datetime | None) -> str:
     return value.date().isoformat()
 
 
+def _normalize_timestamp_seconds(seconds: Any) -> int:
+    import math
+
+    try:
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+            raise TypeError("timestamp must be numeric")
+        if not math.isfinite(seconds):
+            raise ValueError("timestamp must be finite")
+        return max(math.floor(seconds), 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 def _format_timestamp(seconds: Any) -> str:
-    total_seconds = max(int(seconds or 0), 0)
+    total_seconds = _normalize_timestamp_seconds(seconds)
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     if hours:
@@ -28,7 +41,7 @@ def _format_timestamp(seconds: Any) -> str:
 
 
 def _timestamp_url(source: VideoNoteSource, seconds: Any) -> str:
-    safe_seconds = max(int(seconds or 0), 0)
+    safe_seconds = _normalize_timestamp_seconds(seconds)
     real_bvid, id_page = split_part_video_id(source.bvid)
     base = f"https://www.bilibili.com/video/{real_bvid}"
     if id_page or (source.total_parts or 0) > 1 or (source.page_number or 0) > 1:
