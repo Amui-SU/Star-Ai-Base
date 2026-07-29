@@ -120,14 +120,18 @@ def test_micro_task_template_keeps_the_record_concise():
 def test_fast_verifier_only_runs_explicit_targets():
     script = read("scripts/verify-fast.ps1")
 
-    for parameter in ["FrontendTest", "LintFile", "BackendTest"]:
+    for parameter in ["FrontendTest", "LintFile", "BackendTest", "StaticFile"]:
         assert f"[string[]]${parameter}" in script
 
     assert 'Invoke-Step "git diff --check"' in script
-    assert "npm test -- --run @FrontendTest" in script
-    assert "npx eslint @LintFile" in script
+    assert "node_modules/.bin/vitest" in script
+    assert "node_modules/.bin/eslint" in script
+    assert "& $vitest run @FrontendTest" in script
+    assert "& $eslint @LintFile" in script
     assert "python -m pytest -q @BackendTest" in script
     assert "Provide at least one targeted check" in script
+    assert "npm test" not in script
+    assert "npx eslint" not in script
     assert "npm run build" not in script
     assert 'Invoke-Step "frontend tests"' not in script
     assert 'Invoke-Step "backend tests"' not in script
