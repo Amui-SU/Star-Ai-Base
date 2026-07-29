@@ -29,6 +29,8 @@ from app.schemas.auth import (
     AdminUserListResponse,
     AdminUserResponse,
     AdminUserStatusUpdateRequest,
+    PasswordResetConfirmRequest,
+    PasswordResetSendCodeRequest,
     SystemAuthResponse,
     SystemDisplayNameUpdateRequest,
     SystemLoginRequest,
@@ -247,6 +249,19 @@ class VerificationCode(Base):
     email = Column(String(255), index=True, nullable=False)
     code_hash = Column(String(128), nullable=False)  # SHA-256 哈希
     attempts = Column(Integer, default=0)  # 错误尝试次数
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_utc_now)
+
+
+class PasswordResetCode(Base):
+    """One-time email codes dedicated to password resets."""
+
+    __tablename__ = "password_reset_codes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), index=True, nullable=False)
+    code_hash = Column(String(128), nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=_utc_now)
 

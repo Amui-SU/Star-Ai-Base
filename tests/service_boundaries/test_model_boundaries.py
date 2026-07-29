@@ -11,6 +11,8 @@ def test_models_delegates_auth_and_api_account_schemas_to_schema_modules():
     api_accounts_schema_path = project_root / "app/schemas/api_accounts.py"
 
     auth_schema_names = {
+        "PasswordResetConfirmRequest",
+        "PasswordResetSendCodeRequest",
         "SystemRegisterRequest",
         "SystemLoginRequest",
         "SystemDisplayNameUpdateRequest",

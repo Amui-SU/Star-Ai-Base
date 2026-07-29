@@ -18,6 +18,16 @@ class SystemLoginRequest(BaseModel):
     password: str
 
 
+class PasswordResetSendCodeRequest(BaseModel):
+    email: str
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+
 class SystemDisplayNameUpdateRequest(BaseModel):
     display_name: str
 
