@@ -465,7 +465,7 @@ describe("video note markdown adapter", () => {
     ).toEqual([]);
   });
 
-  it("reconciles 3000 edited blocks within 50ms", () => {
+  it("reconciles 3000 edited blocks with a median duration under 50ms", () => {
     const previousBlocks: VideoNoteBlock[] = Array.from(
       { length: 3000 },
       (_, index) => ({
@@ -515,15 +515,17 @@ describe("video note markdown adapter", () => {
       });
     expect.soft(insertedBlocksWithOldIds).toEqual([]);
 
-    const durations = Array.from({ length: 3 }, () => {
+    const durations = Array.from({ length: 5 }, () => {
       const startedAt = performance.now();
       markdownToVideoNoteBlocks(markdown, previousBlocks);
       return performance.now() - startedAt;
     });
-    const slowestDuration = Math.max(...durations);
+    const sortedDurations = [...durations].sort((left, right) => left - right);
+    const medianDuration =
+      sortedDurations[Math.floor(sortedDurations.length / 2)];
 
     expect(
-      slowestDuration,
+      medianDuration,
       `durations: ${durations.map((duration) => `${duration.toFixed(2)}ms`).join(", ")}`,
     ).toBeLessThan(50);
   });

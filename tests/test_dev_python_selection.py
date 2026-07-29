@@ -1,9 +1,13 @@
 import json
 from pathlib import Path
+import shutil
 import subprocess
+
+import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEV_SCRIPT = PROJECT_ROOT / "scripts" / "dev.ps1"
+POWERSHELL = shutil.which("powershell.exe")
 
 
 def _function_block(source: str, name: str) -> str:
@@ -14,10 +18,13 @@ def _function_block(source: str, name: str) -> str:
 
 
 def _run_dev_functions(body: str) -> subprocess.CompletedProcess[str]:
+    if POWERSHELL is None:
+        pytest.skip("requires powershell.exe")
+
     escaped_path = str(DEV_SCRIPT).replace("'", "''")
     return subprocess.run(
         [
-            "powershell.exe",
+            POWERSHELL,
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",

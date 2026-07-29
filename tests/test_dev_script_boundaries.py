@@ -1,5 +1,10 @@
 from pathlib import Path
+import shutil
 import subprocess
+
+import pytest
+
+POWERSHELL = shutil.which("powershell.exe")
 
 
 def _dev_script() -> str:
@@ -8,12 +13,15 @@ def _dev_script() -> str:
 
 
 def _dot_source_dev_script(command: str) -> subprocess.CompletedProcess[str]:
+    if POWERSHELL is None:
+        pytest.skip("requires powershell.exe")
+
     project_root = Path(__file__).resolve().parents[1]
     script_path = project_root / "scripts" / "dev.ps1"
     escaped_path = str(script_path).replace("'", "''")
     return subprocess.run(
         [
-            "powershell.exe",
+            POWERSHELL,
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
