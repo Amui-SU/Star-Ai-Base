@@ -159,7 +159,7 @@ def test_comma_separated_backend_targets_run_each_file(verifier_repo: VerifierRe
         "tests/test_one.py,tests/test_two.py",
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert "2 passed" in result.stdout
     assert "targeted frontend tests" not in result.stdout
 
