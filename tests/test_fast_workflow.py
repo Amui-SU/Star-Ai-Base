@@ -58,11 +58,12 @@ def verifier_repo(tmp_path: Path) -> VerifierRepo:
     shutil.copy2(PROJECT_ROOT / "scripts" / "verify-fast.ps1", scripts)
 
     (repo / "README.md").write_text("baseline\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("frontend/node_modules/\n", encoding="utf-8")
     for command in [
         ["git", "init"],
         ["git", "config", "user.email", "fast-verifier-tests@example.com"],
         ["git", "config", "user.name", "Fast Verifier Tests"],
-        ["git", "add", "README.md"],
+        ["git", "add", "README.md", ".gitignore"],
         ["git", "commit", "--no-gpg-sign", "--no-verify", "-m", "baseline"],
     ]:
         run_checked(command, repo, environment)
@@ -216,6 +217,71 @@ def test_static_file_rejects_unsupported_extensions(verifier_repo: VerifierRepo)
 
     assert result.returncode != 0
     assert "Unsupported static file" in result.stdout + result.stderr
+
+
+def test_unstaged_whitespace_in_tracked_static_file_fails(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "README.md").write_text("baseline\ninvalid \n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "README.md")
+
+    assert result.returncode != 0
+
+
+def test_staged_whitespace_in_tracked_static_file_fails(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "README.md").write_text("baseline\ninvalid \n", encoding="utf-8")
+    run_checked(["git", "add", "README.md"], repo, environment)
+
+    result = run_verifier(repo, environment, "-StaticFile", "README.md")
+
+    assert result.returncode != 0
+
+
+def test_untracked_whitespace_in_static_file_fails(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_text("invalid \n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    assert result.returncode != 0
+    assert "note.md:1" in result.stdout + result.stderr
+    assert "trailing whitespace" in result.stdout + result.stderr
+
+
+def test_untracked_terminal_blank_line_fails(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_text("content\n\n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    assert result.returncode != 0
+    assert "note.md" in result.stdout + result.stderr
+    assert "blank line" in result.stdout + result.stderr
+
+
+def test_untracked_conflict_marker_fails(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_text("<<<<<<< HEAD\ncontent\n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    assert result.returncode != 0
+    assert "note.md:1" in result.stdout + result.stderr
+    assert "conflict marker" in result.stdout + result.stderr
+
+
+def test_untracked_binary_file_with_nul_is_skipped(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+    (repo / "binary.txt").write_bytes(b"binary\x00invalid \n")
+
+    result = run_verifier(repo, environment, "-StaticFile", "binary.txt")
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_static_file_rejects_case_variant_sibling_on_case_sensitive_filesystem(

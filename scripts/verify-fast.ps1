@@ -72,6 +72,75 @@ function Test-StaticPathHasReparsePoint {
     return $false
 }
 
+function Test-UntrackedTextFiles {
+    Write-Info "untracked text hygiene"
+    $untrackedFiles = @(git ls-files --others --exclude-standard)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Could not enumerate untracked files"
+        exit $LASTEXITCODE
+    }
+
+    foreach ($relativePath in $untrackedFiles) {
+        $candidate = Join-Path $projectRoot $relativePath
+        try {
+            [byte[]]$bytes = [System.IO.File]::ReadAllBytes($candidate)
+        }
+        catch {
+            Write-Fail "Could not read untracked file: $relativePath"
+            exit 1
+        }
+
+        if ($bytes -contains [byte]0) {
+            continue
+        }
+
+        [string]$content = [System.Text.Encoding]::UTF8.GetString($bytes)
+        [string[]]$lines = @($content -split "\r\n|\n|\r")
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            $line = $lines[$index]
+            $lineNumber = $index + 1
+
+            if ($line -match "[ \t]$") {
+                Write-Fail "Untracked text check failed: ${relativePath}:$lineNumber trailing whitespace"
+                exit 1
+            }
+
+            if ($line -match "^(<{7}( .*)?|={7}|>{7}( .*)?)$") {
+                Write-Fail "Untracked text check failed: ${relativePath}:$lineNumber unresolved conflict marker"
+                exit 1
+            }
+        }
+
+        $lineEndingLength = if ($content.EndsWith("`r`n")) {
+            2
+        }
+        elseif ($content.EndsWith("`n") -or $content.EndsWith("`r")) {
+            1
+        }
+        else {
+            0
+        }
+
+        if ($lineEndingLength -gt 0) {
+            $beforeLastLineEnding = $content.Substring(0, $content.Length - $lineEndingLength)
+            if (
+                $beforeLastLineEnding.EndsWith("`r`n") -or
+                $beforeLastLineEnding.EndsWith("`n") -or
+                $beforeLastLineEnding.EndsWith("`r")
+            ) {
+                $lineNumber = [System.Text.RegularExpressions.Regex]::Matches(
+                    $beforeLastLineEnding,
+                    "\r\n|\n|\r"
+                ).Count + 1
+                Write-Fail "Untracked text check failed: ${relativePath}:$lineNumber terminal blank line"
+                exit 1
+            }
+        }
+    }
+
+    Write-Ok "untracked text hygiene"
+}
+
 $FrontendTest = @(Expand-Targets $FrontendTest)
 $LintFile = @(Expand-Targets $LintFile)
 $BackendTest = @(Expand-Targets $BackendTest)
@@ -150,6 +219,12 @@ Set-Location $projectRoot
 Invoke-Step "git diff --check" {
     git diff --check
 }
+
+Invoke-Step "git diff --cached --check" {
+    git diff --cached --check
+}
+
+Test-UntrackedTextFiles
 
 if ($BackendTest.Count -gt 0) {
     Invoke-Step "targeted backend tests" {
