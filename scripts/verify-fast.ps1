@@ -72,10 +72,15 @@ function Test-StaticPathHasReparsePoint {
     return $false
 }
 
-function Get-UntrackedFiles {
+function Get-GitNullSeparatedPaths {
+    param(
+        [string]$Arguments,
+        [string]$Description
+    )
+
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = "git"
-    $startInfo.Arguments = "ls-files -z --others --exclude-standard"
+    $startInfo.Arguments = $Arguments
     $startInfo.WorkingDirectory = $projectRoot
     $startInfo.UseShellExecute = $false
     $startInfo.RedirectStandardOutput = $true
@@ -86,7 +91,7 @@ function Get-UntrackedFiles {
     $process.StartInfo = $startInfo
     try {
         if (-not $process.Start()) {
-            Write-Fail "Could not start git to enumerate untracked files"
+            Write-Fail "Could not start git to enumerate $Description"
             exit 1
         }
 
@@ -125,28 +130,44 @@ function Get-UntrackedFiles {
         if ($exitCode -ne 0) {
             $detail = $stderr.Trim()
             if ($detail.Length -gt 0) {
-                Write-Fail "Could not enumerate untracked files: $detail"
+                Write-Fail "Could not enumerate ${Description}: $detail"
             }
             else {
-                Write-Fail "Could not enumerate untracked files"
+                Write-Fail "Could not enumerate $Description"
             }
             exit $exitCode
         }
 
         if ($pathDecodeFailed -or $pathBytes.Count -ne 0) {
-            Write-Fail "Git returned an invalid UTF-8 untracked path"
+            Write-Fail "Git returned an invalid UTF-8 path while enumerating $Description"
             exit 1
         }
 
         return $paths.ToArray()
     }
     catch {
-        Write-Fail "Could not enumerate untracked files: $($_.Exception.Message)"
+        Write-Fail "Could not enumerate ${Description}: $($_.Exception.Message)"
         exit 1
     }
     finally {
         $process.Dispose()
     }
+}
+
+function Get-UntrackedFiles {
+    return @(
+        Get-GitNullSeparatedPaths `
+            "ls-files -z --others --exclude-standard" `
+            "untracked files"
+    )
+}
+
+function Get-ChangedFiles {
+    $paths = @()
+    $paths += Get-GitNullSeparatedPaths "diff --name-only -z" "unstaged changes"
+    $paths += Get-GitNullSeparatedPaths "diff --cached --name-only -z" "staged changes"
+    $paths += Get-UntrackedFiles
+    return @($paths | Where-Object { $_ } | Sort-Object -Unique)
 }
 
 function Test-FileContainsNul {
@@ -293,7 +314,18 @@ $pathComparison = if ($env:OS -eq "Windows_NT") {
 } else {
     [System.StringComparison]::Ordinal
 }
+$pathComparer = if ($env:OS -eq "Windows_NT") {
+    [System.StringComparer]::OrdinalIgnoreCase
+} else {
+    [System.StringComparer]::Ordinal
+}
 $allowedStaticExtensions = @(".md", ".txt", ".css", ".scss", ".less", ".html", ".json", ".yaml", ".yml")
+$changedFiles = @(Get-ChangedFiles)
+$changedPathSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+foreach ($changedFile in $changedFiles) {
+    [void]$changedPathSet.Add($changedFile.Replace("\", "/"))
+}
+$staticTargetSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
 
 foreach ($staticTarget in $StaticFile) {
     if ([System.IO.Path]::IsPathRooted($staticTarget)) {
@@ -341,6 +373,9 @@ foreach ($staticTarget in $StaticFile) {
         Write-Fail "Unsupported static file: $staticTarget"
         exit 2
     }
+
+    $relativeStaticPath = $candidate.Substring($projectRootPrefix.Length).Replace("\", "/")
+    [void]$staticTargetSet.Add($relativeStaticPath)
 }
 
 Set-Location $projectRoot
@@ -354,6 +389,33 @@ Invoke-Step "git diff --cached --check" {
 }
 
 Test-UntrackedTextFiles
+
+foreach ($staticTarget in $staticTargetSet) {
+    if (-not $changedPathSet.Contains($staticTarget)) {
+        Write-Fail "Static file target is not changed: $staticTarget"
+        exit 2
+    }
+}
+
+$staticOnly = (
+    $StaticFile.Count -gt 0 -and
+    $BackendTest.Count -eq 0 -and
+    $FrontendTest.Count -eq 0 -and
+    $LintFile.Count -eq 0
+)
+if ($staticOnly) {
+    foreach ($changedFile in $changedFiles) {
+        $extension = [System.IO.Path]::GetExtension($changedFile).ToLowerInvariant()
+        if ($allowedStaticExtensions -notcontains $extension) {
+            Write-Fail "Static-only verification cannot cover changed file: $changedFile"
+            exit 2
+        }
+        if (-not $staticTargetSet.Contains($changedFile.Replace("\", "/"))) {
+            Write-Fail "Static verification is missing changed file: $changedFile"
+            exit 2
+        }
+    }
+}
 
 if ($BackendTest.Count -gt 0) {
     Invoke-Step "targeted backend tests" {

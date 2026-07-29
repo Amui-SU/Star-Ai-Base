@@ -35,13 +35,27 @@ security behavior.
 - Add a failing targeted test first for behavior or boundary changes. Pure
   documentation, comments, or visual-value-only edits may omit a new automated
   test when the task record explains why.
+- Map every changed production file to its relevant verification:
+  - Python production changes require at least one targeted `-BackendTest` plus
+    a Black check covering all changed Python files, such as
+    `black --check app/service.py tests/test_service.py`.
+  - JavaScript or TypeScript production changes require a `-LintFile` target for
+    every changed code file. Add a targeted `-FrontendTest` whenever behavior
+    changes.
+  - Documentation and style changes use `-StaticFile` plus any necessary manual
+    check. HTML, JSON, YAML, or YML targets qualify only as pure non-behavioral
+    static content. Shared build, deployment, authentication, or security
+    configuration is not static content and must use complete verification.
 - Run `scripts\verify-fast.ps1` with at least one relevant `-BackendTest`,
   `-FrontendTest`, `-LintFile`, or `-StaticFile` target. Each option accepts
-  comma-separated values; `-StaticFile` is only for documentation or style
-  files. The fast verifier checks unstaged, staged, and untracked changes.
-  Qualified micro tasks use it in place of the full verification below.
-  Inspect only the affected page, state, and viewport; check desktop and mobile
-  only when a responsive rule changes.
+  comma-separated values. The fast verifier checks unstaged, staged, and
+  untracked changes, requires each static target to be changed, and requires a
+  static-only invocation to cover every changed file.
+- In `Verification`, record the actual command, specific targets, and any
+  required manual results. A bare “verified” is not evidence.
+- Qualified micro tasks use fast verification in place of the full verification
+  below. Inspect only the affected page, state, and viewport; check desktop and
+  mobile only when a responsive rule changes.
 - Finish with an independently committable changeset. Create a focused commit
   only when authorized by the user or required by the integration workflow.
 
@@ -58,11 +72,14 @@ dependencies, deployment, or cross-platform releases require the full design,
 implementation plan, test-driven workflow, complete verification, and relevant
 release checklist.
 
-The fast lane replaces steps 2 and 3 of the Stable Commit Workflow for a
-qualified micro task. `scripts/verify-before-commit.ps1` remains required for
-normal or high-risk work, releases, deployments, shared build configuration,
-or any task whose targeted checks reveal cross-module impact. CI remains the
-final full verification gate after integration.
+### Full verification boundaries
+
+Normal and high-risk tasks, releases, deployments, shared build configuration,
+dependency changes, authentication changes, security changes, and any task
+whose targeted checks reveal cross-module impact require complete verification
+with `scripts/verify-before-commit.ps1`. The fast lane replaces steps 2 and 3 of
+the Stable Commit Workflow only for a qualified micro task. CI remains the final
+full verification gate after integration.
 
 ## Worktree Flow
 

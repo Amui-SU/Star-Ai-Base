@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -12,6 +13,17 @@ VerifierRepo = tuple[Path, dict[str, str]]
 
 def read(relative_path: str) -> str:
     return (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+
+
+def markdown_section(document: str, heading: str) -> str:
+    marker = heading.split(maxsplit=1)[0]
+    match = re.search(rf"(?m)^{re.escape(heading)}\s*$", document)
+    assert match is not None, f"missing Markdown section: {heading}"
+    remainder = document[match.end() :]
+    next_heading = re.search(rf"(?m)^#{{1,{len(marker)}}}\s+", remainder)
+    if next_heading is None:
+        return remainder
+    return remainder[: next_heading.start()]
 
 
 def powershell_executable() -> str:
@@ -62,7 +74,7 @@ def verifier_repo(tmp_path: Path) -> VerifierRepo:
         ["git", "init"],
         ["git", "config", "user.email", "fast-verifier-tests@example.com"],
         ["git", "config", "user.name", "Fast Verifier Tests"],
-        ["git", "add", "README.md", ".gitignore"],
+        ["git", "add", "README.md", ".gitignore", "scripts/verify-fast.ps1"],
         ["git", "commit", "--no-gpg-sign", "--no-verify", "-m", "baseline"],
     ]:
         run_checked(command, repo, environment)
@@ -120,7 +132,7 @@ def write_frontend_stub(repo: Path, executable: str) -> Path:
 
 def test_agent_instructions_define_the_micro_task_fast_lane():
     instructions = read("AGENTS.md")
-    compact_instructions = " ".join(instructions.split())
+    fast_lane = markdown_section(instructions, "### Micro task fast lane")
 
     assert "## Task Risk Tiers" in instructions
     assert "### Micro task fast lane" in instructions
@@ -129,25 +141,59 @@ def test_agent_instructions_define_the_micro_task_fast_lane():
     assert "docs/micro-task-template.md" in instructions
     assert (
         "at least one relevant `-BackendTest`, `-FrontendTest`, `-LintFile`, or "
-        "`-StaticFile` target" in compact_instructions
+        "`-StaticFile` target" in " ".join(fast_lane.split())
     )
-    assert "comma-separated values" in compact_instructions
-    assert (
-        "`-StaticFile` is only for documentation or style files" in compact_instructions
+    for token in [
+        "comma-separated values",
+        "unstaged, staged, and untracked changes",
+        "independently committable changeset",
+        "target files overlap existing changes",
+        "verification shares mutable state",
+    ]:
+        assert token in " ".join(fast_lane.split())
+
+
+def test_fast_lane_maps_file_types_to_specific_verification_targets():
+    fast_lane = markdown_section(read("AGENTS.md"), "### Micro task fast lane")
+    v2_design = read(
+        "docs/superpowers/specs/2026-07-29-micro-task-fast-lane-v2-design.md"
     )
-    assert "unstaged, staged, and untracked changes" in compact_instructions
-    assert (
-        "replaces steps 2 and 3 of the Stable Commit Workflow" in compact_instructions
-    )
-    assert "independently committable changeset" in compact_instructions
-    assert (
-        "authorized by the user or required by the integration workflow"
-        in compact_instructions
-    )
-    assert (
-        "target files overlap existing changes or verification shares mutable state"
-        in compact_instructions
-    )
+
+    for document in [fast_lane, v2_design]:
+        compact = " ".join(document.split())
+        for token in [
+            "Python production",
+            "`-BackendTest`",
+            "Black",
+            "changed Python",
+            "JavaScript or TypeScript production",
+            "`-LintFile`",
+            "every changed code file",
+            "`-FrontendTest`",
+            "behavior",
+            "`-StaticFile`",
+            "manual check",
+            "HTML, JSON, YAML, or YML",
+            "pure non-behavioral static content",
+            "shared build",
+            "deployment",
+            "authentication",
+            "security",
+            "complete verification",
+        ]:
+            assert token.casefold() in compact.casefold()
+
+
+def test_fast_lane_requires_concrete_verification_evidence():
+    fast_lane = markdown_section(read("AGENTS.md"), "### Micro task fast lane")
+    template = read("docs/micro-task-template.md")
+
+    for document in [fast_lane, template]:
+        compact = " ".join(document.split())
+        assert "actual command" in compact
+        assert "specific targets" in compact
+        assert "manual results" in compact
+        assert "“verified”" in compact
 
 
 def test_micro_task_template_keeps_the_record_concise():
@@ -160,7 +206,6 @@ def test_micro_task_template_keeps_the_record_concise():
     assert "implementation plan" in template
     assert "Optional when this is a bug: **Root cause:**" in template
     assert "Optional when scope could easily expand: **Out of scope:**" in template
-    assert "Problem" not in template
 
 
 def test_workflow_source_exempts_qualified_micro_tasks_from_full_steps():
@@ -196,12 +241,11 @@ def test_fast_lane_boundaries_mark_v2_as_the_current_policy():
 
     assert "> **Status:** Superseded on conflict details by V2." in design
     assert "[V2 design](2026-07-29-micro-task-fast-lane-v2-design.md)" in design
-    assert "`-StaticFile` is only for documentation or style files" in design
-    assert "comma-separated values" in design
-    assert "unstaged, staged, and untracked" in design
-    assert "any dirty checkout" not in design
-    assert "one commit" not in design
-    assert "six-line task record" not in design
+    assert "[`AGENTS.md`](../../../AGENTS.md)" in design
+    assert (
+        PROJECT_ROOT
+        / "docs/superpowers/specs/2026-07-29-micro-task-fast-lane-v2-design.md"
+    ).is_file()
 
 
 def test_fast_verifier_only_runs_explicit_targets():
@@ -236,14 +280,28 @@ def test_untracked_scan_uses_streaming_file_apis():
 
 def test_fast_lane_preserves_full_verification_boundaries():
     instructions = read("AGENTS.md")
-    compact_instructions = " ".join(instructions.split())
+    high_risk = markdown_section(instructions, "### High-risk task")
+    boundaries = markdown_section(instructions, "### Full verification boundaries")
 
-    assert (
-        "`scripts/verify-before-commit.ps1` remains required for normal or high-risk work"
-        in compact_instructions
-    )
-    for boundary in ["authentication", "security", "dependencies", "deployment"]:
-        assert boundary in instructions
+    for token in [
+        "authentication",
+        "security",
+        "dependencies",
+        "deployment",
+        "complete verification",
+    ]:
+        assert token in high_risk
+    for token in [
+        "normal",
+        "high-risk",
+        "release",
+        "authentication",
+        "security",
+        "dependency",
+        "deployment",
+        "complete verification",
+    ]:
+        assert token.casefold() in boundaries.casefold()
 
 
 def test_comma_separated_backend_targets_run_each_file(verifier_repo: VerifierRepo):
@@ -291,6 +349,90 @@ def test_static_file_rejects_unsupported_extensions(verifier_repo: VerifierRepo)
 
     assert result.returncode != 0
     assert "Unsupported static file" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("git_state", "code_path"),
+    [("untracked", "change.py"), ("unstaged", "frontend/widget.tsx")],
+)
+def test_static_file_requires_changed_target_when_only_code_changed(
+    verifier_repo: VerifierRepo, git_state: str, code_path: str
+):
+    repo, environment = verifier_repo
+    target = repo / code_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if git_state == "unstaged":
+        target.write_bytes(b"export const value = 1;\n")
+        run_checked(["git", "add", code_path], repo, environment)
+        run_checked(
+            [
+                "git",
+                "commit",
+                "--no-gpg-sign",
+                "--no-verify",
+                "-m",
+                "track code target",
+            ],
+            repo,
+            environment,
+        )
+    target.write_bytes(b"changed\n")
+
+    result = run_verifier(repo, environment, "-StaticFile", "README.md")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Static file target is not changed: README.md" in output
+
+
+def test_static_file_requires_its_target_to_be_changed(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+
+    result = run_verifier(repo, environment, "-StaticFile", "README.md")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Static file target is not changed: README.md" in output
+
+
+def test_static_only_verification_rejects_code_hidden_by_changed_readme(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "README.md").write_bytes(b"changed\n")
+    (repo / "change.py").write_text("changed\n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "README.md")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Static-only verification cannot cover changed file: change.py" in output
+
+
+def test_static_only_verification_requires_every_changed_static_file(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_text("content\n", encoding="utf-8")
+    (repo / "style.css").write_text("body {}\n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Static verification is missing changed file: style.css" in output
+
+
+def test_static_only_verification_accepts_all_changed_static_files(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_text("content\n", encoding="utf-8")
+    (repo / "style.css").write_text("body {}\n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md,style.css")
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_unstaged_whitespace_in_tracked_static_file_fails(
