@@ -120,30 +120,88 @@ def write_frontend_stub(repo: Path, executable: str) -> Path:
 
 def test_agent_instructions_define_the_micro_task_fast_lane():
     instructions = read("AGENTS.md")
+    compact_instructions = " ".join(instructions.split())
 
     assert "## Task Risk Tiers" in instructions
     assert "### Micro task fast lane" in instructions
     assert "at most three production files" in instructions
     assert "scripts\\verify-fast.ps1" in instructions
     assert "docs/micro-task-template.md" in instructions
-    assert "use a worktree" in instructions
+    assert (
+        "at least one relevant `-BackendTest`, `-FrontendTest`, `-LintFile`, or "
+        "`-StaticFile` target" in compact_instructions
+    )
+    assert "comma-separated values" in compact_instructions
+    assert (
+        "`-StaticFile` is only for documentation or style files" in compact_instructions
+    )
+    assert "unstaged, staged, and untracked changes" in compact_instructions
+    assert (
+        "replaces steps 2 and 3 of the Stable Commit Workflow" in compact_instructions
+    )
+    assert "independently committable changeset" in compact_instructions
+    assert (
+        "authorized by the user or required by the integration workflow"
+        in compact_instructions
+    )
+    assert (
+        "target files overlap existing changes or verification shares mutable state"
+        in compact_instructions
+    )
 
 
 def test_micro_task_template_keeps_the_record_concise():
     template = read("docs/micro-task-template.md")
 
-    for field in [
-        "Problem",
-        "Root cause",
-        "Change",
-        "Out of scope",
-        "Acceptance",
-        "Verification",
-    ]:
+    for field in ["Change", "Acceptance", "Verification"]:
         assert f"**{field}:**" in template
 
     assert "independent design spec" in template
     assert "implementation plan" in template
+    assert "Optional when this is a bug: **Root cause:**" in template
+    assert "Optional when scope could easily expand: **Out of scope:**" in template
+    assert "Problem" not in template
+
+
+def test_workflow_source_exempts_qualified_micro_tasks_from_full_steps():
+    instructions = read("AGENTS.md")
+    compact_instructions = " ".join(instructions.split())
+
+    assert (
+        "## Stable Commit Workflow (normal, high-risk, release, and escalated work)"
+        in instructions
+    )
+    assert (
+        "Qualified micro tasks use `scripts\\verify-fast.ps1` instead of steps 2 and 3."
+        in compact_instructions
+    )
+    assert (
+        "For normal, high-risk, release, or escalated work, run the full commit "
+        "verification before committing." in compact_instructions
+    )
+    assert "verify-before-commit.ps1 -Format" in instructions
+
+
+def test_workflow_source_delegates_claude_task_rules_to_agents():
+    claude = read("CLAUDE.md")
+
+    assert (
+        "Task classification, worktree choice, and verification rules are defined only in "
+        "`AGENTS.md`." in claude.splitlines()[:8]
+    )
+
+
+def test_fast_lane_boundaries_mark_v2_as_the_current_policy():
+    design = read("docs/superpowers/specs/2026-07-28-micro-task-fast-lane-design.md")
+
+    assert "> **Status:** Superseded on conflict details by V2." in design
+    assert "[V2 design](2026-07-29-micro-task-fast-lane-v2-design.md)" in design
+    assert "`-StaticFile` is only for documentation or style files" in design
+    assert "comma-separated values" in design
+    assert "unstaged, staged, and untracked" in design
+    assert "any dirty checkout" not in design
+    assert "one commit" not in design
+    assert "six-line task record" not in design
 
 
 def test_fast_verifier_only_runs_explicit_targets():
@@ -178,8 +236,12 @@ def test_untracked_scan_uses_streaming_file_apis():
 
 def test_fast_lane_preserves_full_verification_boundaries():
     instructions = read("AGENTS.md")
+    compact_instructions = " ".join(instructions.split())
 
-    assert "does not replace `scripts/verify-before-commit.ps1`" in instructions
+    assert (
+        "`scripts/verify-before-commit.ps1` remains required for normal or high-risk work"
+        in compact_instructions
+    )
     for boundary in ["authentication", "security", "dependencies", "deployment"]:
         assert boundary in instructions
 

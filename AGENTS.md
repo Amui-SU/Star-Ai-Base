@@ -26,18 +26,24 @@ to revert, adds no dependency, stays within one frontend or backend boundary,
 and does not alter APIs, persisted data, authentication, authorization, or
 security behavior.
 
-- Do not create an independent design spec or implementation plan. Record the
-  problem, root cause, change, out-of-scope behavior, acceptance, and exact
-  verification using `docs/micro-task-template.md` or the task/commit body.
-- Work directly in the current checkout only when it is clean. If unrelated
-  changes are present, use a worktree so the micro task remains isolated.
+- Do not create an independent design spec or implementation plan. Record
+  `Change`, `Acceptance`, and `Verification` using
+  `docs/micro-task-template.md` or the task/commit body. Add a root cause only
+  for a bug; add out-of-scope behavior only when the scope could easily expand.
+- Work directly in the current checkout unless target files overlap existing
+  changes or verification shares mutable state; in either case, use a worktree.
 - Add a failing targeted test first for behavior or boundary changes. Pure
   documentation, comments, or visual-value-only edits may omit a new automated
   test when the task record explains why.
-- Run `scripts\verify-fast.ps1` with explicit test and lint targets. Inspect only
-  the affected page, state, and viewport; check desktop and mobile only when a
-  responsive rule changes.
-- Finish with one focused commit.
+- Run `scripts\verify-fast.ps1` with at least one relevant `-BackendTest`,
+  `-FrontendTest`, `-LintFile`, or `-StaticFile` target. Each option accepts
+  comma-separated values; `-StaticFile` is only for documentation or style
+  files. The fast verifier checks unstaged, staged, and untracked changes.
+  Qualified micro tasks use it in place of the full verification below.
+  Inspect only the affected page, state, and viewport; check desktop and mobile
+  only when a responsive rule changes.
+- Finish with an independently committable changeset. Create a focused commit
+  only when authorized by the user or required by the integration workflow.
 
 ### Normal task
 
@@ -52,10 +58,11 @@ dependencies, deployment, or cross-platform releases require the full design,
 implementation plan, test-driven workflow, complete verification, and relevant
 release checklist.
 
-The fast lane does not replace `scripts/verify-before-commit.ps1` for normal or
-high-risk work, releases, deployments, shared build configuration, or any task
-whose targeted checks reveal cross-module impact. CI remains the final full
-verification gate after integration.
+The fast lane replaces steps 2 and 3 of the Stable Commit Workflow for a
+qualified micro task. `scripts/verify-before-commit.ps1` remains required for
+normal or high-risk work, releases, deployments, shared build configuration,
+or any task whose targeted checks reveal cross-module impact. CI remains the
+final full verification gate after integration.
 
 ## Worktree Flow
 
@@ -70,13 +77,18 @@ configuration/instruction updates that do not require running the full
 implementation workflow. For these changes, still inspect the working tree first
 and run the lightest relevant verification such as `git diff --check`.
 
+For a qualified micro task, a dirty checkout alone is not a reason to create a
+worktree. Use one only when target files overlap existing changes or verification
+shares mutable state.
+
 1. Create the branch under `.worktrees/<slice-name>`.
 2. Confirm the baseline with targeted tests before editing.
 3. Write or update the failing test/guard first for behavior or boundary
    changes.
 4. Make the smallest implementation that satisfies the test.
 5. Run targeted regressions in the worktree.
-6. Run the full commit verification before committing.
+6. For normal, high-risk, release, or escalated work, run the full commit
+   verification before committing.
 7. Merge back to `main` with `git merge --ff-only`.
 8. Re-run targeted regressions on `main`.
 9. Remove the worktree and branch.
@@ -163,9 +175,11 @@ Chat history and web-source backfill:
 - Add regression coverage for source visibility and regeneration behavior before
   changing UI orchestration.
 
-## Stable Commit Workflow
+## Stable Commit Workflow (normal, high-risk, release, and escalated work)
 
-Before creating a git commit in this repository, run the commit checks in this order.
+Before creating a git commit for normal, high-risk, release, or escalated work,
+run the commit checks in this order. Qualified micro tasks use
+`scripts\verify-fast.ps1` instead of steps 2 and 3.
 
 1. Inspect the worktree:
 
