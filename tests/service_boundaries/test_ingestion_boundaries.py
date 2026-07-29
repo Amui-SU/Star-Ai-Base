@@ -25,12 +25,14 @@ def test_ingestion_task_persistence_and_status_mapping_live_in_service():
     assert "def build_status_payload" in service_source
     assert "async def create_ingestion_task" in service_source
     assert "async def update_ingestion_task" in service_source
+    assert "async def get_ingestion_task_for_workspace" in service_source
     assert "from app.services.ingestion_tasks import" in imports_source
     assert "from app.services.ingestion_tasks import" in build_requests_source
     assert "async def _create_import_task" not in imports_source
     assert "async def _update_import_task" not in imports_source
     assert "async def _update_task" not in knowledge_bases_source
     assert "update_ingestion_task" in import_tasks_source
+    assert "select(IngestionTask)" not in imports_source
     assert "create_ingestion_task(" in build_requests_source
     assert "create_ingestion_task(" not in knowledge_bases_source
     assert "update_task: TaskUpdater = update_ingestion_task" in build_tasks_source

@@ -48,6 +48,33 @@ def workflow_run_blocks(content: str) -> list[str]:
     ]
 
 
+def assert_ci_security_policy(content: str) -> None:
+    workflow = yaml.safe_load(content)
+    jobs = workflow["jobs"]
+    frontend = jobs["frontend"]
+
+    assert workflow["permissions"] == {"contents": "read"}
+    for job in jobs.values():
+        assert "continue-on-error" not in job
+        assert "if" not in job
+        assert "permissions" not in job
+        assert job.get("timeout-minutes") == 30
+
+    steps = {
+        step.get("name"): step for step in frontend["steps"] if isinstance(step, dict)
+    }
+
+    production_audit = steps["Audit production dependencies"]
+    assert production_audit["run"] == "npm audit --omit=dev --audit-level=high"
+    assert "continue-on-error" not in production_audit
+    assert "if" not in production_audit
+
+    full_audit = steps["Report full dependency audit"]
+    assert full_audit["run"] == "npm audit --audit-level=high"
+    assert full_audit["continue-on-error"] is True
+    assert "if" not in full_audit
+
+
 def assert_deploy_commands_are_summary_only(run_block: str) -> None:
     deploy_lines = [
         line
@@ -85,6 +112,74 @@ def test_github_actions_ci_runs_backend_and_frontend_quality_gates():
         "npm run build",
     ]:
         assert required in content
+
+
+def test_ci_blocks_production_audit_failures_and_reports_full_audit():
+    assert_ci_security_policy(read_ci_workflow())
+
+
+def test_ci_jobs_have_bounded_runtime():
+    assert_ci_security_policy(read_ci_workflow())
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement"),
+    [
+        (
+            "  frontend:\n    name: Frontend",
+            "  frontend:\n    continue-on-error: true\n    name: Frontend",
+        ),
+        (
+            "  frontend:\n    name: Frontend",
+            "  frontend:\n    permissions:\n      contents: write\n    name: Frontend",
+        ),
+        (
+            "  frontend:\n    name: Frontend",
+            "  frontend:\n    continue-on-error: ${{ true }}\n    name: Frontend",
+        ),
+        (
+            "  frontend:\n    name: Frontend",
+            "  frontend:\n    if: ${{ false }}\n    name: Frontend",
+        ),
+    ],
+)
+def test_ci_security_policy_rejects_job_level_bypasses(original, replacement):
+    content = read_ci_workflow()
+    assert original in content
+
+    with pytest.raises(AssertionError):
+        assert_ci_security_policy(content.replace(original, replacement, 1))
+
+
+def test_ci_security_policy_rejects_an_unbounded_new_job():
+    content = read_ci_workflow()
+    unsafe_job = """
+  unsafe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo unsafe
+"""
+
+    with pytest.raises(AssertionError):
+        assert_ci_security_policy(f"{content.rstrip()}\n{unsafe_job}")
+
+
+@pytest.mark.parametrize(
+    ("step_name", "unsafe_setting"),
+    [
+        ("Audit production dependencies", "continue-on-error: ${{ true }}"),
+        ("Audit production dependencies", "if: ${{ false }}"),
+        ("Report full dependency audit", "if: ${{ false }}"),
+    ],
+)
+def test_ci_security_policy_rejects_audit_step_bypasses(step_name, unsafe_setting):
+    content = read_ci_workflow()
+    original = f"      - name: {step_name}\n"
+    replacement = f"{original}        {unsafe_setting}\n"
+    assert original in content
+
+    with pytest.raises(AssertionError):
+        assert_ci_security_policy(content.replace(original, replacement, 1))
 
 
 def test_pytest_asyncio_fixture_loop_scope_is_explicit():

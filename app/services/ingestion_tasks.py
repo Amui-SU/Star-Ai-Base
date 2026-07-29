@@ -57,6 +57,20 @@ def build_status_payload(task: IngestionTask) -> dict:
     }
 
 
+async def get_ingestion_task_for_workspace(
+    db: AsyncSession,
+    *,
+    task_id: str,
+    workspace_id: int,
+) -> IngestionTask | None:
+    result = await db.execute(
+        select(IngestionTask)
+        .where(IngestionTask.task_id == task_id)
+        .where(IngestionTask.workspace_id == workspace_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def update_ingestion_task(task_id: str, **fields) -> bool:
     from app.database import get_db_context
 

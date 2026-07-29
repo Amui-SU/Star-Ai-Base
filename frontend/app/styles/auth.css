@@ -62,6 +62,14 @@ body.auth-page-active {
   gap: 14px;
 }
 
+.auth-page .auth-brand {
+  transform: translateX(-16px);
+}
+
+.auth-page .auth-form-section-lowered {
+  transform: translateY(-24px);
+}
+
 .auth-page .auth-header-actions {
   display: inline-flex;
   align-items: center;
@@ -135,6 +143,11 @@ body.auth-page-active {
     padding-top: 0;
     padding-bottom: 16px;
     gap: 10px;
+  }
+
+  .auth-page .auth-brand,
+  .auth-page .auth-form-section-lowered {
+    transform: none;
   }
 
   .auth-page .auth-form-section {

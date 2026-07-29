@@ -69,7 +69,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
             maxWidth: "90rem",
           }}
         >
-          <div className="flex items-center gap-2.5">
+          <div className="auth-brand flex items-center gap-2.5">
             <svg
               className="auth-brand-icon w-7 h-7 text-[#d97757]"
               viewBox="0 0 24 24"
@@ -100,7 +100,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
         }}
       >
         <section
-          className="auth-form-section auth-form-section-lowered flex items-center justify-center py-6"
+          className="auth-form-section auth-form-section-lowered flex flex-col items-center justify-center py-6"
           style={{ minHeight: "calc(100svh - var(--auth-header-height))" }}
         >
           <div

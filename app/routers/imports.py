@@ -11,7 +11,6 @@ from fastapi import (
 )
 from loguru import logger
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -19,11 +18,15 @@ from app.dependencies import (
     get_current_user,
     get_current_workspace,
 )
-from app.models import IngestionTask, SystemUser, Workspace
+from app.models import SystemUser, Workspace
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
-from app.services.ingestion_tasks import create_ingestion_task, update_ingestion_task
+from app.services.ingestion_tasks import (
+    create_ingestion_task,
+    get_ingestion_task_for_workspace,
+    update_ingestion_task,
+)
 from app.services.import_request_runtime import (
     DEFAULT_LOCAL_IMPORT_DIR,
     detect_import_source_type as _detect_source_type,
@@ -290,12 +293,11 @@ async def get_import_task_status(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> ImportTaskStatusResponse:
-    result = await db.execute(
-        select(IngestionTask)
-        .where(IngestionTask.task_id == task_id)
-        .where(IngestionTask.workspace_id == current_workspace.id)
+    task = await get_ingestion_task_for_workspace(
+        db,
+        task_id=task_id,
+        workspace_id=current_workspace.id,
     )
-    task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return ImportTaskStatusResponse(
