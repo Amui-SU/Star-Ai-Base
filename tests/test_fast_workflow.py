@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VerifierRepo = tuple[Path, dict[str, str]]
 
@@ -72,11 +71,14 @@ def verifier_repo(tmp_path: Path) -> VerifierRepo:
 
 
 def run_verifier(
-    repo: Path, environment: dict[str, str], *arguments: str
+    repo: Path,
+    environment: dict[str, str],
+    *arguments: str,
+    executable: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    executable = powershell_executable()
-    command = [executable, "-NoProfile"]
-    if Path(executable).name.lower().startswith("powershell"):
+    shell = executable or powershell_executable()
+    command = [shell, "-NoProfile"]
+    if Path(shell).name.lower().startswith("powershell"):
         command.extend(["-ExecutionPolicy", "Bypass"])
     command.extend(["-File", "scripts/verify-fast.ps1", *arguments])
     return subprocess.run(
@@ -162,6 +164,16 @@ def test_fast_verifier_only_runs_explicit_targets():
     assert "npm run build" not in script
     assert 'Invoke-Step "frontend tests"' not in script
     assert 'Invoke-Step "backend tests"' not in script
+
+
+def test_untracked_scan_uses_streaming_file_apis():
+    script = read("scripts/verify-fast.ps1")
+
+    assert "[System.IO.File]::ReadAllBytes" not in script
+    assert "System.IO.FileStream" in script
+    assert "System.IO.StreamReader" in script
+    assert "StandardOutput.BaseStream" in script
+    assert "ls-files -z --others --exclude-standard" in script
 
 
 def test_fast_lane_preserves_full_verification_boundaries():
@@ -264,9 +276,66 @@ def test_untracked_terminal_blank_line_fails(verifier_repo: VerifierRepo):
     assert "blank line" in result.stdout + result.stderr
 
 
+def test_untracked_file_containing_only_one_newline_is_a_terminal_blank_line(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_bytes(b"\n")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    assert result.returncode != 0
+    assert "note.md:1" in result.stdout + result.stderr
+    assert "terminal blank line" in result.stdout + result.stderr
+
+
 def test_untracked_conflict_marker_fails(verifier_repo: VerifierRepo):
     repo, environment = verifier_repo
     (repo / "note.md").write_text("<<<<<<< HEAD\ncontent\n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    assert result.returncode != 0
+    assert "note.md:1" in result.stdout + result.stderr
+    assert "conflict marker" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "<<<<<<<<< branch",
+        "========",
+        ">>>>>>>> branch",
+        "||||||| base",
+    ],
+)
+def test_untracked_extended_conflict_marker_fails(
+    verifier_repo: VerifierRepo, marker: str
+):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_text(f"{marker}\ncontent\n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    assert result.returncode != 0
+    assert "note.md:1" in result.stdout + result.stderr
+    assert "conflict marker" in result.stdout + result.stderr
+
+
+def test_untracked_conflict_marker_requires_the_whole_line(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_text("prefix <<<<<<< HEAD suffix\n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_untracked_utf8_bom_conflict_marker_fails(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_bytes(b"\xef\xbb\xbf<<<<<<< HEAD\ncontent\n")
 
     result = run_verifier(repo, environment, "-StaticFile", "note.md")
 
@@ -282,6 +351,76 @@ def test_untracked_binary_file_with_nul_is_skipped(verifier_repo: VerifierRepo):
     result = run_verifier(repo, environment, "-StaticFile", "binary.txt")
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_untracked_invalid_utf8_file_is_skipped(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+    (repo / "binary.txt").write_bytes(b"\xffinvalid \n")
+
+    result = run_verifier(repo, environment, "-StaticFile", "binary.txt")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_large_untracked_text_file_reports_late_whitespace(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    large_content = ("valid line\n" * 300_000) + "invalid \n"
+    (repo / "large.txt").write_text(large_content, encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "large.txt")
+
+    assert result.returncode != 0
+    assert "large.txt:300001" in result.stdout + result.stderr
+    assert "trailing whitespace" in result.stdout + result.stderr
+
+
+def test_untracked_special_character_path_is_enumerated_without_git_quoting(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    relative_path = Path("中文 空格 'quoted'") / "nested" / "note.md"
+    target = repo / relative_path
+    target.parent.mkdir(parents=True)
+    target.write_text("invalid \n", encoding="utf-8")
+    windows_powershell = shutil.which("powershell") if os.name == "nt" else None
+
+    result = run_verifier(
+        repo,
+        environment,
+        "-StaticFile",
+        str(relative_path),
+        executable=windows_powershell,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert ":1 trailing whitespace" in output
+    assert "Could not read untracked file" not in output
+
+
+def test_untracked_symbolic_link_is_rejected_without_scanning_target(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    outside = repo.parent / "outside-note.md"
+    outside.write_text("invalid \n", encoding="utf-8")
+    link = repo / "linked-note.md"
+    try:
+        link.symlink_to(outside)
+    except OSError as error:
+        if os.name == "nt":
+            pytest.skip(f"cannot create symbolic links: {error}")
+        raise
+
+    result = run_verifier(repo, environment, "-StaticFile", "README.md")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "linked-note.md" in output
+    assert "symbolic link or reparse point" in output
+    assert "trailing whitespace" not in output
 
 
 def test_static_file_rejects_case_variant_sibling_on_case_sensitive_filesystem(

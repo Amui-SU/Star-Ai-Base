@@ -72,69 +72,198 @@ function Test-StaticPathHasReparsePoint {
     return $false
 }
 
+function Get-UntrackedFiles {
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = "git"
+    $startInfo.Arguments = "ls-files -z --others --exclude-standard"
+    $startInfo.WorkingDirectory = $projectRoot
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            Write-Fail "Could not start git to enumerate untracked files"
+            exit 1
+        }
+
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $paths = New-Object "System.Collections.Generic.List[string]"
+        $pathBytes = New-Object "System.Collections.Generic.List[byte]"
+        $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        [byte[]]$buffer = New-Object byte[] 4096
+        $stdout = $process.StandardOutput.BaseStream
+        $pathDecodeFailed = $false
+
+        while (($bytesRead = $stdout.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            for ($index = 0; $index -lt $bytesRead; $index++) {
+                if ($buffer[$index] -eq 0) {
+                    try {
+                        $path = $utf8.GetString($pathBytes.ToArray())
+                        if ($path.Length -gt 0) {
+                            [void]$paths.Add($path)
+                        }
+                    }
+                    catch [System.Text.DecoderFallbackException] {
+                        $pathDecodeFailed = $true
+                    }
+                    $pathBytes.Clear()
+                }
+                else {
+                    [void]$pathBytes.Add($buffer[$index])
+                }
+            }
+        }
+
+        $process.WaitForExit()
+        $stderr = $stderrTask.Result
+        $exitCode = $process.ExitCode
+
+        if ($exitCode -ne 0) {
+            $detail = $stderr.Trim()
+            if ($detail.Length -gt 0) {
+                Write-Fail "Could not enumerate untracked files: $detail"
+            }
+            else {
+                Write-Fail "Could not enumerate untracked files"
+            }
+            exit $exitCode
+        }
+
+        if ($pathDecodeFailed -or $pathBytes.Count -ne 0) {
+            Write-Fail "Git returned an invalid UTF-8 untracked path"
+            exit 1
+        }
+
+        return $paths.ToArray()
+    }
+    catch {
+        Write-Fail "Could not enumerate untracked files: $($_.Exception.Message)"
+        exit 1
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Test-FileContainsNul {
+    param([string]$Path)
+
+    $stream = [System.IO.FileStream]::new(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::ReadWrite
+    )
+    try {
+        [byte[]]$buffer = New-Object byte[] 65536
+        while (($bytesRead = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            for ($index = 0; $index -lt $bytesRead; $index++) {
+                if ($buffer[$index] -eq 0) {
+                    return $true
+                }
+            }
+        }
+        return $false
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Get-UntrackedTextViolation {
+    param(
+        [string]$Path,
+        [string]$RelativePath
+    )
+
+    $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    $reader = $null
+    try {
+        $reader = [System.IO.StreamReader]::new($Path, $strictUtf8, $true)
+        $lineNumber = 0
+        $hasLine = $false
+        $lastLine = $null
+        $firstViolation = $null
+
+        while (($line = $reader.ReadLine()) -ne $null) {
+            $lineNumber++
+            $hasLine = $true
+            $lastLine = $line
+
+            if ($null -eq $firstViolation -and $line -match "[ \t]$") {
+                $firstViolation = "${RelativePath}:$lineNumber trailing whitespace"
+            }
+
+            if (
+                $null -eq $firstViolation -and
+                $line -match "^(<{7,}|={7,}|>{7,}|\|{7,})( .*)?$"
+            ) {
+                $firstViolation = "${RelativePath}:$lineNumber unresolved conflict marker"
+            }
+        }
+
+        if (
+            $null -eq $firstViolation -and
+            $hasLine -and
+            $lastLine -match "^[ \t]*$"
+        ) {
+            $firstViolation = "${RelativePath}:$lineNumber terminal blank line"
+        }
+
+        return $firstViolation
+    }
+    catch [System.Text.DecoderFallbackException] {
+        Write-Info "Skipping non-UTF-8 untracked file: $RelativePath"
+        return $null
+    }
+    catch {
+        Write-Fail "Could not read untracked file: $RelativePath"
+        exit 1
+    }
+    finally {
+        if ($null -ne $reader) {
+            $reader.Dispose()
+        }
+    }
+}
+
 function Test-UntrackedTextFiles {
     Write-Info "untracked text hygiene"
-    $untrackedFiles = @(git ls-files --others --exclude-standard)
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Could not enumerate untracked files"
-        exit $LASTEXITCODE
-    }
+    $untrackedFiles = @(Get-UntrackedFiles)
 
     foreach ($relativePath in $untrackedFiles) {
         $candidate = Join-Path $projectRoot $relativePath
         try {
-            [byte[]]$bytes = [System.IO.File]::ReadAllBytes($candidate)
+            $item = Get-Item -LiteralPath $candidate -Force
+        }
+        catch {
+            Write-Fail "Could not inspect untracked file: $relativePath"
+            exit 1
+        }
+
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Write-Fail "Untracked file is a symbolic link or reparse point: $relativePath"
+            exit 1
+        }
+
+        try {
+            if (Test-FileContainsNul $candidate) {
+                continue
+            }
         }
         catch {
             Write-Fail "Could not read untracked file: $relativePath"
             exit 1
         }
 
-        if ($bytes -contains [byte]0) {
-            continue
-        }
-
-        [string]$content = [System.Text.Encoding]::UTF8.GetString($bytes)
-        [string[]]$lines = @($content -split "\r\n|\n|\r")
-        for ($index = 0; $index -lt $lines.Count; $index++) {
-            $line = $lines[$index]
-            $lineNumber = $index + 1
-
-            if ($line -match "[ \t]$") {
-                Write-Fail "Untracked text check failed: ${relativePath}:$lineNumber trailing whitespace"
-                exit 1
-            }
-
-            if ($line -match "^(<{7}( .*)?|={7}|>{7}( .*)?)$") {
-                Write-Fail "Untracked text check failed: ${relativePath}:$lineNumber unresolved conflict marker"
-                exit 1
-            }
-        }
-
-        $lineEndingLength = if ($content.EndsWith("`r`n")) {
-            2
-        }
-        elseif ($content.EndsWith("`n") -or $content.EndsWith("`r")) {
-            1
-        }
-        else {
-            0
-        }
-
-        if ($lineEndingLength -gt 0) {
-            $beforeLastLineEnding = $content.Substring(0, $content.Length - $lineEndingLength)
-            if (
-                $beforeLastLineEnding.EndsWith("`r`n") -or
-                $beforeLastLineEnding.EndsWith("`n") -or
-                $beforeLastLineEnding.EndsWith("`r")
-            ) {
-                $lineNumber = [System.Text.RegularExpressions.Regex]::Matches(
-                    $beforeLastLineEnding,
-                    "\r\n|\n|\r"
-                ).Count + 1
-                Write-Fail "Untracked text check failed: ${relativePath}:$lineNumber terminal blank line"
-                exit 1
-            }
+        $violation = Get-UntrackedTextViolation $candidate $relativePath
+        if ($null -ne $violation) {
+            Write-Fail "Untracked text check failed: $violation"
+            exit 1
         }
     }
 
