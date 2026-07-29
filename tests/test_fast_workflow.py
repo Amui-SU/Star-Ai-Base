@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -6,6 +7,7 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+VerifierRepo = tuple[Path, dict[str, str]]
 
 
 def read(relative_path: str) -> str:
@@ -19,10 +21,24 @@ def powershell_executable() -> str:
     return executable
 
 
-def run_checked(command: list[str], cwd: Path) -> None:
+def isolated_subprocess_environment(tmp_path: Path) -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.pop("PYTEST_ADDOPTS", None)
+    environment.pop("PYTEST_PLUGINS", None)
+    environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+
+    git_config = tmp_path / "empty.gitconfig"
+    git_config.write_text("", encoding="utf-8")
+    environment["GIT_CONFIG_GLOBAL"] = str(git_config)
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    return environment
+
+
+def run_checked(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
     result = subprocess.run(
         command,
         cwd=cwd,
+        env=environment,
         check=False,
         capture_output=True,
         text=True,
@@ -33,8 +49,9 @@ def run_checked(command: list[str], cwd: Path) -> None:
 
 
 @pytest.fixture
-def verifier_repo(tmp_path: Path) -> Path:
+def verifier_repo(tmp_path: Path) -> VerifierRepo:
     repo = tmp_path / "repo"
+    environment = isolated_subprocess_environment(tmp_path)
     scripts = repo / "scripts"
     scripts.mkdir(parents=True)
     shutil.copy2(PROJECT_ROOT / "scripts" / "verify-fast.ps1", scripts)
@@ -47,12 +64,14 @@ def verifier_repo(tmp_path: Path) -> Path:
         ["git", "add", "README.md"],
         ["git", "commit", "--no-gpg-sign", "--no-verify", "-m", "baseline"],
     ]:
-        run_checked(command, repo)
+        run_checked(command, repo, environment)
 
-    return repo
+    return repo, environment
 
 
-def run_verifier(repo: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+def run_verifier(
+    repo: Path, environment: dict[str, str], *arguments: str
+) -> subprocess.CompletedProcess[str]:
     executable = powershell_executable()
     command = [executable, "-NoProfile"]
     if Path(executable).name.lower().startswith("powershell"):
@@ -61,6 +80,7 @@ def run_verifier(repo: Path, *arguments: str) -> subprocess.CompletedProcess[str
     return subprocess.run(
         command,
         cwd=repo,
+        env=environment,
         check=False,
         capture_output=True,
         text=True,
@@ -121,8 +141,9 @@ def test_fast_lane_preserves_full_verification_boundaries():
         assert boundary in instructions
 
 
-def test_comma_separated_backend_targets_run_each_file(verifier_repo: Path):
-    tests = verifier_repo / "tests"
+def test_comma_separated_backend_targets_run_each_file(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+    tests = repo / "tests"
     tests.mkdir()
     (tests / "test_one.py").write_text(
         "def test_one():\n    assert True\n", encoding="utf-8"
@@ -132,7 +153,8 @@ def test_comma_separated_backend_targets_run_each_file(verifier_repo: Path):
     )
 
     result = run_verifier(
-        verifier_repo,
+        repo,
+        environment,
         "-BackendTest",
         "tests/test_one.py,tests/test_two.py",
     )
@@ -144,28 +166,33 @@ def test_comma_separated_backend_targets_run_each_file(verifier_repo: Path):
 
 @pytest.mark.parametrize("static_file", ["docs/note.md", "styles/fix.css"])
 def test_static_file_accepts_supported_extensions(
-    verifier_repo: Path, static_file: str
+    verifier_repo: VerifierRepo, static_file: str
 ):
-    target = verifier_repo / static_file
+    repo, environment = verifier_repo
+    target = repo / static_file
     target.parent.mkdir()
     target.write_text("content\n", encoding="utf-8")
 
-    result = run_verifier(verifier_repo, "-StaticFile", static_file)
+    result = run_verifier(repo, environment, "-StaticFile", static_file)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_static_file_rejects_unsupported_extensions(verifier_repo: Path):
-    (verifier_repo / "unsafe.py").write_text("print('unsafe')\n", encoding="utf-8")
+def test_static_file_rejects_unsupported_extensions(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+    (repo / "unsafe.py").write_text("print('unsafe')\n", encoding="utf-8")
 
-    result = run_verifier(verifier_repo, "-StaticFile", "unsafe.py")
+    result = run_verifier(repo, environment, "-StaticFile", "unsafe.py")
 
     assert result.returncode != 0
     assert "Unsupported static file" in result.stdout + result.stderr
 
 
-def test_positional_target_is_not_bound_to_another_verifier_option(verifier_repo: Path):
-    tests = verifier_repo / "tests"
+def test_positional_target_is_not_bound_to_another_verifier_option(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    tests = repo / "tests"
     tests.mkdir()
     (tests / "test_one.py").write_text(
         "def test_one():\n    assert True\n", encoding="utf-8"
@@ -173,10 +200,11 @@ def test_positional_target_is_not_bound_to_another_verifier_option(verifier_repo
     (tests / "test_two.py").write_text(
         "def test_two():\n    assert True\n", encoding="utf-8"
     )
-    (verifier_repo / "frontend").mkdir()
+    (repo / "frontend").mkdir()
 
     result = run_verifier(
-        verifier_repo,
+        repo,
+        environment,
         "-BackendTest",
         "tests/test_one.py",
         "tests/test_two.py",
