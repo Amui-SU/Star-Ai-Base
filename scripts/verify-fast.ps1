@@ -3,7 +3,8 @@ param(
     [string[]]$FrontendTest = @(),
     [string[]]$LintFile = @(),
     [string[]]$BackendTest = @(),
-    [string[]]$StaticFile = @()
+    [string[]]$StaticFile = @(),
+    [string[]]$TaskFile = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -253,8 +254,13 @@ function Get-UntrackedTextViolation {
 }
 
 function Test-UntrackedTextFiles {
+    param(
+        [string[]]$Files = @(),
+        [switch]$Scoped
+    )
+
     Write-Info "untracked text hygiene"
-    $untrackedFiles = @(Get-UntrackedFiles)
+    $untrackedFiles = if ($Scoped) { @($Files) } else { @(Get-UntrackedFiles) }
 
     foreach ($relativePath in $untrackedFiles) {
         $candidate = Join-Path $projectRoot $relativePath
@@ -295,6 +301,7 @@ $FrontendTest = @(Expand-Targets $FrontendTest)
 $LintFile = @(Expand-Targets $LintFile)
 $BackendTest = @(Expand-Targets $BackendTest)
 $StaticFile = @(Expand-Targets $StaticFile)
+$TaskFile = @(Expand-Targets $TaskFile)
 
 if (
     $FrontendTest.Count -eq 0 -and
@@ -328,6 +335,49 @@ foreach ($changedFile in $changedFiles) {
 }
 $staticTargetSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
 $lintTargetSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+$taskFileSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+$taskFilesNormalized = New-Object "System.Collections.Generic.List[string]"
+
+foreach ($taskTarget in $TaskFile) {
+    if ([System.IO.Path]::IsPathRooted($taskTarget)) {
+        Write-Fail "Task file must be relative to project root: $taskTarget"
+        exit 2
+    }
+
+    try {
+        $taskPathForHost = $taskTarget.Replace("\", "/").Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+        $candidate = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $taskPathForHost))
+    }
+    catch {
+        Write-Fail "Invalid task file path: $taskTarget"
+        exit 2
+    }
+
+    if (-not $candidate.StartsWith($projectRootPrefix, $pathComparison)) {
+        Write-Fail "Task file must stay within project root: $taskTarget"
+        exit 2
+    }
+
+    $relativeTaskPath = $candidate.Substring($projectRootPrefix.Length).Replace("\", "/")
+    if (-not $taskFileSet.Add($relativeTaskPath)) {
+        Write-Fail "Duplicate task file: $taskTarget"
+        exit 2
+    }
+    if (-not $changedPathSet.Contains($relativeTaskPath)) {
+        Write-Fail "Task file is not changed: $taskTarget"
+        exit 2
+    }
+    [void]$taskFilesNormalized.Add($relativeTaskPath)
+}
+
+$taskScopeEnabled = $taskFilesNormalized.Count -gt 0
+$verificationFiles = @()
+if ($taskScopeEnabled) {
+    $verificationFiles = @($taskFilesNormalized.ToArray())
+}
+else {
+    $verificationFiles = @($changedFiles)
+}
 
 foreach ($lintTarget in $LintFile) {
     if ([System.IO.Path]::IsPathRooted($lintTarget)) {
@@ -405,15 +455,35 @@ foreach ($staticTarget in $StaticFile) {
 
 Set-Location $projectRoot
 
-Invoke-Step "git diff --check" {
-    git diff --check
-}
+if ($taskScopeEnabled) {
+    Invoke-Step "git diff --check (task files)" {
+        git diff --check -- @verificationFiles
+    }
 
-Invoke-Step "git diff --cached --check" {
-    git diff --cached --check
-}
+    Invoke-Step "git diff --cached --check (task files)" {
+        git diff --cached --check -- @verificationFiles
+    }
 
-Test-UntrackedTextFiles
+    $untrackedPathSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+    foreach ($untrackedFile in @(Get-UntrackedFiles)) {
+        [void]$untrackedPathSet.Add($untrackedFile.Replace("\", "/"))
+    }
+    $scopedUntrackedFiles = @(
+        $verificationFiles | Where-Object { $untrackedPathSet.Contains($_) }
+    )
+    Test-UntrackedTextFiles -Files $scopedUntrackedFiles -Scoped
+}
+else {
+    Invoke-Step "git diff --check" {
+        git diff --check
+    }
+
+    Invoke-Step "git diff --cached --check" {
+        git diff --cached --check
+    }
+
+    Test-UntrackedTextFiles
+}
 
 foreach ($staticTarget in $staticTargetSet) {
     if (-not $changedPathSet.Contains($staticTarget)) {
@@ -422,7 +492,7 @@ foreach ($staticTarget in $staticTargetSet) {
     }
 }
 
-foreach ($changedFile in $changedFiles) {
+foreach ($changedFile in $verificationFiles) {
     $normalizedChangedFile = $changedFile.Replace("\", "/")
     $extension = [System.IO.Path]::GetExtension($normalizedChangedFile).ToLowerInvariant()
 

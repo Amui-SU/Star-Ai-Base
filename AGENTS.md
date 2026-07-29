@@ -30,8 +30,12 @@ security behavior.
   `Change`, `Acceptance`, and `Verification` using
   `docs/micro-task-template.md` or the task/commit body. Add a root cause only
   for a bug; add out-of-scope behavior only when the scope could easily expand.
-- Work directly in the current checkout unless target files overlap existing
-  changes or verification shares mutable state; in either case, use a worktree.
+- In a clean or isolated checkout, omit `-TaskFile`; the verifier maps and checks
+  all changed files. When unrelated non-overlapping dirty changes are present,
+  list every task file with `-TaskFile` and record the actual command and targets.
+  `-TaskFile` is not a verification target and cannot declare an unchanged file.
+  If target files overlap existing changes or verification shares mutable state,
+  use a worktree.
 - Add a failing targeted test first for behavior or boundary changes. Pure
   documentation, comments, or visual-value-only edits may omit a new automated
   test when the task record explains why.
@@ -57,6 +61,14 @@ security behavior.
   verification.
 - In `Verification`, record the actual command, specific targets, and any
   required manual results. A bare “verified” is not evidence.
+- Example for a documentation task in a checkout with unrelated dirty changes:
+
+  ```powershell
+  powershell -File scripts\verify-fast.ps1 `
+    -TaskFile AGENTS.md,docs/micro-task-template.md `
+    -StaticFile AGENTS.md,docs/micro-task-template.md
+  ```
+
 - Qualified micro tasks use fast verification in place of the full verification
   below. Inspect only the affected page, state, and viewport; check desktop and
   mobile only when a responsive rule changes.

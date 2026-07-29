@@ -22,6 +22,26 @@ workflow policy; this design records the verifier contract and rationale.
 The `Verification` record contains the actual command, specific targets, and
 required manual results. A bare “verified” is not evidence.
 
+## Task changeset scope
+
+In a clean or isolated checkout, omit `-TaskFile`; verification covers all
+changed files. With unrelated non-overlapping dirty changes, list every task
+file using `-TaskFile` and record the actual command and targets. `-TaskFile`
+accepts comma-separated values, is not a verification target, cannot declare an
+unchanged file, and cannot contain duplicate or out-of-repository paths.
+
+The explicit scope limits changed-file mapping, tracked unstaged and staged
+whitespace checks, and untracked text hygiene to the declared task changeset. It
+does not weaken the mapping rules for those files. When target files overlap
+existing changes or verification shares mutable state, use a worktree instead
+of scoping around the conflict.
+
+```powershell
+powershell -File scripts\verify-fast.ps1 `
+  -TaskFile AGENTS.md,docs/micro-task-template.md `
+  -StaticFile AGENTS.md,docs/micro-task-template.md
+```
+
 ## Static-file coverage contract
 
 `verify-fast.ps1` collects changed paths from unstaged, staged, and untracked Git
