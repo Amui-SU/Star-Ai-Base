@@ -12,6 +12,7 @@ from app.models import (
     AdminUserListResponse,
     AdminUserResponse,
     AdminUserStatusUpdateRequest,
+    PasswordResetConfirmRequest,
     PasswordResetSendCodeRequest,
     SystemAuthResponse,
     SystemDisplayNameUpdateRequest,
@@ -52,6 +53,7 @@ from app.services.system_auth_login import (
     login_system_user,
 )
 from app.services.system_auth_password_reset import (
+    confirm_password_reset as _confirm_password_reset,
     send_password_reset_code as _send_password_reset_code,
 )
 from app.services.system_auth_registration import (
@@ -143,6 +145,14 @@ async def send_password_reset_code(
         client_ip=client_ip,
         debug=bool(settings.debug),
     )
+
+
+@router.post("/password-reset/confirm")
+async def confirm_password_reset(
+    payload: PasswordResetConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    return await _confirm_password_reset(db, payload=payload)
 
 
 @router.post("/logout")
