@@ -30,6 +30,25 @@ export const systemAuthApi = {
       body: JSON.stringify({ email }),
     }),
 
+  sendPasswordResetCode: (email: string) =>
+    request<{ message: string; code?: string }>(
+      "/system-auth/password-reset/send-code",
+      {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      },
+    ),
+
+  confirmPasswordReset: (data: {
+    email: string;
+    code: string;
+    new_password: string;
+  }) =>
+    request<{ message: string }>("/system-auth/password-reset/confirm", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   register: async (data: {
     email: string;
     password: string;
