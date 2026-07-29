@@ -196,6 +196,24 @@ def test_fast_lane_requires_concrete_verification_evidence():
         assert "“verified”" in compact
 
 
+def test_fast_lane_mapping_applies_regardless_of_mixed_targets():
+    fast_lane = markdown_section(read("AGENTS.md"), "### Micro task fast lane")
+    v2_design = read(
+        "docs/superpowers/specs/2026-07-29-micro-task-fast-lane-v2-design.md"
+    )
+
+    for document in [fast_lane, v2_design]:
+        compact = " ".join(document.split()).casefold()
+        for token in [
+            "every changed static file",
+            "regardless of other targets",
+            "every changed frontend",
+            "unsupported changed files",
+            "complete verification",
+        ]:
+            assert token.casefold() in compact
+
+
 def test_micro_task_template_keeps_the_record_concise():
     template = read("docs/micro-task-template.md")
 
@@ -406,7 +424,10 @@ def test_static_only_verification_rejects_code_hidden_by_changed_readme(
 
     output = result.stdout + result.stderr
     assert result.returncode != 0
-    assert "Static-only verification cannot cover changed file: change.py" in output
+    assert (
+        "Changed Python files require at least one -BackendTest target: change.py"
+        in output
+    )
 
 
 def test_static_only_verification_requires_every_changed_static_file(
@@ -420,7 +441,7 @@ def test_static_only_verification_requires_every_changed_static_file(
 
     output = result.stdout + result.stderr
     assert result.returncode != 0
-    assert "Static verification is missing changed file: style.css" in output
+    assert "Missing -StaticFile target for changed file: style.css" in output
 
 
 def test_static_only_verification_accepts_all_changed_static_files(
@@ -433,6 +454,119 @@ def test_static_only_verification_accepts_all_changed_static_files(
     result = run_verifier(repo, environment, "-StaticFile", "note.md,style.css")
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_backend_target_cannot_hide_missing_lint_for_changed_frontend_file(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "README.md").write_bytes(b"changed\n")
+    frontend_file = repo / "frontend" / "src" / "widget.tsx"
+    frontend_file.parent.mkdir(parents=True)
+    frontend_file.write_bytes(b"export const value = 2;\n")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_probe.py").write_bytes(b"def test_probe():\n    assert True\n")
+
+    result = run_verifier(
+        repo,
+        environment,
+        "-StaticFile",
+        "README.md",
+        "-BackendTest",
+        "tests/test_probe.py",
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert (
+        "Missing -LintFile target for changed frontend file: src/widget.tsx" in output
+    )
+
+
+def test_mixed_targets_continue_when_static_backend_and_lint_mapping_is_complete(
+    verifier_repo: VerifierRepo, tmp_path: Path
+):
+    repo, environment = verifier_repo
+    (repo / "README.md").write_bytes(b"changed\n")
+    frontend_file = repo / "frontend" / "src" / "widget.tsx"
+    frontend_file.parent.mkdir(parents=True)
+    frontend_file.write_bytes(b"export const value = 2;\n")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_probe.py").write_bytes(b"def test_probe():\n    assert True\n")
+    write_frontend_stub(repo, "eslint")
+    log = tmp_path / "eslint-arguments.txt"
+    environment["FAST_VERIFIER_LOG"] = str(log)
+    environment["FAST_VERIFIER_EXIT"] = "0"
+
+    result = run_verifier(
+        repo,
+        environment,
+        "-StaticFile",
+        "README.md",
+        "-BackendTest",
+        "tests/test_probe.py",
+        "-LintFile",
+        "src/widget.tsx",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert log.read_text(encoding="utf-8").split() == ["src/widget.tsx"]
+
+
+def test_changed_python_requires_backend_target_even_with_frontend_target(
+    verifier_repo: VerifierRepo, tmp_path: Path
+):
+    repo, environment = verifier_repo
+    (repo / "change.py").write_bytes(b"value = 2\n")
+    write_frontend_stub(repo, "vitest")
+    environment["FAST_VERIFIER_LOG"] = str(tmp_path / "vitest-arguments.txt")
+    environment["FAST_VERIFIER_EXIT"] = "0"
+
+    result = run_verifier(repo, environment, "-FrontendTest", "src/unrelated.test.ts")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert (
+        "Changed Python files require at least one -BackendTest target: change.py"
+        in output
+    )
+
+
+def test_changed_static_file_requires_target_even_with_backend_target(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_bytes(b"content\n")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_probe.py").write_bytes(b"def test_probe():\n    assert True\n")
+
+    result = run_verifier(repo, environment, "-BackendTest", "tests/test_probe.py")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Missing -StaticFile target for changed file: note.md" in output
+
+
+def test_unsupported_changed_extension_requires_full_verification(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "settings.toml").write_bytes(b"enabled = true\n")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_probe.py").write_bytes(b"def test_probe():\n    assert True\n")
+
+    result = run_verifier(repo, environment, "-BackendTest", "tests/test_probe.py")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert (
+        "Fast verification does not support changed file: settings.toml; "
+        "use full verification." in output
+    )
 
 
 def test_unstaged_whitespace_in_tracked_static_file_fails(

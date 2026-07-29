@@ -25,9 +25,11 @@ required manual results. A bare “verified” is not evidence.
 
 `verify-fast.ps1` collects changed paths from unstaged, staged, and untracked Git
 states using NUL-delimited output. Every `-StaticFile` target must belong to that
-change set. When `-StaticFile` is the only verification class, every changed
-path must have an allowed static extension and every changed path must be named
-by `-StaticFile`.
+change set. The mapping applies regardless of other targets: every changed
+static file must be named by `-StaticFile`, every changed frontend JavaScript or
+TypeScript file must be named by `-LintFile`, and any changed Python file
+requires at least one `-BackendTest`. Unsupported changed files require complete
+verification.
 
 The allowed extensions remain Markdown, plain text, CSS, SCSS, Less, HTML,
 JSON, YAML, and YML. Extension eligibility does not reclassify behavioral or

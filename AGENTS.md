@@ -50,7 +50,10 @@ security behavior.
   `-FrontendTest`, `-LintFile`, or `-StaticFile` target. Each option accepts
   comma-separated values. The fast verifier checks unstaged, staged, and
   untracked changes, requires each static target to be changed, and requires a
-  static-only invocation to cover every changed file.
+  complete changed-file mapping regardless of other targets: every changed
+  static file needs `-StaticFile`, and every changed frontend JavaScript or
+  TypeScript file needs `-LintFile`. Unsupported changed files require complete
+  verification.
 - In `Verification`, record the actual command, specific targets, and any
   required manual results. A bare “verified” is not evidence.
 - Qualified micro tasks use fast verification in place of the full verification

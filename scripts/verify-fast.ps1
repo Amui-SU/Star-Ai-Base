@@ -309,6 +309,7 @@ if (
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $frontendRoot = Join-Path $projectRoot "frontend"
 $projectRootPrefix = $projectRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+$frontendRootPrefix = $frontendRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
 $pathComparison = if ($env:OS -eq "Windows_NT") {
     [System.StringComparison]::OrdinalIgnoreCase
 } else {
@@ -326,6 +327,30 @@ foreach ($changedFile in $changedFiles) {
     [void]$changedPathSet.Add($changedFile.Replace("\", "/"))
 }
 $staticTargetSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+$lintTargetSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+
+foreach ($lintTarget in $LintFile) {
+    if ([System.IO.Path]::IsPathRooted($lintTarget)) {
+        Write-Fail "Lint file must be relative to frontend root: $lintTarget"
+        exit 2
+    }
+
+    try {
+        $candidate = [System.IO.Path]::GetFullPath((Join-Path $frontendRoot $lintTarget))
+    }
+    catch {
+        Write-Fail "Invalid lint file path: $lintTarget"
+        exit 2
+    }
+
+    if (-not $candidate.StartsWith($frontendRootPrefix, $pathComparison)) {
+        Write-Fail "Lint file must stay within frontend root: $lintTarget"
+        exit 2
+    }
+
+    $relativeLintPath = $candidate.Substring($frontendRootPrefix.Length).Replace("\", "/")
+    [void]$lintTargetSet.Add($relativeLintPath)
+}
 
 foreach ($staticTarget in $StaticFile) {
     if ([System.IO.Path]::IsPathRooted($staticTarget)) {
@@ -397,24 +422,41 @@ foreach ($staticTarget in $staticTargetSet) {
     }
 }
 
-$staticOnly = (
-    $StaticFile.Count -gt 0 -and
-    $BackendTest.Count -eq 0 -and
-    $FrontendTest.Count -eq 0 -and
-    $LintFile.Count -eq 0
-)
-if ($staticOnly) {
-    foreach ($changedFile in $changedFiles) {
-        $extension = [System.IO.Path]::GetExtension($changedFile).ToLowerInvariant()
-        if ($allowedStaticExtensions -notcontains $extension) {
-            Write-Fail "Static-only verification cannot cover changed file: $changedFile"
+foreach ($changedFile in $changedFiles) {
+    $normalizedChangedFile = $changedFile.Replace("\", "/")
+    $extension = [System.IO.Path]::GetExtension($normalizedChangedFile).ToLowerInvariant()
+
+    if ($allowedStaticExtensions -contains $extension) {
+        if (-not $staticTargetSet.Contains($normalizedChangedFile)) {
+            Write-Fail "Missing -StaticFile target for changed file: $changedFile"
             exit 2
         }
-        if (-not $staticTargetSet.Contains($changedFile.Replace("\", "/"))) {
-            Write-Fail "Static verification is missing changed file: $changedFile"
-            exit 2
-        }
+        continue
     }
+
+    if ($extension -eq ".py") {
+        if ($BackendTest.Count -eq 0) {
+            Write-Fail "Changed Python files require at least one -BackendTest target: $changedFile"
+            exit 2
+        }
+        continue
+    }
+
+    $frontendCodeExtensions = @(".js", ".jsx", ".ts", ".tsx")
+    if (
+        $normalizedChangedFile.StartsWith("frontend/", $pathComparison) -and
+        $frontendCodeExtensions -contains $extension
+    ) {
+        $relativeFrontendPath = $normalizedChangedFile.Substring("frontend/".Length)
+        if (-not $lintTargetSet.Contains($relativeFrontendPath)) {
+            Write-Fail "Missing -LintFile target for changed frontend file: $relativeFrontendPath"
+            exit 2
+        }
+        continue
+    }
+
+    Write-Fail "Fast verification does not support changed file: $changedFile; use full verification."
+    exit 2
 }
 
 if ($BackendTest.Count -gt 0) {
