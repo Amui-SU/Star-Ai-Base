@@ -114,12 +114,14 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                 ? "欢迎回来"
                 : step === "login"
                   ? "输入密码"
-                  : "创建账号"}
+                  : step === "forgot-password"
+                    ? "重置密码"
+                    : "创建账号"}
             </h1>
             <p className="auth-subtitle mb-0 font-[Noto_Serif_SC,Songti_SC,Georgia,serif] leading-[1.35] text-[#dedbd4]">
               {step === "email"
                 ? "登录以继续你的知识探索"
-                : step === "login"
+                : step === "login" || step === "forgot-password"
                   ? email
                   : "验证邮箱并设置密码"}
             </p>

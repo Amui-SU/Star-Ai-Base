@@ -1,4 +1,4 @@
-export type AuthStep = "email" | "login" | "register";
+export type AuthStep = "email" | "login" | "register" | "forgot-password";
 export type OAuthProvider = "google" | "wechat" | "qq";
 
 export const isLocalhost = (host: string) =>
