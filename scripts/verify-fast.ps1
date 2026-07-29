@@ -47,6 +47,31 @@ function Invoke-Step {
     Write-Ok $Name
 }
 
+function Test-StaticPathHasReparsePoint {
+    param(
+        [string]$Path,
+        [string]$ProjectRoot,
+        [string]$ProjectRootPrefix
+    )
+
+    $current = $ProjectRoot
+    $item = Get-Item -LiteralPath $current -Force
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        return $true
+    }
+
+    $relativePath = $Path.Substring($ProjectRootPrefix.Length)
+    foreach ($segment in $relativePath.Split([char[]]@('\', '/'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+        $current = Join-Path $current $segment
+        $item = Get-Item -LiteralPath $current -Force
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 $FrontendTest = @(Expand-Targets $FrontendTest)
 $LintFile = @(Expand-Targets $LintFile)
 $BackendTest = @(Expand-Targets $BackendTest)
@@ -65,6 +90,11 @@ if (
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $frontendRoot = Join-Path $projectRoot "frontend"
 $projectRootPrefix = $projectRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+$pathComparison = if ($env:OS -eq "Windows_NT") {
+    [System.StringComparison]::OrdinalIgnoreCase
+} else {
+    [System.StringComparison]::Ordinal
+}
 $allowedStaticExtensions = @(".md", ".txt", ".css", ".scss", ".less", ".html", ".json", ".yaml", ".yml")
 
 foreach ($staticTarget in $StaticFile) {
@@ -73,8 +103,15 @@ foreach ($staticTarget in $StaticFile) {
         exit 2
     }
 
-    $candidate = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $staticTarget))
-    if (-not $candidate.StartsWith($projectRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    try {
+        $candidate = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $staticTarget))
+    }
+    catch {
+        Write-Fail "Invalid static file path: $staticTarget"
+        exit 2
+    }
+
+    if (-not $candidate.StartsWith($projectRootPrefix, $pathComparison)) {
         Write-Fail "Static file must stay within project root: $staticTarget"
         exit 2
     }
@@ -84,8 +121,20 @@ foreach ($staticTarget in $StaticFile) {
         exit 2
     }
 
-    $resolved = (Resolve-Path -LiteralPath $candidate).Path
-    if (-not $resolved.StartsWith($projectRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (Test-StaticPathHasReparsePoint $candidate $projectRoot $projectRootPrefix) {
+        Write-Fail "Static file path cannot contain a symbolic link: $staticTarget"
+        exit 2
+    }
+
+    try {
+        $resolved = (Resolve-Path -LiteralPath $candidate).Path
+    }
+    catch {
+        Write-Fail "Invalid static file path: $staticTarget"
+        exit 2
+    }
+
+    if (-not $resolved.StartsWith($projectRootPrefix, $pathComparison)) {
         Write-Fail "Static file must stay within project root: $staticTarget"
         exit 2
     }
