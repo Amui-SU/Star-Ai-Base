@@ -320,7 +320,7 @@ $pathComparer = if ($env:OS -eq "Windows_NT") {
 } else {
     [System.StringComparer]::Ordinal
 }
-$allowedStaticExtensions = @(".md", ".txt", ".css", ".scss", ".less", ".html", ".json", ".yaml", ".yml")
+$allowedStaticExtensions = @(".md", ".txt", ".css", ".scss", ".less")
 $changedFiles = @(Get-ChangedFiles)
 $changedPathSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
 foreach ($changedFile in $changedFiles) {
@@ -395,7 +395,7 @@ foreach ($staticTarget in $StaticFile) {
     }
 
     if ($allowedStaticExtensions -notcontains [System.IO.Path]::GetExtension($resolved).ToLowerInvariant()) {
-        Write-Fail "Unsupported static file: $staticTarget"
+        Write-Fail "Unsupported static file: $staticTarget; use full verification."
         exit 2
     }
 

@@ -173,8 +173,8 @@ def test_fast_lane_maps_file_types_to_specific_verification_targets():
             "behavior",
             "`-StaticFile`",
             "manual check",
-            "HTML, JSON, YAML, or YML",
-            "pure non-behavioral static content",
+            "`-StaticFile` supports only Markdown, plain text, CSS, SCSS, and Less",
+            "HTML, JSON, YAML, and YML require complete verification",
             "shared build",
             "deployment",
             "authentication",
@@ -285,6 +285,16 @@ def test_fast_verifier_only_runs_explicit_targets():
     assert 'Invoke-Step "frontend tests"' not in script
     assert 'Invoke-Step "backend tests"' not in script
 
+    extension_list = re.search(r"\$allowedStaticExtensions\s*=\s*@\(([^)]*)\)", script)
+    assert extension_list is not None
+    assert set(re.findall(r'"(\.[a-z]+)"', extension_list.group(1))) == {
+        ".md",
+        ".txt",
+        ".css",
+        ".scss",
+        ".less",
+    }
+
 
 def test_untracked_scan_uses_streaming_file_apis():
     script = read("scripts/verify-fast.ps1")
@@ -367,6 +377,31 @@ def test_static_file_rejects_unsupported_extensions(verifier_repo: VerifierRepo)
 
     assert result.returncode != 0
     assert "Unsupported static file" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("static_file", "content"),
+    [
+        ("package.json", b"{}\n"),
+        ("compose.yml", b"services: {}\n"),
+        (".github/workflows/ci.yaml", b"name: ci\n"),
+        ("page.html", b"<p>content</p>\n"),
+    ],
+)
+def test_static_file_rejects_structured_and_config_files(
+    verifier_repo: VerifierRepo, static_file: str, content: bytes
+):
+    repo, environment = verifier_repo
+    target = repo / static_file
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+
+    result = run_verifier(repo, environment, "-StaticFile", static_file)
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert f"Unsupported static file: {static_file}" in output
+    assert "use full verification" in output
 
 
 @pytest.mark.parametrize(

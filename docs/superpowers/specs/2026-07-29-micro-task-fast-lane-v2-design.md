@@ -13,8 +13,9 @@ workflow policy; this design records the verifier contract and rationale.
 - JavaScript or TypeScript production changes require `-LintFile` for every
   changed code file. Behavior changes additionally require `-FrontendTest`.
 - Documentation and style changes use `-StaticFile` plus any necessary manual
-  check. HTML, JSON, YAML, or YML are eligible only as pure non-behavioral static
-  content.
+  check. `-StaticFile` supports only Markdown, plain text, CSS, SCSS, and Less.
+  HTML, JSON, YAML, and YML require complete verification, even for small
+  changes.
 - Shared build, deployment, authentication, and security configuration always
   escalates to complete verification.
 
@@ -31,9 +32,9 @@ TypeScript file must be named by `-LintFile`, and any changed Python file
 requires at least one `-BackendTest`. Unsupported changed files require complete
 verification.
 
-The allowed extensions remain Markdown, plain text, CSS, SCSS, Less, HTML,
-JSON, YAML, and YML. Extension eligibility does not reclassify behavioral or
-high-risk configuration as static content.
+The allowed extensions are `.md`, `.txt`, `.css`, `.scss`, and `.less`.
+Structured and configuration formats are intentionally excluded from the fast
+lane rather than classified by filename or presumed intent.
 
 ## Workflow boundaries
 

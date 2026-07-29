@@ -43,9 +43,10 @@ security behavior.
     every changed code file. Add a targeted `-FrontendTest` whenever behavior
     changes.
   - Documentation and style changes use `-StaticFile` plus any necessary manual
-    check. HTML, JSON, YAML, or YML targets qualify only as pure non-behavioral
-    static content. Shared build, deployment, authentication, or security
-    configuration is not static content and must use complete verification.
+    check. `-StaticFile` supports only Markdown, plain text, CSS, SCSS, and Less.
+    HTML, JSON, YAML, and YML require complete verification, even for small
+    changes. Shared build, deployment, authentication, or security configuration
+    is not static content and must also use complete verification.
 - Run `scripts\verify-fast.ps1` with at least one relevant `-BackendTest`,
   `-FrontendTest`, `-LintFile`, or `-StaticFile` target. Each option accepts
   comma-separated values. The fast verifier checks unstaged, staged, and
