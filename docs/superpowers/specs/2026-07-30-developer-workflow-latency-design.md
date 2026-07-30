@@ -1,6 +1,6 @@
 # Developer Workflow Latency Design
 
-**Date:** 2026-07-30  
+**Date:** 2026-07-30
 **Status:** Approved for implementation planning
 
 ## Problem
