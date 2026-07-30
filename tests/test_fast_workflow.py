@@ -50,22 +50,30 @@ def isolated_subprocess_environment(tmp_path: Path) -> dict[str, str]:
 
 
 def terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    else:
-        try:
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        else:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+    except Exception:
+        pass
 
-    if process.poll() is None:
-        process.kill()
+    try:
+        if process.poll() is None:
+            process.kill()
+    except Exception:
+        pass
+
+    try:
+        process.wait(timeout=5)
+    except Exception:
+        pass
 
 
 def run_subprocess_with_timeout(
@@ -149,6 +157,45 @@ def test_timed_subprocess_kills_child_process_tree_and_reports_diagnostics(
     assert "parent-started" in diagnostic
     assert "stdout=" in diagnostic
     assert "stderr=" in diagnostic
+
+
+@pytest.mark.parametrize(
+    "taskkill_error",
+    [
+        pytest.param(
+            subprocess.TimeoutExpired(["taskkill"], 10),
+            id="timeout",
+        ),
+        pytest.param(OSError("taskkill unavailable"), id="os-error"),
+        pytest.param(RuntimeError("taskkill failed unexpectedly"), id="unexpected"),
+    ],
+)
+def test_windows_process_tree_cleanup_falls_back_when_taskkill_fails(
+    monkeypatch: pytest.MonkeyPatch, taskkill_error: Exception
+):
+    calls: list[object] = []
+
+    class FakeProcess:
+        pid = 1234
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            calls.append("kill")
+
+        def wait(self, timeout):
+            calls.append(("wait", timeout))
+
+    def fail_taskkill(*args, **kwargs):
+        raise taskkill_error
+
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(subprocess, "run", fail_taskkill)
+
+    terminate_process_tree(FakeProcess())
+
+    assert calls == ["kill", ("wait", 5)]
 
 
 def run_checked(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
@@ -1407,6 +1454,64 @@ def test_task_file_rejects_a_code_symbolic_link_before_verification(
 
     assert result.returncode != 0
     assert "symbolic link" in (result.stdout + result.stderr).casefold()
+
+
+@pytest.mark.parametrize(
+    ("option", "repo_relative_path", "verifier_target"),
+    [
+        pytest.param("-BackendTest", "linked.py", "linked.py", id="backend"),
+        pytest.param(
+            "-FrontendTest",
+            "frontend/src/linked.test.ts",
+            "src/linked.test.ts",
+            id="frontend",
+        ),
+        pytest.param("-LintFile", "frontend/src/linked.ts", "src/linked.ts", id="lint"),
+        pytest.param("-TaskFile", "linked.py", "linked.py", id="code-task-file"),
+    ],
+)
+def test_code_targets_reject_git_index_mode_120000(
+    verifier_repo: VerifierRepo,
+    option: str,
+    repo_relative_path: str,
+    verifier_target: str,
+):
+    repo, environment = verifier_repo
+    target = repo / repo_relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("outside-target", encoding="utf-8")
+    blob = run_subprocess_with_timeout(
+        ["git", "hash-object", "-w", repo_relative_path],
+        cwd=repo,
+        environment=environment,
+        timeout_seconds=20,
+    )
+    assert blob.returncode == 0, blob.stdout + blob.stderr
+    run_checked(
+        [
+            "git",
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"120000,{blob.stdout.strip()},{repo_relative_path}",
+        ],
+        repo,
+        environment,
+    )
+
+    arguments = [option, verifier_target]
+    if option == "-TaskFile":
+        backend_test = repo / "tests" / "test_probe.py"
+        backend_test.parent.mkdir()
+        backend_test.write_text(
+            "def test_probe():\n    assert True\n", encoding="utf-8"
+        )
+        arguments.extend(["-BackendTest", "tests/test_probe.py"])
+
+    result = run_verifier(repo, environment, *arguments)
+
+    assert result.returncode != 0
+    assert "Git symbolic link" in result.stdout + result.stderr
 
 
 def test_changed_python_is_black_checked_before_backend_tests(
