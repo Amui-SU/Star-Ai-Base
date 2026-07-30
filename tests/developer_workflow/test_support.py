@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import selectors
 import subprocess
 import sys
 import time
@@ -201,17 +202,16 @@ def test_run_command_bounds_output_from_child_that_escapes_process_group(
 
     started = time.monotonic()
     try:
-        try:
-            result = run_command(
+        with pytest.raises(AssertionError) as exc_info:
+            run_command(
                 [sys.executable, "-c", parent_script],
                 tmp_path,
                 os.environ.copy(),
                 timeout=2,
             )
-        except AssertionError as error:
-            assert "cleanup" in str(error) or "timed out" in str(error)
-        else:
-            assert "target complete" in result.stdout
+        message = str(exc_info.value)
+        assert "stdout" in message
+        assert "output may be truncated" in message
         assert time.monotonic() - started < 10
     finally:
         if escaped_pid_file.exists():
@@ -229,6 +229,87 @@ def test_posix_output_capture_uses_single_threaded_selector_deadlines() -> None:
     assert "os.set_blocking" in runner_source
     assert "os.read" in module_source
     assert "time.monotonic" in module_source
+
+
+@pytest.mark.parametrize("failing_pipe_call", [2, 3])
+def test_posix_pipe_setup_failure_closes_previously_created_fds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failing_pipe_call: int,
+) -> None:
+    real_pipe = os.pipe
+    created_fds: list[int] = []
+    pipe_calls = 0
+
+    def failing_pipe() -> tuple[int, int]:
+        nonlocal pipe_calls
+        pipe_calls += 1
+        if pipe_calls == failing_pipe_call:
+            raise OSError("simulated pipe failure")
+        descriptors = real_pipe()
+        created_fds.extend(descriptors)
+        return descriptors
+
+    monkeypatch.setattr(support.os, "pipe", failing_pipe)
+    try:
+        with pytest.raises(OSError, match="simulated pipe failure"):
+            support._run_posix_command(
+                [sys.executable, "-c", "pass"], tmp_path, os.environ.copy(), 1
+            )
+        _assert_fds_closed(created_fds)
+    finally:
+        _force_close_fds(created_fds)
+
+
+def test_posix_selector_setup_failure_closes_all_pipe_fds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_pipe = os.pipe
+    created_fds: list[int] = []
+
+    def recording_pipe() -> tuple[int, int]:
+        descriptors = real_pipe()
+        created_fds.extend(descriptors)
+        return descriptors
+
+    def failing_selector() -> selectors.BaseSelector:
+        raise OSError("simulated selector failure")
+
+    monkeypatch.setattr(support.os, "pipe", recording_pipe)
+    monkeypatch.setattr(support.selectors, "DefaultSelector", failing_selector)
+    try:
+        with pytest.raises(OSError, match="simulated selector failure"):
+            support._run_posix_command(
+                [sys.executable, "-c", "pass"], tmp_path, os.environ.copy(), 1
+            )
+        _assert_fds_closed(created_fds)
+    finally:
+        _force_close_fds(created_fds)
+
+
+def test_posix_output_deadline_reports_registered_channels() -> None:
+    class Key:
+        def __init__(self, channel: str) -> None:
+            self.data = channel
+
+    class DeadlineSelector:
+        def get_map(self) -> dict[int, Key]:
+            return {11: Key("stdout"), 12: Key("stderr")}
+
+        def select(self, timeout: float) -> list[object]:
+            return []
+
+    error = support._drain_posix_output(
+        DeadlineSelector(),
+        deadline=time.monotonic() + 1,
+        stdout_chunks=[],
+        stderr_chunks=[],
+    )
+
+    assert error is not None
+    assert "stdout" in str(error)
+    assert "stderr" in str(error)
+    assert "output may be truncated" in str(error)
 
 
 def test_posix_group_cleanup_kills_stable_group_before_reaping_leader() -> None:
@@ -344,3 +425,17 @@ def _force_cleanup(pid: int) -> None:
         os.kill(pid, 9)
     except ProcessLookupError:
         pass
+
+
+def _assert_fds_closed(descriptors: list[int]) -> None:
+    for descriptor in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+
+
+def _force_close_fds(descriptors: list[int]) -> None:
+    for descriptor in descriptors:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass

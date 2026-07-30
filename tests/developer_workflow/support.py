@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from typing import NoReturn
 
@@ -197,17 +198,8 @@ def _run_windows_command(
 def _run_posix_command(
     args: list[str], cwd: Path, env: dict[str, str], timeout: float
 ) -> subprocess.CompletedProcess[str]:
-    result_read_fd, result_write_fd = os.pipe()
-    stdout_read_fd, stdout_write_fd = os.pipe()
-    stderr_read_fd, stderr_write_fd = os.pipe()
-    open_fds = {
-        result_read_fd,
-        result_write_fd,
-        stdout_read_fd,
-        stdout_write_fd,
-        stderr_read_fd,
-        stderr_write_fd,
-    }
+    resources = ExitStack()
+    open_fds: set[int] = set()
     process: subprocess.Popen[bytes] | None = None
     stdout_chunks: list[bytes] = []
     stderr_chunks: list[bytes] = []
@@ -215,8 +207,12 @@ def _run_posix_command(
     target_returncode: int | None = None
     cleanup_error: AssertionError | None = None
     cleanup_attempted = False
-    selector = selectors.DefaultSelector()
     try:
+        result_read_fd, result_write_fd = _open_managed_pipe(resources, open_fds)
+        stdout_read_fd, stdout_write_fd = _open_managed_pipe(resources, open_fds)
+        stderr_read_fd, stderr_write_fd = _open_managed_pipe(resources, open_fds)
+        selector = selectors.DefaultSelector()
+        resources.callback(selector.close)
         command = [
             sys.executable,
             "-c",
@@ -280,9 +276,7 @@ def _run_posix_command(
                 kill_signal=signal.SIGKILL,
             )
             cleanup_error = _combine_cleanup_errors(cleanup_error, fallback_error)
-        selector.close()
-        for fd in tuple(open_fds):
-            _close_raw_fd(fd, open_fds)
+        resources.close()
 
     stdout = b"".join(stdout_chunks).decode("utf-8", errors="replace")
     stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace")
@@ -412,10 +406,10 @@ def _drain_posix_output(
     while any(key.data in {"stdout", "stderr"} for key in selector.get_map().values()):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None
+            return _truncated_output_error(selector)
         events = selector.select(remaining)
         if not events:
-            return None
+            return _truncated_output_error(selector)
         for key, _ in events:
             if key.data not in {"stdout", "stderr"}:
                 selector.unregister(key.fd)
@@ -435,6 +429,23 @@ def _drain_posix_output(
     return None
 
 
+def _truncated_output_error(
+    selector: selectors.BaseSelector,
+) -> AssertionError:
+    channels = sorted(
+        {
+            str(key.data)
+            for key in selector.get_map().values()
+            if key.data in {"stdout", "stderr"}
+        }
+    )
+    channel_list = ", ".join(channels) if channels else "unknown"
+    return AssertionError(
+        "output channels did not reach EOF before cleanup deadline: "
+        f"{channel_list}; output may be truncated"
+    )
+
+
 def _close_raw_fd(fd: int, open_fds: set[int]) -> None:
     if fd not in open_fds:
         return
@@ -444,6 +455,14 @@ def _close_raw_fd(fd: int, open_fds: set[int]) -> None:
         pass
     finally:
         open_fds.discard(fd)
+
+
+def _open_managed_pipe(resources: ExitStack, open_fds: set[int]) -> tuple[int, int]:
+    descriptors = os.pipe()
+    for descriptor in descriptors:
+        open_fds.add(descriptor)
+        resources.callback(_close_raw_fd, descriptor, open_fds)
+    return descriptors
 
 
 def _combine_cleanup_errors(
