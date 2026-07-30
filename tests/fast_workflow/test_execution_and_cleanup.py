@@ -221,24 +221,42 @@ def test_frontend_executable_resolution_does_not_depend_on_os_environment(
     assert log.read_text(encoding="utf-8").split() == ["--", "src/widget.ts"]
 
 
-def test_lint_bracket_path_is_rejected_before_eslint_can_match_a_sibling(
-    verifier_repo: VerifierRepo, tmp_path: Path
+@pytest.mark.parametrize(
+    ("lint_target", "matched_sibling"),
+    [
+        pytest.param("src/[C]ase.ts", "src/Case.ts", id="bracket"),
+        pytest.param(
+            "components/+(ChatPanel).tsx",
+            "components/ChatPanel.tsx",
+            id="extglob-plus",
+        ),
+        pytest.param(
+            "components/@(ChatPanel).tsx",
+            "components/ChatPanel.tsx",
+            id="extglob-at",
+        ),
+    ],
+)
+def test_lint_glob_path_is_rejected_before_eslint_can_match_a_sibling(
+    verifier_repo: VerifierRepo,
+    tmp_path: Path,
+    lint_target: str,
+    matched_sibling: str,
 ):
     repo, environment = verifier_repo
-    write_frontend_target(repo, "src/Case.ts")
-    run_checked(["git", "add", "frontend/src/Case.ts"], repo, environment)
+    write_frontend_target(repo, matched_sibling)
+    run_checked(["git", "add", f"frontend/{matched_sibling}"], repo, environment)
     run_checked(
         ["git", "commit", "--no-gpg-sign", "--no-verify", "-m", "add sibling"],
         repo,
         environment,
     )
-    write_frontend_target(repo, "src/[C]ase.ts")
     write_frontend_stub(repo, "eslint")
     log = tmp_path / "eslint-arguments.txt"
     environment["FAST_VERIFIER_LOG"] = str(log)
     environment["FAST_VERIFIER_EXIT"] = "0"
 
-    result = run_verifier(repo, environment, "-LintFile", "src/[C]ase.ts")
+    result = run_verifier(repo, environment, "-LintFile", lint_target)
 
     assert result.returncode != 0
     assert "ESLint glob" in result.stdout + result.stderr

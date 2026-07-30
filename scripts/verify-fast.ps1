@@ -36,7 +36,7 @@ function Expand-Targets {
 function Test-ContainsEslintGlobCharacter {
     param([string]$Target)
 
-    return $Target.IndexOfAny([char[]]"*?[]{}!") -ge 0
+    return $Target.IndexOfAny([char[]]"*?[]{}()!+@") -ge 0
 }
 
 function Invoke-Step {
@@ -552,7 +552,7 @@ else {
 
 foreach ($lintTarget in $LintFile) {
     if (Test-ContainsEslintGlobCharacter $lintTarget) {
-        Write-Fail "Lint target must not contain ESLint glob characters (* ? [ ] { } !): $lintTarget"
+        Write-Fail "Lint target must not contain ESLint glob or extglob characters (* ? [ ] { } ( ) ! + @): $lintTarget"
         exit 2
     }
     $verifiedTarget = Resolve-VerifiedFileTarget $lintTarget $frontendRoot $frontendRootPrefix "Lint" @(".js", ".jsx", ".ts", ".tsx")

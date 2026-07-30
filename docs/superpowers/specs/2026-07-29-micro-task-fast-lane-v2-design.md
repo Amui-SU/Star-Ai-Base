@@ -35,8 +35,8 @@ tool target is an existing relative real file inside its required root: options,
 absolute paths, traversal, reparse points, symbolic links, and Git mode-120000
 entries are rejected. A backend target may append a pytest node id (`::...`) to
 an otherwise verified `.py` file. Lint targets additionally reject ESLint glob
-characters (`*`, `?`, `[`, `]`, `{`, `}`, and `!`) so ESLint cannot reinterpret
-an already verified literal path.
+or extglob characters (`*`, `?`, `[`, `]`, `{`, `}`, `(`, `)`, `!`, `+`, and
+`@`) so ESLint cannot reinterpret an already verified literal path.
 
 The explicit scope limits changed-file mapping, tracked unstaged and staged
 whitespace checks, and untracked text hygiene to the declared task changeset. It

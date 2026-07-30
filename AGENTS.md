@@ -58,7 +58,8 @@ security behavior.
   under its required root (and cannot be a symbolic link, reparse point, Git
   symlink, absolute path, traversal, or tool option); backend targets may append
   a pytest node id after a verified `.py` file, while lint targets cannot
-  contain ESLint glob characters (`*`, `?`, `[`, `]`, `{`, `}`, or `!`). The fast verifier checks
+  contain ESLint glob or extglob characters (`*`, `?`, `[`, `]`, `{`, `}`, `(`,
+  `)`, `!`, `+`, or `@`). The fast verifier checks
   unstaged, staged, and untracked changes, requires each static target to be
   changed, and validates every in-scope static file as NUL-free strict UTF-8
   text within an 8 MiB limit. It requires a complete changed-file mapping regardless of other targets:

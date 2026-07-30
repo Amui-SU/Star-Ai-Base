@@ -57,7 +57,7 @@ def test_fast_lane_maps_file_types_to_specific_verification_targets():
             "authentication",
             "security",
             "complete verification",
-            "ESLint glob characters",
+            "ESLint glob or extglob characters",
             "8 MiB",
         ]:
             assert token.casefold() in compact.casefold()
@@ -236,6 +236,12 @@ def test_fast_verifier_uses_runtime_os_detection_and_ordinal_path_deduplication(
     assert "RuntimeInformation]::IsOSPlatform" in script
     assert "OSPlatform]::Windows" in script
     assert "$pathComparer = [System.StringComparer]::Ordinal" in script
+
+
+def test_fast_verifier_rejects_the_complete_eslint_glob_character_set():
+    script = read("scripts/verify-fast.ps1")
+
+    assert '[char[]]"*?[]{}()!+@"' in script
 
 
 def test_fast_lane_preserves_full_verification_boundaries():

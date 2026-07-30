@@ -69,7 +69,9 @@ def test_tool_targets_require_existing_non_traversing_relative_files(
     assert "target" in (result.stdout + result.stderr).casefold()
 
 
-@pytest.mark.parametrize("glob_character", ["*", "?", "[", "]", "{", "}", "!"])
+@pytest.mark.parametrize(
+    "glob_character", ["*", "?", "[", "]", "{", "}", "(", ")", "!", "+", "@"]
+)
 def test_lint_targets_reject_eslint_glob_characters(
     verifier_repo: VerifierRepo, glob_character: str
 ):
