@@ -30,6 +30,7 @@ WEB_EXTENSIONS = (
     "yaml",
     "yml",
 )
+_WINDOWS_GIT_SHIM: Path | None = None
 
 
 def _powershell() -> str:
@@ -225,8 +226,8 @@ def test_web_and_docs_files_use_one_pinned_prettier_with_frontend_relative_paths
     records = _records(log_path)
     assert len(records) == 1
     assert records[0]["tool"] == "prettier"
-    assert records[0]["argv"][0] == "--check"
-    assert {str(value).replace("\\", "/") for value in records[0]["argv"][1:]} == {
+    assert records[0]["argv"][:2] == ["--check", "--"]
+    assert {str(value).replace("\\", "/") for value in records[0]["argv"][2:]} == {
         "src/web file.ts",
         "../docs/guide.md",
     }
@@ -245,9 +246,35 @@ def test_every_supported_web_extension_is_sent_to_prettier(tmp_path: Path) -> No
 
     records = _records(log_path)
     assert len(records) == 1
-    assert {str(value).replace("\\", "/") for value in records[0]["argv"][1:]} == {
+    assert records[0]["argv"][:2] == ["--check", "--"]
+    assert {str(value).replace("\\", "/") for value in records[0]["argv"][2:]} == {
         f"src/probe.{extension}" for extension in WEB_EXTENSIONS
     }
+
+
+def test_prettier_batches_option_like_unicode_glob_and_newline_paths_literally(
+    tmp_path: Path,
+) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    _install_prettier_recorder(repo)
+    paths = ["frontend/--config=foo/probe.ts", "docs/说明[ab].md"]
+    if os.name != "nt":
+        paths.append("docs/line\nbreak.md")
+    for path in paths:
+        _write(repo, path, "content\n")
+    _stage(repo, environment, *paths)
+
+    _run(repo, environment)
+
+    records = _records(log_path)
+    assert len(records) == 1
+    assert records[0]["tool"] == "prettier"
+    assert records[0]["argv"][:2] == ["--check", "--"]
+    actual_paths = {str(value).replace("\\", "/") for value in records[0]["argv"][2:]}
+    expected_paths = {"--config=foo/probe.ts", "../docs/说明[ab].md"}
+    if os.name != "nt":
+        expected_paths.add("../docs/line\nbreak.md")
+    assert actual_paths == expected_paths
 
 
 @pytest.mark.parametrize(
@@ -283,6 +310,55 @@ def test_missing_pinned_prettier_fails_closed_with_dependency_guidance(
     assert "prettier" in failure.casefold()
     assert "depend" in failure.casefold() or "npm" in failure.casefold()
     assert _records(log_path) == []
+
+
+def test_missing_python_fails_closed_with_executable_setup_guidance(
+    tmp_path: Path,
+) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    _install_failing_python_shim(repo, environment)
+    path = "probe.py"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "python" in failure.casefold()
+    assert "python -m pip install black" in failure
+    assert _records(log_path) == []
+
+
+def test_missing_black_fails_closed_with_executable_setup_guidance(
+    tmp_path: Path,
+) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    black_module = repo / ".test-tools" / "black"
+    (black_module / "__init__.py").write_text(
+        "raise ImportError('Black deliberately unavailable')\n", encoding="utf-8"
+    )
+    (black_module / "__main__.py").unlink()
+    path = "probe.py"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "black" in failure.casefold()
+    assert "python -m pip install black" in failure
+    assert _records(log_path) == []
+
+
+def _install_failing_python_shim(repo: Path, environment: dict[str, str]) -> None:
+    shim_directory = repo / ".python-failure-shim"
+    shim_directory.mkdir()
+    if os.name == "nt":
+        launcher = shim_directory / "python.cmd"
+        launcher.write_text("@exit /b 127\r\n", encoding="utf-8")
+    else:
+        launcher = shim_directory / "python"
+        launcher.write_text("#!/bin/sh\nexit 127\n", encoding="utf-8")
+        launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
+    environment["PATH"] = str(shim_directory) + os.pathsep + environment["PATH"]
 
 
 def test_cached_diff_check_failure_propagates_before_formatters(tmp_path: Path) -> None:
@@ -423,10 +499,6 @@ def test_filesystem_symbolic_link_is_rejected(tmp_path: Path) -> None:
     assert _records(log_path) == []
 
 
-@pytest.mark.skipif(
-    os.name == "nt",
-    reason="ProcessStartInfo resolves git.exe before a test git.cmd shim",
-)
 @pytest.mark.parametrize("malicious_path", ["../outside.py", "/absolute.py"])
 def test_enumerated_paths_must_be_repo_relative_without_traversal(
     tmp_path: Path, malicious_path: str
@@ -441,7 +513,6 @@ def test_enumerated_paths_must_be_repo_relative_without_traversal(
     assert "relative" in failure.casefold() or "traversal" in failure.casefold()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows Git paths are Unicode strings")
 def test_invalid_utf8_from_git_is_rejected(tmp_path: Path) -> None:
     repo, environment, _ = _prepare_repo(tmp_path)
     _install_git_enumerator_shim(repo, environment, b"invalid-\xff.py\0")
@@ -451,16 +522,99 @@ def test_invalid_utf8_from_git_is_rejected(tmp_path: Path) -> None:
     assert "utf-8" in failure.casefold()
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [b"truncated.py", b"valid.py\0truncated.py", b"\0"],
+    ids=["missing-final-nul", "truncated-second-path", "empty-path"],
+)
+def test_malformed_or_truncated_nul_stream_is_rejected(
+    tmp_path: Path, payload: bytes
+) -> None:
+    repo, environment, _ = _prepare_repo(tmp_path)
+    _install_git_enumerator_shim(repo, environment, payload)
+
+    failure = _failure(repo, environment)
+
+    assert "invalid utf-8 staged path" in failure.casefold()
+
+
 def _install_git_enumerator_shim(
     repo: Path, environment: dict[str, str], payload: bytes
 ) -> None:
+    global _WINDOWS_GIT_SHIM
+
     real_git = shutil.which("git")
     assert real_git is not None
     shim_directory = repo / ".git-enumerator-shim"
     shim_directory.mkdir()
-    shim_script = shim_directory / "git-shim.py"
-    shim_script.write_text(
-        """import base64
+    if os.name == "nt":
+        launcher = shim_directory / "git.exe"
+        if _WINDOWS_GIT_SHIM is not None:
+            shutil.copy2(_WINDOWS_GIT_SHIM, launcher)
+        else:
+            source = shim_directory / "git-shim.cs"
+            source.write_text(
+                """using System;
+using System.IO;
+
+internal static class GitShim
+{
+    private static int Main(string[] args)
+    {
+        string[] expected = {
+            "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"
+        };
+        bool isEnumeration = args.Length == expected.Length;
+        for (int index = 0; isEnumeration && index < args.Length; index++)
+        {
+            isEnumeration = String.Equals(args[index], expected[index], StringComparison.Ordinal);
+        }
+        if (isEnumeration)
+        {
+            byte[] payload = Convert.FromBase64String(
+                Environment.GetEnvironmentVariable("STAGED_VERIFY_GIT_PAYLOAD")
+            );
+            using (Stream output = Console.OpenStandardOutput())
+            {
+                output.Write(payload, 0, payload.Length);
+            }
+        }
+        return 0;
+    }
+}
+""",
+                encoding="utf-8",
+            )
+            compiler_candidates = [
+                Path(os.environ.get("WINDIR", r"C:\Windows"))
+                / "Microsoft.NET"
+                / framework
+                / "v4.0.30319"
+                / "csc.exe"
+                for framework in ("Framework64", "Framework")
+            ]
+            compiler = next(
+                (path for path in compiler_candidates if path.is_file()), None
+            )
+            assert (
+                compiler is not None
+            ), "Windows .NET Framework C# compiler is required"
+            _checked(
+                [
+                    str(compiler),
+                    "/nologo",
+                    "/target:exe",
+                    f"/out:{launcher}",
+                    str(source),
+                ],
+                repo,
+                environment,
+            )
+            _WINDOWS_GIT_SHIM = launcher
+    else:
+        shim_script = shim_directory / "git-shim.py"
+        shim_script.write_text(
+            """import base64
 import os
 import subprocess
 import sys
@@ -472,17 +626,8 @@ if args == expected:
     raise SystemExit(0)
 raise SystemExit(subprocess.run([os.environ["STAGED_VERIFY_REAL_GIT"], *args]).returncode)
 """,
-        encoding="utf-8",
-    )
-    if os.name == "nt":
-        launcher = shim_directory / "git.cmd"
-        launcher.write_text(
-            "@echo off\r\n"
-            '"%STAGED_VERIFY_PYTHON%" "%~dp0git-shim.py" %*\r\n'
-            "exit /b %errorlevel%\r\n",
             encoding="utf-8",
         )
-    else:
         launcher = shim_directory / "git"
         launcher.write_text(
             "#!/bin/sh\n"

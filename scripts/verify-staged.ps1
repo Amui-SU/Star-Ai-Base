@@ -213,6 +213,45 @@ function Resolve-StagedFile {
     }
 }
 
+function Confirm-PythonFormatterDependencies {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $pythonCommand) {
+        Write-Fail (
+            "Missing Python executable. Install Python 3, ensure python is on PATH, " +
+            "then run: python -m pip install black"
+        )
+        exit 1
+    }
+
+    $previousErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        python --version > $null 2>&1
+        $pythonExitCode = $LASTEXITCODE
+        python -c "import black" > $null 2>&1
+        $blackExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorPreference
+    }
+
+    if ($pythonExitCode -ne 0) {
+        Write-Fail (
+            "Python is unavailable or could not start. Install Python 3, ensure python " +
+            "is on PATH, then run: python -m pip install black"
+        )
+        exit 1
+    }
+
+    if ($blackExitCode -ne 0) {
+        Write-Fail (
+            "Missing Python formatter dependency: Black. " +
+            "Prepare it with: python -m pip install black"
+        )
+        exit 1
+    }
+}
+
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $frontendRoot = Join-Path $projectRoot "frontend"
 $projectRootPrefix = $projectRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
@@ -254,6 +293,7 @@ $webPaths = @(
 )
 
 if ($pythonPaths.Count -gt 0) {
+    Confirm-PythonFormatterDependencies
     Invoke-NativeStep "staged Python formatting" {
         python -m black --check -- @pythonPaths
     }
@@ -284,7 +324,7 @@ if ($webPaths.Count -gt 0) {
     Push-Location $frontendRoot
     try {
         Invoke-NativeStep "staged web and docs formatting" {
-            & $prettier --check @frontendRelativePaths
+            & $prettier --check -- @frontendRelativePaths
         }
     }
     finally {
