@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Task classification, worktree choice, and verification rules are defined only in `AGENTS.md`.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 项目概述

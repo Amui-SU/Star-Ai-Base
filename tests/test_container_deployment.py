@@ -29,6 +29,7 @@ VALID_PERSONAL_ACR_BOUNDARY = (
 INVALID_PERSONAL_ACR_BOUNDARY = (
     "crpi-" + "a" * 59 + ".cn-beijing.personal.cr.aliyuncs.com"
 )
+SCRIPT_SUBPROCESS_TIMEOUT_SECONDS = 30
 
 
 def read(relative_path: str) -> str:
@@ -2251,7 +2252,7 @@ def run_restore(
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=10,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
         check=False,
     )
 
@@ -2276,7 +2277,7 @@ def run_recover(
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=10,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
         check=False,
     )
 
