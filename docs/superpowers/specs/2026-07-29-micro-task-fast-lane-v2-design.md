@@ -8,8 +8,10 @@ workflow policy; this design records the verifier contract and rationale.
 
 ## Verification mapping
 
-- Python production changes require a targeted `-BackendTest` and a Black check
-  covering all changed Python files.
+- Python production changes require a targeted `-BackendTest`. The verifier
+  automatically runs `python -m black --check --` over every scoped changed
+  Python file before backend tests, so task records do not claim a separate
+  unexecuted Black command.
 - JavaScript or TypeScript production changes require `-LintFile` for every
   changed code file. Behavior changes additionally require `-FrontendTest`.
 - Documentation and style changes use `-StaticFile` plus any necessary manual
@@ -28,7 +30,11 @@ In a clean or isolated checkout, omit `-TaskFile`; verification covers all
 changed files. With unrelated non-overlapping dirty changes, list every task
 file using `-TaskFile` and record the actual command and targets. `-TaskFile`
 accepts comma-separated values, is not a verification target, cannot declare an
-unchanged file, and cannot contain duplicate or out-of-repository paths.
+unchanged file, and cannot contain duplicate or out-of-repository paths. Every
+tool target is an existing relative real file inside its required root: options,
+absolute paths, traversal, reparse points, symbolic links, and Git mode-120000
+entries are rejected. A backend target may append a pytest node id (`::...`) to
+an otherwise verified `.py` file.
 
 The explicit scope limits changed-file mapping, tracked unstaged and staged
 whitespace checks, and untracked text hygiene to the declared task changeset. It
@@ -55,6 +61,11 @@ verification.
 The allowed extensions are `.md`, `.txt`, `.css`, `.scss`, and `.less`.
 Structured and configuration formats are intentionally excluded from the fast
 lane rather than classified by filename or presumed intent.
+
+Every in-scope static target is read as strict streaming UTF-8 and must contain
+no NUL bytes. Invalid UTF-8 or NUL means the fast lane fails closed and requires
+complete verification; unrelated untracked binary files remain outside this
+static-file contract.
 
 ## Workflow boundaries
 

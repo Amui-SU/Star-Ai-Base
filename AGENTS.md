@@ -40,9 +40,10 @@ security behavior.
   documentation, comments, or visual-value-only edits may omit a new automated
   test when the task record explains why.
 - Map every changed production file to its relevant verification:
-  - Python production changes require at least one targeted `-BackendTest` plus
-    a Black check covering all changed Python files, such as
-    `black --check app/service.py tests/test_service.py`.
+  - Python production changes require at least one targeted `-BackendTest`.
+    `scripts\verify-fast.ps1` automatically runs Black over every scoped
+    changed Python file before the backend tests; do not record a separate
+    unexecuted Black command.
   - JavaScript or TypeScript production changes require a `-LintFile` target for
     every changed code file. Add a targeted `-FrontendTest` whenever behavior
     changes.
@@ -53,12 +54,16 @@ security behavior.
     is not static content and must also use complete verification.
 - Run `scripts\verify-fast.ps1` with at least one relevant `-BackendTest`,
   `-FrontendTest`, `-LintFile`, or `-StaticFile` target. Each option accepts
-  comma-separated values. The fast verifier checks unstaged, staged, and
-  untracked changes, requires each static target to be changed, and requires a
-  complete changed-file mapping regardless of other targets: every changed
-  static file needs `-StaticFile`, and every changed frontend JavaScript or
-  TypeScript file needs `-LintFile`. Unsupported changed files require complete
-  verification.
+  comma-separated values. Each target must be an existing relative real file
+  under its required root (and cannot be a symbolic link, reparse point, Git
+  symlink, absolute path, traversal, or tool option); backend targets may append
+  a pytest node id after a verified `.py` file. The fast verifier checks
+  unstaged, staged, and untracked changes, requires each static target to be
+  changed, validates every in-scope static file as NUL-free strict UTF-8 text,
+  and requires a complete changed-file mapping regardless of other targets:
+  every changed static file needs `-StaticFile`, and every changed frontend
+  JavaScript or TypeScript file needs `-LintFile`. Unsupported changed files
+  require complete verification.
 - In `Verification`, record the actual command, specific targets, and any
   required manual results. A bare “verified” is not evidence.
 - Example for a documentation task in a checkout with unrelated dirty changes:

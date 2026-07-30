@@ -1,8 +1,11 @@
 import os
 import re
+import signal
 import shutil
 import stat
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -46,16 +49,114 @@ def isolated_subprocess_environment(tmp_path: Path) -> dict[str, str]:
     return environment
 
 
-def run_checked(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
-    result = subprocess.run(
+def terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    if process.poll() is None:
+        process.kill()
+
+
+def run_subprocess_with_timeout(
+    command: list[str],
+    *,
+    cwd: Path,
+    environment: dict[str, str],
+    timeout_seconds: float,
+) -> subprocess.CompletedProcess[str]:
+    popen_options: dict[str, object] = {}
+    if os.name == "nt":
+        popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_options["start_new_session"] = True
+
+    process = subprocess.Popen(
         command,
         cwd=cwd,
         env=environment,
-        check=False,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
+        **popen_options,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        terminate_process_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+        raise AssertionError(
+            f"subprocess timed out after {timeout_seconds}s: "
+            f"args={command!r}\nstdout={stdout!r}\nstderr={stderr!r}"
+        ) from None
+
+    return subprocess.CompletedProcess(
+        command,
+        process.returncode,
+        stdout,
+        stderr,
+    )
+
+
+def test_timed_subprocess_kills_child_process_tree_and_reports_diagnostics(
+    tmp_path: Path,
+):
+    sentinel = tmp_path / "child-survived.txt"
+    child_code = (
+        "import pathlib,sys,time; "
+        "time.sleep(0.8); "
+        "pathlib.Path(sys.argv[1]).write_text('survived', encoding='utf-8')"
+    )
+    parent_code = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]]); "
+        "print('parent-started', flush=True); "
+        "time.sleep(10)"
+    )
+    command = [sys.executable, "-c", parent_code, child_code, str(sentinel)]
+
+    started = time.monotonic()
+    with pytest.raises(AssertionError) as error:
+        run_subprocess_with_timeout(
+            command,
+            cwd=tmp_path,
+            environment=os.environ.copy(),
+            timeout_seconds=0.1,
+        )
+    elapsed = time.monotonic() - started
+
+    time.sleep(1)
+    diagnostic = str(error.value)
+    assert elapsed < 5
+    assert not sentinel.exists()
+    assert repr(command) in diagnostic
+    assert "parent-started" in diagnostic
+    assert "stdout=" in diagnostic
+    assert "stderr=" in diagnostic
+
+
+def run_checked(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
+    result = run_subprocess_with_timeout(
+        command,
+        cwd=cwd,
+        environment=environment,
+        timeout_seconds=20,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -93,15 +194,11 @@ def run_verifier(
     if Path(shell).name.lower().startswith("powershell"):
         command.extend(["-ExecutionPolicy", "Bypass"])
     command.extend(["-File", "scripts/verify-fast.ps1", *arguments])
-    return subprocess.run(
+    return run_subprocess_with_timeout(
         command,
         cwd=repo,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+        environment=environment,
+        timeout_seconds=60,
     )
 
 
@@ -128,6 +225,13 @@ def write_frontend_stub(repo: Path, executable: str) -> Path:
         stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
 
     return stub
+
+
+def write_frontend_target(repo: Path, relative_path: str) -> Path:
+    target = repo / "frontend" / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("export {};\n", encoding="utf-8")
+    return target
 
 
 def test_agent_instructions_define_the_micro_task_fast_lane():
@@ -308,9 +412,9 @@ def test_fast_verifier_only_runs_explicit_targets():
     assert 'Invoke-Step "git diff --check"' in script
     assert "node_modules/.bin/vitest" in script
     assert "node_modules/.bin/eslint" in script
-    assert "& $vitest run @FrontendTest" in script
-    assert "& $eslint @LintFile" in script
-    assert "python -m pytest -q @BackendTest" in script
+    assert "& $vitest run @($frontendTestTargetsVerified.ToArray())" in script
+    assert "& $eslint -- @($lintTargetsVerified.ToArray())" in script
+    assert "python -m pytest -q -- @($backendTargetsVerified.ToArray())" in script
     assert "Provide at least one targeted check" in script
     assert "npm test" not in script
     assert "npx eslint" not in script
@@ -394,7 +498,7 @@ def test_static_file_accepts_supported_extensions(
 ):
     repo, environment = verifier_repo
     target = repo / static_file
-    target.parent.mkdir()
+    target.parent.mkdir(parents=True)
     target.write_text("content\n", encoding="utf-8")
 
     result = run_verifier(repo, environment, "-StaticFile", static_file)
@@ -568,6 +672,7 @@ def test_task_file_scope_still_requires_lint_for_changed_typescript(
     target = repo / "frontend" / "src" / "widget.ts"
     target.parent.mkdir(parents=True)
     target.write_bytes(b"export const value = 1;\n")
+    write_frontend_target(repo, "src/widget.test.ts")
     write_frontend_stub(repo, "vitest")
     environment["FAST_VERIFIER_LOG"] = str(tmp_path / "vitest-arguments.txt")
     environment["FAST_VERIFIER_EXIT"] = "0"
@@ -705,6 +810,7 @@ def test_backend_target_cannot_hide_missing_lint_for_changed_frontend_file(
     tests = repo / "tests"
     tests.mkdir()
     (tests / "test_probe.py").write_bytes(b"def test_probe():\n    assert True\n")
+    write_frontend_target(repo, "src/widget.tsx")
 
     result = run_verifier(
         repo,
@@ -733,6 +839,7 @@ def test_mixed_targets_continue_when_static_backend_and_lint_mapping_is_complete
     tests = repo / "tests"
     tests.mkdir()
     (tests / "test_probe.py").write_bytes(b"def test_probe():\n    assert True\n")
+    write_frontend_target(repo, "src/widget.tsx")
     write_frontend_stub(repo, "eslint")
     log = tmp_path / "eslint-arguments.txt"
     environment["FAST_VERIFIER_LOG"] = str(log)
@@ -750,7 +857,7 @@ def test_mixed_targets_continue_when_static_backend_and_lint_mapping_is_complete
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert log.read_text(encoding="utf-8").split() == ["src/widget.tsx"]
+    assert log.read_text(encoding="utf-8").split() == ["--", "src/widget.tsx"]
 
 
 def test_changed_python_requires_backend_target_even_with_frontend_target(
@@ -758,6 +865,7 @@ def test_changed_python_requires_backend_target_even_with_frontend_target(
 ):
     repo, environment = verifier_repo
     (repo / "change.py").write_bytes(b"value = 2\n")
+    write_frontend_target(repo, "src/unrelated.test.ts")
     write_frontend_stub(repo, "vitest")
     environment["FAST_VERIFIER_LOG"] = str(tmp_path / "vitest-arguments.txt")
     environment["FAST_VERIFIER_EXIT"] = "0"
@@ -926,7 +1034,8 @@ def test_untracked_binary_file_with_nul_is_skipped(verifier_repo: VerifierRepo):
 
     result = run_verifier(repo, environment, "-StaticFile", "binary.txt")
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "NUL" in result.stdout + result.stderr
 
 
 def test_untracked_invalid_utf8_file_is_skipped(verifier_repo: VerifierRepo):
@@ -935,7 +1044,8 @@ def test_untracked_invalid_utf8_file_is_skipped(verifier_repo: VerifierRepo):
 
     result = run_verifier(repo, environment, "-StaticFile", "binary.txt")
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "UTF-8" in result.stdout + result.stderr
 
 
 def test_large_untracked_text_file_reports_late_whitespace(
@@ -1034,16 +1144,16 @@ def test_static_file_rejects_symbolic_link_to_outside_repo(verifier_repo: Verifi
     result = run_verifier(repo, environment, "-StaticFile", "linked/outside.md")
 
     assert result.returncode != 0
-    assert (
-        "Static file path cannot contain a symbolic link"
-        in result.stdout + result.stderr
-    )
+    assert "symbolic link" in (result.stdout + result.stderr).casefold()
 
 
 def test_frontend_test_uses_local_vitest_with_expanded_targets(
     verifier_repo: VerifierRepo, tmp_path: Path
 ):
     repo, environment = verifier_repo
+    (repo / "README.md").write_bytes(b"changed\n")
+    write_frontend_target(repo, "src/one.test.ts")
+    write_frontend_target(repo, "src/two.test.ts")
     write_frontend_stub(repo, "vitest")
     log = tmp_path / "vitest-arguments.txt"
     environment["FAST_VERIFIER_LOG"] = str(log)
@@ -1052,6 +1162,10 @@ def test_frontend_test_uses_local_vitest_with_expanded_targets(
     result = run_verifier(
         repo,
         environment,
+        "-TaskFile",
+        "README.md",
+        "-StaticFile",
+        "README.md",
         "-FrontendTest",
         "src/one.test.ts,src/two.test.ts",
     )
@@ -1068,6 +1182,7 @@ def test_lint_file_uses_local_eslint_with_target(
     verifier_repo: VerifierRepo, tmp_path: Path
 ):
     repo, environment = verifier_repo
+    write_frontend_target(repo, "src/widget.ts")
     write_frontend_stub(repo, "eslint")
     log = tmp_path / "eslint-arguments.txt"
     environment["FAST_VERIFIER_LOG"] = str(log)
@@ -1076,7 +1191,7 @@ def test_lint_file_uses_local_eslint_with_target(
     result = run_verifier(repo, environment, "-LintFile", "src/widget.ts")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert log.read_text(encoding="utf-8").split() == ["src/widget.ts"]
+    assert log.read_text(encoding="utf-8").split() == ["--", "src/widget.ts"]
 
 
 @pytest.mark.parametrize(
@@ -1095,11 +1210,22 @@ def test_frontend_executable_failure_propagates_exit_code(
     step: str,
 ):
     repo, environment = verifier_repo
+    (repo / "README.md").write_bytes(b"changed\n")
+    write_frontend_target(repo, target)
     write_frontend_stub(repo, executable)
     environment["FAST_VERIFIER_LOG"] = str(tmp_path / "arguments.txt")
     environment["FAST_VERIFIER_EXIT"] = "23"
 
-    result = run_verifier(repo, environment, option, target)
+    result = run_verifier(
+        repo,
+        environment,
+        "-TaskFile",
+        "README.md",
+        "-StaticFile",
+        "README.md",
+        option,
+        target,
+    )
 
     assert result.returncode == 23, result.stdout + result.stderr
     assert f"[FAIL] {step} failed" in result.stdout
@@ -1110,9 +1236,20 @@ def test_missing_frontend_executable_has_clear_error(
     verifier_repo: VerifierRepo, option: str
 ):
     repo, environment = verifier_repo
-    (repo / "frontend").mkdir()
+    (repo / "README.md").write_bytes(b"changed\n")
+    target = "src/target.test.ts" if option == "-FrontendTest" else "src/target.ts"
+    write_frontend_target(repo, target)
 
-    result = run_verifier(repo, environment, option, "src/target.ts")
+    result = run_verifier(
+        repo,
+        environment,
+        "-TaskFile",
+        "README.md",
+        "-StaticFile",
+        "README.md",
+        option,
+        target,
+    )
 
     assert result.returncode != 0
     assert "Missing frontend dependency:" in result.stdout + result.stderr
@@ -1142,3 +1279,190 @@ def test_positional_target_is_not_bound_to_another_verifier_option(
 
     assert result.returncode != 0
     assert "targeted frontend tests" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("option", "executable", "safe_target", "injected_target"),
+    [
+        ("-BackendTest", None, "tests/test_probe.py", "--collect-only"),
+        ("-FrontendTest", "vitest", "src/probe.test.ts", "--passWithNoTests"),
+        ("-LintFile", "eslint", "src/probe.ts", "--fix"),
+    ],
+)
+def test_tool_targets_reject_comma_expanded_option_injection(
+    verifier_repo: VerifierRepo,
+    tmp_path: Path,
+    option: str,
+    executable: str | None,
+    safe_target: str,
+    injected_target: str,
+):
+    repo, environment = verifier_repo
+    target = repo / ("frontend" if option != "-BackendTest" else "") / safe_target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        (
+            "def test_probe():\n    assert True\n"
+            if target.suffix == ".py"
+            else "export {};\n"
+        ),
+        encoding="utf-8",
+    )
+    if executable is not None:
+        write_frontend_stub(repo, executable)
+        environment["FAST_VERIFIER_LOG"] = str(tmp_path / "tool-arguments.txt")
+        environment["FAST_VERIFIER_EXIT"] = "0"
+
+    result = run_verifier(repo, environment, option, f"{safe_target},{injected_target}")
+
+    assert result.returncode != 0
+    assert "must not start with '-'" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("option", "target"),
+    [
+        ("-BackendTest", "../outside.py"),
+        ("-BackendTest", "does-not-exist.py"),
+        ("-FrontendTest", "../outside.test.ts"),
+        ("-LintFile", "does-not-exist.ts"),
+    ],
+)
+def test_tool_targets_require_existing_non_traversing_relative_files(
+    verifier_repo: VerifierRepo, option: str, target: str
+):
+    repo, environment = verifier_repo
+    result = run_verifier(repo, environment, option, target)
+
+    assert result.returncode != 0
+    assert "target" in (result.stdout + result.stderr).casefold()
+
+
+def test_backend_target_allows_a_node_id_after_a_verified_python_file(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_probe.py").write_text(
+        "def test_probe():\n    assert True\n", encoding="utf-8"
+    )
+
+    result = run_verifier(
+        repo, environment, "-BackendTest", "tests/test_probe.py::test_probe"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+
+
+def test_task_file_rejects_a_code_symbolic_link_before_verification(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    outside = repo.parent / "outside.py"
+    outside.write_text("value = 1\n", encoding="utf-8")
+    linked = repo / "linked.py"
+    try:
+        linked.symlink_to(outside)
+    except OSError as error:
+        if os.name == "nt":
+            pytest.skip(f"cannot create symbolic links: {error}")
+        raise
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_probe.py").write_text(
+        "def test_probe():\n    assert True\n", encoding="utf-8"
+    )
+
+    result = run_verifier(
+        repo,
+        environment,
+        "-TaskFile",
+        "linked.py",
+        "-BackendTest",
+        "tests/test_probe.py",
+    )
+
+    assert result.returncode != 0
+    assert "symbolic link" in (result.stdout + result.stderr).casefold()
+
+
+def test_changed_python_is_black_checked_before_backend_tests(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "change.py").write_text("value=1\n", encoding="utf-8")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_probe.py").write_text(
+        "def test_probe():\n    assert True\n", encoding="utf-8"
+    )
+
+    result = run_verifier(repo, environment, "-BackendTest", "tests/test_probe.py")
+
+    assert result.returncode != 0
+    assert "changed Python formatting" in result.stdout
+    assert "targeted backend tests" not in result.stdout
+
+
+def test_black_checks_all_scoped_python_files(verifier_repo: VerifierRepo):
+    repo, environment = verifier_repo
+    (repo / "one.py").write_text("value = 1\n", encoding="utf-8")
+    (repo / "two.py").write_text("other = 2\n", encoding="utf-8")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_probe.py").write_text(
+        "def test_probe():\n    assert True\n", encoding="utf-8"
+    )
+
+    result = run_verifier(
+        repo,
+        environment,
+        "-TaskFile",
+        "one.py,two.py",
+        "-BackendTest",
+        "tests/test_probe.py",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2 files would be left unchanged" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("git_state", ["unstaged", "staged"])
+def test_task_file_diff_check_treats_brackets_as_literal_pathspecs(
+    verifier_repo: VerifierRepo, git_state: str
+):
+    repo, environment = verifier_repo
+    path = repo / "[ab].md"
+    path.write_text("invalid \n", encoding="utf-8")
+    run_checked(["git", "add", "-N", "[ab].md"], repo, environment)
+    if git_state == "staged":
+        run_checked(["git", "add", "[ab].md"], repo, environment)
+
+    result = run_verifier(
+        repo,
+        environment,
+        "-TaskFile",
+        "[ab].md",
+        "-StaticFile",
+        "[ab].md",
+    )
+
+    assert result.returncode != 0
+    assert "trailing whitespace" in result.stdout + result.stderr
+
+
+def test_static_file_checks_each_case_distinct_changed_file_on_case_sensitive_filesystem(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "Foo.md").write_text("one\n", encoding="utf-8")
+    if (repo / "foo.md").exists():
+        pytest.skip("case-insensitive filesystem")
+    (repo / "foo.md").write_text("two\n", encoding="utf-8")
+
+    result = run_verifier(repo, environment, "-StaticFile", "Foo.md")
+
+    assert result.returncode != 0
+    assert "foo.md" in result.stdout + result.stderr

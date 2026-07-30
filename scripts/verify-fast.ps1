@@ -168,7 +168,122 @@ function Get-ChangedFiles {
     $paths += Get-GitNullSeparatedPaths "diff --name-only -z" "unstaged changes"
     $paths += Get-GitNullSeparatedPaths "diff --cached --name-only -z" "staged changes"
     $paths += Get-UntrackedFiles
-    return @($paths | Where-Object { $_ } | Sort-Object -Unique)
+    $uniquePaths = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+    foreach ($path in $paths) {
+        if ($path) {
+            [void]$uniquePaths.Add($path)
+        }
+    }
+    return @($uniquePaths)
+}
+
+function Test-GitSymbolicLink {
+    param([string]$RelativePath)
+
+    $entries = @(git -C $projectRoot --literal-pathspecs ls-files -s -- $RelativePath)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Could not inspect Git mode for: $RelativePath"
+        exit $LASTEXITCODE
+    }
+
+    return @($entries | Where-Object { $_ -match "^120000 " }).Count -gt 0
+}
+
+function Resolve-VerifiedFileTarget {
+    param(
+        [string]$Target,
+        [string]$Root,
+        [string]$RootPrefix,
+        [string]$Label,
+        [string[]]$AllowedExtensions = @(),
+        [switch]$AllowPytestNodeId,
+        [switch]$RequireFrontendTestName
+    )
+
+    $fileTarget = $Target
+    $nodeId = ""
+    if ($AllowPytestNodeId) {
+        $nodeIdIndex = $Target.IndexOf("::", [System.StringComparison]::Ordinal)
+        if ($nodeIdIndex -ge 0) {
+            $fileTarget = $Target.Substring(0, $nodeIdIndex)
+            $nodeId = $Target.Substring($nodeIdIndex)
+            if ($nodeId.Length -le 2) {
+                Write-Fail "$Label target has an empty pytest node id: $Target"
+                exit 2
+            }
+        }
+    }
+
+    if ($fileTarget.Length -eq 0 -or $fileTarget.StartsWith("-", [System.StringComparison]::Ordinal)) {
+        Write-Fail "$Label target must not start with '-': $Target"
+        exit 2
+    }
+    if ([System.IO.Path]::IsPathRooted($fileTarget)) {
+        Write-Fail "$Label target must be relative: $Target"
+        exit 2
+    }
+    if (@($fileTarget -split "[\\/]" | Where-Object { $_ -eq ".." }).Count -gt 0) {
+        Write-Fail "$Label target must not contain '..': $Target"
+        exit 2
+    }
+
+    try {
+        $hostPath = $fileTarget.Replace("\", "/").Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+        $candidate = [System.IO.Path]::GetFullPath((Join-Path $Root $hostPath))
+    }
+    catch {
+        Write-Fail "Invalid $Label target: $Target"
+        exit 2
+    }
+
+    if (-not $candidate.StartsWith($RootPrefix, $pathComparison)) {
+        Write-Fail "$Label target must stay within its root: $Target"
+        exit 2
+    }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        Write-Fail "$Label target file not found: $Target"
+        exit 2
+    }
+    if (Test-StaticPathHasReparsePoint $candidate $Root $RootPrefix) {
+        Write-Fail "$Label target cannot be a symbolic link or reparse point: $Target"
+        exit 2
+    }
+    if (Test-GitSymbolicLink ($candidate.Substring($projectRootPrefix.Length).Replace("\", "/"))) {
+        Write-Fail "$Label target cannot be a Git symbolic link: $Target"
+        exit 2
+    }
+
+    try {
+        $resolved = (Resolve-Path -LiteralPath $candidate).Path
+    }
+    catch {
+        Write-Fail "Invalid $Label target: $Target"
+        exit 2
+    }
+    if (-not $resolved.StartsWith($RootPrefix, $pathComparison)) {
+        Write-Fail "$Label target must stay within its root: $Target"
+        exit 2
+    }
+
+    $extension = [System.IO.Path]::GetExtension($resolved).ToLowerInvariant()
+    if ($AllowedExtensions.Count -gt 0 -and $AllowedExtensions -notcontains $extension) {
+        if ($Label -eq "Static file") {
+            Write-Fail "Unsupported static file: $Target; use full verification."
+        }
+        else {
+            Write-Fail "$Label target has an unsupported extension: $Target"
+        }
+        exit 2
+    }
+    if ($RequireFrontendTestName -and $resolved -notmatch "(?i)\.(test|spec)\.(ts|tsx|js|jsx)$") {
+        Write-Fail "$Label target must be a frontend test file: $Target"
+        exit 2
+    }
+
+    return [pscustomobject]@{
+        RelativePath = $candidate.Substring($RootPrefix.Length).Replace("\", "/")
+        ToolArgument = $candidate.Substring($RootPrefix.Length).Replace("\", "/") + $nodeId
+    }
 }
 
 function Test-FileContainsNul {
@@ -199,7 +314,8 @@ function Test-FileContainsNul {
 function Get-UntrackedTextViolation {
     param(
         [string]$Path,
-        [string]$RelativePath
+        [string]$RelativePath,
+        [switch]$FailClosed
     )
 
     $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
@@ -239,6 +355,9 @@ function Get-UntrackedTextViolation {
         return $firstViolation
     }
     catch [System.Text.DecoderFallbackException] {
+        if ($FailClosed) {
+            return "${RelativePath}: invalid UTF-8"
+        }
         Write-Info "Skipping non-UTF-8 untracked file: $RelativePath"
         return $null
     }
@@ -250,6 +369,27 @@ function Get-UntrackedTextViolation {
         if ($null -ne $reader) {
             $reader.Dispose()
         }
+    }
+}
+
+function Test-StaticTextFile {
+    param([string]$RelativePath)
+
+    $candidate = Join-Path $projectRoot $RelativePath
+    try {
+        if (Test-FileContainsNul $candidate) {
+            Write-Fail "Static file contains NUL bytes: $RelativePath"
+            exit 1
+        }
+        $violation = Get-UntrackedTextViolation $candidate $RelativePath -FailClosed
+        if ($null -ne $violation) {
+            Write-Fail "Static file text check failed: $violation"
+            exit 1
+        }
+    }
+    catch {
+        Write-Fail "Could not read static file: $RelativePath"
+        exit 1
     }
 }
 
@@ -337,6 +477,9 @@ $staticTargetSet = [System.Collections.Generic.HashSet[string]]::new($pathCompar
 $lintTargetSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
 $taskFileSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
 $taskFilesNormalized = New-Object "System.Collections.Generic.List[string]"
+$backendTargetsVerified = New-Object "System.Collections.Generic.List[string]"
+$frontendTestTargetsVerified = New-Object "System.Collections.Generic.List[string]"
+$lintTargetsVerified = New-Object "System.Collections.Generic.List[string]"
 
 foreach ($taskTarget in $TaskFile) {
     if ([System.IO.Path]::IsPathRooted($taskTarget)) {
@@ -380,88 +523,35 @@ else {
 }
 
 foreach ($lintTarget in $LintFile) {
-    if ([System.IO.Path]::IsPathRooted($lintTarget)) {
-        Write-Fail "Lint file must be relative to frontend root: $lintTarget"
-        exit 2
-    }
+    $verifiedTarget = Resolve-VerifiedFileTarget $lintTarget $frontendRoot $frontendRootPrefix "Lint" @(".js", ".jsx", ".ts", ".tsx")
+    [void]$lintTargetSet.Add($verifiedTarget.RelativePath)
+    [void]$lintTargetsVerified.Add($verifiedTarget.ToolArgument)
+}
 
-    try {
-        $candidate = [System.IO.Path]::GetFullPath((Join-Path $frontendRoot $lintTarget))
-    }
-    catch {
-        Write-Fail "Invalid lint file path: $lintTarget"
-        exit 2
-    }
+foreach ($frontendTestTarget in $FrontendTest) {
+    $verifiedTarget = Resolve-VerifiedFileTarget $frontendTestTarget $frontendRoot $frontendRootPrefix "Frontend test" @(".js", ".jsx", ".ts", ".tsx") -RequireFrontendTestName
+    [void]$frontendTestTargetsVerified.Add($verifiedTarget.ToolArgument)
+}
 
-    if (-not $candidate.StartsWith($frontendRootPrefix, $pathComparison)) {
-        Write-Fail "Lint file must stay within frontend root: $lintTarget"
-        exit 2
-    }
-
-    $relativeLintPath = $candidate.Substring($frontendRootPrefix.Length).Replace("\", "/")
-    [void]$lintTargetSet.Add($relativeLintPath)
+foreach ($backendTestTarget in $BackendTest) {
+    $verifiedTarget = Resolve-VerifiedFileTarget $backendTestTarget $projectRoot $projectRootPrefix "Backend test" @(".py") -AllowPytestNodeId
+    [void]$backendTargetsVerified.Add($verifiedTarget.ToolArgument)
 }
 
 foreach ($staticTarget in $StaticFile) {
-    if ([System.IO.Path]::IsPathRooted($staticTarget)) {
-        Write-Fail "Static file must be relative to project root: $staticTarget"
-        exit 2
-    }
-
-    try {
-        $candidate = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $staticTarget))
-    }
-    catch {
-        Write-Fail "Invalid static file path: $staticTarget"
-        exit 2
-    }
-
-    if (-not $candidate.StartsWith($projectRootPrefix, $pathComparison)) {
-        Write-Fail "Static file must stay within project root: $staticTarget"
-        exit 2
-    }
-
-    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-        Write-Fail "Static file not found: $staticTarget"
-        exit 2
-    }
-
-    if (Test-StaticPathHasReparsePoint $candidate $projectRoot $projectRootPrefix) {
-        Write-Fail "Static file path cannot contain a symbolic link: $staticTarget"
-        exit 2
-    }
-
-    try {
-        $resolved = (Resolve-Path -LiteralPath $candidate).Path
-    }
-    catch {
-        Write-Fail "Invalid static file path: $staticTarget"
-        exit 2
-    }
-
-    if (-not $resolved.StartsWith($projectRootPrefix, $pathComparison)) {
-        Write-Fail "Static file must stay within project root: $staticTarget"
-        exit 2
-    }
-
-    if ($allowedStaticExtensions -notcontains [System.IO.Path]::GetExtension($resolved).ToLowerInvariant()) {
-        Write-Fail "Unsupported static file: $staticTarget; use full verification."
-        exit 2
-    }
-
-    $relativeStaticPath = $candidate.Substring($projectRootPrefix.Length).Replace("\", "/")
-    [void]$staticTargetSet.Add($relativeStaticPath)
+    $verifiedTarget = Resolve-VerifiedFileTarget $staticTarget $projectRoot $projectRootPrefix "Static file" $allowedStaticExtensions
+    [void]$staticTargetSet.Add($verifiedTarget.RelativePath)
 }
 
 Set-Location $projectRoot
 
 if ($taskScopeEnabled) {
     Invoke-Step "git diff --check (task files)" {
-        git diff --check -- @verificationFiles
+        git --literal-pathspecs diff --check -- @verificationFiles
     }
 
     Invoke-Step "git diff --cached --check (task files)" {
-        git diff --cached --check -- @verificationFiles
+        git --literal-pathspecs diff --cached --check -- @verificationFiles
     }
 
     $untrackedPathSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
@@ -490,6 +580,10 @@ foreach ($staticTarget in $staticTargetSet) {
         Write-Fail "Static file target is not changed: $staticTarget"
         exit 2
     }
+}
+
+foreach ($verificationFile in $verificationFiles) {
+    [void](Resolve-VerifiedFileTarget $verificationFile $projectRoot $projectRootPrefix "Verification file")
 }
 
 foreach ($changedFile in $verificationFiles) {
@@ -529,9 +623,25 @@ foreach ($changedFile in $verificationFiles) {
     exit 2
 }
 
+foreach ($staticTarget in $staticTargetSet) {
+    Test-StaticTextFile $staticTarget
+}
+
+$changedPythonFiles = @(
+    $verificationFiles | Where-Object {
+        [System.IO.Path]::GetExtension($_).ToLowerInvariant() -eq ".py"
+    }
+)
+
+if ($changedPythonFiles.Count -gt 0) {
+    Invoke-Step "changed Python formatting" {
+        python -m black --check -- @changedPythonFiles
+    }
+}
+
 if ($BackendTest.Count -gt 0) {
     Invoke-Step "targeted backend tests" {
-        python -m pytest -q @BackendTest
+        python -m pytest -q -- @($backendTargetsVerified.ToArray())
     }
 }
 
@@ -549,7 +659,7 @@ if ($FrontendTest.Count -gt 0 -or $LintFile.Count -gt 0) {
             }
 
             Invoke-Step "targeted frontend tests" {
-                & $vitest run @FrontendTest
+                & $vitest run @($frontendTestTargetsVerified.ToArray())
             }
         }
 
@@ -560,7 +670,7 @@ if ($FrontendTest.Count -gt 0 -or $LintFile.Count -gt 0) {
             }
 
             Invoke-Step "targeted frontend lint" {
-                & $eslint @LintFile
+                & $eslint -- @($lintTargetsVerified.ToArray())
             }
         }
     }
