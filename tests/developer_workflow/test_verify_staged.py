@@ -222,6 +222,7 @@ def test_successful_black_stderr_is_not_reported_as_native_command_error(
     result = _run(repo, environment)
 
     assert "NativeCommandError" not in result.stdout + result.stderr
+    assert "Black success detail" in result.stdout + result.stderr
 
 
 def _install_python_recorder(repo: Path, environment: dict[str, str]) -> Path:
@@ -495,6 +496,146 @@ def test_actual_pinned_prettier_preserves_windows_shell_sensitive_literal_path(
         repo,
         environment,
     ).stdout.splitlines() == [path]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction policy")
+def test_registered_worktree_node_modules_junction_is_allowed(tmp_path: Path) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    sibling = tmp_path / "registered-worktree"
+    _add_registered_worktree(repo, sibling, environment)
+    _write_matching_frontend_manifests(repo, sibling)
+    _install_prettier_recorder(sibling)
+    _create_junction(
+        repo / "frontend" / "node_modules",
+        sibling / "frontend" / "node_modules",
+        environment,
+    )
+    path = "frontend/probe.ts"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    _run(repo, environment)
+
+    assert [record["tool"] for record in _records(log_path)] == ["prettier"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction policy")
+def test_unregistered_node_modules_junction_target_is_rejected(tmp_path: Path) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    target = tmp_path / "unregistered-target"
+    _write_matching_frontend_manifests(repo, target)
+    _install_prettier_recorder(target)
+    _create_junction(
+        repo / "frontend" / "node_modules",
+        target / "frontend" / "node_modules",
+        environment,
+    )
+    path = "frontend/probe.ts"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "registered" in failure.casefold()
+    assert "worktree" in failure.casefold()
+    assert _records(log_path) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction policy")
+def test_registered_junction_requires_identical_frontend_manifests(
+    tmp_path: Path,
+) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    sibling = tmp_path / "mismatched-worktree"
+    _add_registered_worktree(repo, sibling, environment)
+    _write_matching_frontend_manifests(repo, sibling)
+    (sibling / "frontend" / "package-lock.json").write_text(
+        '{"lockfileVersion":2}\n', encoding="utf-8"
+    )
+    _install_prettier_recorder(sibling)
+    _create_junction(
+        repo / "frontend" / "node_modules",
+        sibling / "frontend" / "node_modules",
+        environment,
+    )
+    path = "frontend/probe.ts"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "manifest" in failure.casefold()
+    assert "match" in failure.casefold()
+    assert _records(log_path) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction policy")
+def test_registered_junction_still_rejects_nested_prettier_reparse(
+    tmp_path: Path,
+) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    sibling = tmp_path / "nested-reparse-worktree"
+    _add_registered_worktree(repo, sibling, environment)
+    _write_matching_frontend_manifests(repo, sibling)
+    entry = _install_prettier_recorder(sibling)
+    source_bin = entry.parent
+    outside_bin = tmp_path / "outside-prettier-bin"
+    shutil.copytree(source_bin, outside_bin)
+    shutil.rmtree(source_bin)
+    _create_junction(source_bin, outside_bin, environment)
+    _create_junction(
+        repo / "frontend" / "node_modules",
+        sibling / "frontend" / "node_modules",
+        environment,
+    )
+    path = "frontend/probe.ts"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "symbolic link" in failure.casefold() or "reparse" in failure.casefold()
+    assert _records(log_path) == []
+
+
+def _add_registered_worktree(
+    repo: Path, target: Path, environment: dict[str, str]
+) -> None:
+    _checked(
+        ["git", "worktree", "add", "--detach", str(target), "HEAD"],
+        repo,
+        environment,
+    )
+
+
+def _write_matching_frontend_manifests(current: Path, target: Path) -> None:
+    package_text = '{"name":"frontend","private":true}\n'
+    lock_text = '{"lockfileVersion":3}\n'
+    for worktree in (current, target):
+        frontend = worktree / "frontend"
+        frontend.mkdir(parents=True, exist_ok=True)
+        (frontend / "package.json").write_text(package_text, encoding="utf-8")
+        (frontend / "package-lock.json").write_text(lock_text, encoding="utf-8")
+
+
+def _create_junction(link: Path, target: Path, environment: dict[str, str]) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    junction_environment = environment.copy()
+    junction_environment["STAGED_TEST_JUNCTION_LINK"] = str(link)
+    junction_environment["STAGED_TEST_JUNCTION_TARGET"] = str(target)
+    command = [
+        _powershell(),
+        "-NoProfile",
+        "-Command",
+        "$ErrorActionPreference='Stop'; "
+        "New-Item -ItemType Junction -Path "
+        "$env:STAGED_TEST_JUNCTION_LINK -Target "
+        "$env:STAGED_TEST_JUNCTION_TARGET | Out-Null",
+    ]
+    try:
+        run_command(command, link.parent, junction_environment)
+    except AssertionError as error:
+        pytest.skip(f"filesystem does not permit test junctions: {error}")
 
 
 def test_missing_python_fails_closed_with_executable_setup_guidance(

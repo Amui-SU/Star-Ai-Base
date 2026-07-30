@@ -102,15 +102,50 @@ function Get-StagedPaths {
 }
 
 function Test-PathHasReparsePoint {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [string]$AllowedReparsePath = ""
+    )
 
     $current = $projectRoot
     $item = Get-Item -LiteralPath $current -Force
-    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    if (
+        ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -and
+        -not $current.Equals($AllowedReparsePath, $pathComparison)
+    ) {
         return $true
     }
 
     $relativePath = $Path.Substring($projectRootPrefix.Length)
+    foreach ($segment in $relativePath.Split(
+        [char[]]@('\', '/'),
+        [System.StringSplitOptions]::RemoveEmptyEntries
+    )) {
+        $current = Join-Path $current $segment
+        $item = Get-Item -LiteralPath $current -Force
+        if (
+            ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -and
+            -not $current.Equals($AllowedReparsePath, $pathComparison)
+        ) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-PathFromRootHasReparsePoint {
+    param(
+        [string]$Path,
+        [string]$Root,
+        [string]$RootPrefix
+    )
+
+    $current = $Root
+    $item = Get-Item -LiteralPath $current -Force
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        return $true
+    }
+    $relativePath = $Path.Substring($RootPrefix.Length)
     foreach ($segment in $relativePath.Split(
         [char[]]@('\', '/'),
         [System.StringSplitOptions]::RemoveEmptyEntries
@@ -244,9 +279,227 @@ function Get-NodeCommand {
     return $nodeCommand
 }
 
+function Get-RegisteredWorktreeRoots {
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = "git"
+    $startInfo.Arguments = "worktree list --porcelain -z"
+    $startInfo.WorkingDirectory = $projectRoot
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            Write-Fail "Could not start Git to enumerate registered worktrees"
+            exit 1
+        }
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $fields = New-Object "System.Collections.Generic.List[string]"
+        $fieldBytes = New-Object "System.Collections.Generic.List[byte]"
+        $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        [byte[]]$buffer = New-Object byte[] 4096
+        $stdout = $process.StandardOutput.BaseStream
+        $decodeFailed = $false
+
+        while (($bytesRead = $stdout.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            for ($index = 0; $index -lt $bytesRead; $index++) {
+                if ($buffer[$index] -eq 0) {
+                    if ($fieldBytes.Count -gt 0) {
+                        try {
+                            [void]$fields.Add($strictUtf8.GetString($fieldBytes.ToArray()))
+                        }
+                        catch [System.Text.DecoderFallbackException] {
+                            $decodeFailed = $true
+                        }
+                    }
+                    $fieldBytes.Clear()
+                }
+                else {
+                    [void]$fieldBytes.Add($buffer[$index])
+                }
+            }
+        }
+
+        $process.WaitForExit()
+        $stderr = $stderrTask.Result
+        $exitCode = $process.ExitCode
+        if ($exitCode -ne 0) {
+            $detail = $stderr.Trim()
+            if ($detail.Length -gt 0) {
+                Write-Fail "Could not enumerate registered worktrees: $detail"
+            }
+            else {
+                Write-Fail "Could not enumerate registered worktrees"
+            }
+            exit $exitCode
+        }
+        if ($decodeFailed -or $fieldBytes.Count -ne 0) {
+            Write-Fail "Git returned invalid UTF-8 or truncated registered worktree data"
+            exit 1
+        }
+
+        $roots = New-Object "System.Collections.Generic.List[string]"
+        foreach ($field in $fields) {
+            if ($field.StartsWith("worktree ", [System.StringComparison]::Ordinal)) {
+                $rootText = $field.Substring("worktree ".Length)
+                if (-not [System.IO.Path]::IsPathRooted($rootText)) {
+                    Write-Fail "Git returned a non-absolute registered worktree path"
+                    exit 1
+                }
+                try {
+                    [void]$roots.Add([System.IO.Path]::GetFullPath($rootText))
+                }
+                catch {
+                    Write-Fail "Git returned an invalid registered worktree path"
+                    exit 1
+                }
+            }
+        }
+        return $roots.ToArray()
+    }
+    catch {
+        Write-Fail "Could not enumerate registered worktrees: $($_.Exception.Message)"
+        exit 1
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Get-FileSha256 {
+    param([string]$Path)
+
+    $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::Read
+    )
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha256.ComputeHash($stream)
+        return [System.BitConverter]::ToString($hash).Replace("-", "")
+    }
+    finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Confirm-ApprovedNodeModulesJunction {
+    param([string]$NodeModulesRoot)
+
+    if (-not $isWindows) {
+        Write-Fail "frontend/node_modules reparse points are allowed only for Windows junction reuse"
+        exit 1
+    }
+    $nodeModulesItem = Get-Item -LiteralPath $NodeModulesRoot -Force
+    if ([string]$nodeModulesItem.LinkType -cne "Junction") {
+        Write-Fail "frontend/node_modules reparse reuse must be a Windows junction"
+        exit 1
+    }
+    $junctionTargets = @($nodeModulesItem.Target)
+    if ($junctionTargets.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$junctionTargets[0])) {
+        Write-Fail "frontend/node_modules junction must expose exactly one target"
+        exit 1
+    }
+    try {
+        $targetNodeModules = [System.IO.Path]::GetFullPath([string]$junctionTargets[0]).TrimEnd([char[]]@('\', '/'))
+    }
+    catch {
+        Write-Fail "frontend/node_modules junction target is invalid"
+        exit 1
+    }
+
+    $targetWorktree = $null
+    foreach ($registeredRoot in @(Get-RegisteredWorktreeRoots)) {
+        $normalizedRoot = $registeredRoot.TrimEnd([char[]]@('\', '/'))
+        if ($normalizedRoot.Equals($projectRoot, $pathComparison)) {
+            continue
+        }
+        try {
+            $registeredNodeModules = [System.IO.Path]::GetFullPath(
+                (Join-Path (Join-Path $normalizedRoot "frontend") "node_modules")
+            ).TrimEnd([char[]]@('\', '/'))
+        }
+        catch {
+            Write-Fail "Registered worktree path could not be normalized safely"
+            exit 1
+        }
+        if ($registeredNodeModules.Equals($targetNodeModules, $pathComparison)) {
+            $targetWorktree = $normalizedRoot
+            break
+        }
+    }
+    if ($null -eq $targetWorktree) {
+        Write-Fail (
+            "frontend/node_modules junction target must exactly match a registered " +
+            "other worktree's frontend/node_modules"
+        )
+        exit 1
+    }
+    if (-not (Test-Path -LiteralPath $targetWorktree -PathType Container)) {
+        Write-Fail "Registered target worktree is missing"
+        exit 1
+    }
+    if (-not (Test-Path -LiteralPath $targetNodeModules -PathType Container)) {
+        Write-Fail "Registered target worktree node_modules is missing"
+        exit 1
+    }
+    $targetWorktreePrefix = $targetWorktree + [System.IO.Path]::DirectorySeparatorChar
+    if (Test-PathFromRootHasReparsePoint $targetNodeModules $targetWorktree $targetWorktreePrefix) {
+        Write-Fail "Registered target worktree node_modules cannot contain a reparse ancestor"
+        exit 1
+    }
+
+    foreach ($manifestName in @("package.json", "package-lock.json")) {
+        $currentManifest = Join-Path $frontendRoot $manifestName
+        $targetManifest = Join-Path (Join-Path $targetWorktree "frontend") $manifestName
+        if (
+            -not (Test-Path -LiteralPath $currentManifest -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $targetManifest -PathType Leaf)
+        ) {
+            Write-Fail "Both worktrees must contain frontend/$manifestName for junction approval"
+            exit 1
+        }
+        if (
+            (Test-PathHasReparsePoint $currentManifest) -or
+            (Test-PathFromRootHasReparsePoint $targetManifest $targetWorktree $targetWorktreePrefix)
+        ) {
+            Write-Fail "Frontend junction approval manifests cannot use reparse paths"
+            exit 1
+        }
+        if ((Get-FileSha256 $currentManifest) -cne (Get-FileSha256 $targetManifest)) {
+            Write-Fail "Frontend junction approval manifest contents must match: $manifestName"
+            exit 1
+        }
+    }
+    return $targetNodeModules
+}
+
 function Resolve-PinnedPrettierCli {
-    $packageRoot = Join-Path $frontendRoot "node_modules/prettier"
+    $nodeModulesRoot = Join-Path $frontendRoot "node_modules"
+    $allowedReparsePath = ""
+    $approvedTargetNodeModules = $null
+    if (Test-Path -LiteralPath $nodeModulesRoot -PathType Container) {
+        $nodeModulesItem = Get-Item -LiteralPath $nodeModulesRoot -Force
+        if (($nodeModulesItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $approvedTargetNodeModules = Confirm-ApprovedNodeModulesJunction $nodeModulesRoot
+            $allowedReparsePath = $nodeModulesRoot
+        }
+    }
+
+    $packageRoot = Join-Path $nodeModulesRoot "prettier"
     $packageRootPrefix = $packageRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+    $approvedTargetPackagePrefix = ""
+    if ($null -ne $approvedTargetNodeModules) {
+        $approvedTargetPackagePrefix = (Join-Path $approvedTargetNodeModules "prettier").TrimEnd(
+            [char[]]@('\', '/')
+        ) + [System.IO.Path]::DirectorySeparatorChar
+    }
     if (-not (Test-Path -LiteralPath $packageRoot -PathType Container)) {
         Write-Fail (
             "Missing pinned Prettier package: $packageRoot. " +
@@ -254,7 +507,7 @@ function Resolve-PinnedPrettierCli {
         )
         exit 1
     }
-    if (Test-PathHasReparsePoint $packageRoot) {
+    if (Test-PathHasReparsePoint $packageRoot $allowedReparsePath) {
         Write-Fail "Pinned Prettier package cannot be a symbolic link or reparse point: $packageRoot"
         exit 1
     }
@@ -264,7 +517,7 @@ function Resolve-PinnedPrettierCli {
         Write-Fail "Missing pinned Prettier package metadata: $packageJsonPath"
         exit 1
     }
-    if (Test-PathHasReparsePoint $packageJsonPath) {
+    if (Test-PathHasReparsePoint $packageJsonPath $allowedReparsePath) {
         Write-Fail "Pinned Prettier package metadata cannot be a symbolic link or reparse point"
         exit 1
     }
@@ -325,7 +578,7 @@ function Resolve-PinnedPrettierCli {
         Write-Fail "Pinned Prettier CLI entry is missing or is not a real file: $entryCandidate"
         exit 1
     }
-    if (Test-PathHasReparsePoint $entryCandidate) {
+    if (Test-PathHasReparsePoint $entryCandidate $allowedReparsePath) {
         Write-Fail "Pinned Prettier CLI entry cannot be a symbolic link or reparse point"
         exit 1
     }
@@ -342,7 +595,13 @@ function Resolve-PinnedPrettierCli {
         Write-Fail "Could not resolve pinned Prettier CLI entry"
         exit 1
     }
-    if (-not $resolvedEntry.StartsWith($packageRootPrefix, $pathComparison)) {
+    if (
+        -not $resolvedEntry.StartsWith($packageRootPrefix, $pathComparison) -and
+        (
+            $approvedTargetPackagePrefix.Length -eq 0 -or
+            -not $resolvedEntry.StartsWith($approvedTargetPackagePrefix, $pathComparison)
+        )
+    ) {
         Write-Fail "Resolved Prettier CLI entry must stay within its package"
         exit 1
     }
@@ -394,11 +653,9 @@ if ($pythonPaths.Count -gt 0) {
     Write-Info "staged Python formatting"
     $previousErrorPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $blackStderrPath = Join-Path (
-        [System.IO.Path]::GetTempPath()
-    ) ("verify-staged-black-" + [System.Guid]::NewGuid().ToString("N") + ".stderr")
+    $blackOutput = @()
     try {
-        & $pythonCommand.Source -m black --check -- @pythonPaths 2> $blackStderrPath
+        $blackOutput = @(& $pythonCommand.Source -m black --check -- @pythonPaths 2>&1)
         $blackExitCode = $LASTEXITCODE
     }
     catch {
@@ -411,21 +668,19 @@ if ($pythonPaths.Count -gt 0) {
     finally {
         $ErrorActionPreference = $previousErrorPreference
     }
-    $blackStderr = ""
-    try {
-        if (Test-Path -LiteralPath $blackStderrPath -PathType Leaf) {
-            $blackStderr = Get-Content -LiteralPath $blackStderrPath -Raw
+    $blackStderrParts = New-Object "System.Collections.Generic.List[string]"
+    foreach ($outputItem in $blackOutput) {
+        if ($outputItem -is [System.Management.Automation.ErrorRecord]) {
+            $message = $outputItem.Exception.Message
+            [void]$blackStderrParts.Add($message)
+            [System.Console]::Error.WriteLine($message)
+        }
+        else {
+            [System.Console]::Out.WriteLine([string]$outputItem)
         }
     }
-    finally {
-        if (Test-Path -LiteralPath $blackStderrPath -PathType Leaf) {
-            Remove-Item -LiteralPath $blackStderrPath -Force
-        }
-    }
+    $blackStderr = [string]::Join([System.Environment]::NewLine, $blackStderrParts.ToArray())
     if ($blackExitCode -ne 0) {
-        if ($blackStderr.Length -gt 0) {
-            [System.Console]::Error.Write($blackStderr)
-        }
         $missingBlack = $blackStderr -match "(?is)(No module named.*black|ModuleNotFoundError.*black|ImportError.*black)"
         if ($missingBlack) {
             Write-Fail (
