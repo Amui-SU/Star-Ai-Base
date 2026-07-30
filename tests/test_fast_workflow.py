@@ -1028,6 +1028,27 @@ def test_untracked_utf8_bom_conflict_marker_fails(verifier_repo: VerifierRepo):
     assert "conflict marker" in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    ("encoding", "bom"),
+    [
+        ("utf-16-le", b"\xff\xfe"),
+        ("utf-16-be", b"\xfe\xff"),
+    ],
+)
+def test_static_file_rejects_utf16_bom_without_nul(
+    verifier_repo: VerifierRepo, encoding: str, bom: bytes
+):
+    repo, environment = verifier_repo
+    payload = bom + "\u1234\u5678".encode(encoding)
+    assert b"\x00" not in payload
+    (repo / "note.md").write_bytes(payload)
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    assert result.returncode != 0
+    assert "UTF-8" in result.stdout + result.stderr
+
+
 def test_untracked_binary_file_with_nul_is_skipped(verifier_repo: VerifierRepo):
     repo, environment = verifier_repo
     (repo / "binary.txt").write_bytes(b"binary\x00invalid \n")

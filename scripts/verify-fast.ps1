@@ -321,7 +321,7 @@ function Get-UntrackedTextViolation {
     $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
     $reader = $null
     try {
-        $reader = [System.IO.StreamReader]::new($Path, $strictUtf8, $true)
+        $reader = [System.IO.StreamReader]::new($Path, $strictUtf8, $false)
         $lineNumber = 0
         $hasLine = $false
         $lastLine = $null
@@ -330,6 +330,13 @@ function Get-UntrackedTextViolation {
         while (($line = $reader.ReadLine()) -ne $null) {
             $lineNumber++
             $hasLine = $true
+            if (
+                $lineNumber -eq 1 -and
+                $line.Length -gt 0 -and
+                $line[0] -eq [char]0xFEFF
+            ) {
+                $line = $line.Substring(1)
+            }
             $lastLine = $line
 
             if ($null -eq $firstViolation -and $line -match "[ \t]$") {
