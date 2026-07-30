@@ -1,6 +1,11 @@
 # Micro-task Fast Lane V2 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+
+**Status: Implemented (historical plan).** The checklist below records the completed
+development sequence. The current contract tests live in `tests/fast_workflow`,
+with a lightweight split guard in `tests/test_fast_workflow_structure.py`; current
+policy and verifier behavior supersede illustrative snippets in this plan.
 
 **Goal:** Make micro-task verification reliable and genuinely lightweight without weakening normal, high-risk, or release verification.
 
@@ -14,9 +19,9 @@
 
 **Files:**
 
-- Modify: `tests/test_fast_workflow.py`
+- Modify: `tests/fast_workflow`
 
-- [ ] **Step 1: Add the subprocess and temporary-repository helpers**
+- [x] **Step 1: Add the subprocess and temporary-repository helpers**
 
 Add imports for `os`, `shutil`, `subprocess`, `textwrap`, and `pytest`. Add helpers that:
 
@@ -63,7 +68,7 @@ def invoke_fast(root: Path, *arguments: str):
     )
 ```
 
-- [ ] **Step 2: Add failing public-CLI tests**
+- [x] **Step 2: Add failing public-CLI tests**
 
 Add tests proving that comma-separated backend targets remain two arguments, static Markdown/CSS files are accepted, code passed through `-StaticFile` is rejected, and a stray positional target fails without starting frontend verification. Use two tiny pytest files in the temporary repository for the backend case.
 
@@ -108,20 +113,20 @@ def test_fast_verifier_rejects_code_as_static_file(tmp_path):
     assert "Unsupported static file" in result.stdout + result.stderr
 ```
 
-- [ ] **Step 3: Run the focused tests and confirm RED**
+- [x] **Step 3: Run the focused tests and confirm RED**
 
 Run:
 
 ```powershell
-python -m pytest -q tests/test_fast_workflow.py -k "comma_separated or static_file"
+python -m pytest -q tests/fast_workflow -k "comma_separated or static_file"
 ```
 
 Expected: failures because the current script treats the comma-separated paths as one pytest target and does not define `-StaticFile`.
 
-- [ ] **Step 4: Commit only the failing contract tests**
+- [x] **Step 4: Commit only the failing contract tests**
 
 ```powershell
-git add -- tests/test_fast_workflow.py
+git add -- tests/fast_workflow
 git commit -m "test: expose fast verifier cli gaps"
 ```
 
@@ -130,9 +135,9 @@ git commit -m "test: expose fast verifier cli gaps"
 **Files:**
 
 - Modify: `scripts/verify-fast.ps1`
-- Test: `tests/test_fast_workflow.py`
+- Test: `tests/fast_workflow`
 
-- [ ] **Step 1: Disable positional binding and normalize targets**
+- [x] **Step 1: Disable positional binding and normalize targets**
 
 Add `[CmdletBinding(PositionalBinding = $false)]`, the `StaticFile` parameter, and a helper that trims array values, splits comma-separated input, removes empty items, and returns a string array:
 
@@ -159,42 +164,42 @@ function Expand-Targets {
 
 Normalize all four parameters immediately after helper declarations and reject an empty target set before the first Git command.
 
-- [ ] **Step 2: Validate restricted static targets**
+- [x] **Step 2: Validate restricted static targets**
 
-Resolve each target beneath the repository root, reject paths that escape the root or do not exist, and allow only `.md`, `.txt`, `.css`, `.scss`, `.less`, `.html`, `.json`, `.yaml`, and `.yml`. Emit `Unsupported static file: <path>` for a disallowed extension.
+Resolve each target beneath the repository root, reject paths that escape the root or do not exist, and allow only `.md`, `.txt`, `.css`, `.scss`, and `.less`. HTML, JSON, YAML, and YML require complete verification. Emit `Unsupported static file: <path>` for a disallowed extension.
 
-- [ ] **Step 3: Run the Task 1 tests and confirm GREEN**
+- [x] **Step 3: Run the Task 1 tests and confirm GREEN**
 
 Run:
 
 ```powershell
-python -m pytest -q tests/test_fast_workflow.py -k "comma_separated or static_file"
+python -m pytest -q tests/fast_workflow -k "comma_separated or static_file"
 ```
 
 Expected: all selected tests pass.
 
-- [ ] **Step 4: Add failing tests for local frontend executables**
+- [x] **Step 4: Add failing tests for local frontend executables**
 
 Extend the structural contract to require `.bin/vitest` and `.bin/eslint` resolution and to forbid `npm test`, `npx eslint`, `npm run build`, and unscoped test commands. The test should fail against the current npm/npx implementation before it is changed.
 
-- [ ] **Step 5: Call installed frontend executables directly**
+- [x] **Step 5: Call installed frontend executables directly**
 
 Resolve `vitest.cmd`/`eslint.cmd` on Windows and `vitest`/`eslint` elsewhere under `frontend/node_modules/.bin`. If a requested command is missing, print a focused dependency error and return nonzero. Invoke Vitest with `run` and the normalized test targets, and ESLint with normalized lint targets.
 
-- [ ] **Step 6: Run the focused workflow suite**
+- [x] **Step 6: Run the focused workflow suite**
 
 Run:
 
 ```powershell
-python -m pytest -q tests/test_fast_workflow.py
+python -m pytest -q tests/fast_workflow
 ```
 
 Expected: all workflow tests pass.
 
-- [ ] **Step 7: Commit the CLI implementation**
+- [x] **Step 7: Commit the CLI implementation**
 
 ```powershell
-git add -- scripts/verify-fast.ps1 tests/test_fast_workflow.py
+git add -- scripts/verify-fast.ps1 tests/fast_workflow
 git commit -m "fix: make fast verification targets reliable"
 ```
 
@@ -202,10 +207,10 @@ git commit -m "fix: make fast verification targets reliable"
 
 **Files:**
 
-- Modify: `tests/test_fast_workflow.py`
+- Modify: `tests/fast_workflow`
 - Modify: `scripts/verify-fast.ps1`
 
-- [ ] **Step 1: Add failing Git-state contract tests**
+- [x] **Step 1: Add failing Git-state contract tests**
 
 Using `init_fast_repo`, add three tests:
 
@@ -235,37 +240,37 @@ def test_fast_verifier_rejects_untracked_whitespace(tmp_path):
     assert result.returncode != 0
 ```
 
-- [ ] **Step 2: Run the three tests and confirm RED**
+- [x] **Step 2: Run the three tests and confirm RED**
 
 Run:
 
 ```powershell
-python -m pytest -q tests/test_fast_workflow.py -k "whitespace"
+python -m pytest -q tests/fast_workflow -k "whitespace"
 ```
 
 Expected: unstaged may already fail, while staged and untracked cases expose the missing checks.
 
-- [ ] **Step 3: Add staged and untracked checks**
+- [x] **Step 3: Add staged and untracked checks**
 
 Run both `git diff --check` and `git diff --cached --check`. Enumerate untracked files with `git ls-files --others --exclude-standard`. For text files, reject trailing spaces/tabs, whitespace-only final lines, and lines equal to unresolved Git conflict markers. Detect binary content by a NUL byte and skip its content scan.
 
 Limit explicit static-file validation to the paths supplied by the caller, while repository whitespace checks cover all task changes in the clean or isolated worktree.
 
-- [ ] **Step 4: Run the Git-state tests and full workflow suite**
+- [x] **Step 4: Run the Git-state tests and full workflow suite**
 
 Run:
 
 ```powershell
-python -m pytest -q tests/test_fast_workflow.py -k "whitespace"
-python -m pytest -q tests/test_fast_workflow.py
+python -m pytest -q tests/fast_workflow -k "whitespace"
+python -m pytest -q tests/fast_workflow
 ```
 
 Expected: both commands pass.
 
-- [ ] **Step 5: Commit the Git-state protection**
+- [x] **Step 5: Commit the Git-state protection**
 
 ```powershell
-git add -- scripts/verify-fast.ps1 tests/test_fast_workflow.py
+git add -- scripts/verify-fast.ps1 tests/fast_workflow
 git commit -m "fix: verify every fast-lane git state"
 ```
 
@@ -273,27 +278,27 @@ git commit -m "fix: verify every fast-lane git state"
 
 **Files:**
 
-- Modify: `tests/test_fast_workflow.py`
+- Modify: `tests/fast_workflow`
 - Modify: `AGENTS.md`
 - Modify: `CLAUDE.md`
 - Modify: `docs/micro-task-template.md`
 - Modify: `docs/superpowers/specs/2026-07-28-micro-task-fast-lane-design.md`
 
-- [ ] **Step 1: Add failing policy assertions**
+- [x] **Step 1: Add failing policy assertions**
 
 Require the instructions to state that qualified micro tasks substitute `verify-fast.ps1` for the complete verification steps, that full verification applies to normal/high-risk/release work, that a focused commit is conditional on authorization, and that overlapping changes—not any dirty file—trigger worktree isolation. Require the concise three-field template and a pointer from `CLAUDE.md` to `AGENTS.md` as the workflow source of truth.
 
-- [ ] **Step 2: Run policy tests and confirm RED**
+- [x] **Step 2: Run policy tests and confirm RED**
 
 Run:
 
 ```powershell
-python -m pytest -q tests/test_fast_workflow.py -k "instructions or template or boundaries"
+python -m pytest -q tests/fast_workflow -k "instructions or template or boundaries"
 ```
 
 Expected: failures against the contradictory stable-commit and six-field rules.
 
-- [ ] **Step 3: Update the workflow source of truth**
+- [x] **Step 3: Update the workflow source of truth**
 
 In `AGENTS.md`:
 
@@ -305,20 +310,20 @@ In `AGENTS.md`:
 
 Update the original fast-lane design to match the implemented interface and mark it superseded by the V2 design where details differ. Simplify `docs/micro-task-template.md`. Add one short workflow-source pointer near the top of `CLAUDE.md` without duplicating the policy.
 
-- [ ] **Step 4: Run policy and complete workflow tests**
+- [x] **Step 4: Run policy and complete workflow tests**
 
 Run:
 
 ```powershell
-python -m pytest -q tests/test_fast_workflow.py
+python -m pytest -q tests/fast_workflow
 ```
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit the policy update**
+- [x] **Step 5: Commit the policy update**
 
 ```powershell
-git add -- AGENTS.md CLAUDE.md docs/micro-task-template.md docs/superpowers/specs/2026-07-28-micro-task-fast-lane-design.md tests/test_fast_workflow.py
+git add -- AGENTS.md CLAUDE.md docs/micro-task-template.md docs/superpowers/specs/2026-07-28-micro-task-fast-lane-design.md tests/fast_workflow
 git commit -m "docs: align policy with micro-task fast lane"
 ```
 
@@ -328,29 +333,29 @@ git commit -m "docs: align policy with micro-task fast lane"
 
 - Verify all first-batch files and commits.
 
-- [ ] **Step 1: Run focused verification through the updated public CLI**
+- [x] **Step 1: Run focused verification through the updated public CLI**
 
 Run:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-fast.ps1 `
-  -BackendTest tests/test_fast_workflow.py `
+  -BackendTest tests/fast_workflow/test_policy.py `
   -StaticFile AGENTS.md,CLAUDE.md,docs/micro-task-template.md,docs/superpowers/specs/2026-07-28-micro-task-fast-lane-design.md
 ```
 
 Expected: targeted pytest and all Git/static checks pass without starting frontend tests or a production build.
 
-- [ ] **Step 2: Run adjacent process-script regressions**
+- [x] **Step 2: Run adjacent process-script regressions**
 
 Run:
 
 ```powershell
-python -m pytest -q tests/test_fast_workflow.py tests/test_dev_script_boundaries.py
+python -m pytest -q tests/fast_workflow tests/test_dev_script_boundaries.py
 ```
 
 Expected: all tests pass.
 
-- [ ] **Step 3: Inspect scope and history**
+- [x] **Step 3: Inspect scope and history**
 
 Run:
 
@@ -363,10 +368,10 @@ git log --oneline --decorate -6
 
 Expected: no uncommitted files, no whitespace errors, and only the design, tests, implementation, and policy commits are ahead of the starting branch.
 
-- [ ] **Step 4: Request code review**
+- [x] **Step 4: Request code review**
 
 Use `superpowers:requesting-code-review` against the branch diff. Address every confirmed important finding with a failing test first, then rerun Steps 1–3.
 
-- [ ] **Step 5: Hand off the verified first batch**
+- [x] **Step 5: Hand off the verified first batch**
 
 Report the worktree path, commits, verification commands, and remaining second-batch scope. Do not merge, push, or modify the global hook until explicitly requested.
