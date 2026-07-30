@@ -172,6 +172,16 @@ def run_command(
     finally:
         if job is not None:
             job.close()
+        elif os.name != "nt":
+            original_exception_active = sys.exc_info()[0] is not None
+            try:
+                cleanup_error = _cleanup_posix_process_group(process)
+            except Exception:
+                if not original_exception_active:
+                    raise
+            else:
+                if cleanup_error is not None and not original_exception_active:
+                    raise cleanup_error
 
 
 def init_repo(path: Path) -> dict[str, str]:
@@ -236,6 +246,41 @@ def _collect_after_termination(process: subprocess.Popen[str]) -> tuple[str, str
                 _as_text(error.stderr),
                 "could not be collected after termination",
             )
+
+
+def _cleanup_posix_process_group(
+    process: subprocess.Popen[str],
+) -> AssertionError | None:
+    errors: list[str] = []
+    process_group = process.pid
+    current_group = os.getpgrp()
+    if process_group == current_group:
+        errors.append(f"refused to kill current process group {current_group}")
+    else:
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError as error:
+            errors.append(f"could not kill process group {process_group}: {error}")
+
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        except OSError as error:
+            errors.append(f"could not kill root process {process.pid}: {error}")
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            errors.append(f"could not reap root process {process.pid} within 20s")
+
+    if errors:
+        return AssertionError("; ".join(errors))
+    return None
 
 
 def _raise_failure(

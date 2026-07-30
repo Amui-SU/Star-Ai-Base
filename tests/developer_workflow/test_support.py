@@ -148,12 +148,56 @@ def test_run_command_reports_nonzero_exit_status(tmp_path: Path) -> None:
     assert "stderr=" in message
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group contract")
+def test_run_command_reaps_detached_stdio_child_after_success(tmp_path: Path) -> None:
+    child_pid_file = tmp_path / "posix-child-pid.txt"
+    delayed_marker = tmp_path / "posix-child-marker.txt"
+    child_script = (
+        "import pathlib, time; "
+        "time.sleep(3); "
+        f"pathlib.Path({str(delayed_marker)!r}).write_text('alive', encoding='utf-8')"
+    )
+    parent_script = (
+        "import pathlib, subprocess, sys; "
+        f"child = subprocess.Popen([sys.executable, '-c', {child_script!r}], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+        "stderr=subprocess.DEVNULL); "
+        f"pathlib.Path({str(child_pid_file)!r}).write_text(str(child.pid), encoding='utf-8')"
+    )
+
+    try:
+        result = run_command(
+            [sys.executable, "-c", parent_script],
+            tmp_path,
+            os.environ.copy(),
+            timeout=1,
+        )
+        assert result.returncode == 0
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            assert not delayed_marker.exists()
+            time.sleep(0.2)
+        child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+        assert not _process_exists(child_pid)
+    finally:
+        if child_pid_file.exists():
+            _force_cleanup(int(child_pid_file.read_text(encoding="utf-8")))
+
+
 def _process_exists(pid: int) -> bool:
     if os.name != "nt":
-        proc_stat = Path("/proc") / str(pid) / "stat"
-        if proc_stat.exists():
-            fields = proc_stat.read_text(encoding="utf-8", errors="replace").split()
-            return len(fields) > 2 and fields[2] != "Z"
+        proc_root = Path("/proc")
+        if proc_root.is_dir():
+            proc_stat = proc_root / str(pid) / "stat"
+            try:
+                stat_text = proc_stat.read_text(encoding="utf-8", errors="replace")
+            except FileNotFoundError:
+                return False
+            _, separator, suffix = stat_text.rpartition(")")
+            if separator:
+                state_fields = suffix.split()
+                if state_fields and state_fields[0] == "Z":
+                    return False
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
