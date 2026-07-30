@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
+import sys
 from pathlib import Path
 from typing import NoReturn
+
+_WINDOWS_LAUNCHER = """import json
+import subprocess
+import sys
+
+payload = sys.stdin.readline()
+if not payload:
+    raise SystemExit(125)
+raise SystemExit(subprocess.run(json.loads(payload), check=False).returncode)
+"""
 
 if os.name == "nt":
     import ctypes
@@ -123,23 +135,33 @@ def run_command(
     else:
         popen_options["start_new_session"] = True
 
-    process = subprocess.Popen(args, **popen_options)  # type: ignore[arg-type]
+    command = args
+    payload: str | None = None
+    if os.name == "nt":
+        command = [sys.executable, "-c", _WINDOWS_LAUNCHER]
+        payload = f"{json.dumps(args)}\n"
+        popen_options["stdin"] = subprocess.PIPE
+
+    process = subprocess.Popen(command, **popen_options)  # type: ignore[arg-type]
     job: _WindowsJob | None = None
     if os.name == "nt":
         try:
             job = _WindowsJob(process)
         except BaseException as error:
-            _terminate_process_tree(process, None)
+            _terminate_process_tree(process)
             stdout, stderr = _collect_after_termination(process)
             _raise_failure(args, stdout, stderr, f"could not own process tree: {error}")
 
     try:
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            _terminate_process_tree(process, job)
-            job = None
-            stdout, stderr = _collect_after_termination(process)
+            stdout, stderr = process.communicate(input=payload, timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            _terminate_process_tree(process)
+            try:
+                stdout, stderr = process.communicate(timeout=1)
+            except subprocess.TimeoutExpired as after_kill:
+                stdout = _as_text(after_kill.stdout or error.stdout)
+                stderr = _as_text(after_kill.stderr or error.stderr)
             _raise_failure(args, stdout, stderr, f"timed out after {timeout}s")
 
         if process.returncode:
@@ -179,12 +201,7 @@ def init_repo(path: Path) -> dict[str, str]:
     return environment
 
 
-def _terminate_process_tree(
-    process: subprocess.Popen[str], job: _WindowsJob | None
-) -> None:
-    if os.name == "nt" and job is not None:
-        job.close()
-        return
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
     if os.name == "nt":
         try:
             subprocess.run(

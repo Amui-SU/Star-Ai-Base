@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.developer_workflow import support
 from tests.developer_workflow.support import init_repo, run_command
 
 
@@ -118,7 +119,7 @@ def test_run_command_owns_child_when_parent_exits_before_timeout(
                 os.environ.copy(),
                 timeout=1,
             )
-        assert "python.exe" in str(exc_info.value)
+        assert Path(sys.executable).name in str(exc_info.value)
         deadline = time.monotonic() + 6
         while time.monotonic() < deadline:
             assert not delayed_marker.exists()
@@ -141,7 +142,7 @@ def test_run_command_reports_nonzero_exit_status(tmp_path: Path) -> None:
 
     message = str(exc_info.value)
     assert "exited with status 7" in message
-    assert "python.exe" in message
+    assert Path(sys.executable).name in message
     assert "bad output" in message
     assert "stdout=" in message
     assert "stderr=" in message
@@ -149,6 +150,10 @@ def test_run_command_reports_nonzero_exit_status(tmp_path: Path) -> None:
 
 def _process_exists(pid: int) -> bool:
     if os.name != "nt":
+        proc_stat = Path("/proc") / str(pid) / "stat"
+        if proc_stat.exists():
+            fields = proc_stat.read_text(encoding="utf-8", errors="replace").split()
+            return len(fields) > 2 and fields[2] != "Z"
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
@@ -164,6 +169,36 @@ def _process_exists(pid: int) -> bool:
         check=False,
     )
     return str(pid) in result.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object contract")
+def test_run_command_does_not_start_target_before_job_assignment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assignment_complete = tmp_path / "assignment-complete.txt"
+    target_started = tmp_path / "target-started.txt"
+
+    class GateProbeJob:
+        def __init__(self, process: subprocess.Popen[str]) -> None:
+            time.sleep(0.3)
+            assert not target_started.exists(), "target started before Job assignment"
+            assignment_complete.write_text("ready", encoding="utf-8")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(support, "_WindowsJob", GateProbeJob)
+    target_script = (
+        "import pathlib, sys; "
+        f"started = pathlib.Path({str(target_started)!r}); started.write_text('started'); "
+        f"assert pathlib.Path({str(assignment_complete)!r}).exists(); print('released')"
+    )
+
+    result = run_command(
+        [sys.executable, "-c", target_script], tmp_path, os.environ.copy()
+    )
+
+    assert result.stdout == "released\n"
 
 
 def _force_cleanup(pid: int) -> None:
