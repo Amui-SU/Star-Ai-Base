@@ -10,6 +10,8 @@ from .support import (
     run_verifier,
 )
 
+STATIC_FILE_LIMIT_BYTES = 8 * 1024 * 1024
+
 
 def test_unstaged_whitespace_in_tracked_static_file_fails(
     verifier_repo: VerifierRepo,
@@ -84,6 +86,7 @@ def test_untracked_conflict_marker_fails(verifier_repo: VerifierRepo):
     "marker",
     [
         "<<<<<<<<< branch",
+        "<<<<<<<\tbranch",
         "========",
         ">>>>>>>> branch",
         "||||||| base",
@@ -177,6 +180,36 @@ def test_large_untracked_text_file_reports_late_whitespace(
     assert result.returncode != 0
     assert "large.txt:300001" in result.stdout + result.stderr
     assert "trailing whitespace" in result.stdout + result.stderr
+
+
+def test_static_file_rejects_a_single_line_over_the_size_limit(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "large.md").write_bytes(b"x" * (STATIC_FILE_LIMIT_BYTES + 1))
+
+    result = run_verifier(repo, environment, "-StaticFile", "large.md")
+
+    assert result.returncode != 0
+    assert (
+        "large.md exceeds the 8 MiB static file limit" in result.stdout + result.stderr
+    )
+
+
+def test_large_unsupported_file_is_skipped_before_text_decoding(
+    verifier_repo: VerifierRepo,
+):
+    repo, environment = verifier_repo
+    (repo / "note.md").write_text("changed", encoding="utf-8")
+    (repo / "archive.bin").write_bytes((b"x" * (STATIC_FILE_LIMIT_BYTES + 1)) + b"\xff")
+
+    result = run_verifier(repo, environment, "-StaticFile", "note.md")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Fast verification does not support changed file: archive.bin" in output
+    assert "Skipping non-UTF-8 untracked file: archive.bin" not in output
+    assert "static file limit" not in output
 
 
 def test_untracked_special_character_path_is_enumerated_without_git_quoting(

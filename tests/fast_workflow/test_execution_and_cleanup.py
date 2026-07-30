@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 import time
@@ -6,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from . import support
 from .support import (
     VerifierRepo,
+    run_checked,
+    read,
     run_subprocess_with_timeout,
     run_verifier,
     terminate_process_tree,
@@ -92,6 +96,67 @@ def test_windows_process_tree_cleanup_falls_back_when_taskkill_fails(
     assert calls == ["kill", ("wait", 5)]
 
 
+def test_timeout_diagnostics_remain_bounded_when_a_descendant_keeps_pipes_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    command = ["verifier", "--probe"]
+    communicate_timeouts: list[float] = []
+
+    class FakeProcess:
+        pid = 1234
+        returncode = -9
+
+        def communicate(self, timeout):
+            communicate_timeouts.append(timeout)
+            raise subprocess.TimeoutExpired(
+                command,
+                timeout,
+                output=b"parent-started",
+                stderr=b"descendant-pipe-open",
+            )
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            pass
+
+        def wait(self, timeout):
+            pass
+
+    def fail_taskkill(*args, **kwargs):
+        raise OSError("taskkill unavailable")
+
+    monkeypatch.setattr(support.os, "name", "nt")
+    monkeypatch.setattr(
+        support.subprocess, "Popen", lambda *args, **kwargs: FakeProcess()
+    )
+    monkeypatch.setattr(support.subprocess, "run", fail_taskkill)
+
+    with pytest.raises(AssertionError) as error:
+        run_subprocess_with_timeout(
+            command,
+            cwd=tmp_path,
+            environment=os.environ.copy(),
+            timeout_seconds=0.1,
+        )
+
+    diagnostic = str(error.value)
+    assert communicate_timeouts == [0.1, 5]
+    assert repr(command) in diagnostic
+    assert "parent-started" in diagnostic
+    assert "descendant-pipe-open" in diagnostic
+    assert "stdout=" in diagnostic
+    assert "stderr=" in diagnostic
+
+
+def test_subprocess_timeout_cleanup_has_no_unbounded_pipe_waits():
+    support_source = read("tests/fast_workflow/support.py")
+
+    assert re.search(r"\.communicate\(\s*\)", support_source) is None
+    assert re.search(r"\.wait\(\s*\)", support_source) is None
+
+
 def test_frontend_test_uses_local_vitest_with_expanded_targets(
     verifier_repo: VerifierRepo, tmp_path: Path
 ):
@@ -137,6 +202,47 @@ def test_lint_file_uses_local_eslint_with_target(
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert log.read_text(encoding="utf-8").split() == ["--", "src/widget.ts"]
+
+
+def test_frontend_executable_resolution_does_not_depend_on_os_environment(
+    verifier_repo: VerifierRepo, tmp_path: Path
+):
+    repo, environment = verifier_repo
+    environment.pop("OS", None)
+    write_frontend_target(repo, "src/widget.ts")
+    write_frontend_stub(repo, "eslint")
+    log = tmp_path / "eslint-arguments.txt"
+    environment["FAST_VERIFIER_LOG"] = str(log)
+    environment["FAST_VERIFIER_EXIT"] = "0"
+
+    result = run_verifier(repo, environment, "-LintFile", "src/widget.ts")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert log.read_text(encoding="utf-8").split() == ["--", "src/widget.ts"]
+
+
+def test_lint_bracket_path_is_rejected_before_eslint_can_match_a_sibling(
+    verifier_repo: VerifierRepo, tmp_path: Path
+):
+    repo, environment = verifier_repo
+    write_frontend_target(repo, "src/Case.ts")
+    run_checked(["git", "add", "frontend/src/Case.ts"], repo, environment)
+    run_checked(
+        ["git", "commit", "--no-gpg-sign", "--no-verify", "-m", "add sibling"],
+        repo,
+        environment,
+    )
+    write_frontend_target(repo, "src/[C]ase.ts")
+    write_frontend_stub(repo, "eslint")
+    log = tmp_path / "eslint-arguments.txt"
+    environment["FAST_VERIFIER_LOG"] = str(log)
+    environment["FAST_VERIFIER_EXIT"] = "0"
+
+    result = run_verifier(repo, environment, "-LintFile", "src/[C]ase.ts")
+
+    assert result.returncode != 0
+    assert "ESLint glob" in result.stdout + result.stderr
+    assert not log.exists()
 
 
 @pytest.mark.parametrize(

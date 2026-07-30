@@ -57,6 +57,8 @@ def test_fast_lane_maps_file_types_to_specific_verification_targets():
             "authentication",
             "security",
             "complete verification",
+            "ESLint glob characters",
+            "8 MiB",
         ]:
             assert token.casefold() in compact.casefold()
 
@@ -170,6 +172,17 @@ def test_fast_lane_boundaries_mark_v2_as_the_current_policy():
     ).is_file()
 
 
+def test_v2_plan_labels_the_historical_dirty_worktree_verification_context():
+    plan = read("docs/superpowers/plans/2026-07-29-micro-task-fast-lane-v2.md")
+    task_five = markdown_section(
+        plan, "### Task 5: Verify the first batch and prepare integration"
+    )
+
+    assert "Historical execution context" in task_five
+    assert "dirty worktree" in task_five
+    assert "not a clean-checkout reproduction command" in task_five
+
+
 def test_fast_verifier_only_runs_explicit_targets():
     script = read("scripts/verify-fast.ps1")
 
@@ -214,6 +227,15 @@ def test_untracked_scan_uses_streaming_file_apis():
     assert "System.IO.StreamReader" in script
     assert "StandardOutput.BaseStream" in script
     assert "ls-files -z --others --exclude-standard" in script
+
+
+def test_fast_verifier_uses_runtime_os_detection_and_ordinal_path_deduplication():
+    script = read("scripts/verify-fast.ps1")
+
+    assert "$env:OS" not in script
+    assert "RuntimeInformation]::IsOSPlatform" in script
+    assert "OSPlatform]::Windows" in script
+    assert "$pathComparer = [System.StringComparer]::Ordinal" in script
 
 
 def test_fast_lane_preserves_full_verification_boundaries():

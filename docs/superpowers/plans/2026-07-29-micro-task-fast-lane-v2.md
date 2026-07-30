@@ -345,6 +345,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-fast.ps1 `
 
 Expected: targeted pytest and all Git/static checks pass without starting frontend tests or a production build.
 
+> **Historical execution context:** This command was run while the listed
+> first-batch files were present in a dirty worktree. It records that completed
+> run and is not a clean-checkout reproduction command, because `-StaticFile`
+> intentionally rejects unchanged targets. Steps 2 and 3 below record the final
+> clean-tree regression and repository-state gates.
+
 - [x] **Step 2: Run adjacent process-script regressions**
 
 Run:

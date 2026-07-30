@@ -69,6 +69,23 @@ def test_tool_targets_require_existing_non_traversing_relative_files(
     assert "target" in (result.stdout + result.stderr).casefold()
 
 
+@pytest.mark.parametrize("glob_character", ["*", "?", "[", "]", "{", "}", "!"])
+def test_lint_targets_reject_eslint_glob_characters(
+    verifier_repo: VerifierRepo, glob_character: str
+):
+    repo, environment = verifier_repo
+
+    result = run_verifier(
+        repo,
+        environment,
+        "-LintFile",
+        f"src/probe{glob_character}target.ts",
+    )
+
+    assert result.returncode != 0
+    assert "ESLint glob" in result.stdout + result.stderr
+
+
 def test_backend_target_allows_a_node_id_after_a_verified_python_file(
     verifier_repo: VerifierRepo,
 ):

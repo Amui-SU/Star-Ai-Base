@@ -34,7 +34,9 @@ unchanged file, and cannot contain duplicate or out-of-repository paths. Every
 tool target is an existing relative real file inside its required root: options,
 absolute paths, traversal, reparse points, symbolic links, and Git mode-120000
 entries are rejected. A backend target may append a pytest node id (`::...`) to
-an otherwise verified `.py` file.
+an otherwise verified `.py` file. Lint targets additionally reject ESLint glob
+characters (`*`, `?`, `[`, `]`, `{`, `}`, and `!`) so ESLint cannot reinterpret
+an already verified literal path.
 
 The explicit scope limits changed-file mapping, tracked unstaged and staged
 whitespace checks, and untracked text hygiene to the declared task changeset. It
@@ -62,10 +64,11 @@ The allowed extensions are `.md`, `.txt`, `.css`, `.scss`, and `.less`.
 Structured and configuration formats are intentionally excluded from the fast
 lane rather than classified by filename or presumed intent.
 
-Every in-scope static target is read as strict streaming UTF-8 and must contain
-no NUL bytes. Invalid UTF-8 or NUL means the fast lane fails closed and requires
-complete verification; unrelated untracked binary files remain outside this
-static-file contract.
+Every in-scope static target is limited to 8 MiB, read as strict streaming UTF-8,
+and must contain no NUL bytes. Exceeding the limit, invalid UTF-8, or NUL means
+the fast lane fails closed and requires complete verification; unrelated
+untracked files with unsupported extensions remain outside this static-file
+contract and are skipped before content scanning.
 
 ## Workflow boundaries
 

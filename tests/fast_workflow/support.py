@@ -74,6 +74,14 @@ def terminate_process_tree(process: subprocess.Popen[str]) -> None:
         pass
 
 
+def timeout_stream_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def run_subprocess_with_timeout(
     command: list[str],
     *,
@@ -100,13 +108,25 @@ def run_subprocess_with_timeout(
     )
     try:
         stdout, stderr = process.communicate(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as initial_timeout:
         terminate_process_tree(process)
         try:
             stdout, stderr = process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate()
+        except subprocess.TimeoutExpired as cleanup_timeout:
+            try:
+                process.kill()
+            except Exception:
+                pass
+            stdout = timeout_stream_text(
+                cleanup_timeout.output
+                if cleanup_timeout.output is not None
+                else initial_timeout.output
+            )
+            stderr = timeout_stream_text(
+                cleanup_timeout.stderr
+                if cleanup_timeout.stderr is not None
+                else initial_timeout.stderr
+            )
         raise AssertionError(
             f"subprocess timed out after {timeout_seconds}s: "
             f"args={command!r}\nstdout={stdout!r}\nstderr={stderr!r}"

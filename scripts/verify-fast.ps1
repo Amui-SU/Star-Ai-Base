@@ -33,6 +33,12 @@ function Expand-Targets {
     return $expanded
 }
 
+function Test-ContainsEslintGlobCharacter {
+    param([string]$Target)
+
+    return $Target.IndexOfAny([char[]]"*?[]{}!") -ge 0
+}
+
 function Invoke-Step {
     param(
         [string]$Name,
@@ -345,7 +351,7 @@ function Get-UntrackedTextViolation {
 
             if (
                 $null -eq $firstViolation -and
-                $line -match "^(<{7,}|={7,}|>{7,}|\|{7,})( .*)?$"
+                $line -match "^(<{7,}|={7,}|>{7,}|\|{7,})([ \t].*)?$"
             ) {
                 $firstViolation = "${RelativePath}:$lineNumber unresolved conflict marker"
             }
@@ -384,6 +390,11 @@ function Test-StaticTextFile {
 
     $candidate = Join-Path $projectRoot $RelativePath
     try {
+        $item = Get-Item -LiteralPath $candidate -Force
+        if ($item.Length -gt $maxStaticFileBytes) {
+            Write-Fail "Static file $RelativePath exceeds the 8 MiB static file limit"
+            exit 1
+        }
         if (Test-FileContainsNul $candidate) {
             Write-Fail "Static file contains NUL bytes: $RelativePath"
             exit 1
@@ -421,6 +432,16 @@ function Test-UntrackedTextFiles {
 
         if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
             Write-Fail "Untracked file is a symbolic link or reparse point: $relativePath"
+            exit 1
+        }
+
+        $extension = [System.IO.Path]::GetExtension($relativePath).ToLowerInvariant()
+        if ($allowedStaticExtensions -notcontains $extension) {
+            continue
+        }
+
+        if ($item.Length -gt $maxStaticFileBytes) {
+            Write-Fail "Static file $relativePath exceeds the 8 MiB static file limit"
             exit 1
         }
 
@@ -464,17 +485,17 @@ $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $frontendRoot = Join-Path $projectRoot "frontend"
 $projectRootPrefix = $projectRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
 $frontendRootPrefix = $frontendRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
-$pathComparison = if ($env:OS -eq "Windows_NT") {
+$isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Windows
+)
+$pathComparison = if ($isWindows) {
     [System.StringComparison]::OrdinalIgnoreCase
 } else {
     [System.StringComparison]::Ordinal
 }
-$pathComparer = if ($env:OS -eq "Windows_NT") {
-    [System.StringComparer]::OrdinalIgnoreCase
-} else {
-    [System.StringComparer]::Ordinal
-}
+$pathComparer = [System.StringComparer]::Ordinal
 $allowedStaticExtensions = @(".md", ".txt", ".css", ".scss", ".less")
+$maxStaticFileBytes = 8MB
 $changedFiles = @(Get-ChangedFiles)
 $changedPathSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
 foreach ($changedFile in $changedFiles) {
@@ -530,6 +551,10 @@ else {
 }
 
 foreach ($lintTarget in $LintFile) {
+    if (Test-ContainsEslintGlobCharacter $lintTarget) {
+        Write-Fail "Lint target must not contain ESLint glob characters (* ? [ ] { } !): $lintTarget"
+        exit 2
+    }
     $verifiedTarget = Resolve-VerifiedFileTarget $lintTarget $frontendRoot $frontendRootPrefix "Lint" @(".js", ".jsx", ".ts", ".tsx")
     [void]$lintTargetSet.Add($verifiedTarget.RelativePath)
     [void]$lintTargetsVerified.Add($verifiedTarget.ToolArgument)
@@ -655,7 +680,7 @@ if ($BackendTest.Count -gt 0) {
 if ($FrontendTest.Count -gt 0 -or $LintFile.Count -gt 0) {
     Push-Location $frontendRoot
     try {
-        $binSuffix = if ($env:OS -eq "Windows_NT") { ".cmd" } else { "" }
+        $binSuffix = if ($isWindows) { ".cmd" } else { "" }
         $vitest = Join-Path $frontendRoot "node_modules/.bin/vitest$binSuffix"
         $eslint = Join-Path $frontendRoot "node_modules/.bin/eslint$binSuffix"
 

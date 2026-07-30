@@ -57,10 +57,11 @@ security behavior.
   comma-separated values. Each target must be an existing relative real file
   under its required root (and cannot be a symbolic link, reparse point, Git
   symlink, absolute path, traversal, or tool option); backend targets may append
-  a pytest node id after a verified `.py` file. The fast verifier checks
+  a pytest node id after a verified `.py` file, while lint targets cannot
+  contain ESLint glob characters (`*`, `?`, `[`, `]`, `{`, `}`, or `!`). The fast verifier checks
   unstaged, staged, and untracked changes, requires each static target to be
-  changed, validates every in-scope static file as NUL-free strict UTF-8 text,
-  and requires a complete changed-file mapping regardless of other targets:
+  changed, and validates every in-scope static file as NUL-free strict UTF-8
+  text within an 8 MiB limit. It requires a complete changed-file mapping regardless of other targets:
   every changed static file needs `-StaticFile`, and every changed frontend
   JavaScript or TypeScript file needs `-LintFile`. Unsupported changed files
   require complete verification.
