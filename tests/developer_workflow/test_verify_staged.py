@@ -195,6 +195,61 @@ def test_python_files_are_black_checked_together_with_literal_paths(
     assert Path(str(records[0]["cwd"])) == repo
 
 
+def test_staged_python_starts_python_exactly_once(tmp_path: Path) -> None:
+    repo, environment, _ = _prepare_repo(tmp_path)
+    python_log = _install_python_recorder(repo, environment)
+    path = "single-process.py"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    _run(repo, environment)
+
+    calls = [
+        json.loads(line) for line in python_log.read_text(encoding="utf-8").splitlines()
+    ]
+    assert calls == [["-m", "black", "--check", "--", path]]
+
+
+def _install_python_recorder(repo: Path, environment: dict[str, str]) -> Path:
+    shim_directory = repo / ".python-recorder-shim"
+    shim_directory.mkdir()
+    log_path = repo / ".python-calls.jsonl"
+    recorder = shim_directory / "python-recorder.py"
+    recorder.write_text(
+        """import json
+import os
+import subprocess
+import sys
+
+with open(os.environ["STAGED_VERIFY_PYTHON_LOG"], "a", encoding="utf-8") as stream:
+    stream.write(json.dumps(sys.argv[1:], ensure_ascii=False) + "\\n")
+result = subprocess.run([os.environ["STAGED_VERIFY_REAL_PYTHON"], *sys.argv[1:]])
+raise SystemExit(result.returncode)
+""",
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        launcher = shim_directory / "python.cmd"
+        launcher.write_text(
+            "@echo off\r\n"
+            '"%STAGED_VERIFY_REAL_PYTHON%" "%~dp0python-recorder.py" %*\r\n'
+            "exit /b %errorlevel%\r\n",
+            encoding="utf-8",
+        )
+    else:
+        launcher = shim_directory / "python"
+        launcher.write_text(
+            "#!/bin/sh\n"
+            'exec "$STAGED_VERIFY_REAL_PYTHON" "$(dirname "$0")/python-recorder.py" "$@"\n',
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
+    environment["STAGED_VERIFY_REAL_PYTHON"] = sys.executable
+    environment["STAGED_VERIFY_PYTHON_LOG"] = str(log_path)
+    environment["PATH"] = str(shim_directory) + os.pathsep + environment["PATH"]
+    return log_path
+
+
 def test_newline_and_glob_like_staged_names_remain_literal(tmp_path: Path) -> None:
     repo, environment, log_path = _prepare_repo(tmp_path)
     paths = ["glob[ab].py"]
@@ -295,6 +350,8 @@ def test_formatter_failures_propagate(
 
     assert f"status {exit_code}" in failure
     assert [record["tool"] for record in _records(log_path)] == [tool]
+    if tool == "black":
+        assert "python -m pip install black" in failure
 
 
 def test_missing_pinned_prettier_fails_closed_with_dependency_guidance(
@@ -316,10 +373,10 @@ def test_missing_python_fails_closed_with_executable_setup_guidance(
     tmp_path: Path,
 ) -> None:
     repo, environment, log_path = _prepare_repo(tmp_path)
-    _install_failing_python_shim(repo, environment)
     path = "probe.py"
     _write(repo, path)
     _stage(repo, environment, path)
+    _remove_python_from_path(repo, environment)
 
     failure = _failure(repo, environment)
 
@@ -348,17 +405,20 @@ def test_missing_black_fails_closed_with_executable_setup_guidance(
     assert _records(log_path) == []
 
 
-def _install_failing_python_shim(repo: Path, environment: dict[str, str]) -> None:
-    shim_directory = repo / ".python-failure-shim"
-    shim_directory.mkdir()
+def _remove_python_from_path(repo: Path, environment: dict[str, str]) -> None:
+    real_git = shutil.which("git")
+    assert real_git is not None
     if os.name == "nt":
-        launcher = shim_directory / "python.cmd"
-        launcher.write_text("@exit /b 127\r\n", encoding="utf-8")
+        system_directory = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32"
+        path_entries = [str(Path(real_git).parent), str(system_directory)]
     else:
-        launcher = shim_directory / "python"
-        launcher.write_text("#!/bin/sh\nexit 127\n", encoding="utf-8")
-        launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
-    environment["PATH"] = str(shim_directory) + os.pathsep + environment["PATH"]
+        git_only_directory = repo / ".git-only-path"
+        git_only_directory.mkdir()
+        git_launcher = git_only_directory / "git"
+        git_launcher.symlink_to(real_git)
+        path_entries = [str(git_only_directory)]
+    environment["PATH"] = os.pathsep.join(path_entries)
+    assert shutil.which("python", path=environment["PATH"]) is None
 
 
 def test_cached_diff_check_failure_propagates_before_formatters(tmp_path: Path) -> None:

@@ -213,7 +213,7 @@ function Resolve-StagedFile {
     }
 }
 
-function Confirm-PythonFormatterDependencies {
+function Get-PythonFormatterCommand {
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
     if ($null -eq $pythonCommand) {
         Write-Fail (
@@ -222,34 +222,7 @@ function Confirm-PythonFormatterDependencies {
         )
         exit 1
     }
-
-    $previousErrorPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        python --version > $null 2>&1
-        $pythonExitCode = $LASTEXITCODE
-        python -c "import black" > $null 2>&1
-        $blackExitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $previousErrorPreference
-    }
-
-    if ($pythonExitCode -ne 0) {
-        Write-Fail (
-            "Python is unavailable or could not start. Install Python 3, ensure python " +
-            "is on PATH, then run: python -m pip install black"
-        )
-        exit 1
-    }
-
-    if ($blackExitCode -ne 0) {
-        Write-Fail (
-            "Missing Python formatter dependency: Black. " +
-            "Prepare it with: python -m pip install black"
-        )
-        exit 1
-    }
+    return $pythonCommand
 }
 
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
@@ -293,10 +266,32 @@ $webPaths = @(
 )
 
 if ($pythonPaths.Count -gt 0) {
-    Confirm-PythonFormatterDependencies
-    Invoke-NativeStep "staged Python formatting" {
-        python -m black --check -- @pythonPaths
+    $pythonCommand = Get-PythonFormatterCommand
+    Write-Info "staged Python formatting"
+    $previousErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $pythonCommand.Source -m black --check -- @pythonPaths
+        $blackExitCode = $LASTEXITCODE
     }
+    catch {
+        Write-Fail (
+            "Could not start Python formatter. Prepare Python and Black with: " +
+            "python -m pip install black"
+        )
+        exit 1
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorPreference
+    }
+    if ($blackExitCode -ne 0) {
+        Write-Fail (
+            "staged Python formatting failed. Prepare Python and Black with: " +
+            "python -m pip install black"
+        )
+        exit $blackExitCode
+    }
+    Write-Ok "staged Python formatting"
 }
 
 if ($webPaths.Count -gt 0) {
