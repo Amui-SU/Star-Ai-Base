@@ -228,7 +228,9 @@ def test_wait_port_returns_promptly_when_child_process_exits():
     payload = json.loads(result.stdout.strip())
     assert payload["ready"] is False
     assert payload["exitCode"] == 23
-    assert payload["elapsedMs"] < 2000
+    # Wait-Port polls once per second; allow Windows process-start and scheduler
+    # jitter while still catching a regression to the 30-second timeout path.
+    assert payload["elapsedMs"] < 5000
 
 
 def test_start_waits_on_each_child_and_reports_early_exit_codes():

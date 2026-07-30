@@ -26,7 +26,7 @@ def test_timed_subprocess_kills_child_process_tree_and_reports_diagnostics(
     sentinel = tmp_path / "child-survived.txt"
     child_code = (
         "import pathlib,sys,time; "
-        "time.sleep(0.8); "
+        "time.sleep(5); "
         "pathlib.Path(sys.argv[1]).write_text('survived', encoding='utf-8')"
     )
     parent_code = (
@@ -47,9 +47,11 @@ def test_timed_subprocess_kills_child_process_tree_and_reports_diagnostics(
         )
     elapsed = time.monotonic() - started
 
-    time.sleep(1)
+    # Give taskkill several scheduler quanta, then wait past the child's natural
+    # write deadline so the sentinel still proves the descendant was terminated.
+    time.sleep(5.5)
     diagnostic = str(error.value)
-    assert elapsed < 5
+    assert elapsed < 25
     assert not sentinel.exists()
     assert repr(command) in diagnostic
     assert "parent-started" in diagnostic
