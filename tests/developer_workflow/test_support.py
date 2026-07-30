@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
@@ -184,6 +185,52 @@ def test_run_command_reaps_detached_stdio_child_after_success(tmp_path: Path) ->
             _force_cleanup(int(child_pid_file.read_text(encoding="utf-8")))
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group contract")
+def test_run_command_bounds_output_from_child_that_escapes_process_group(
+    tmp_path: Path,
+) -> None:
+    escaped_pid_file = tmp_path / "escaped-session-child-pid.txt"
+    child_script = "import time; time.sleep(30)"
+    parent_script = (
+        "import os, pathlib, subprocess, sys; "
+        f"child = subprocess.Popen([sys.executable, '-c', {child_script!r}], "
+        "stdin=subprocess.DEVNULL, preexec_fn=os.setsid); "
+        f"pathlib.Path({str(escaped_pid_file)!r}).write_text(str(child.pid), encoding='utf-8'); "
+        "print('target complete')"
+    )
+
+    started = time.monotonic()
+    try:
+        try:
+            result = run_command(
+                [sys.executable, "-c", parent_script],
+                tmp_path,
+                os.environ.copy(),
+                timeout=2,
+            )
+        except AssertionError as error:
+            assert "cleanup" in str(error) or "timed out" in str(error)
+        else:
+            assert "target complete" in result.stdout
+        assert time.monotonic() - started < 10
+    finally:
+        if escaped_pid_file.exists():
+            _force_cleanup(int(escaped_pid_file.read_text(encoding="utf-8")))
+
+
+def test_posix_output_capture_uses_single_threaded_selector_deadlines() -> None:
+    module_source = inspect.getsource(support)
+    runner_source = inspect.getsource(support._run_posix_command)
+
+    assert "threading" not in module_source
+    assert "TextIO" not in module_source
+    assert ".read(" not in runner_source
+    assert "selectors.DefaultSelector" in runner_source
+    assert "os.set_blocking" in runner_source
+    assert "os.read" in module_source
+    assert "time.monotonic" in module_source
+
+
 def test_posix_group_cleanup_kills_stable_group_before_reaping_leader() -> None:
     events: list[tuple[object, ...]] = []
 
@@ -206,6 +253,19 @@ def test_posix_group_cleanup_kills_stable_group_before_reaping_leader() -> None:
         ("killpg", 43210, 9),
         ("wait", 10),
     ]
+
+
+def test_cleanup_diagnostic_is_appended_to_primary_failure() -> None:
+    cleanup_error = AssertionError("could not reap supervisor")
+
+    assert (
+        support._append_cleanup_error("timed out after 1s", cleanup_error)
+        == "timed out after 1s; cleanup_error=could not reap supervisor"
+    )
+    assert (
+        support._append_cleanup_error("exited with status 7", cleanup_error)
+        == "exited with status 7; cleanup_error=could not reap supervisor"
+    )
 
 
 def _process_exists(pid: int) -> bool:

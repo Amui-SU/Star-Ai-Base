@@ -8,11 +8,10 @@ import selectors
 import signal
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import NoReturn, TextIO
+from typing import NoReturn
 
 _WINDOWS_LAUNCHER = """import json
 import subprocess
@@ -199,14 +198,24 @@ def _run_posix_command(
     args: list[str], cwd: Path, env: dict[str, str], timeout: float
 ) -> subprocess.CompletedProcess[str]:
     result_read_fd, result_write_fd = os.pipe()
-    process: subprocess.Popen[str] | None = None
-    reader_threads: list[threading.Thread] = []
-    reader_errors: list[str] = []
-    stdout_chunks: list[str] = []
-    stderr_chunks: list[str] = []
+    stdout_read_fd, stdout_write_fd = os.pipe()
+    stderr_read_fd, stderr_write_fd = os.pipe()
+    open_fds = {
+        result_read_fd,
+        result_write_fd,
+        stdout_read_fd,
+        stdout_write_fd,
+        stderr_read_fd,
+        stderr_write_fd,
+    }
+    process: subprocess.Popen[bytes] | None = None
+    stdout_chunks: list[bytes] = []
+    stderr_chunks: list[bytes] = []
     result_reason: str | None = None
     target_returncode: int | None = None
     cleanup_error: AssertionError | None = None
+    cleanup_attempted = False
+    selector = selectors.DefaultSelector()
     try:
         command = [
             sys.executable,
@@ -220,76 +229,78 @@ def _run_posix_command(
                 command,
                 cwd=cwd,
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+                stdout=stdout_write_fd,
+                stderr=stderr_write_fd,
                 start_new_session=True,
                 pass_fds=(result_write_fd,),
             )
         finally:
-            os.close(result_write_fd)
-            result_write_fd = -1
+            for fd in (result_write_fd, stdout_write_fd, stderr_write_fd):
+                _close_raw_fd(fd, open_fds)
 
-        assert process.stdout is not None
-        assert process.stderr is not None
-        reader_threads = [
-            _start_output_reader(process.stdout, stdout_chunks, reader_errors),
-            _start_output_reader(process.stderr, stderr_chunks, reader_errors),
-        ]
+        for fd, channel in (
+            (result_read_fd, "result"),
+            (stdout_read_fd, "stdout"),
+            (stderr_read_fd, "stderr"),
+        ):
+            os.set_blocking(fd, False)
+            selector.register(fd, selectors.EVENT_READ, channel)
+
         try:
-            target_returncode = _wait_for_posix_result(result_read_fd, timeout)
-            if target_returncode is None:
+            target_returncode, result_reason = _collect_posix_until_result(
+                selector,
+                deadline=time.monotonic() + max(timeout, 0),
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+            )
+            if result_reason == "timed out":
                 result_reason = f"timed out after {timeout}s"
         finally:
+            cleanup_attempted = True
             cleanup_error = _kill_posix_group_then_reap(
                 process,
                 current_group=os.getpgrp(),
                 kill_group=os.killpg,
                 kill_signal=signal.SIGKILL,
             )
-    finally:
-        if result_write_fd >= 0:
-            os.close(result_write_fd)
-        os.close(result_read_fd)
-        if process is not None and cleanup_error is None and process.returncode is None:
-            cleanup_error = _kill_posix_group_then_reap(
-                process,
-                current_group=os.getpgrp(),
-                kill_group=os.killpg,
-                kill_signal=signal.SIGKILL,
-            )
-        reader_cleanup_error = _join_output_readers(
-            reader_threads,
-            (
-                [
-                    stream
-                    for stream in (process.stdout, process.stderr)
-                    if stream is not None
-                ]
-                if process is not None
-                else []
-            ),
-            reader_errors,
-        )
-        if cleanup_error is None:
-            cleanup_error = reader_cleanup_error
 
-    stdout = "".join(stdout_chunks)
-    stderr = "".join(stderr_chunks)
-    if cleanup_error is not None:
-        _raise_failure(args, stdout, stderr, f"cleanup failed: {cleanup_error}")
-    if reader_errors:
-        _raise_failure(
-            args, stdout, stderr, f"output collection failed: {reader_errors}"
+        drain_error = _drain_posix_output(
+            selector,
+            deadline=time.monotonic() + 2,
+            stdout_chunks=stdout_chunks,
+            stderr_chunks=stderr_chunks,
         )
+        cleanup_error = _combine_cleanup_errors(cleanup_error, drain_error)
+    finally:
+        if process is not None and not cleanup_attempted:
+            fallback_error = _kill_posix_group_then_reap(
+                process,
+                current_group=os.getpgrp(),
+                kill_group=os.killpg,
+                kill_signal=signal.SIGKILL,
+            )
+            cleanup_error = _combine_cleanup_errors(cleanup_error, fallback_error)
+        selector.close()
+        for fd in tuple(open_fds):
+            _close_raw_fd(fd, open_fds)
+
+    stdout = b"".join(stdout_chunks).decode("utf-8", errors="replace")
+    stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace")
     if result_reason is not None:
+        result_reason = _append_cleanup_error(result_reason, cleanup_error)
         _raise_failure(args, stdout, stderr, result_reason)
     if target_returncode is None:
-        _raise_failure(args, stdout, stderr, "supervisor exited without a result")
+        reason = _append_cleanup_error(
+            "supervisor exited without a result", cleanup_error
+        )
+        _raise_failure(args, stdout, stderr, reason)
     if target_returncode:
-        _raise_failure(args, stdout, stderr, f"exited with status {target_returncode}")
+        reason = _append_cleanup_error(
+            f"exited with status {target_returncode}", cleanup_error
+        )
+        _raise_failure(args, stdout, stderr, reason)
+    if cleanup_error is not None:
+        _raise_failure(args, stdout, stderr, f"cleanup failed: {cleanup_error}")
     return subprocess.CompletedProcess(args, target_returncode, stdout, stderr)
 
 
@@ -351,34 +362,106 @@ def _collect_after_termination(process: subprocess.Popen[str]) -> tuple[str, str
             )
 
 
-def _start_output_reader(
-    stream: TextIO, chunks: list[str], errors: list[str]
-) -> threading.Thread:
-    def drain() -> None:
-        try:
-            while chunk := stream.read(65536):
-                chunks.append(chunk)
-        except (OSError, ValueError) as error:
-            errors.append(str(error))
+def _collect_posix_until_result(
+    selector: selectors.BaseSelector,
+    *,
+    deadline: float,
+    stdout_chunks: list[bytes],
+    stderr_chunks: list[bytes],
+) -> tuple[int | None, str | None]:
+    result = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None, "timed out"
+        events = selector.select(remaining)
+        if not events:
+            return None, "timed out"
+        for key, _ in events:
+            try:
+                chunk = os.read(key.fd, 65536)
+            except BlockingIOError:
+                continue
+            except OSError as error:
+                return None, f"output capture failed: {error}"
+            if not chunk:
+                selector.unregister(key.fd)
+                if key.data == "result":
+                    return None, "supervisor closed its result channel unexpectedly"
+                continue
+            if key.data == "stdout":
+                stdout_chunks.append(chunk)
+            elif key.data == "stderr":
+                stderr_chunks.append(chunk)
+            else:
+                result.extend(chunk)
+                if b"\n" in result:
+                    try:
+                        return int(result.split(b"\n", 1)[0]), None
+                    except ValueError:
+                        return None, f"invalid supervisor result: {bytes(result)!r}"
 
-    thread = threading.Thread(target=drain, daemon=True)
-    thread.start()
-    return thread
+
+def _drain_posix_output(
+    selector: selectors.BaseSelector,
+    *,
+    deadline: float,
+    stdout_chunks: list[bytes],
+    stderr_chunks: list[bytes],
+) -> AssertionError | None:
+    while any(key.data in {"stdout", "stderr"} for key in selector.get_map().values()):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        events = selector.select(remaining)
+        if not events:
+            return None
+        for key, _ in events:
+            if key.data not in {"stdout", "stderr"}:
+                selector.unregister(key.fd)
+                continue
+            try:
+                chunk = os.read(key.fd, 65536)
+            except BlockingIOError:
+                continue
+            except OSError as error:
+                return AssertionError(f"could not drain {key.data}: {error}")
+            if not chunk:
+                selector.unregister(key.fd)
+            elif key.data == "stdout":
+                stdout_chunks.append(chunk)
+            else:
+                stderr_chunks.append(chunk)
+    return None
 
 
-def _wait_for_posix_result(result_fd: int, timeout: float) -> int | None:
-    with selectors.DefaultSelector() as selector:
-        selector.register(result_fd, selectors.EVENT_READ)
-        events = selector.select(max(timeout, 0))
-    if not events:
-        return None
-    result = os.read(result_fd, 64)
-    if not result:
-        raise AssertionError("POSIX supervisor closed its result channel unexpectedly")
+def _close_raw_fd(fd: int, open_fds: set[int]) -> None:
+    if fd not in open_fds:
+        return
     try:
-        return int(result.strip())
-    except ValueError as error:
-        raise AssertionError(f"Invalid POSIX supervisor result: {result!r}") from error
+        os.close(fd)
+    except OSError:
+        pass
+    finally:
+        open_fds.discard(fd)
+
+
+def _combine_cleanup_errors(
+    first: AssertionError | None, second: AssertionError | None
+) -> AssertionError | None:
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return AssertionError(f"{first}; {second}")
+
+
+def _append_cleanup_error(
+    primary_reason: str, cleanup_error: AssertionError | None
+) -> str:
+    if cleanup_error is None:
+        return primary_reason
+    return f"{primary_reason}; cleanup_error={cleanup_error}"
 
 
 def _kill_posix_group_then_reap(
@@ -420,34 +503,6 @@ def _kill_posix_group_then_reap(
 
     if errors:
         return AssertionError("; ".join(errors))
-    return None
-
-
-def _join_output_readers(
-    threads: list[threading.Thread],
-    streams: list[TextIO],
-    errors: list[str],
-) -> AssertionError | None:
-    deadline = time.monotonic() + 10
-    for thread in threads:
-        thread.join(max(deadline - time.monotonic(), 0))
-    alive = [thread for thread in threads if thread.is_alive()]
-    if alive:
-        for stream in streams:
-            try:
-                stream.close()
-            except (OSError, ValueError) as error:
-                errors.append(str(error))
-        close_deadline = time.monotonic() + 1
-        for thread in alive:
-            thread.join(max(close_deadline - time.monotonic(), 0))
-    for stream in streams:
-        try:
-            stream.close()
-        except (OSError, ValueError) as error:
-            errors.append(str(error))
-    if any(thread.is_alive() for thread in threads):
-        return AssertionError("output reader threads did not stop within 11s")
     return None
 
 
