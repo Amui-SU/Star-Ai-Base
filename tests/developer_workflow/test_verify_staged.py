@@ -56,6 +56,7 @@ def _prepare_repo(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     log_path = repo / ".tool-calls.jsonl"
     environment["STAGED_VERIFY_LOG"] = str(log_path)
     environment["STAGED_VERIFY_BLACK_EXIT"] = "0"
+    environment["STAGED_VERIFY_BLACK_STDERR"] = ""
     environment["STAGED_VERIFY_PRETTIER_EXIT"] = "0"
     environment["STAGED_VERIFY_PYTHON"] = sys.executable
 
@@ -71,6 +72,8 @@ import sys
 record = {"tool": "black", "argv": sys.argv[1:], "cwd": os.getcwd()}
 with open(os.environ["STAGED_VERIFY_LOG"], "a", encoding="utf-8") as stream:
     stream.write(json.dumps(record, ensure_ascii=False) + "\\n")
+if message := os.environ.get("STAGED_VERIFY_BLACK_STDERR"):
+    print(message, file=sys.stderr)
 raise SystemExit(int(os.environ.get("STAGED_VERIFY_BLACK_EXIT", "0")))
 """,
         encoding="utf-8",
@@ -98,49 +101,46 @@ raise SystemExit(int(os.environ.get("STAGED_VERIFY_BLACK_EXIT", "0")))
     return repo, environment, log_path
 
 
-def _install_prettier_recorder(repo: Path) -> Path:
-    bin_directory = repo / "frontend" / "node_modules" / ".bin"
+def _install_prettier_recorder(
+    repo: Path,
+    *,
+    version: str = "3.6.2",
+    bin_entry: str = "./bin/prettier.cjs",
+) -> Path:
+    package_directory = repo / "frontend" / "node_modules" / "prettier"
+    bin_directory = package_directory / "bin"
     bin_directory.mkdir(parents=True, exist_ok=True)
-    recorder = bin_directory / "prettier-recorder.py"
-    recorder.write_text(
-        """import json
-import os
-import sys
-
-record = {"tool": "prettier", "argv": sys.argv[1:], "cwd": os.getcwd()}
-with open(os.environ["STAGED_VERIFY_LOG"], "a", encoding="utf-8") as stream:
-    stream.write(json.dumps(record, ensure_ascii=False) + "\\n")
-raise SystemExit(int(os.environ.get("STAGED_VERIFY_PRETTIER_EXIT", "0")))
+    (package_directory / "package.json").write_text(
+        json.dumps(
+            {"name": "prettier", "version": version, "bin": bin_entry},
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    entry = package_directory / "bin" / "prettier.cjs"
+    entry.write_text(
+        """const fs = require("fs");
+const record = {tool: "prettier", argv: process.argv.slice(2), cwd: process.cwd()};
+fs.appendFileSync(
+  process.env.STAGED_VERIFY_LOG,
+  JSON.stringify(record) + "\\n",
+  {encoding: "utf8"},
+);
+process.exit(Number(process.env.STAGED_VERIFY_PRETTIER_EXIT || "0"));
 """,
         encoding="utf-8",
     )
-
-    if os.name == "nt":
-        executable = bin_directory / "prettier.cmd"
-        executable.write_text(
-            "@echo off\r\n"
-            '"%STAGED_VERIFY_PYTHON%" "%~dp0prettier-recorder.py" %*\r\n'
-            "exit /b %errorlevel%\r\n",
-            encoding="utf-8",
-        )
-    else:
-        executable = bin_directory / "prettier"
-        executable.write_text(
-            "#!/bin/sh\n"
-            'exec "$STAGED_VERIFY_PYTHON" "$(dirname "$0")/prettier-recorder.py" "$@"\n',
-            encoding="utf-8",
-        )
-        executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
-    return executable
+    return entry
 
 
-def _run(repo: Path, environment: dict[str, str]) -> None:
+def _run(repo: Path, environment: dict[str, str]):
     shell = _powershell()
     command = [shell, "-NoProfile"]
     if Path(shell).name.lower().startswith("powershell"):
         command.extend(["-ExecutionPolicy", "Bypass"])
     command.extend(["-File", "scripts/verify-staged.ps1"])
-    run_command(command, repo, environment)
+    return run_command(command, repo, environment)
 
 
 def _failure(repo: Path, environment: dict[str, str]) -> str:
@@ -208,6 +208,20 @@ def test_staged_python_starts_python_exactly_once(tmp_path: Path) -> None:
         json.loads(line) for line in python_log.read_text(encoding="utf-8").splitlines()
     ]
     assert calls == [["-m", "black", "--check", "--", path]]
+
+
+def test_successful_black_stderr_is_not_reported_as_native_command_error(
+    tmp_path: Path,
+) -> None:
+    repo, environment, _ = _prepare_repo(tmp_path)
+    environment["STAGED_VERIFY_BLACK_STDERR"] = "Black success detail"
+    path = "success.py"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    result = _run(repo, environment)
+
+    assert "NativeCommandError" not in result.stdout + result.stderr
 
 
 def _install_python_recorder(repo: Path, environment: dict[str, str]) -> Path:
@@ -351,7 +365,8 @@ def test_formatter_failures_propagate(
     assert f"status {exit_code}" in failure
     assert [record["tool"] for record in _records(log_path)] == [tool]
     if tool == "black":
-        assert "python -m pip install black" in failure
+        assert "python -m pip install black" not in failure
+        assert "format" in failure.casefold()
 
 
 def test_missing_pinned_prettier_fails_closed_with_dependency_guidance(
@@ -369,6 +384,119 @@ def test_missing_pinned_prettier_fails_closed_with_dependency_guidance(
     assert _records(log_path) == []
 
 
+def test_prettier_package_version_must_be_exactly_pinned(tmp_path: Path) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    _install_prettier_recorder(repo, version="3.6.1")
+    path = "frontend/probe.ts"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "version" in failure.casefold()
+    assert "3.6.2" in failure
+    assert _records(log_path) == []
+
+
+def test_prettier_cli_entry_must_stay_inside_its_package(tmp_path: Path) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    _install_prettier_recorder(repo, bin_entry="../outside.cjs")
+    _write(repo, "frontend/node_modules/outside.cjs", "process.exit(0);\n")
+    path = "frontend/probe.ts"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "package" in failure.casefold()
+    assert "within" in failure.casefold() or "inside" in failure.casefold()
+    assert _records(log_path) == []
+
+
+def test_prettier_cli_entry_must_exist_as_a_real_file(tmp_path: Path) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    entry = _install_prettier_recorder(repo)
+    entry.unlink()
+    path = "frontend/probe.ts"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "prettier" in failure.casefold()
+    assert "CLI entry" in failure
+    assert _records(log_path) == []
+
+
+def test_prettier_cli_entry_rejects_filesystem_links(tmp_path: Path) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    entry = _install_prettier_recorder(repo)
+    outside = repo.parent / "outside-prettier.cjs"
+    outside.write_text("process.exit(0);\n", encoding="utf-8")
+    entry.unlink()
+    try:
+        entry.symlink_to(outside)
+    except OSError as error:
+        pytest.skip(f"filesystem does not permit test symbolic links: {error}")
+    path = "frontend/probe.ts"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "symbolic link" in failure.casefold() or "reparse" in failure.casefold()
+    assert _records(log_path) == []
+
+
+def test_missing_node_fails_closed_with_dependency_guidance(tmp_path: Path) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    _install_prettier_recorder(repo)
+    path = "frontend/probe.ts"
+    _write(repo, path)
+    _stage(repo, environment, path)
+    _restrict_path_to_git(repo, environment)
+    assert shutil.which("node", path=environment["PATH"]) is None
+
+    failure = _failure(repo, environment)
+
+    assert "Missing Node.js executable" in failure
+    assert "install node.js" in failure.casefold()
+    assert _records(log_path) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows command-interpreter regression")
+def test_actual_pinned_prettier_preserves_windows_shell_sensitive_literal_path(
+    tmp_path: Path,
+) -> None:
+    repo, environment, _ = _prepare_repo(tmp_path)
+    source_package = PROJECT_ROOT / "frontend" / "node_modules" / "prettier"
+    assert source_package.is_dir(), "pinned Prettier package must be installed"
+    destination_package = repo / "frontend" / "node_modules" / "prettier"
+    destination_package.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_package, destination_package)
+    path = "frontend/docs/shell-%SAFE%!bang!&caret^.md"
+    target = _write(repo, path, "# Shell safe\n")
+    _stage(repo, environment, path)
+    before = target.read_bytes()
+    status_before = run_command(
+        ["git", "status", "--porcelain=v1", "-z"], repo, environment
+    ).stdout
+
+    _run(repo, environment)
+
+    assert target.read_bytes() == before
+    assert (
+        run_command(["git", "status", "--porcelain=v1", "-z"], repo, environment).stdout
+        == status_before
+    )
+    assert run_command(["git", "diff", "--", path], repo, environment).stdout == ""
+    assert run_command(
+        ["git", "diff", "--cached", "--name-only", "--", path],
+        repo,
+        environment,
+    ).stdout.splitlines() == [path]
+
+
 def test_missing_python_fails_closed_with_executable_setup_guidance(
     tmp_path: Path,
 ) -> None:
@@ -376,7 +504,8 @@ def test_missing_python_fails_closed_with_executable_setup_guidance(
     path = "probe.py"
     _write(repo, path)
     _stage(repo, environment, path)
-    _remove_python_from_path(repo, environment)
+    _restrict_path_to_git(repo, environment)
+    assert shutil.which("python", path=environment["PATH"]) is None
 
     failure = _failure(repo, environment)
 
@@ -405,7 +534,7 @@ def test_missing_black_fails_closed_with_executable_setup_guidance(
     assert _records(log_path) == []
 
 
-def _remove_python_from_path(repo: Path, environment: dict[str, str]) -> None:
+def _restrict_path_to_git(repo: Path, environment: dict[str, str]) -> None:
     real_git = shutil.which("git")
     assert real_git is not None
     if os.name == "nt":
@@ -418,7 +547,6 @@ def _remove_python_from_path(repo: Path, environment: dict[str, str]) -> None:
         git_launcher.symlink_to(real_git)
         path_entries = [str(git_only_directory)]
     environment["PATH"] = os.pathsep.join(path_entries)
-    assert shutil.which("python", path=environment["PATH"]) is None
 
 
 def test_cached_diff_check_failure_propagates_before_formatters(tmp_path: Path) -> None:

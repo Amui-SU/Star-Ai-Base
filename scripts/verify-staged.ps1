@@ -225,6 +225,130 @@ function Get-PythonFormatterCommand {
     return $pythonCommand
 }
 
+function Get-NodeCommand {
+    $nodeCommand = Get-Command node -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -eq $nodeCommand) {
+        Write-Fail (
+            "Missing Node.js executable. Install Node.js and ensure node is on PATH, " +
+            "then run npm install in the frontend directory."
+        )
+        exit 1
+    }
+    if (
+        $isWindows -and
+        [System.IO.Path]::GetExtension($nodeCommand.Source).ToLowerInvariant() -ne ".exe"
+    ) {
+        Write-Fail "Node.js must resolve to a native node.exe executable on Windows."
+        exit 1
+    }
+    return $nodeCommand
+}
+
+function Resolve-PinnedPrettierCli {
+    $packageRoot = Join-Path $frontendRoot "node_modules/prettier"
+    $packageRootPrefix = $packageRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not (Test-Path -LiteralPath $packageRoot -PathType Container)) {
+        Write-Fail (
+            "Missing pinned Prettier package: $packageRoot. " +
+            "Prepare frontend dependencies with npm install in the frontend directory."
+        )
+        exit 1
+    }
+    if (Test-PathHasReparsePoint $packageRoot) {
+        Write-Fail "Pinned Prettier package cannot be a symbolic link or reparse point: $packageRoot"
+        exit 1
+    }
+
+    $packageJsonPath = Join-Path $packageRoot "package.json"
+    if (-not (Test-Path -LiteralPath $packageJsonPath -PathType Leaf)) {
+        Write-Fail "Missing pinned Prettier package metadata: $packageJsonPath"
+        exit 1
+    }
+    if (Test-PathHasReparsePoint $packageJsonPath) {
+        Write-Fail "Pinned Prettier package metadata cannot be a symbolic link or reparse point"
+        exit 1
+    }
+
+    try {
+        $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        $packageJson = [System.IO.File]::ReadAllText($packageJsonPath, $strictUtf8)
+        $packageMetadata = $packageJson | ConvertFrom-Json
+    }
+    catch {
+        Write-Fail "Could not read pinned Prettier package metadata as strict UTF-8 JSON"
+        exit 1
+    }
+    if ([string]$packageMetadata.version -cne "3.6.2") {
+        Write-Fail (
+            "Pinned Prettier package version must be exactly 3.6.2; found: " +
+            [string]$packageMetadata.version
+        )
+        exit 1
+    }
+
+    $binEntry = $null
+    if ($packageMetadata.bin -is [string]) {
+        $binEntry = [string]$packageMetadata.bin
+    }
+    elseif ($null -ne $packageMetadata.bin -and $null -ne $packageMetadata.bin.prettier) {
+        $binEntry = [string]$packageMetadata.bin.prettier
+    }
+    if ([string]::IsNullOrWhiteSpace($binEntry)) {
+        Write-Fail "Pinned Prettier package metadata has no CLI entry"
+        exit 1
+    }
+    if ([System.IO.Path]::IsPathRooted($binEntry)) {
+        Write-Fail "Pinned Prettier CLI entry must stay within its package"
+        exit 1
+    }
+    if (@($binEntry -split "[\\/]" | Where-Object { $_ -eq ".." }).Count -gt 0) {
+        Write-Fail "Pinned Prettier CLI entry must stay within its package"
+        exit 1
+    }
+
+    try {
+        $entryHostPath = $binEntry.Replace(
+            "/",
+            [System.IO.Path]::DirectorySeparatorChar
+        )
+        $entryCandidate = [System.IO.Path]::GetFullPath((Join-Path $packageRoot $entryHostPath))
+    }
+    catch {
+        Write-Fail "Pinned Prettier CLI entry is invalid"
+        exit 1
+    }
+    if (-not $entryCandidate.StartsWith($packageRootPrefix, $pathComparison)) {
+        Write-Fail "Pinned Prettier CLI entry must stay within its package"
+        exit 1
+    }
+    if (-not (Test-Path -LiteralPath $entryCandidate -PathType Leaf)) {
+        Write-Fail "Pinned Prettier CLI entry is missing or is not a real file: $entryCandidate"
+        exit 1
+    }
+    if (Test-PathHasReparsePoint $entryCandidate) {
+        Write-Fail "Pinned Prettier CLI entry cannot be a symbolic link or reparse point"
+        exit 1
+    }
+    $entryExtension = [System.IO.Path]::GetExtension($entryCandidate).ToLowerInvariant()
+    if (@(".cjs", ".js", ".mjs") -notcontains $entryExtension) {
+        Write-Fail "Pinned Prettier CLI entry must be a JavaScript file"
+        exit 1
+    }
+
+    try {
+        $resolvedEntry = (Resolve-Path -LiteralPath $entryCandidate).Path
+    }
+    catch {
+        Write-Fail "Could not resolve pinned Prettier CLI entry"
+        exit 1
+    }
+    if (-not $resolvedEntry.StartsWith($packageRootPrefix, $pathComparison)) {
+        Write-Fail "Resolved Prettier CLI entry must stay within its package"
+        exit 1
+    }
+    return $resolvedEntry
+}
+
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $frontendRoot = Join-Path $projectRoot "frontend"
 $projectRootPrefix = $projectRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
@@ -270,8 +394,11 @@ if ($pythonPaths.Count -gt 0) {
     Write-Info "staged Python formatting"
     $previousErrorPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
+    $blackStderrPath = Join-Path (
+        [System.IO.Path]::GetTempPath()
+    ) ("verify-staged-black-" + [System.Guid]::NewGuid().ToString("N") + ".stderr")
     try {
-        & $pythonCommand.Source -m black --check -- @pythonPaths
+        & $pythonCommand.Source -m black --check -- @pythonPaths 2> $blackStderrPath
         $blackExitCode = $LASTEXITCODE
     }
     catch {
@@ -284,26 +411,42 @@ if ($pythonPaths.Count -gt 0) {
     finally {
         $ErrorActionPreference = $previousErrorPreference
     }
+    $blackStderr = ""
+    try {
+        if (Test-Path -LiteralPath $blackStderrPath -PathType Leaf) {
+            $blackStderr = Get-Content -LiteralPath $blackStderrPath -Raw
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $blackStderrPath -PathType Leaf) {
+            Remove-Item -LiteralPath $blackStderrPath -Force
+        }
+    }
     if ($blackExitCode -ne 0) {
-        Write-Fail (
-            "staged Python formatting failed. Prepare Python and Black with: " +
-            "python -m pip install black"
-        )
+        if ($blackStderr.Length -gt 0) {
+            [System.Console]::Error.Write($blackStderr)
+        }
+        $missingBlack = $blackStderr -match "(?is)(No module named.*black|ModuleNotFoundError.*black|ImportError.*black)"
+        if ($missingBlack) {
+            Write-Fail (
+                "Python formatter dependency Black is missing or cannot be imported. " +
+                "Prepare it with: python -m pip install black"
+            )
+        }
+        else {
+            Write-Fail (
+                "staged Python formatting failed. Fix the reported formatting error, " +
+                "stage the corrected file, and retry."
+            )
+        }
         exit $blackExitCode
     }
     Write-Ok "staged Python formatting"
 }
 
 if ($webPaths.Count -gt 0) {
-    $binSuffix = if ($isWindows) { ".cmd" } else { "" }
-    $prettier = Join-Path $frontendRoot "node_modules/.bin/prettier$binSuffix"
-    if (-not (Test-Path -LiteralPath $prettier -PathType Leaf)) {
-        Write-Fail (
-            "Missing pinned Prettier dependency: $prettier. " +
-            "Prepare frontend dependencies with npm install in the frontend directory."
-        )
-        exit 1
-    }
+    $nodeCommand = Get-NodeCommand
+    $prettierCli = Resolve-PinnedPrettierCli
 
     $frontendRelativePaths = @(
         $webPaths | ForEach-Object {
@@ -319,7 +462,7 @@ if ($webPaths.Count -gt 0) {
     Push-Location $frontendRoot
     try {
         Invoke-NativeStep "staged web and docs formatting" {
-            & $prettier --check -- @frontendRelativePaths
+            & $nodeCommand.Source $prettierCli --check -- @frontendRelativePaths
         }
     }
     finally {
