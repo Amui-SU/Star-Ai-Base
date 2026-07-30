@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import selectors
 import signal
 import subprocess
 import sys
+import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, TextIO
 
 _WINDOWS_LAUNCHER = """import json
 import subprocess
@@ -18,6 +22,26 @@ payload = sys.stdin.readline()
 if not payload:
     raise SystemExit(125)
 raise SystemExit(subprocess.run(json.loads(payload), check=False).returncode)
+"""
+
+_POSIX_SUPERVISOR = """import json
+import os
+import signal
+import subprocess
+import sys
+import traceback
+
+result_fd = int(sys.argv[1])
+command = json.loads(sys.argv[2])
+try:
+    returncode = subprocess.run(command, check=False).returncode
+except BaseException:
+    traceback.print_exc()
+    returncode = 127
+os.write(result_fd, f"{returncode}\\n".encode("ascii"))
+os.close(result_fd)
+while True:
+    signal.pause()
 """
 
 if os.name == "nt":
@@ -121,6 +145,14 @@ def run_command(
     timeout: float = 30,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command with bounded collection and fail with useful diagnostics."""
+    if os.name != "nt":
+        return _run_posix_command(args, cwd, env, timeout)
+    return _run_windows_command(args, cwd, env, timeout)
+
+
+def _run_windows_command(
+    args: list[str], cwd: Path, env: dict[str, str], timeout: float
+) -> subprocess.CompletedProcess[str]:
     popen_options: dict[str, object] = {
         "cwd": cwd,
         "env": env,
@@ -129,28 +161,18 @@ def run_command(
         "text": True,
         "encoding": "utf-8",
         "errors": "replace",
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP,
+        "stdin": subprocess.PIPE,
     }
-    if os.name == "nt":
-        popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        popen_options["start_new_session"] = True
-
-    command = args
-    payload: str | None = None
-    if os.name == "nt":
-        command = [sys.executable, "-c", _WINDOWS_LAUNCHER]
-        payload = f"{json.dumps(args)}\n"
-        popen_options["stdin"] = subprocess.PIPE
-
+    command = [sys.executable, "-c", _WINDOWS_LAUNCHER]
+    payload = f"{json.dumps(args)}\n"
     process = subprocess.Popen(command, **popen_options)  # type: ignore[arg-type]
-    job: _WindowsJob | None = None
-    if os.name == "nt":
-        try:
-            job = _WindowsJob(process)
-        except BaseException as error:
-            _terminate_process_tree(process)
-            stdout, stderr = _collect_after_termination(process)
-            _raise_failure(args, stdout, stderr, f"could not own process tree: {error}")
+    try:
+        job = _WindowsJob(process)
+    except BaseException as error:
+        _terminate_process_tree(process)
+        stdout, stderr = _collect_after_termination(process)
+        _raise_failure(args, stdout, stderr, f"could not own process tree: {error}")
 
     try:
         try:
@@ -170,18 +192,105 @@ def run_command(
             )
         return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
     finally:
-        if job is not None:
-            job.close()
-        elif os.name != "nt":
-            original_exception_active = sys.exc_info()[0] is not None
-            try:
-                cleanup_error = _cleanup_posix_process_group(process)
-            except Exception:
-                if not original_exception_active:
-                    raise
-            else:
-                if cleanup_error is not None and not original_exception_active:
-                    raise cleanup_error
+        job.close()
+
+
+def _run_posix_command(
+    args: list[str], cwd: Path, env: dict[str, str], timeout: float
+) -> subprocess.CompletedProcess[str]:
+    result_read_fd, result_write_fd = os.pipe()
+    process: subprocess.Popen[str] | None = None
+    reader_threads: list[threading.Thread] = []
+    reader_errors: list[str] = []
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    result_reason: str | None = None
+    target_returncode: int | None = None
+    cleanup_error: AssertionError | None = None
+    try:
+        command = [
+            sys.executable,
+            "-c",
+            _POSIX_SUPERVISOR,
+            str(result_write_fd),
+            json.dumps(args),
+        ]
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=cwd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                start_new_session=True,
+                pass_fds=(result_write_fd,),
+            )
+        finally:
+            os.close(result_write_fd)
+            result_write_fd = -1
+
+        assert process.stdout is not None
+        assert process.stderr is not None
+        reader_threads = [
+            _start_output_reader(process.stdout, stdout_chunks, reader_errors),
+            _start_output_reader(process.stderr, stderr_chunks, reader_errors),
+        ]
+        try:
+            target_returncode = _wait_for_posix_result(result_read_fd, timeout)
+            if target_returncode is None:
+                result_reason = f"timed out after {timeout}s"
+        finally:
+            cleanup_error = _kill_posix_group_then_reap(
+                process,
+                current_group=os.getpgrp(),
+                kill_group=os.killpg,
+                kill_signal=signal.SIGKILL,
+            )
+    finally:
+        if result_write_fd >= 0:
+            os.close(result_write_fd)
+        os.close(result_read_fd)
+        if process is not None and cleanup_error is None and process.returncode is None:
+            cleanup_error = _kill_posix_group_then_reap(
+                process,
+                current_group=os.getpgrp(),
+                kill_group=os.killpg,
+                kill_signal=signal.SIGKILL,
+            )
+        reader_cleanup_error = _join_output_readers(
+            reader_threads,
+            (
+                [
+                    stream
+                    for stream in (process.stdout, process.stderr)
+                    if stream is not None
+                ]
+                if process is not None
+                else []
+            ),
+            reader_errors,
+        )
+        if cleanup_error is None:
+            cleanup_error = reader_cleanup_error
+
+    stdout = "".join(stdout_chunks)
+    stderr = "".join(stderr_chunks)
+    if cleanup_error is not None:
+        _raise_failure(args, stdout, stderr, f"cleanup failed: {cleanup_error}")
+    if reader_errors:
+        _raise_failure(
+            args, stdout, stderr, f"output collection failed: {reader_errors}"
+        )
+    if result_reason is not None:
+        _raise_failure(args, stdout, stderr, result_reason)
+    if target_returncode is None:
+        _raise_failure(args, stdout, stderr, "supervisor exited without a result")
+    if target_returncode:
+        _raise_failure(args, stdout, stderr, f"exited with status {target_returncode}")
+    return subprocess.CompletedProcess(args, target_returncode, stdout, stderr)
 
 
 def init_repo(path: Path) -> dict[str, str]:
@@ -212,24 +321,18 @@ def init_repo(path: Path) -> dict[str, str]:
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    if os.name == "nt":
-        try:
-            subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=10,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            process.kill()
-        return
     try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        process.kill()
 
 
 def _collect_after_termination(process: subprocess.Popen[str]) -> tuple[str, str]:
@@ -248,17 +351,50 @@ def _collect_after_termination(process: subprocess.Popen[str]) -> tuple[str, str
             )
 
 
-def _cleanup_posix_process_group(
+def _start_output_reader(
+    stream: TextIO, chunks: list[str], errors: list[str]
+) -> threading.Thread:
+    def drain() -> None:
+        try:
+            while chunk := stream.read(65536):
+                chunks.append(chunk)
+        except (OSError, ValueError) as error:
+            errors.append(str(error))
+
+    thread = threading.Thread(target=drain, daemon=True)
+    thread.start()
+    return thread
+
+
+def _wait_for_posix_result(result_fd: int, timeout: float) -> int | None:
+    with selectors.DefaultSelector() as selector:
+        selector.register(result_fd, selectors.EVENT_READ)
+        events = selector.select(max(timeout, 0))
+    if not events:
+        return None
+    result = os.read(result_fd, 64)
+    if not result:
+        raise AssertionError("POSIX supervisor closed its result channel unexpectedly")
+    try:
+        return int(result.strip())
+    except ValueError as error:
+        raise AssertionError(f"Invalid POSIX supervisor result: {result!r}") from error
+
+
+def _kill_posix_group_then_reap(
     process: subprocess.Popen[str],
+    *,
+    current_group: int,
+    kill_group: Callable[[int, int], None],
+    kill_signal: int,
 ) -> AssertionError | None:
     errors: list[str] = []
     process_group = process.pid
-    current_group = os.getpgrp()
     if process_group == current_group:
         errors.append(f"refused to kill current process group {current_group}")
     else:
         try:
-            os.killpg(process_group, signal.SIGKILL)
+            kill_group(process_group, kill_signal)
         except ProcessLookupError:
             pass
         except OSError as error:
@@ -277,9 +413,41 @@ def _cleanup_posix_process_group(
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             errors.append(f"could not reap root process {process.pid} within 20s")
+        except OSError as error:
+            errors.append(f"could not reap root process {process.pid}: {error}")
+    except OSError as error:
+        errors.append(f"could not reap root process {process.pid}: {error}")
 
     if errors:
         return AssertionError("; ".join(errors))
+    return None
+
+
+def _join_output_readers(
+    threads: list[threading.Thread],
+    streams: list[TextIO],
+    errors: list[str],
+) -> AssertionError | None:
+    deadline = time.monotonic() + 10
+    for thread in threads:
+        thread.join(max(deadline - time.monotonic(), 0))
+    alive = [thread for thread in threads if thread.is_alive()]
+    if alive:
+        for stream in streams:
+            try:
+                stream.close()
+            except (OSError, ValueError) as error:
+                errors.append(str(error))
+        close_deadline = time.monotonic() + 1
+        for thread in alive:
+            thread.join(max(close_deadline - time.monotonic(), 0))
+    for stream in streams:
+        try:
+            stream.close()
+        except (OSError, ValueError) as error:
+            errors.append(str(error))
+    if any(thread.is_alive() for thread in threads):
+        return AssertionError("output reader threads did not stop within 11s")
     return None
 
 

@@ -184,6 +184,30 @@ def test_run_command_reaps_detached_stdio_child_after_success(tmp_path: Path) ->
             _force_cleanup(int(child_pid_file.read_text(encoding="utf-8")))
 
 
+def test_posix_group_cleanup_kills_stable_group_before_reaping_leader() -> None:
+    events: list[tuple[object, ...]] = []
+
+    class FakeProcess:
+        pid = 43210
+
+        def wait(self, timeout: float) -> int:
+            events.append(("wait", timeout))
+            return -9
+
+    def kill_group(process_group: int, requested_signal: int) -> None:
+        events.append(("killpg", process_group, requested_signal))
+
+    error = support._kill_posix_group_then_reap(
+        FakeProcess(), current_group=12345, kill_group=kill_group, kill_signal=9
+    )
+
+    assert error is None
+    assert events == [
+        ("killpg", 43210, 9),
+        ("wait", 10),
+    ]
+
+
 def _process_exists(pid: int) -> bool:
     if os.name != "nt":
         proc_root = Path("/proc")
