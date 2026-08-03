@@ -106,6 +106,14 @@ def _configure_local(repo: Path, environment: dict[str, str], value: str) -> Non
     )
 
 
+def _add_local(repo: Path, environment: dict[str, str], value: str) -> None:
+    run_command(
+        ["git", "config", "--local", "--add", "workflow.useRepositoryHook", value],
+        repo,
+        environment,
+    )
+
+
 def _add_repository_verifier(repo: Path) -> Path:
     verifier = repo / "scripts" / "verify-staged.ps1"
     verifier.parent.mkdir(parents=True, exist_ok=True)
@@ -137,6 +145,32 @@ def test_noncanonical_local_values_do_not_dispatch(tmp_path: Path, value: str) -
     _add_repository_verifier(repo)
     _tool(repo, "pwsh")
     _configure_local(repo, environment, value)
+
+    _run(repo, environment)
+
+    assert _records(log) == []
+
+
+def test_local_true_with_trailing_newline_does_not_dispatch(tmp_path: Path) -> None:
+    repo, environment, log = _prepare_repo(tmp_path)
+    _add_repository_verifier(repo)
+    _tool(repo, "pwsh")
+    _configure_local(repo, environment, "true\n")
+
+    _run(repo, environment)
+
+    assert _records(log) == []
+
+
+@pytest.mark.parametrize("values", [("false", "true"), ("true", "true")])
+def test_multiple_local_values_never_dispatch(
+    tmp_path: Path, values: tuple[str, str]
+) -> None:
+    repo, environment, log = _prepare_repo(tmp_path)
+    _add_repository_verifier(repo)
+    _tool(repo, "pwsh")
+    for value in values:
+        _add_local(repo, environment, value)
 
     _run(repo, environment)
 

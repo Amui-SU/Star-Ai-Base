@@ -5,14 +5,30 @@ set -u
 repo_root=$(git rev-parse --show-toplevel) || exit $?
 cd -- "$repo_root" || exit $?
 
-local_opt_in=$(git config --local --get-all workflow.useRepositoryHook 2>/dev/null)
+git_path=$(git rev-parse --git-path hooks) || exit $?
+config_file="$git_path/.global-pre-commit-config.$$"
+staged_file="$git_path/.global-pre-commit-staged.$$"
+umask 077
+if ! (set -C; : > "$config_file") 2>/dev/null; then
+    printf 'pre-commit: could not create local-config buffer\n' >&2
+    exit 1
+fi
+trap 'rm -f -- "$config_file" "$staged_file"' EXIT HUP INT TERM
+
+git config --local --null --get-all workflow.useRepositoryHook > "$config_file" 2>/dev/null
 config_status=$?
 if [ "$config_status" -gt 1 ]; then
     printf 'pre-commit: could not read repository-local workflow.useRepositoryHook\n' >&2
     exit "$config_status"
 fi
+local_opt_ins=()
+if [ "$config_status" -eq 0 ]; then
+    while IFS= read -r -d '' config_value; do
+        local_opt_ins+=("$config_value")
+    done < "$config_file"
+fi
 
-if [ "$config_status" -eq 0 ] && [ "$local_opt_in" = "true" ]; then
+if [ "${#local_opt_ins[@]}" -eq 1 ] && [ "${local_opt_ins[0]}" = "true" ]; then
     verifier="$repo_root/scripts/verify-staged.ps1"
     if [ ! -f "$verifier" ]; then
         printf 'pre-commit: repository verifier script is missing: %s\n' "$verifier" >&2
@@ -34,14 +50,10 @@ if [ "$config_status" -eq 0 ] && [ "$local_opt_in" = "true" ]; then
     exit $?
 fi
 
-git_path=$(git rev-parse --git-path hooks) || exit $?
-staged_file="$git_path/.global-pre-commit-staged.$$"
-umask 077
 if ! (set -C; : > "$staged_file") 2>/dev/null; then
     printf 'pre-commit: could not create staged-path buffer\n' >&2
     exit 1
 fi
-trap 'rm -f -- "$staged_file"' EXIT HUP INT TERM
 
 git diff --cached --name-only -z --diff-filter=ACMR > "$staged_file"
 git_status=$?
