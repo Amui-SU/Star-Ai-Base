@@ -2,45 +2,57 @@
 
 set -u
 
+active_producer_pid=""
+
+cleanup_active_producer() {
+    producer_pid="$active_producer_pid"
+    active_producer_pid=""
+    if [ -n "$producer_pid" ]; then
+        kill "$producer_pid" 2>/dev/null || true
+        wait "$producer_pid" 2>/dev/null || true
+    fi
+    return 0
+}
+
+trap cleanup_active_producer EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 repo_root=$(git rev-parse --show-toplevel) || exit $?
 cd -- "$repo_root" || exit $?
 
-git_path=$(git rev-parse --git-path hooks) || exit $?
-config_file="$git_path/.global-pre-commit-config.$$"
-staged_file="$git_path/.global-pre-commit-staged.$$"
-config_owned=0
-staged_owned=0
-
-cleanup_buffers() {
-    if [ "$config_owned" -eq 1 ]; then
-        config_owned=0
-        rm -f -- "$config_file"
+coproc { git config --local --null --get-all workflow.useRepositoryHook 2>/dev/null; }
+config_fd=${COPROC[0]}
+config_pid=$COPROC_PID
+active_producer_pid=$config_pid
+local_opt_ins=()
+config_truncated=0
+while :; do
+    config_value=""
+    if IFS= read -r -d '' config_value <&$config_fd; then
+        local_opt_ins+=("$config_value")
+        continue
     fi
-    if [ "$staged_owned" -eq 1 ]; then
-        staged_owned=0
-        rm -f -- "$staged_file"
+    if [ -n "$config_value" ]; then
+        config_truncated=1
     fi
-}
-
-umask 077
-if ! (set -C; : > "$config_file") 2>/dev/null; then
-    printf 'pre-commit: could not create local-config buffer\n' >&2
-    exit 1
-fi
-config_owned=1
-trap cleanup_buffers EXIT HUP INT TERM
-
-git config --local --null --get-all workflow.useRepositoryHook > "$config_file" 2>/dev/null
+    break
+done
+exec {config_fd}<&-
+wait "$config_pid"
 config_status=$?
-if [ "$config_status" -gt 1 ]; then
+active_producer_pid=""
+
+if [ "$config_status" -ne 0 ] && ! {
+    [ "$config_status" -eq 1 ] && [ "${#local_opt_ins[@]}" -eq 0 ] && [ "$config_truncated" -eq 0 ]
+}; then
     printf 'pre-commit: could not read repository-local workflow.useRepositoryHook\n' >&2
     exit "$config_status"
 fi
-local_opt_ins=()
-if [ "$config_status" -eq 0 ]; then
-    while IFS= read -r -d '' config_value; do
-        local_opt_ins+=("$config_value")
-    done < "$config_file"
+if [ "$config_truncated" -eq 1 ]; then
+    printf 'pre-commit: truncated NUL stream from local config\n' >&2
+    exit 1
 fi
 
 if [ "${#local_opt_ins[@]}" -eq 1 ] && [ "${local_opt_ins[0]}" = "true" ]; then
@@ -65,21 +77,21 @@ if [ "${#local_opt_ins[@]}" -eq 1 ] && [ "${local_opt_ins[0]}" = "true" ]; then
     exit $?
 fi
 
-if ! (set -C; : > "$staged_file") 2>/dev/null; then
-    printf 'pre-commit: could not create staged-path buffer\n' >&2
-    exit 1
-fi
-staged_owned=1
-
-git diff --cached --name-only -z --diff-filter=ACMR > "$staged_file"
-git_status=$?
-if [ "$git_status" -ne 0 ]; then
-    exit "$git_status"
-fi
-
+coproc { git diff --cached --name-only -z --diff-filter=ACMR; }
+staged_fd=${COPROC[0]}
+staged_pid=$COPROC_PID
+active_producer_pid=$staged_pid
 python_files=()
 web_files=()
-while IFS= read -r -d '' path; do
+staged_truncated=0
+while :; do
+    path=""
+    if ! IFS= read -r -d '' path <&$staged_fd; then
+        if [ -n "$path" ]; then
+            staged_truncated=1
+        fi
+        break
+    fi
     lower_path=${path,,}
     case "$lower_path" in
         *.py) python_files+=("$path") ;;
@@ -87,7 +99,18 @@ while IFS= read -r -d '' path; do
             web_files+=("$path")
             ;;
     esac
-done < "$staged_file"
+done
+exec {staged_fd}<&-
+wait "$staged_pid"
+git_status=$?
+active_producer_pid=""
+if [ "$git_status" -ne 0 ]; then
+    exit "$git_status"
+fi
+if [ "$staged_truncated" -eq 1 ]; then
+    printf 'pre-commit: truncated NUL stream from staged path list\n' >&2
+    exit 1
+fi
 
 if [ "${#python_files[@]}" -gt 0 ]; then
     if command -v ruff >/dev/null 2>&1; then

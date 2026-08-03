@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from .support import init_repo, run_command
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 HOOK_SOURCE = PROJECT_ROOT / "scripts" / "git-hooks" / "pre-commit"
+_WINDOWS_GIT_SHIM: Path | None = None
 
 
 def _git_bash() -> str:
@@ -69,6 +71,144 @@ def _tool(repo: Path, name: str, *, exit_code: str = "${HOOK_TEST_EXIT:-0}") -> 
         encoding="utf-8",
     )
     target.chmod(target.stat().st_mode | stat.S_IXUSR)
+
+
+def _signaling_tool(repo: Path, name: str, signal_name: str) -> None:
+    target = repo / ".hook-test-tools" / name
+    target.write_text(
+        "#!/bin/sh\n"
+        f'printf \'%s\\0\' CALL {name!r} "$#" "$@" >> "$HOOK_TEST_LOG"\n'
+        f'kill -{signal_name} "$PPID"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    target.chmod(target.stat().st_mode | stat.S_IXUSR)
+
+
+def _install_git_stream_shim(
+    repo: Path, environment: dict[str, str], mode: str
+) -> None:
+    global _WINDOWS_GIT_SHIM
+
+    real_git = shutil.which("git")
+    assert real_git
+    shim_directory = repo / ".hook-git-shim"
+    shim_directory.mkdir()
+    environment["HOOK_TEST_REAL_GIT"] = real_git
+    environment["HOOK_TEST_GIT_MODE"] = mode
+    if os.name == "nt":
+        launcher = shim_directory / "git.exe"
+        if _WINDOWS_GIT_SHIM is not None:
+            shutil.copy2(_WINDOWS_GIT_SHIM, launcher)
+        else:
+            source = shim_directory / "git-shim.cs"
+            source.write_text(
+                """using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+
+internal static class GitShim
+{
+    private static bool Matches(string[] args, string[] expected)
+    {
+        if (args.Length != expected.Length) return false;
+        for (int index = 0; index < args.Length; index++)
+            if (!String.Equals(args[index], expected[index], StringComparison.Ordinal)) return false;
+        return true;
+    }
+
+    private static int Main(string[] args)
+    {
+        string mode = Environment.GetEnvironmentVariable("HOOK_TEST_GIT_MODE");
+        bool config = Matches(args, new [] { "config", "--local", "--null", "--get-all", "workflow.useRepositoryHook" });
+        bool staged = Matches(args, new [] { "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR" });
+        if (mode == "config-truncated" && config)
+        {
+            byte[] payload = Encoding.UTF8.GetBytes("true");
+            Console.OpenStandardOutput().Write(payload, 0, payload.Length);
+            return 0;
+        }
+        if (mode == "staged-truncated" && staged)
+        {
+            byte[] payload = Encoding.UTF8.GetBytes("probe.py");
+            Console.OpenStandardOutput().Write(payload, 0, payload.Length);
+            return 0;
+        }
+        ProcessStartInfo info = new ProcessStartInfo();
+        info.FileName = Environment.GetEnvironmentVariable("HOOK_TEST_REAL_GIT");
+        info.Arguments = String.Join(" ", args);
+        info.UseShellExecute = false;
+        Process process = Process.Start(info);
+        process.WaitForExit();
+        return process.ExitCode;
+    }
+}
+""",
+                encoding="utf-8",
+            )
+            compiler_candidates = [
+                Path(os.environ.get("WINDIR", r"C:\Windows"))
+                / "Microsoft.NET"
+                / framework
+                / "v4.0.30319"
+                / "csc.exe"
+                for framework in ("Framework64", "Framework")
+            ]
+            compiler = next(
+                (path for path in compiler_candidates if path.is_file()), None
+            )
+            assert compiler, "Windows .NET Framework C# compiler is required"
+            run_command(
+                [
+                    str(compiler),
+                    "/nologo",
+                    "/target:exe",
+                    f"/out:{launcher}",
+                    str(source),
+                ],
+                repo,
+                environment,
+            )
+            _WINDOWS_GIT_SHIM = launcher
+    else:
+        script = shim_directory / "git-shim.py"
+        script.write_text(
+            """import os
+import subprocess
+import sys
+
+args = sys.argv[1:]
+config = ["config", "--local", "--null", "--get-all", "workflow.useRepositoryHook"]
+staged = ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]
+mode = os.environ["HOOK_TEST_GIT_MODE"]
+if mode == "config-truncated" and args == config:
+    sys.stdout.buffer.write(b"true")
+    raise SystemExit(0)
+if mode == "staged-truncated" and args == staged:
+    sys.stdout.buffer.write(b"probe.py")
+    raise SystemExit(0)
+raise SystemExit(subprocess.run([os.environ["HOOK_TEST_REAL_GIT"], *args]).returncode)
+""",
+            encoding="utf-8",
+        )
+        launcher = shim_directory / "git"
+        launcher.write_text(
+            '#!/bin/sh\nexec "$HOOK_TEST_PYTHON" "$(dirname "$0")/git-shim.py" "$@"\n',
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
+        environment["HOOK_TEST_PYTHON"] = sys.executable
+    bash_environment = shim_directory / "bash-env.sh"
+    bash_environment.write_text(
+        "unset -f git 2>/dev/null || true\n"
+        'shim_dir=$(cygpath -u "$HOOK_TEST_SHIM_DIR" 2>/dev/null || printf %s "$HOOK_TEST_SHIM_DIR")\n'
+        'PATH="$shim_dir:$PATH"\n'
+        "export PATH\n",
+        encoding="utf-8",
+    )
+    environment["HOOK_TEST_SHIM_DIR"] = str(shim_directory)
+    environment["BASH_ENV"] = bash_environment.as_posix()
 
 
 def _records(log: Path) -> list[tuple[str, list[str]]]:
@@ -256,15 +396,13 @@ def test_repository_verifier_failure_propagates(tmp_path: Path) -> None:
     assert "status 23" in failure
 
 
-def test_preexisting_staged_buffer_is_preserved_when_creation_fails(
+def test_preexisting_staged_buffer_is_ignored_and_preserved(
     tmp_path: Path,
 ) -> None:
     repo, environment, _ = _prepare_repo(tmp_path)
 
-    with pytest.raises(AssertionError) as failure:
-        run_command(_collision_command(repo, "staged"), repo, environment)
+    run_command(_collision_command(repo, "staged"), repo, environment)
 
-    assert "staged-path buffer" in str(failure.value)
     _assert_collision_preserved(repo, "staged")
 
 
@@ -287,16 +425,58 @@ def test_repository_dispatch_does_not_touch_preexisting_staged_buffer(
     ]
 
 
-def test_preexisting_config_buffer_is_preserved_when_creation_fails(
+def test_preexisting_config_buffer_is_ignored_and_preserved(
     tmp_path: Path,
 ) -> None:
     repo, environment, _ = _prepare_repo(tmp_path)
 
-    with pytest.raises(AssertionError) as failure:
-        run_command(_collision_command(repo, "config"), repo, environment)
+    run_command(_collision_command(repo, "config"), repo, environment)
 
-    assert "local-config buffer" in str(failure.value)
     _assert_collision_preserved(repo, "config")
+
+
+@pytest.mark.parametrize(
+    ("signal_name", "status"), [("HUP", 129), ("INT", 130), ("TERM", 143)]
+)
+def test_signal_exits_nonzero_without_running_later_formatter(
+    tmp_path: Path, signal_name: str, status: int
+) -> None:
+    repo, environment, log = _prepare_repo(tmp_path)
+    _signaling_tool(repo, "ruff", signal_name)
+    _tool(repo, "prettier")
+    _write(repo, "probe.py")
+    _write(repo, "probe.ts", "const value = 1\n")
+    _stage(repo, environment, "probe.py", "probe.ts")
+
+    failure = _failure(repo, environment)
+
+    assert f"status {status}" in failure
+    assert [tool for tool, _ in _records(log)] == ["ruff"]
+
+
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [
+        ("config-truncated", "local config"),
+        ("staged-truncated", "staged path"),
+    ],
+)
+def test_truncated_nul_stream_fails_closed(
+    tmp_path: Path, mode: str, message: str
+) -> None:
+    repo, environment, log = _prepare_repo(tmp_path)
+    _install_git_stream_shim(repo, environment, mode)
+    _tool(repo, "ruff")
+    selected_git = run_command(
+        [_git_bash(), "-c", "type -P git"], repo, environment
+    ).stdout
+    assert ".hook-git-shim" in selected_git
+
+    failure = _failure(repo, environment)
+
+    assert "truncated" in failure.casefold()
+    assert message in failure.casefold()
+    assert _records(log) == []
 
 
 def test_empty_index_is_a_fast_noop(tmp_path: Path) -> None:
