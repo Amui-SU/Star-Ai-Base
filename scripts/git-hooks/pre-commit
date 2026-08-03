@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+set -u
+
+repo_root=$(git rev-parse --show-toplevel) || exit $?
+cd -- "$repo_root" || exit $?
+
+local_opt_in=$(git config --local --get-all workflow.useRepositoryHook 2>/dev/null)
+config_status=$?
+if [ "$config_status" -gt 1 ]; then
+    printf 'pre-commit: could not read repository-local workflow.useRepositoryHook\n' >&2
+    exit "$config_status"
+fi
+
+if [ "$config_status" -eq 0 ] && [ "$local_opt_in" = "true" ]; then
+    verifier="$repo_root/scripts/verify-staged.ps1"
+    if [ ! -f "$verifier" ]; then
+        printf 'pre-commit: repository verifier script is missing: %s\n' "$verifier" >&2
+        exit 1
+    fi
+
+    if command -v pwsh >/dev/null 2>&1; then
+        powershell_command=pwsh
+    elif command -v powershell.exe >/dev/null 2>&1; then
+        powershell_command=powershell.exe
+    elif command -v powershell >/dev/null 2>&1; then
+        powershell_command=powershell
+    else
+        printf 'pre-commit: PowerShell is required by the repository verifier\n' >&2
+        exit 1
+    fi
+
+    "$powershell_command" -NoProfile -ExecutionPolicy Bypass -File "$verifier"
+    exit $?
+fi
+
+git_path=$(git rev-parse --git-path hooks) || exit $?
+staged_file="$git_path/.global-pre-commit-staged.$$"
+umask 077
+if ! (set -C; : > "$staged_file") 2>/dev/null; then
+    printf 'pre-commit: could not create staged-path buffer\n' >&2
+    exit 1
+fi
+trap 'rm -f -- "$staged_file"' EXIT HUP INT TERM
+
+git diff --cached --name-only -z --diff-filter=ACMR > "$staged_file"
+git_status=$?
+if [ "$git_status" -ne 0 ]; then
+    exit "$git_status"
+fi
+
+python_files=()
+web_files=()
+while IFS= read -r -d '' path; do
+    lower_path=${path,,}
+    case "$lower_path" in
+        *.py) python_files+=("$path") ;;
+        *.js|*.jsx|*.ts|*.tsx|*.json|*.css|*.scss|*.less|*.html|*.md|*.mdx|*.yaml|*.yml)
+            web_files+=("$path")
+            ;;
+    esac
+done < "$staged_file"
+
+if [ "${#python_files[@]}" -gt 0 ]; then
+    if command -v ruff >/dev/null 2>&1; then
+        ruff format --check -- "${python_files[@]}"
+        tool_status=$?
+    elif command -v black >/dev/null 2>&1; then
+        black --check -- "${python_files[@]}"
+        tool_status=$?
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -m py_compile -- "${python_files[@]}"
+        tool_status=$?
+    elif command -v python >/dev/null 2>&1; then
+        python -m py_compile -- "${python_files[@]}"
+        tool_status=$?
+    else
+        printf 'pre-commit: warning: no local Python checker is available; Python files were not checked\n' >&2
+        tool_status=0
+    fi
+    if [ "$tool_status" -ne 0 ]; then
+        exit "$tool_status"
+    fi
+fi
+
+if [ "${#web_files[@]}" -gt 0 ]; then
+    if command -v prettier >/dev/null 2>&1; then
+        prettier --check -- "${web_files[@]}"
+        tool_status=$?
+        if [ "$tool_status" -ne 0 ]; then
+            exit "$tool_status"
+        fi
+    else
+        printf 'pre-commit: warning: no local Prettier executable is available; web files were not checked\n' >&2
+    fi
+fi
+
+exit 0
