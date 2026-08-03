@@ -226,43 +226,81 @@ def test_successful_black_stderr_is_not_reported_as_native_command_error(
 
 
 def _install_python_recorder(repo: Path, environment: dict[str, str]) -> Path:
-    shim_directory = repo / ".python-recorder-shim"
-    shim_directory.mkdir()
+    recorder_directory = repo / ".python-recorder"
+    recorder_directory.mkdir()
+    launcher = recorder_directory / ("python.exe" if os.name == "nt" else "python")
+    os.link(sys.executable, launcher)
+    if os.name == "nt":
+        for runtime_library in Path(sys.executable).parent.glob("python*.dll"):
+            os.link(runtime_library, recorder_directory / runtime_library.name)
     log_path = repo / ".python-calls.jsonl"
-    recorder = shim_directory / "python-recorder.py"
-    recorder.write_text(
+    (recorder_directory / "sitecustomize.py").write_text(
         """import json
 import os
-import subprocess
 import sys
 
-with open(os.environ["STAGED_VERIFY_PYTHON_LOG"], "a", encoding="utf-8") as stream:
-    stream.write(json.dumps(sys.argv[1:], ensure_ascii=False) + "\\n")
-result = subprocess.run([os.environ["STAGED_VERIFY_REAL_PYTHON"], *sys.argv[1:]])
-raise SystemExit(result.returncode)
+if sys.orig_argv[1:3] == ["-m", "black"]:
+    with open(os.environ["STAGED_VERIFY_PYTHON_LOG"], "a", encoding="utf-8") as stream:
+        stream.write(json.dumps(sys.orig_argv[1:], ensure_ascii=False) + "\\n")
 """,
         encoding="utf-8",
     )
-    if os.name == "nt":
-        launcher = shim_directory / "python.cmd"
-        launcher.write_text(
-            "@echo off\r\n"
-            '"%STAGED_VERIFY_REAL_PYTHON%" "%~dp0python-recorder.py" %*\r\n'
-            "exit /b %errorlevel%\r\n",
-            encoding="utf-8",
-        )
-    else:
-        launcher = shim_directory / "python"
-        launcher.write_text(
-            "#!/bin/sh\n"
-            'exec "$STAGED_VERIFY_REAL_PYTHON" "$(dirname "$0")/python-recorder.py" "$@"\n',
-            encoding="utf-8",
-        )
-        launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
-    environment["STAGED_VERIFY_REAL_PYTHON"] = sys.executable
     environment["STAGED_VERIFY_PYTHON_LOG"] = str(log_path)
-    environment["PATH"] = str(shim_directory) + os.pathsep + environment["PATH"]
+    environment["PYTHONHOME"] = sys.prefix
+    environment["PYTHONPATH"] = os.pathsep.join(
+        value
+        for value in (str(recorder_directory), environment.get("PYTHONPATH"))
+        if value
+    )
+    environment["PATH"] = (
+        str(Path(sys.executable).parent) + os.pathsep + environment["PATH"]
+    )
     return log_path
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows command-wrapper policy")
+def test_python_cmd_wrapper_is_rejected_without_execution(tmp_path: Path) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    wrapper_directory = repo / ".python-wrapper"
+    wrapper_directory.mkdir()
+    marker = repo / "wrapper-executed"
+    (wrapper_directory / "python.cmd").write_text(
+        "@echo off\r\n"
+        'type nul > "%STAGED_VERIFY_WRAPPER_MARKER%"\r\n'
+        "exit /b 0\r\n",
+        encoding="utf-8",
+    )
+    environment["STAGED_VERIFY_WRAPPER_MARKER"] = str(marker)
+    environment["PATH"] = str(wrapper_directory) + os.pathsep + environment["PATH"]
+    path = "wrapper-probe.py"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    failure = _failure(repo, environment)
+
+    assert "python" in failure.casefold()
+    assert "native" in failure.casefold() or "executable" in failure.casefold()
+    assert not marker.exists()
+    assert _records(log_path) == []
+
+
+def test_native_python_preserves_one_literal_special_filename_without_side_effects(
+    tmp_path: Path,
+) -> None:
+    repo, environment, log_path = _prepare_repo(tmp_path)
+    python_log = _install_python_recorder(repo, environment)
+    path = "; $(New-Item injected) [x] ' unicode-路径.py"
+    _write(repo, path)
+    _stage(repo, environment, path)
+
+    _run(repo, environment)
+
+    calls = [
+        json.loads(line) for line in python_log.read_text(encoding="utf-8").splitlines()
+    ]
+    assert calls == [["-m", "black", "--check", "--", path]]
+    assert _records(log_path)[0]["argv"] == ["--check", "--", path]
+    assert not (repo / "injected").exists()
 
 
 def test_newline_and_glob_like_staged_names_remain_literal(tmp_path: Path) -> None:

@@ -257,7 +257,37 @@ function Get-PythonFormatterCommand {
         )
         exit 1
     }
-    return $pythonCommand
+    if ($pythonCommand.CommandType -ne [System.Management.Automation.CommandTypes]::Application) {
+        Write-Fail "Python must resolve directly to a native executable application."
+        exit 1
+    }
+    try {
+        if (-not [System.IO.Path]::IsPathRooted($pythonCommand.Source)) {
+            throw "Python command path is not absolute"
+        }
+        $pythonPath = [System.IO.Path]::GetFullPath($pythonCommand.Source)
+    }
+    catch {
+        Write-Fail "Python must resolve to a valid absolute native executable path."
+        exit 1
+    }
+    if (-not (Test-Path -LiteralPath $pythonPath -PathType Leaf)) {
+        Write-Fail "Python must resolve to an existing native executable file."
+        exit 1
+    }
+    if (
+        $isWindows -and
+        [System.IO.Path]::GetExtension($pythonPath).ToLowerInvariant() -ne ".exe"
+    ) {
+        Write-Fail "Python must resolve to a native python.exe executable on Windows."
+        exit 1
+    }
+    $pythonPathRoot = [System.IO.Path]::GetPathRoot($pythonPath)
+    if (Test-PathFromRootHasReparsePoint $pythonPath $pythonPathRoot $pythonPathRoot) {
+        Write-Fail "Python executable path cannot contain a symbolic link or reparse point."
+        exit 1
+    }
+    return [pscustomobject]@{ Source = $pythonPath }
 }
 
 function Get-NodeCommand {
