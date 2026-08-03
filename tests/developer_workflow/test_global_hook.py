@@ -6,6 +6,7 @@ import os
 import shutil
 import stat
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -209,6 +210,71 @@ raise SystemExit(subprocess.run([os.environ["HOOK_TEST_REAL_GIT"], *args]).retur
     )
     environment["HOOK_TEST_SHIM_DIR"] = str(shim_directory)
     environment["BASH_ENV"] = bash_environment.as_posix()
+
+
+def _install_hanging_git_shim(
+    repo: Path, environment: dict[str, str], phase: str
+) -> Path:
+    real_git = shutil.which("git")
+    assert real_git
+    shim_directory = repo / ".hook-hang-shim"
+    shim_directory.mkdir()
+    marker = repo / "producer-ready"
+    pid_file = repo / "producer-pid"
+    launcher = shim_directory / "git"
+    launcher.write_text(
+        "#!/bin/bash\n"
+        'is_config=0; [ "$1" = config ] && is_config=1\n'
+        'is_staged=0; [ "$1" = diff ] && is_staged=1\n'
+        'if { [ "$HOOK_TEST_HANG_PHASE" = config ] && [ "$is_config" -eq 1 ]; } || '
+        '{ [ "$HOOK_TEST_HANG_PHASE" = staged ] && [ "$is_staged" -eq 1 ]; }; then\n'
+        "  trap '' TERM\n"
+        '  printf %s "$$" > "$HOOK_TEST_PRODUCER_PID"\n'
+        '  printf ready > "$HOOK_TEST_PRODUCER_READY"\n'
+        "  while :; do sleep 1; done\n"
+        "fi\n"
+        'exec "$HOOK_TEST_REAL_GIT" "$@"\n',
+        encoding="utf-8",
+    )
+    launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
+    bash_environment = shim_directory / "bash-env.sh"
+    bash_environment.write_text(
+        "unset -f git 2>/dev/null || true\n"
+        'shim_dir=$(cygpath -u "$HOOK_TEST_SHIM_DIR" 2>/dev/null || printf %s "$HOOK_TEST_SHIM_DIR")\n'
+        'PATH="$shim_dir:$PATH"\n'
+        "export PATH\n",
+        encoding="utf-8",
+    )
+    environment["HOOK_TEST_REAL_GIT"] = real_git
+    environment["HOOK_TEST_HANG_PHASE"] = phase
+    environment["HOOK_TEST_PRODUCER_READY"] = str(marker)
+    environment["HOOK_TEST_PRODUCER_PID"] = str(pid_file)
+    environment["HOOK_TEST_SHIM_DIR"] = str(shim_directory)
+    environment["BASH_ENV"] = bash_environment.as_posix()
+    return marker
+
+
+def _signaled_hook_command(repo: Path, marker: Path, signal_name: str) -> list[str]:
+    hook = repo / "pre-commit"
+    wrapper = (
+        '(trap - HUP INT TERM; exec "$1") & hook_pid=$!; '
+        '(while [ ! -s "$2" ]; do sleep 0.02; done; kill -"$3" "$hook_pid") & '
+        'wait "$hook_pid"; hook_status=$?; '
+        'producer_pid=$(cat "$4"); '
+        'if kill -0 "$producer_pid" 2>/dev/null; then '
+        'kill -KILL "$producer_pid" 2>/dev/null || true; exit 99; fi; '
+        'exit "$hook_status"'
+    )
+    return [
+        _git_bash(),
+        "-c",
+        wrapper,
+        "signal-fixture",
+        hook.as_posix(),
+        marker.as_posix(),
+        signal_name,
+        (repo / "producer-pid").as_posix(),
+    ]
 
 
 def _records(log: Path) -> list[tuple[str, list[str]]]:
@@ -452,6 +518,35 @@ def test_signal_exits_nonzero_without_running_later_formatter(
 
     assert f"status {status}" in failure
     assert [tool for tool, _ in _records(log)] == ["ruff"]
+
+
+@pytest.mark.parametrize("phase", ["config", "staged"])
+@pytest.mark.parametrize(
+    ("signal_name", "status"), [("HUP", 129), ("INT", 130), ("TERM", 143)]
+)
+def test_signal_boundedly_reaps_term_ignoring_active_producer(
+    tmp_path: Path, phase: str, signal_name: str, status: int
+) -> None:
+    repo, environment, log = _prepare_repo(tmp_path)
+    marker = _install_hanging_git_shim(repo, environment, phase)
+    _tool(repo, "ruff")
+    _tool(repo, "prettier")
+    _write(repo, "probe.py")
+    _write(repo, "probe.ts", "const value = 1\n")
+    _stage(repo, environment, "probe.py", "probe.ts")
+
+    started = time.monotonic()
+    with pytest.raises(AssertionError) as failure:
+        run_command(
+            _signaled_hook_command(repo, marker, signal_name),
+            repo,
+            environment,
+            timeout=4,
+        )
+
+    assert time.monotonic() - started < 4
+    assert f"status {status}" in str(failure.value)
+    assert _records(log) == []
 
 
 @pytest.mark.parametrize(

@@ -4,11 +4,48 @@ set -u
 
 active_producer_pid=""
 
+producer_is_active_job() {
+    expected_pid=$1
+    while IFS= read -r job_pid; do
+        if [ "$job_pid" = "$expected_pid" ]; then
+            return 0
+        fi
+    done < <(jobs -p)
+    return 1
+}
+
+poll_producer_exit() {
+    polled_pid=$1
+    poll_count=0
+    while [ "$poll_count" -lt 20 ]; do
+        if ! producer_is_active_job "$polled_pid"; then
+            return 0
+        fi
+        sleep 0.05
+        poll_count=$((poll_count + 1))
+    done
+    return 1
+}
+
 cleanup_active_producer() {
+    trap '' HUP INT TERM
     producer_pid="$active_producer_pid"
-    active_producer_pid=""
-    if [ -n "$producer_pid" ]; then
-        kill "$producer_pid" 2>/dev/null || true
+    if [ -z "$producer_pid" ]; then
+        return 0
+    fi
+
+    if producer_is_active_job "$producer_pid"; then
+        kill -TERM "$producer_pid" 2>/dev/null || true
+    fi
+    if ! poll_producer_exit "$producer_pid"; then
+        if producer_is_active_job "$producer_pid"; then
+            kill -KILL "$producer_pid" 2>/dev/null || true
+        fi
+        poll_producer_exit "$producer_pid" || true
+    fi
+
+    if ! producer_is_active_job "$producer_pid"; then
+        active_producer_pid=""
         wait "$producer_pid" 2>/dev/null || true
     fi
     return 0
@@ -22,8 +59,8 @@ trap 'exit 143' TERM
 repo_root=$(git rev-parse --show-toplevel) || exit $?
 cd -- "$repo_root" || exit $?
 
-coproc { git config --local --null --get-all workflow.useRepositoryHook 2>/dev/null; }
-config_fd=${COPROC[0]}
+coproc { exec git config --local --null --get-all workflow.useRepositoryHook 2>/dev/null; }
+exec {config_fd}<&${COPROC[0]}
 config_pid=$COPROC_PID
 active_producer_pid=$config_pid
 local_opt_ins=()
@@ -77,8 +114,8 @@ if [ "${#local_opt_ins[@]}" -eq 1 ] && [ "${local_opt_ins[0]}" = "true" ]; then
     exit $?
 fi
 
-coproc { git diff --cached --name-only -z --diff-filter=ACMR; }
-staged_fd=${COPROC[0]}
+coproc { exec git diff --cached --name-only -z --diff-filter=ACMR; }
+exec {staged_fd}<&${COPROC[0]}
 staged_pid=$COPROC_PID
 active_producer_pid=$staged_pid
 python_files=()
