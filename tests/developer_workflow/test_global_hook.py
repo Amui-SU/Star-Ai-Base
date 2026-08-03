@@ -98,6 +98,31 @@ def _failure(repo: Path, environment: dict[str, str]) -> str:
     return str(failure.value)
 
 
+def _collision_command(repo: Path, kind: str) -> list[str]:
+    hooks = repo / ".git" / "hooks"
+    hook = repo / "pre-commit"
+    wrapper = (
+        'buffer="$1/.global-pre-commit-$2.$$"; '
+        'printf %s preserved > "$buffer"; '
+        'exec "$3"'
+    )
+    return [
+        _git_bash(),
+        "-c",
+        wrapper,
+        "collision-fixture",
+        hooks.as_posix(),
+        kind,
+        hook.as_posix(),
+    ]
+
+
+def _assert_collision_preserved(repo: Path, kind: str) -> None:
+    matches = list((repo / ".git" / "hooks").glob(f".global-pre-commit-{kind}.*"))
+    assert len(matches) == 1
+    assert matches[0].read_text(encoding="utf-8") == "preserved"
+
+
 def _configure_local(repo: Path, environment: dict[str, str], value: str) -> None:
     run_command(
         ["git", "config", "--local", "workflow.useRepositoryHook", value],
@@ -229,6 +254,49 @@ def test_repository_verifier_failure_propagates(tmp_path: Path) -> None:
     failure = _failure(repo, environment)
 
     assert "status 23" in failure
+
+
+def test_preexisting_staged_buffer_is_preserved_when_creation_fails(
+    tmp_path: Path,
+) -> None:
+    repo, environment, _ = _prepare_repo(tmp_path)
+
+    with pytest.raises(AssertionError) as failure:
+        run_command(_collision_command(repo, "staged"), repo, environment)
+
+    assert "staged-path buffer" in str(failure.value)
+    _assert_collision_preserved(repo, "staged")
+
+
+def test_repository_dispatch_does_not_touch_preexisting_staged_buffer(
+    tmp_path: Path,
+) -> None:
+    repo, environment, log = _prepare_repo(tmp_path)
+    verifier = _add_repository_verifier(repo)
+    _tool(repo, "pwsh")
+    _configure_local(repo, environment, "true")
+
+    run_command(_collision_command(repo, "staged"), repo, environment)
+
+    _assert_collision_preserved(repo, "staged")
+    assert _records(log) == [
+        (
+            "pwsh",
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", verifier.as_posix()],
+        )
+    ]
+
+
+def test_preexisting_config_buffer_is_preserved_when_creation_fails(
+    tmp_path: Path,
+) -> None:
+    repo, environment, _ = _prepare_repo(tmp_path)
+
+    with pytest.raises(AssertionError) as failure:
+        run_command(_collision_command(repo, "config"), repo, environment)
+
+    assert "local-config buffer" in str(failure.value)
+    _assert_collision_preserved(repo, "config")
 
 
 def test_empty_index_is_a_fast_noop(tmp_path: Path) -> None:

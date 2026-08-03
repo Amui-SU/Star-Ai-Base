@@ -8,12 +8,27 @@ cd -- "$repo_root" || exit $?
 git_path=$(git rev-parse --git-path hooks) || exit $?
 config_file="$git_path/.global-pre-commit-config.$$"
 staged_file="$git_path/.global-pre-commit-staged.$$"
+config_owned=0
+staged_owned=0
+
+cleanup_buffers() {
+    if [ "$config_owned" -eq 1 ]; then
+        config_owned=0
+        rm -f -- "$config_file"
+    fi
+    if [ "$staged_owned" -eq 1 ]; then
+        staged_owned=0
+        rm -f -- "$staged_file"
+    fi
+}
+
 umask 077
 if ! (set -C; : > "$config_file") 2>/dev/null; then
     printf 'pre-commit: could not create local-config buffer\n' >&2
     exit 1
 fi
-trap 'rm -f -- "$config_file" "$staged_file"' EXIT HUP INT TERM
+config_owned=1
+trap cleanup_buffers EXIT HUP INT TERM
 
 git config --local --null --get-all workflow.useRepositoryHook > "$config_file" 2>/dev/null
 config_status=$?
@@ -54,6 +69,7 @@ if ! (set -C; : > "$staged_file") 2>/dev/null; then
     printf 'pre-commit: could not create staged-path buffer\n' >&2
     exit 1
 fi
+staged_owned=1
 
 git diff --cached --name-only -z --diff-filter=ACMR > "$staged_file"
 git_status=$?
