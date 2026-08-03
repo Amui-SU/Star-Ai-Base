@@ -228,11 +228,6 @@ def test_successful_black_stderr_is_not_reported_as_native_command_error(
 def _install_python_recorder(repo: Path, environment: dict[str, str]) -> Path:
     recorder_directory = repo / ".python-recorder"
     recorder_directory.mkdir()
-    launcher = recorder_directory / ("python.exe" if os.name == "nt" else "python")
-    os.link(sys.executable, launcher)
-    if os.name == "nt":
-        for runtime_library in Path(sys.executable).parent.glob("python*.dll"):
-            os.link(runtime_library, recorder_directory / runtime_library.name)
     log_path = repo / ".python-calls.jsonl"
     (recorder_directory / "sitecustomize.py").write_text(
         """import json
