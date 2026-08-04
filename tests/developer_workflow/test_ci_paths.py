@@ -91,6 +91,37 @@ def test_force_full_ignores_paths() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "invalid_path",
+    [
+        "",
+        "/docs/readme.md",
+        "../docs/readme.md",
+        "C:/docs/readme.md",
+        "docs/../../README.md",
+        "docs//readme.md",
+        "./docs/readme.md",
+        r"\\server\share\docs\readme.md",
+    ],
+)
+def test_invalid_repository_relative_path_fails_closed(invalid_path: str) -> None:
+    assert _load_classifier().classify_paths([invalid_path]) == {
+        "backend": True,
+        "frontend": True,
+        "docs_only": False,
+    }
+
+
+def test_one_invalid_path_forces_mixed_input_to_full_ci() -> None:
+    assert _load_classifier().classify_paths(
+        ["docs/valid.md", "frontend/component.ts", "../docs/readme.md"]
+    ) == {
+        "backend": True,
+        "frontend": True,
+        "docs_only": False,
+    }
+
+
 def _run_classifier(
     payload: bytes, output: Path, *extra_args: str
 ) -> subprocess.CompletedProcess[bytes]:
@@ -205,6 +236,110 @@ def test_write_outputs_preserves_existing_file_mode(tmp_path: Path) -> None:
     classifier.write_outputs(output, OUTPUT_VALUES)
 
     assert stat.S_IMODE(output.stat().st_mode) == expected_mode
+
+
+def _symlink_or_skip(link: Path, target: Path, *, directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except OSError as error:
+        pytest.skip(f"filesystem does not permit symbolic links: {error}")
+
+
+def test_write_outputs_rejects_target_symlink_without_touching_link_target(
+    tmp_path: Path,
+) -> None:
+    classifier = _load_classifier()
+    outside = tmp_path / "outside-output"
+    existing = b"outside=exact\n"
+    outside.write_bytes(existing)
+    output = tmp_path / "github-output"
+    _symlink_or_skip(output, outside)
+
+    with pytest.raises(OSError, match="link|reparse"):
+        classifier.write_outputs(output, OUTPUT_VALUES)
+
+    assert output.is_symlink()
+    assert outside.read_bytes() == existing
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
+
+
+def test_write_outputs_rejects_parent_symlink_without_touching_link_target(
+    tmp_path: Path,
+) -> None:
+    classifier = _load_classifier()
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    existing = b"outside=exact\n"
+    (real_parent / "github-output").write_bytes(existing)
+    linked_parent = tmp_path / "linked-parent"
+    _symlink_or_skip(linked_parent, real_parent, directory=True)
+    output = linked_parent / "github-output"
+
+    with pytest.raises(OSError, match="link|reparse"):
+        classifier.write_outputs(output, OUTPUT_VALUES)
+
+    assert linked_parent.is_symlink()
+    assert (real_parent / "github-output").read_bytes() == existing
+    assert list(real_parent.glob(f".{output.name}.*.tmp")) == []
+
+
+def test_write_outputs_rejects_non_regular_target_without_artifacts(
+    tmp_path: Path,
+) -> None:
+    classifier = _load_classifier()
+    output = tmp_path / "github-output"
+    output.mkdir()
+
+    with pytest.raises(OSError):
+        classifier.write_outputs(output, OUTPUT_VALUES)
+
+    assert output.is_dir()
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
+
+
+def test_write_outputs_rejects_non_directory_parent_without_artifacts(
+    tmp_path: Path,
+) -> None:
+    classifier = _load_classifier()
+    parent = tmp_path / "not-a-directory"
+    existing = b"parent=exact\n"
+    parent.write_bytes(existing)
+    output = parent / "github-output"
+
+    with pytest.raises(OSError):
+        classifier.write_outputs(output, OUTPUT_VALUES)
+
+    assert parent.read_bytes() == existing
+    assert not output.exists()
+
+
+def test_target_identity_change_before_replace_preserves_concurrent_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    classifier = _load_classifier()
+    output = tmp_path / "github-output"
+    output.write_bytes(b"original=true\n")
+    concurrent = tmp_path / "concurrent-output"
+    concurrent_bytes = b"concurrent=must-survive\n"
+    concurrent.write_bytes(concurrent_bytes)
+    real_chmod = os.chmod
+    real_replace = os.replace
+    swapped = False
+
+    def swap_target_before_validation(path, mode) -> None:
+        nonlocal swapped
+        real_chmod(path, mode)
+        if not swapped:
+            swapped = True
+            real_replace(concurrent, output)
+
+    monkeypatch.setattr(os, "chmod", swap_target_before_validation)
+
+    with pytest.raises(OSError, match="changed|identity"):
+        classifier.write_outputs(output, OUTPUT_VALUES)
+
+    assert output.read_bytes() == concurrent_bytes
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
 
 
 class _MidWriteFailure:
