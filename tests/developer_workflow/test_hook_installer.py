@@ -15,6 +15,7 @@ from .support import init_repo, run_command
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER_SOURCE = PROJECT_ROOT / "scripts" / "install-global-hook.ps1"
 HOOK_SOURCE = PROJECT_ROOT / "scripts" / "git-hooks" / "pre-commit"
+_BASELINE_REPO: tuple[Path, dict[str, str]] | None = None
 
 
 def _powershell() -> str:
@@ -24,10 +25,12 @@ def _powershell() -> str:
     return executable
 
 
-def _prepare_repo(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
+@pytest.fixture(scope="session", autouse=True)
+def _installer_repo_baseline(tmp_path_factory: pytest.TempPathFactory):
+    global _BASELINE_REPO
     assert INSTALLER_SOURCE.is_file(), "installer has not been implemented"
     assert HOOK_SOURCE.is_file(), "global hook template has not been implemented"
-    repo = tmp_path / "repo with 空格"
+    repo = tmp_path_factory.mktemp("hook-installer-baseline") / "repo"
     environment = init_repo(repo)
     scripts = repo / "scripts"
     (scripts / "git-hooks").mkdir(parents=True)
@@ -40,6 +43,18 @@ def _prepare_repo(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
         repo,
         environment,
     )
+    _BASELINE_REPO = (repo, environment)
+    yield
+    _BASELINE_REPO = None
+
+
+def _prepare_repo(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
+    assert _BASELINE_REPO is not None
+    baseline, baseline_environment = _BASELINE_REPO
+    repo = tmp_path / "repo with 空格"
+    shutil.copytree(baseline, repo)
+    environment = baseline_environment.copy()
+    environment["GIT_CONFIG_GLOBAL"] = str(repo / ".git" / "test-global-config")
     hook_directory = tmp_path / "hooks with 中文"
     hook_directory.mkdir()
     return repo, environment, hook_directory
@@ -127,6 +142,45 @@ def _make_junction(link: Path, target: Path, environment: dict[str, str]) -> Non
     run_command(command, link.parent, junction_environment)
 
 
+def _read_acl(path: Path, repo: Path, environment: dict[str, str]) -> dict[str, object]:
+    acl_environment = environment.copy()
+    acl_environment["HOOK_INSTALLER_TEST_ACL_PATH"] = str(path)
+    result = run_command(
+        [
+            _powershell(),
+            "-NoProfile",
+            "-Command",
+            "$acl = [System.IO.File]::GetAccessControl($env:HOOK_INSTALLER_TEST_ACL_PATH); "
+            "$rules = @($acl.GetAccessRules($true, $true, "
+            "[System.Security.Principal.SecurityIdentifier]) | ForEach-Object { "
+            "@{ sid = $_.IdentityReference.Value; allow = "
+            "($_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow); "
+            "rights = [int]$_.FileSystemRights; inherited = $_.IsInherited } }); "
+            "@{ protected = $acl.AreAccessRulesProtected; current = "
+            "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+            "owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value; "
+            "sddl = $acl.GetSecurityDescriptorSddlForm("
+            "[System.Security.AccessControl.AccessControlSections]::Access); "
+            "rules = $rules } | ConvertTo-Json -Compress -Depth 4",
+        ],
+        repo,
+        acl_environment,
+    )
+    return json.loads(result.stdout.strip())
+
+
+def _assert_restricted_acl(payload: dict[str, object]) -> None:
+    assert payload["protected"] is True
+    assert payload["rules"] == [
+        {
+            "inherited": False,
+            "rights": 2032127,
+            "allow": True,
+            "sid": payload["current"],
+        }
+    ]
+
+
 @contextmanager
 def _exclusive_windows_lock(path: Path):
     if os.name != "nt":
@@ -193,6 +247,43 @@ def test_installer_backs_up_exact_bytes_installs_atomically_and_opts_in(
     destination.write_bytes(b"changed after install")
     run_command([_powershell(), "-NoProfile", "-Command", restore], repo, environment)
     assert destination.read_bytes() == old_bytes
+
+
+def test_existing_hook_final_acl_is_restricted_to_current_user(tmp_path: Path) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    destination = hook_directory / "pre-commit"
+    destination.write_bytes(b"wide inherited hook")
+    assert _read_acl(destination, repo, environment)["protected"] is False
+
+    _run_installer(repo, environment, hook_directory)
+
+    _assert_restricted_acl(_read_acl(destination, repo, environment))
+
+
+def test_multiple_local_opt_in_values_become_one_exact_true(tmp_path: Path) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    for value in ("false", "true"):
+        run_command(
+            [
+                "git",
+                "config",
+                "--local",
+                "--add",
+                "workflow.useRepositoryHook",
+                value,
+            ],
+            repo,
+            environment,
+        )
+
+    _run_installer(repo, environment, hook_directory)
+
+    values = run_command(
+        ["git", "config", "--local", "--get-all", "workflow.useRepositoryHook"],
+        repo,
+        environment,
+    ).stdout.splitlines()
+    assert values == ["true"]
 
 
 def test_installer_safely_creates_a_missing_hook_directory(tmp_path: Path) -> None:
@@ -339,6 +430,69 @@ def test_failure_cleans_only_new_candidates_and_preserves_collisions(
     assert set(hook_directory.glob("pre-commit.installing-*")) == {temporary_collision}
 
 
+@pytest.mark.parametrize(
+    "owned_name",
+    [
+        "pre-commit.installing-owned.tmp",
+        "pre-commit.installing-rollback-owned.tmp",
+        "pre-commit.installing-displaced-owned.tmp",
+    ],
+)
+def test_owned_cleanup_preserves_a_replaced_path_and_reports_it(
+    tmp_path: Path, owned_name: str
+) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    source = repo / "owned-source.bin"
+    owned = hook_directory / owned_name
+    source.write_bytes(b"owned bytes")
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_SOURCE"] = str(source)
+    internal_environment["HOOK_INSTALLER_TEST_OWNED"] = str(owned)
+
+    failure = _internal_failure(
+        repo,
+        internal_environment,
+        "$record = New-OwnedCopy $env:HOOK_INSTALLER_TEST_SOURCE "
+        "$env:HOOK_INSTALLER_TEST_OWNED; "
+        "[System.IO.File]::WriteAllBytes($env:HOOK_INSTALLER_TEST_OWNED, "
+        "[System.Text.Encoding]::UTF8.GetBytes('concurrent replacement')); "
+        "Remove-OwnedFile $record 'test owned file'",
+    )
+
+    assert "changed" in failure.lower() or "identity" in failure.lower()
+    assert owned.read_bytes() == b"concurrent replacement"
+
+
+def test_rollback_race_restores_concurrent_destination_and_preserves_artifacts(
+    tmp_path: Path,
+) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    destination = hook_directory / "pre-commit"
+    destination.write_bytes(b"old hook")
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_DIRECTORY"] = str(hook_directory)
+
+    failure = _internal_failure(
+        repo,
+        internal_environment,
+        "$failConfig = { throw 'forced config failure' }; "
+        "$race = { param($Destination) [System.IO.File]::WriteAllBytes("
+        "$Destination, [System.Text.Encoding]::UTF8.GetBytes('concurrent hook')) }; "
+        "Invoke-HookInstaller -HookDirectory $env:HOOK_INSTALLER_TEST_DIRECTORY "
+        "-RepositoryOptInAction $failConfig -BeforeRollbackReplaceAction $race",
+    )
+
+    assert "concurrent" in failure.lower()
+    assert destination.read_bytes() == b"concurrent hook"
+    backups = list(hook_directory.glob("pre-commit.backup-*.bak"))
+    recoveries = list(hook_directory.glob("pre-commit.recovery-*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == b"old hook"
+    assert len(recoveries) == 1
+    assert recoveries[0].read_bytes() == b"old hook"
+    assert not list(hook_directory.glob("pre-commit.installing-*"))
+
+
 @pytest.mark.parametrize("had_destination", [False, True])
 def test_source_change_after_copy_does_not_break_config_failure_rollback(
     tmp_path: Path, had_destination: bool
@@ -399,7 +553,7 @@ def test_copy_hash_describes_written_bytes_after_source_changes(tmp_path: Path) 
         "$env:HOOK_INSTALLER_TEST_DESTINATION; "
         "[System.IO.File]::WriteAllBytes($env:HOOK_INSTALLER_TEST_SOURCE, "
         "[System.Text.Encoding]::UTF8.GetBytes('changed source')); "
-        "@{ copy = $copyHash; destination = "
+        "@{ copy = $copyHash.Hash; destination = "
         "(Get-FileHashHex $env:HOOK_INSTALLER_TEST_DESTINATION); source = "
         "(Get-FileHashHex $env:HOOK_INSTALLER_TEST_SOURCE) } "
         "| ConvertTo-Json -Compress",
@@ -623,11 +777,16 @@ def test_config_failure_restores_old_hook_and_keeps_diagnostic_backup(
     destination = hook_directory / "pre-commit"
     old_bytes = b"old hook"
     destination.write_bytes(old_bytes)
+    original_acl = _read_acl(destination, repo, environment)
     (repo / ".git" / "config.lock").write_text("occupied", encoding="utf-8")
 
     failure = _failure(repo, environment, hook_directory)
     assert "opt-in" in failure.lower() or "config" in failure.lower()
     assert destination.read_bytes() == old_bytes
+    restored_acl = _read_acl(destination, repo, environment)
+    assert restored_acl["owner"] == original_acl["owner"]
+    assert restored_acl["protected"] == original_acl["protected"]
+    assert restored_acl["rules"] == original_acl["rules"]
     backups = list(hook_directory.glob("pre-commit.backup-*.bak"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == old_bytes
@@ -650,4 +809,4 @@ def test_installer_source_has_ps51_main_guard_and_no_recursive_cleanup() -> None
     assert source.startswith("#requires -Version 5.1")
     assert "$MyInvocation.InvocationName -ne '.'" in source
     assert "Remove-Item -Recurse" not in source
-    assert "git config --local workflow.useRepositoryHook true" in source
+    assert "git config --local --replace-all workflow.useRepositoryHook true" in source

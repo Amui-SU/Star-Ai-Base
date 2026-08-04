@@ -7,6 +7,63 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 $script:InstallerScriptPath = [System.IO.Path]::GetFullPath($MyInvocation.MyCommand.Path)
 
+if (-not ("HookInstaller.NativeFileIdentity" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace HookInstaller {
+    public static class NativeFileIdentity {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileInformation {
+            public uint FileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+            public uint VolumeSerialNumber;
+            public uint FileSizeHigh;
+            public uint FileSizeLow;
+            public uint NumberOfLinks;
+            public uint FileIndexHigh;
+            public uint FileIndexLow;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(
+            SafeFileHandle handle,
+            out FileInformation information
+        );
+
+        public static string FromHandle(SafeFileHandle handle) {
+            FileInformation information;
+            if (!GetFileInformationByHandle(handle, out information)) {
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return String.Format(
+                "{0:X8}:{1:X8}{2:X8}",
+                information.VolumeSerialNumber,
+                information.FileIndexHigh,
+                information.FileIndexLow
+            );
+        }
+
+        public static string FromPath(string path) {
+            using (FileStream stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete
+            )) {
+                return FromHandle(stream.SafeFileHandle);
+            }
+        }
+    }
+}
+"@
+}
+
 function Write-Failure {
     param([string]$Message)
 
@@ -119,6 +176,86 @@ function Set-RestrictedFileAcl {
     [System.IO.File]::SetAccessControl($Path, $security)
 }
 
+function Assert-RestrictedFileAcl {
+    param([string]$Path)
+
+    $currentIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $security = [System.IO.File]::GetAccessControl($Path)
+    if (-not $security.AreAccessRulesProtected) {
+        throw "Installed hook ACL must disable inherited access rules: $Path"
+    }
+    $rules = @($security.GetAccessRules(
+        $true,
+        $true,
+        [System.Security.Principal.SecurityIdentifier]
+    ))
+    if ($rules.Count -ne 1) {
+        throw "Installed hook ACL must contain exactly one access rule: $Path"
+    }
+    $rule = $rules[0]
+    if (
+        $rule.IsInherited -or
+        $rule.IdentityReference.Value -cne $currentIdentity -or
+        $rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or
+        $rule.FileSystemRights -ne [System.Security.AccessControl.FileSystemRights]::FullControl
+    ) {
+        throw "Installed hook ACL must allow only the current user full control: $Path"
+    }
+}
+
+function Get-FileAclPolicy {
+    param([string]$Path)
+
+    $security = [System.IO.File]::GetAccessControl($Path)
+    $effectiveRules = @($security.GetAccessRules(
+        $true,
+        $true,
+        [System.Security.Principal.SecurityIdentifier]
+    ) | ForEach-Object {
+        "{0}|{1}|{2}|{3}" -f @(
+            $_.IdentityReference.Value,
+            [int]$_.AccessControlType,
+            [int]$_.FileSystemRights,
+            [bool]$_.IsInherited
+        )
+    } | Sort-Object)
+    return [pscustomobject]@{
+        Protected = $security.AreAccessRulesProtected
+        Owner = $security.GetOwner([System.Security.Principal.SecurityIdentifier])
+        ExplicitRules = @($security.GetAccessRules(
+            $true,
+            $false,
+            [System.Security.Principal.SecurityIdentifier]
+        ))
+        EffectiveRules = $effectiveRules
+    }
+}
+
+function Restore-FileAclPolicy {
+    param(
+        [string]$Path,
+        [object]$Policy
+    )
+
+    $security = New-Object System.Security.AccessControl.FileSecurity
+    $security.SetOwner($Policy.Owner)
+    $security.SetAccessRuleProtection($Policy.Protected, $false)
+    foreach ($rule in @($Policy.ExplicitRules)) {
+        [void]$security.AddAccessRule($rule)
+    }
+    [System.IO.File]::SetAccessControl($Path, $security)
+    $actual = Get-FileAclPolicy $Path
+    $expectedRules = [string]::Join(";", @($Policy.EffectiveRules))
+    $actualRules = [string]::Join(";", @($actual.EffectiveRules))
+    if (
+        $actual.Protected -ne $Policy.Protected -or
+        $actual.Owner.Value -cne $Policy.Owner.Value -or
+        $actualRules -cne $expectedRules
+    ) {
+        throw "File ACL policy could not be restored exactly: $Path"
+    }
+}
+
 function New-OwnedCopy {
     param(
         [string]$Source,
@@ -129,8 +266,10 @@ function New-OwnedCopy {
     $destinationStream = $null
     $sha256 = $null
     $createdDestination = $false
+    $createdIdentity = $null
     $completedCopy = $false
     $copyHash = $null
+    $copyLength = 0
     try {
         $destinationStream = New-Object System.IO.FileStream(
             $Destination,
@@ -141,7 +280,11 @@ function New-OwnedCopy {
             [System.IO.FileOptions]::WriteThrough
         )
         $createdDestination = $true
+        $createdIdentity = [HookInstaller.NativeFileIdentity]::FromHandle(
+            $destinationStream.SafeFileHandle
+        )
         Set-RestrictedFileAcl $Destination
+        Assert-RestrictedFileAcl $Destination
         $sourceStream = New-Object System.IO.FileStream(
             $Source,
             [System.IO.FileMode]::Open,
@@ -159,6 +302,7 @@ function New-OwnedCopy {
         [void]$sha256.TransformFinalBlock((New-Object byte[] 0), 0, 0)
         $destinationStream.Flush($true)
         $copyHash = [System.BitConverter]::ToString($sha256.Hash).Replace("-", "")
+        $copyLength = $destinationStream.Length
         $completedCopy = $true
     }
     finally {
@@ -176,10 +320,19 @@ function New-OwnedCopy {
             -not $completedCopy -and
             [System.IO.File]::Exists($Destination)
         ) {
-            [System.IO.File]::Delete($Destination)
+            $partialRecord = Get-OwnedFileRecord $Destination
+            if ($partialRecord.Identity -cne $createdIdentity) {
+                throw "Owned temporary identity changed during failed copy; preserved: $Destination"
+            }
+            Remove-OwnedFile $partialRecord "failed copy temporary"
         }
     }
-    return $copyHash
+    return [pscustomobject]@{
+        Path = $Destination
+        Hash = $copyHash
+        Length = $copyLength
+        Identity = $createdIdentity
+    }
 }
 
 function Get-FileHashHex {
@@ -199,6 +352,68 @@ function Get-FileHashHex {
         $sha256.Dispose()
         $stream.Dispose()
     }
+}
+
+function Get-OwnedFileRecord {
+    param([string]$Path)
+
+    Assert-RegularDestination $Path
+    if (-not [System.IO.File]::Exists($Path)) {
+        throw "Owned file is missing: $Path"
+    }
+    $item = Get-Item -LiteralPath $Path -Force
+    return [pscustomobject]@{
+        Path = [System.IO.Path]::GetFullPath($Path)
+        Hash = Get-FileHashHex $Path
+        Length = $item.Length
+        Identity = [HookInstaller.NativeFileIdentity]::FromPath($Path)
+    }
+}
+
+function Test-OwnedFileRecord {
+    param([object]$Record)
+
+    if ($null -eq $Record -or -not [System.IO.File]::Exists($Record.Path)) {
+        return $false
+    }
+    try {
+        $current = Get-OwnedFileRecord $Record.Path
+        return (
+            $current.Identity -ceq $Record.Identity -and
+            $current.Length -eq $Record.Length -and
+            $current.Hash -ceq $Record.Hash
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
+function Remove-OwnedFile {
+    param(
+        [object]$Record,
+        [string]$Description
+    )
+
+    if (-not (Test-OwnedFileRecord $Record)) {
+        throw "$Description changed identity or content; preserved: $($Record.Path)"
+    }
+    [System.IO.File]::Delete($Record.Path)
+}
+
+function Test-FileRecordsEqual {
+    param(
+        [object]$First,
+        [object]$Second
+    )
+
+    return (
+        $null -ne $First -and
+        $null -ne $Second -and
+        $First.Identity -ceq $Second.Identity -and
+        $First.Length -eq $Second.Length -and
+        $First.Hash -ceq $Second.Hash
+    )
 }
 
 function New-UniqueChildPath {
@@ -243,15 +458,17 @@ function Restore-InstalledHook {
         [string]$Destination,
         [string]$Backup,
         [bool]$HadDestination,
-        [string]$InstalledHash
+        [object]$InstalledRecord,
+        [object]$OriginalAclPolicy = $null,
+        [scriptblock]$BeforeRollbackReplaceAction = $null
     )
 
     Assert-RegularDestination $Destination
-    if (-not [System.IO.File]::Exists($Destination)) {
-        throw "Cannot roll back because the installed hook disappeared: $Destination"
-    }
-    if ((Get-FileHashHex $Destination) -cne $InstalledHash) {
+    if (-not (Test-OwnedFileRecord $InstalledRecord)) {
         throw "Cannot roll back because the installed hook changed concurrently: $Destination"
+    }
+    if ($null -ne $BeforeRollbackReplaceAction) {
+        & $BeforeRollbackReplaceAction $Destination
     }
     if ($HadDestination) {
         if (-not [System.IO.File]::Exists($Backup)) {
@@ -259,31 +476,49 @@ function Restore-InstalledHook {
         }
         $rollbackTemporary = New-UniqueChildPath $Directory "pre-commit.installing-rollback-" ".tmp"
         $rollbackDisplaced = New-UniqueChildPath $Directory "pre-commit.installing-displaced-" ".tmp"
-        $ownsRollbackTemporary = $false
-        $ownsRollbackDisplaced = $false
+        $rollbackRecord = $null
+        $displacedRecord = $null
         try {
-            $rollbackHash = New-OwnedCopy $Backup $rollbackTemporary
-            $ownsRollbackTemporary = $true
+            $rollbackRecord = New-OwnedCopy $Backup $rollbackTemporary
             [System.IO.File]::Replace(
                 $rollbackTemporary,
                 $Destination,
                 $rollbackDisplaced,
                 $true
             )
-            $ownsRollbackTemporary = $false
-            $ownsRollbackDisplaced = $true
+            $rollbackRecord = $null
+            $displacedRecord = Get-OwnedFileRecord $rollbackDisplaced
+            if (-not (Test-FileRecordsEqual $displacedRecord $InstalledRecord)) {
+                $concurrentAclPolicy = Get-FileAclPolicy $rollbackDisplaced
+                $recoveryArtifact = New-UniqueChildPath $Directory "pre-commit.recovery-" ".bak"
+                [System.IO.File]::Replace(
+                    $rollbackDisplaced,
+                    $Destination,
+                    $recoveryArtifact,
+                    $true
+                )
+                $displacedRecord = $null
+                Restore-FileAclPolicy $Destination $concurrentAclPolicy
+                throw (
+                    "Concurrent hook content was preserved at the destination; " +
+                    "the prior hook also remains in backup and recovery artifacts."
+                )
+            }
+            Remove-OwnedFile $displacedRecord "rollback displaced installed hook"
+            $displacedRecord = $null
+            Restore-FileAclPolicy $Destination $OriginalAclPolicy
         }
         finally {
-            if ($ownsRollbackTemporary -and [System.IO.File]::Exists($rollbackTemporary)) {
-                [System.IO.File]::Delete($rollbackTemporary)
+            if ($null -ne $rollbackRecord -and [System.IO.File]::Exists($rollbackRecord.Path)) {
+                Remove-OwnedFile $rollbackRecord "rollback temporary"
             }
-            if ($ownsRollbackDisplaced -and [System.IO.File]::Exists($rollbackDisplaced)) {
-                [System.IO.File]::Delete($rollbackDisplaced)
+            if ($null -ne $displacedRecord -and [System.IO.File]::Exists($displacedRecord.Path)) {
+                Remove-OwnedFile $displacedRecord "rollback displaced file"
             }
         }
     }
     else {
-        [System.IO.File]::Delete($Destination)
+        Remove-OwnedFile $InstalledRecord "newly installed hook"
     }
 }
 
@@ -291,7 +526,8 @@ function Invoke-HookInstaller {
     param(
         [string]$HookDirectory = "",
         [System.Collections.Generic.Queue[string]]$CandidateNames = $null,
-        [scriptblock]$RepositoryOptInAction = $null
+        [scriptblock]$RepositoryOptInAction = $null,
+        [scriptblock]$BeforeRollbackReplaceAction = $null
     )
 
     $rootOutput = @(& git rev-parse --show-toplevel 2>$null)
@@ -358,6 +594,10 @@ function Invoke-HookInstaller {
     Assert-DirectChild $directory $destination "Hook destination"
     Assert-RegularDestination $destination
     $hadDestination = [System.IO.File]::Exists($destination)
+    $originalAclPolicy = $null
+    if ($hadDestination) {
+        $originalAclPolicy = Get-FileAclPolicy $destination
+    }
     $backup = $null
     if ($hadDestination) {
         $backup = New-UniqueChildPath $directory "pre-commit.backup-" ".bak" $CandidateNames
@@ -366,11 +606,11 @@ function Invoke-HookInstaller {
     $temporary = New-UniqueChildPath $directory "pre-commit.installing-" ".tmp" $CandidateNames
     Assert-DirectChild $directory $temporary "Hook temporary file"
 
-    $ownsTemporary = $false
+    $ownedTemporary = $null
     $installed = $false
+    $installedRecord = $null
     try {
-        $installedHash = New-OwnedCopy $source $temporary
-        $ownsTemporary = $true
+        $ownedTemporary = New-OwnedCopy $source $temporary
         Assert-RegularDestination $destination
         if ($hadDestination) {
             [System.IO.File]::Replace($temporary, $destination, $backup, $true)
@@ -378,30 +618,35 @@ function Invoke-HookInstaller {
         else {
             [System.IO.File]::Move($temporary, $destination)
         }
-        $ownsTemporary = $false
+        $ownedTemporary = $null
         $installed = $true
+        $installedRecord = Get-OwnedFileRecord $destination
+        Set-RestrictedFileAcl $destination
+        Assert-RestrictedFileAcl $destination
+        $installedRecord = Get-OwnedFileRecord $destination
 
         if ($null -ne $RepositoryOptInAction) {
             & $RepositoryOptInAction
         }
-        else {
-            $configOutput = @(& git config --local workflow.useRepositoryHook true 2>&1)
-            $configExit = $LASTEXITCODE
-            if ($configExit -ne 0) {
-                $detail = [string]::Join([System.Environment]::NewLine, @($configOutput | ForEach-Object { [string]$_ }))
-                throw "Failed to set repository opt-in with local Git config. $detail"
-            }
-        }
-        $configuredValues = @(& git config --local --get-all workflow.useRepositoryHook 2>$null)
-        if ($LASTEXITCODE -ne 0 -or $configuredValues.Count -ne 1 -or $configuredValues[0] -cne "true") {
-            throw "Local workflow.useRepositoryHook must be exactly one value equal to true."
+        $configOutput = @(& git config --local --replace-all workflow.useRepositoryHook true 2>&1)
+        $configExit = $LASTEXITCODE
+        if ($configExit -ne 0) {
+            $detail = [string]::Join([System.Environment]::NewLine, @($configOutput | ForEach-Object { [string]$_ }))
+            throw "Failed to atomically set the repository opt-in with local Git config. $detail"
         }
     }
     catch {
         $primaryFailure = $_.Exception.Message
         if ($installed) {
             try {
-                Restore-InstalledHook $directory $destination $backup $hadDestination $installedHash
+                Restore-InstalledHook `
+                    $directory `
+                    $destination `
+                    $backup `
+                    $hadDestination `
+                    $installedRecord `
+                    $originalAclPolicy `
+                    $BeforeRollbackReplaceAction
             }
             catch {
                 throw "$primaryFailure Rollback also failed: $($_.Exception.Message)"
@@ -410,8 +655,8 @@ function Invoke-HookInstaller {
         throw $primaryFailure
     }
     finally {
-        if ($ownsTemporary -and [System.IO.File]::Exists($temporary)) {
-            [System.IO.File]::Delete($temporary)
+        if ($null -ne $ownedTemporary -and [System.IO.File]::Exists($ownedTemporary.Path)) {
+            Remove-OwnedFile $ownedTemporary "installation temporary"
         }
     }
 
