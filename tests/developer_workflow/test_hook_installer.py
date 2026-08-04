@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import shutil
+import signal
 import subprocess
+import threading
+import time
 from base64 import b64decode, b64encode
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-from .support import init_repo, run_command
+from .support import _WindowsJob, init_repo, run_command
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER_SOURCE = PROJECT_ROOT / "scripts" / "install-global-hook.ps1"
@@ -61,20 +65,65 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
 
 
 class _PersistentPowerShellHost:
-    def __init__(self, environment: dict[str, str]) -> None:
+    def __init__(
+        self,
+        environment: dict[str, str],
+        request_timeout_seconds: float = 15,
+    ) -> None:
         command = [_powershell(), "-NoProfile"]
         if Path(command[0]).name.lower().startswith("powershell"):
             command.extend(["-ExecutionPolicy", "Bypass"])
         command.extend(["-Command", _INTERNAL_HOST_SCRIPT])
-        self._process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            env=environment,
-        )
+        popen_options: dict[str, object] = {
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.DEVNULL,
+            "text": True,
+            "encoding": "utf-8",
+            "env": environment,
+        }
+        if os.name == "nt":
+            popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_options["start_new_session"] = True
+        self._process = subprocess.Popen(command, **popen_options)  # type: ignore[arg-type]
+        self._job = _WindowsJob(self._process) if os.name == "nt" else None
+        self._request_timeout_seconds = request_timeout_seconds
+        self._usable = True
+        self._responses: queue.Queue[str | None] = queue.Queue()
+        self._reader = threading.Thread(target=self._read_responses, daemon=True)
+        self._reader.start()
+
+    @property
+    def pid(self) -> int:
+        return self._process.pid
+
+    @property
+    def is_usable(self) -> bool:
+        return self._usable and self._process.poll() is None
+
+    def _read_responses(self) -> None:
+        assert self._process.stdout is not None
+        for line in self._process.stdout:
+            self._responses.put(line)
+        self._responses.put(None)
+
+    def _terminate_owned_tree(self) -> None:
+        self._usable = False
+        if self._job is not None:
+            self._job.close()
+            self._job = None
+        elif self._process.poll() is None:
+            try:
+                os.killpg(self._process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        try:
+            self._process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._process.kill()
+            self._process.wait(timeout=5)
+        self._reader.join(timeout=5)
 
     def run(
         self,
@@ -82,6 +131,8 @@ class _PersistentPowerShellHost:
         environment: dict[str, str],
         command_text: str,
     ) -> subprocess.CompletedProcess[str]:
+        if not self.is_usable:
+            raise AssertionError("Persistent PowerShell host is not usable")
         assert self._process.stdin is not None
         assert self._process.stdout is not None
         managed_environment = {
@@ -95,10 +146,24 @@ class _PersistentPowerShellHost:
             "Command": command_text,
         }
         encoded = b64encode(json.dumps(request).encode("utf-8")).decode("ascii")
-        self._process.stdin.write(encoded + "\n")
-        self._process.stdin.flush()
-        response_line = self._process.stdout.readline()
-        if not response_line:
+        try:
+            self._process.stdin.write(encoded + "\n")
+            self._process.stdin.flush()
+        except (BrokenPipeError, OSError) as error:
+            self._terminate_owned_tree()
+            raise AssertionError(
+                f"Persistent PowerShell host could not accept a request: {error}"
+            ) from error
+        try:
+            response_line = self._responses.get(timeout=self._request_timeout_seconds)
+        except queue.Empty as error:
+            self._terminate_owned_tree()
+            raise AssertionError(
+                "Persistent PowerShell request timed out after "
+                f"{self._request_timeout_seconds}s"
+            ) from error
+        if response_line is None:
+            self._terminate_owned_tree()
             raise AssertionError("Persistent PowerShell host exited without a response")
         response = json.loads(b64decode(response_line).decode("utf-8"))
         if not response["Success"]:
@@ -115,16 +180,24 @@ class _PersistentPowerShellHost:
 
     def close(self) -> None:
         if self._process.poll() is not None:
+            self._usable = False
+            if self._job is not None:
+                self._job.close()
+                self._job = None
             return
         assert self._process.stdin is not None
-        self._process.stdin.write("__EXIT__\n")
-        self._process.stdin.flush()
-        self._process.stdin.close()
         try:
+            self._process.stdin.write("__EXIT__\n")
+            self._process.stdin.flush()
+            self._process.stdin.close()
             self._process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self._process.terminate()
-            self._process.wait(timeout=5)
+            self._usable = False
+            if self._job is not None:
+                self._job.close()
+                self._job = None
+            self._reader.join(timeout=5)
+        except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+            self._terminate_owned_tree()
 
 
 def _powershell() -> str:
@@ -199,6 +272,11 @@ def _run_internal(
     environment: dict[str, str],
     command_text: str,
 ):
+    global _INTERNAL_HOST
+    if _INTERNAL_HOST is None or not _INTERNAL_HOST.is_usable:
+        if _INTERNAL_HOST is not None:
+            _INTERNAL_HOST.close()
+        _INTERNAL_HOST = _PersistentPowerShellHost(environment)
     assert _INTERNAL_HOST is not None
     internal_environment = environment.copy()
     internal_environment["HOOK_INSTALLER_TEST_SCRIPT"] = str(
@@ -294,6 +372,69 @@ def test_internal_contracts_reuse_one_isolated_powershell_host(tmp_path: Path) -
     second = _run_internal(repo, environment, "$PID")
 
     assert first.stdout.strip() == second.stdout.strip()
+
+
+def _windows_process_has_exited(process_id: int) -> bool:
+    if os.name != "nt":
+        pytest.skip("process-tree host contracts apply to Windows")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    wait_for_single_object = kernel32.WaitForSingleObject
+    wait_for_single_object.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    wait_for_single_object.restype = wintypes.DWORD
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    handle = open_process(0x00100000, False, process_id)
+    if not handle:
+        return True
+    try:
+        return wait_for_single_object(handle, 0) == 0
+    finally:
+        close_handle(handle)
+
+
+def test_internal_host_timeout_reaps_tree_and_replaces_bad_host(tmp_path: Path) -> None:
+    global _INTERNAL_HOST
+    if os.name != "nt":
+        pytest.skip("process-tree host contracts apply to Windows")
+    repo, environment, _ = _prepare_repo(tmp_path)
+    child_pid_file = tmp_path / "hung-host-child.pid"
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_CHILD_PID"] = str(child_pid_file)
+    original_host = _INTERNAL_HOST
+    timed_host = _PersistentPowerShellHost(environment, request_timeout_seconds=10)
+    _INTERNAL_HOST = timed_host
+    host_pid = timed_host.pid
+    try:
+        started = time.monotonic()
+        with pytest.raises(AssertionError, match="timed out"):
+            _run_internal(
+                repo,
+                internal_environment,
+                "$child = Start-Process -FilePath powershell -WindowStyle Hidden -PassThru "
+                "-ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 60'; "
+                "[System.IO.File]::WriteAllText($env:HOOK_INSTALLER_TEST_CHILD_PID, "
+                "[string]$child.Id); while ($true) { Start-Sleep -Seconds 1 }",
+            )
+        assert time.monotonic() - started < 20
+        child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+        assert _windows_process_has_exited(host_pid)
+        assert _windows_process_has_exited(child_pid)
+        assert not timed_host.is_usable
+
+        replacement = _run_internal(repo, environment, "$PID")
+        assert int(replacement.stdout.strip()) != host_pid
+        assert _INTERNAL_HOST is not timed_host
+    finally:
+        if _INTERNAL_HOST is not None and _INTERNAL_HOST is not original_host:
+            _INTERNAL_HOST.close()
+        _INTERNAL_HOST = original_host
 
 
 @contextmanager
@@ -1036,6 +1177,52 @@ def test_rollback_restores_acl_captured_from_the_actual_displaced_backup(
     assert len(backups) == 1
     assert backups[0].read_bytes() == b"old hook"
     _assert_restricted_acl(_read_acl(backups[0], repo, environment))
+
+
+@pytest.mark.parametrize("failure_point", ["record", "final_acl"])
+def test_post_replace_failure_restores_actual_backup_before_config_write(
+    tmp_path: Path, failure_point: str
+) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    destination = hook_directory / "pre-commit"
+    destination.write_bytes(b"old hook")
+    original_acl = _read_acl(destination, repo, environment)
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_DIRECTORY"] = str(hook_directory)
+
+    failure = _internal_failure(
+        repo,
+        internal_environment,
+        "$afterReplace = { "
+        + (
+            "throw 'forced record verification failure'"
+            if failure_point == "record"
+            else ""
+        )
+        + " }; "
+        "$beforeFinalAcl = { "
+        + ("throw 'forced final ACL failure'" if failure_point == "final_acl" else "")
+        + " }; "
+        "Invoke-HookInstaller -HookDirectory $env:HOOK_INSTALLER_TEST_DIRECTORY "
+        "-AfterInstallReplaceAction $afterReplace "
+        "-BeforeFinalAclAction $beforeFinalAcl",
+    )
+
+    assert (
+        f"forced {'record verification' if failure_point == 'record' else 'final ACL'} failure"
+        in failure
+    )
+    assert destination.read_bytes() == b"old hook"
+    restored_acl = _read_acl(destination, repo, environment)
+    assert restored_acl["owner"] == original_acl["owner"]
+    assert restored_acl["protected"] == original_acl["protected"]
+    assert restored_acl["rules"] == original_acl["rules"]
+    with pytest.raises(AssertionError):
+        _config(repo, environment, "--local", "--get", "workflow.useRepositoryHook")
+    backups = list(hook_directory.glob("pre-commit.backup-*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == b"old hook"
+    assert not list(hook_directory.glob("pre-commit.installing-*"))
 
 
 def test_config_failure_restores_old_hook_and_keeps_diagnostic_backup(

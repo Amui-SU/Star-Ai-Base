@@ -857,7 +857,9 @@ function Invoke-HookInstaller {
         [scriptblock]$BeforeRollbackReplaceAction = $null,
         [scriptblock]$BeforeInstallReplaceAction = $null,
         [scriptblock]$BeforeRollbackArtifactReplaceAction = $null,
-        [scriptblock]$BeforeRecoveryReplaceAction = $null
+        [scriptblock]$BeforeRecoveryReplaceAction = $null,
+        [scriptblock]$AfterInstallReplaceAction = $null,
+        [scriptblock]$BeforeFinalAclAction = $null
     )
 
     $rootOutput = @(& git rev-parse --show-toplevel 2>$null)
@@ -942,6 +944,12 @@ function Invoke-HookInstaller {
     $backupState = $null
     try {
         $ownedTemporary = New-OwnedCopy $source $temporary
+        $prospectiveInstalledRecord = [pscustomobject]@{
+            Path = $destination
+            Hash = $ownedTemporary.Hash
+            Length = $ownedTemporary.Length
+            Identity = $ownedTemporary.Identity
+        }
         Assert-RegularDestination $destination
         if ($hadDestination) {
             if ($null -ne $BeforeInstallReplaceAction) {
@@ -965,14 +973,26 @@ function Invoke-HookInstaller {
                     $backupBeforeReplace.Length,
                     $backupBeforeReplace.Hash
                 )
+                if (
+                    [HookInstaller.NativeFileIdentity]::FromHandle($backupLock) -cne
+                    $originalDestinationRecord.Identity
+                ) {
+                    throw "Verified backup handle does not match the expected destination identity."
+                }
+                $backupState = [pscustomobject]@{
+                    Record = $backupBeforeReplace
+                    AclPolicy = Get-FileAclPolicy $backup
+                }
                 [System.IO.File]::Replace($temporary, $destination, $backup, $true)
+                $installed = $true
+                $ownedTemporary = $null
+                $installedRecord = $prospectiveInstalledRecord
+                if ($null -ne $AfterInstallReplaceAction) {
+                    & $AfterInstallReplaceAction
+                }
                 $backupAfterReplace = Get-OwnedFileRecord $backup
                 if (-not (Test-FileRecordsEqual $backupAfterReplace $backupBeforeReplace)) {
                     throw "Backup identity or content changed during atomic replacement; preserved: $backup"
-                }
-                $backupState = [pscustomobject]@{
-                    Record = $backupAfterReplace
-                    AclPolicy = Get-FileAclPolicy $backup
                 }
             }
             finally {
@@ -983,13 +1003,26 @@ function Invoke-HookInstaller {
         }
         else {
             [System.IO.File]::Move($temporary, $destination)
+            $installed = $true
+            $ownedTemporary = $null
+            $installedRecord = $prospectiveInstalledRecord
+            if ($null -ne $AfterInstallReplaceAction) {
+                & $AfterInstallReplaceAction
+            }
         }
-        $ownedTemporary = $null
-        $installed = $true
-        $installedRecord = Get-OwnedFileRecord $destination
+        $installedAfterReplace = Get-OwnedFileRecord $destination
+        if (-not (Test-FileRecordsEqual $installedAfterReplace $installedRecord)) {
+            throw "Installed hook identity or content changed after atomic replacement."
+        }
+        if ($null -ne $BeforeFinalAclAction) {
+            & $BeforeFinalAclAction
+        }
         Set-RestrictedFileAcl $destination
         Assert-RestrictedFileAcl $destination
-        $installedRecord = Get-OwnedFileRecord $destination
+        $installedAfterAcl = Get-OwnedFileRecord $destination
+        if (-not (Test-FileRecordsEqual $installedAfterAcl $installedRecord)) {
+            throw "Installed hook identity or content changed while applying its final ACL."
+        }
 
         if ($null -ne $RepositoryOptInAction) {
             & $RepositoryOptInAction
