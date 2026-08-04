@@ -17,11 +17,11 @@ producer_is_active_job() {
 poll_producer_exit() {
     polled_pid=$1
     poll_count=0
-    while [ "$poll_count" -lt 20 ]; do
+    while [ "$poll_count" -lt 5 ]; do
         if ! producer_is_active_job "$polled_pid"; then
             return 0
         fi
-        sleep 0.05
+        sleep 0.1
         poll_count=$((poll_count + 1))
     done
     return 1
