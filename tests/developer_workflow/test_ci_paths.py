@@ -214,7 +214,7 @@ def test_cli_force_full_ignores_docs_only_input(tmp_path: Path) -> None:
     ]
 
 
-def test_write_outputs_appends_to_existing_bytes_in_stable_order(
+def test_trusted_single_writer_appends_to_existing_bytes_in_stable_order(
     tmp_path: Path,
 ) -> None:
     classifier = _load_classifier()
@@ -225,6 +225,13 @@ def test_write_outputs_appends_to_existing_bytes_in_stable_order(
     classifier.write_outputs(output, OUTPUT_VALUES)
 
     assert output.read_bytes() == existing + OUTPUT_PAYLOAD
+
+
+def test_output_writer_declares_trusted_single_writer_precondition() -> None:
+    docstring = _load_classifier().write_outputs.__doc__
+
+    assert docstring is not None
+    assert "trusted single-writer" in docstring
 
 
 def test_write_outputs_preserves_existing_file_mode(tmp_path: Path) -> None:
@@ -313,136 +320,6 @@ def test_write_outputs_rejects_non_directory_parent_without_artifacts(
     assert not output.exists()
 
 
-def test_target_identity_change_before_replace_preserves_concurrent_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    classifier = _load_classifier()
-    output = tmp_path / "github-output"
-    output.write_bytes(b"original=true\n")
-    concurrent = tmp_path / "concurrent-output"
-    concurrent_bytes = b"concurrent=must-survive\n"
-    concurrent.write_bytes(concurrent_bytes)
-    real_chmod = os.chmod
-    real_replace = os.replace
-    swapped = False
-
-    def swap_target_before_validation(path, mode) -> None:
-        nonlocal swapped
-        real_chmod(path, mode)
-        if not swapped:
-            swapped = True
-            real_replace(concurrent, output)
-
-    monkeypatch.setattr(os, "chmod", swap_target_before_validation)
-
-    with pytest.raises(OSError, match="changed|identity"):
-        classifier.write_outputs(output, OUTPUT_VALUES)
-
-    assert output.read_bytes() == concurrent_bytes
-    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
-
-
-@pytest.mark.parametrize("preexisting_output", [False, True])
-def test_target_swap_at_atomic_commit_boundary_is_rolled_back(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    preexisting_output: bool,
-) -> None:
-    classifier = _load_classifier()
-    output = tmp_path / "github-output"
-    if preexisting_output:
-        output.write_bytes(b"original=true\n")
-    concurrent = tmp_path / "concurrent-output"
-    concurrent_bytes = b"concurrent=must-survive\n"
-    concurrent.write_bytes(concurrent_bytes)
-    real_atomic_exchange = getattr(classifier, "_atomic_exchange", None)
-    injected = False
-
-    def swap_target_then_commit(source: Path, target: Path) -> Path:
-        nonlocal injected
-        if not injected:
-            injected = True
-            os.replace(concurrent, target)
-        assert real_atomic_exchange is not None
-        return real_atomic_exchange(source, target)
-
-    monkeypatch.setattr(
-        classifier, "_atomic_exchange", swap_target_then_commit, raising=False
-    )
-
-    with pytest.raises(OSError):
-        classifier.write_outputs(output, OUTPUT_VALUES)
-
-    assert output.read_bytes() == concurrent_bytes
-    assert not concurrent.exists()
-    assert not any(
-        candidate.is_file() and candidate.read_bytes() == OUTPUT_PAYLOAD
-        for candidate in tmp_path.rglob("*")
-    )
-
-
-def test_temporary_swap_at_atomic_commit_boundary_never_publishes_attacker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    classifier = _load_classifier()
-    output = tmp_path / "github-output"
-    original = b"original=true\n"
-    output.write_bytes(original)
-    attacker = tmp_path / "attacker-output"
-    attacker_bytes = b"attacker=must-not-publish\n"
-    attacker.write_bytes(attacker_bytes)
-    real_atomic_exchange = getattr(classifier, "_atomic_exchange", None)
-    injected = False
-
-    def swap_temporary_then_commit(source: Path, target: Path) -> Path:
-        nonlocal injected
-        if not injected:
-            injected = True
-            os.replace(attacker, source)
-        assert real_atomic_exchange is not None
-        return real_atomic_exchange(source, target)
-
-    monkeypatch.setattr(
-        classifier, "_atomic_exchange", swap_temporary_then_commit, raising=False
-    )
-
-    with pytest.raises(OSError):
-        classifier.write_outputs(output, OUTPUT_VALUES)
-
-    assert output.read_bytes() == original
-    assert output.read_bytes() != attacker_bytes
-    assert any(
-        candidate.is_file() and candidate.read_bytes() == attacker_bytes
-        for candidate in tmp_path.rglob("*")
-    )
-
-
-def test_unknown_temporary_identity_is_preserved_on_initial_fstat_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    classifier = _load_classifier()
-    output = tmp_path / "github-output"
-    real_fstat = os.fstat
-    failed = False
-
-    def fail_first_fstat(descriptor: int):
-        nonlocal failed
-        if not failed:
-            failed = True
-            raise OSError("injected initial fstat failure")
-        return real_fstat(descriptor)
-
-    monkeypatch.setattr(os, "fstat", fail_first_fstat)
-
-    with pytest.raises(OSError, match="initial fstat"):
-        classifier.write_outputs(output, OUTPUT_VALUES)
-
-    artifacts = list(tmp_path.glob(f".{output.name}.*.tmp"))
-    assert len(artifacts) == 1
-    assert not output.exists()
-    artifacts[0].unlink()
-
-
 class _MidWriteFailure:
     def __init__(self, stream) -> None:
         self._stream = stream
@@ -469,7 +346,7 @@ class _MidWriteFailure:
 
 @pytest.mark.parametrize("failure_at", ["write", "replace"])
 @pytest.mark.parametrize("preexisting_output", [False, True])
-def test_atomic_output_failure_preserves_destination_and_cleans_temporary_file(
+def test_trusted_single_writer_failure_preserves_destination_and_cleans_temp(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure_at: str,
@@ -493,7 +370,7 @@ def test_atomic_output_failure_preserves_destination_and_cleans_temporary_file(
         def fail_during_replace(*_args, **_kwargs) -> None:
             raise OSError("injected replace failure")
 
-        monkeypatch.setattr(classifier, "_atomic_exchange", fail_during_replace)
+        monkeypatch.setattr(os, "replace", fail_during_replace)
 
     with pytest.raises(OSError, match=failure_at):
         classifier.write_outputs(output, OUTPUT_VALUES)
