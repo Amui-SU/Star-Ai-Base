@@ -241,7 +241,6 @@ run the commit checks in this order. Qualified micro tasks use
    ```
 
 4. Stage files explicitly. Do not stage local secrets, generated data, or build/cache output:
-
    - `.env.local`
    - `data/`
    - `logs/`
@@ -267,6 +266,27 @@ run the commit checks in this order. Qualified micro tasks use
    git log -1 --oneline
    git status --short
    ```
+
+## Repository-Aware Commit Hook
+
+Install the reviewed global dispatcher from this repository with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-global-hook.ps1
+```
+
+The installer reads the absolute global `core.hooksPath`, atomically installs
+the dispatcher, preserves any previous hook as a unique byte-exact backup, and
+sets only this repository's `workflow.useRepositoryHook=true`. Keep the printed
+`Backup` path and run the exact printed `Restore` command if installation or
+later hook operation must be rolled back.
+
+The repository-aware path verifies staged files only and never downloads or
+installs tools during a commit. If the repository verifier is unavailable or
+fails, fix its reported dependency/path issue or restore the prior hook; do not
+bypass the hook or replace it with `npx`, `npm exec`, or another network-capable
+fallback. Repositories without the exact local opt-in use the dispatcher's
+generic installed-tool-only checks.
 
 ## Expected Checks
 
