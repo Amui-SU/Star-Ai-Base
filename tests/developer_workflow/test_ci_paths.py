@@ -590,6 +590,7 @@ def test_all_actions_remain_pinned_to_commit_shas() -> None:
         ("success", "true", "success", "false", "skipped", "false", 0),
         ("success", "false", "skipped", "true", "success", "false", 0),
         ("success", "false", "skipped", "false", "skipped", "true", 0),
+        ("success", "false", "skipped", "false", "skipped", "false", 1),
         ("success", "", "skipped", "false", "skipped", "true", 1),
         ("success", "garbage", "skipped", "false", "skipped", "true", 1),
         ("success", "false", "skipped", "", "skipped", "true", 1),

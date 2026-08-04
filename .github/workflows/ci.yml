@@ -134,4 +134,8 @@ jobs:
             true|false) ;;
             *) exit 1 ;;
           esac
-          [[ "$DOCS_ONLY" != "true" || ( "$BACKEND_EXPECTED" == "false" && "$FRONTEND_EXPECTED" == "false" ) ]] || exit 1
+          if [[ "$BACKEND_EXPECTED" == "false" && "$FRONTEND_EXPECTED" == "false" ]]; then
+            [[ "$DOCS_ONLY" == "true" ]] || exit 1
+          else
+            [[ "$DOCS_ONLY" == "false" ]] || exit 1
+          fi
