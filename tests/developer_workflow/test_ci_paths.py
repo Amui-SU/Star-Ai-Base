@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +14,8 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLASSIFIER_PATH = PROJECT_ROOT / "scripts" / "classify-ci-paths.py"
+OUTPUT_VALUES = {"backend": True, "frontend": False, "docs_only": False}
+OUTPUT_PAYLOAD = b"backend=true\nfrontend=false\ndocs_only=false\n"
 
 
 def _load_classifier() -> ModuleType:
@@ -177,3 +181,89 @@ def test_cli_force_full_ignores_docs_only_input(tmp_path: Path) -> None:
         "frontend=true",
         "docs_only=false",
     ]
+
+
+def test_write_outputs_appends_to_existing_bytes_in_stable_order(
+    tmp_path: Path,
+) -> None:
+    classifier = _load_classifier()
+    output = tmp_path / "github-output"
+    existing = b"previous=exact\r\n"
+    output.write_bytes(existing)
+
+    classifier.write_outputs(output, OUTPUT_VALUES)
+
+    assert output.read_bytes() == existing + OUTPUT_PAYLOAD
+
+
+def test_write_outputs_preserves_existing_file_mode(tmp_path: Path) -> None:
+    classifier = _load_classifier()
+    output = tmp_path / "github-output"
+    output.write_bytes(b"previous=exact\n")
+    expected_mode = stat.S_IMODE(output.stat().st_mode)
+
+    classifier.write_outputs(output, OUTPUT_VALUES)
+
+    assert stat.S_IMODE(output.stat().st_mode) == expected_mode
+
+
+class _MidWriteFailure:
+    def __init__(self, stream) -> None:
+        self._stream = stream
+
+    def __enter__(self):
+        self._stream.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self._stream.__exit__(exc_type, exc_value, traceback)
+
+    def write(self, payload: bytes) -> int:
+        partial_length = max(1, len(payload) // 2)
+        self._stream.write(payload[:partial_length])
+        self._stream.flush()
+        raise OSError("injected mid-write failure")
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def fileno(self) -> int:
+        return self._stream.fileno()
+
+
+@pytest.mark.parametrize("failure_at", ["write", "replace"])
+@pytest.mark.parametrize("preexisting_output", [False, True])
+def test_atomic_output_failure_preserves_destination_and_cleans_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_at: str,
+    preexisting_output: bool,
+) -> None:
+    classifier = _load_classifier()
+    output = tmp_path / "github-output"
+    existing = b"previous=exact\r\n"
+    if preexisting_output:
+        output.write_bytes(existing)
+
+    if failure_at == "write":
+        real_fdopen = os.fdopen
+
+        def fail_during_write(*args, **kwargs):
+            return _MidWriteFailure(real_fdopen(*args, **kwargs))
+
+        monkeypatch.setattr(os, "fdopen", fail_during_write)
+    else:
+
+        def fail_during_replace(*_args, **_kwargs) -> None:
+            raise OSError("injected replace failure")
+
+        monkeypatch.setattr(os, "replace", fail_during_replace)
+
+    with pytest.raises(OSError, match=failure_at):
+        classifier.write_outputs(output, OUTPUT_VALUES)
+
+    if preexisting_output:
+        assert output.read_bytes() == existing
+    else:
+        assert not output.exists()
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []

@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import os
+import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import BinaryIO
 
@@ -74,9 +77,49 @@ def read_zero_paths(stream: BinaryIO) -> list[str]:
 
 
 def write_outputs(path: Path, values: dict[str, bool]) -> None:
-    """Write a complete GitHub output payload after all input is validated."""
+    """Atomically append a complete payload while preserving prior output."""
     lines = [f"{name}={'true' if value else 'false'}" for name, value in values.items()]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    payload = ("\n".join(lines) + "\n").encode("utf-8")
+
+    try:
+        with path.open("rb") as existing_stream:
+            existing = existing_stream.read()
+            existing_mode = stat.S_IMODE(os.fstat(existing_stream.fileno()).st_mode)
+    except FileNotFoundError:
+        existing = b""
+        existing_mode = None
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        temporary_stream = os.fdopen(descriptor, "wb", buffering=0)
+        descriptor = -1
+        with temporary_stream:
+            _write_all(temporary_stream, existing + payload)
+            temporary_stream.flush()
+            os.fsync(temporary_stream.fileno())
+        if existing_mode is not None:
+            os.chmod(temporary_path, existing_mode)
+        os.replace(temporary_path, path)
+    finally:
+        try:
+            if descriptor >= 0:
+                os.close(descriptor)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _write_all(stream: BinaryIO, payload: bytes) -> None:
+    remaining = memoryview(payload)
+    while remaining:
+        written = stream.write(remaining)
+        if written is None or written <= 0:
+            raise OSError("could not write complete GitHub output")
+        remaining = remaining[written:]
 
 
 def main() -> int:
