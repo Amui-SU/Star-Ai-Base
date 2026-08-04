@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
+$script:InstallerScriptPath = [System.IO.Path]::GetFullPath($MyInvocation.MyCommand.Path)
 
 function Write-Failure {
     param([string]$Message)
@@ -29,7 +30,12 @@ function Get-NormalizedAbsolutePath {
         throw "$Description is unsafe because it contains dot path segments."
     }
     try {
-        return [System.IO.Path]::GetFullPath($Path).TrimEnd(
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+        $pathRoot = [System.IO.Path]::GetPathRoot($fullPath)
+        if ($fullPath.Equals($pathRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $pathRoot
+        }
+        return $fullPath.TrimEnd(
             [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
         )
     }
@@ -121,8 +127,10 @@ function New-OwnedCopy {
 
     $sourceStream = $null
     $destinationStream = $null
+    $sha256 = $null
     $createdDestination = $false
     $completedCopy = $false
+    $copyHash = $null
     try {
         $destinationStream = New-Object System.IO.FileStream(
             $Destination,
@@ -142,13 +150,23 @@ function New-OwnedCopy {
             65536,
             [System.IO.FileOptions]::SequentialScan
         )
-        $sourceStream.CopyTo($destinationStream)
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        [byte[]]$buffer = New-Object byte[] 65536
+        while (($bytesRead = $sourceStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $destinationStream.Write($buffer, 0, $bytesRead)
+            [void]$sha256.TransformBlock($buffer, 0, $bytesRead, $buffer, 0)
+        }
+        [void]$sha256.TransformFinalBlock((New-Object byte[] 0), 0, 0)
         $destinationStream.Flush($true)
+        $copyHash = [System.BitConverter]::ToString($sha256.Hash).Replace("-", "")
         $completedCopy = $true
     }
     finally {
         if ($null -ne $sourceStream) {
             $sourceStream.Dispose()
+        }
+        if ($null -ne $sha256) {
+            $sha256.Dispose()
         }
         if ($null -ne $destinationStream) {
             $destinationStream.Dispose()
@@ -161,6 +179,7 @@ function New-OwnedCopy {
             [System.IO.File]::Delete($Destination)
         }
     }
+    return $copyHash
 }
 
 function Get-FileHashHex {
@@ -186,13 +205,30 @@ function New-UniqueChildPath {
     param(
         [string]$Directory,
         [string]$Prefix,
-        [string]$Suffix
+        [string]$Suffix,
+        [System.Collections.Generic.Queue[string]]$CandidateNames = $null
     )
 
     for ($attempt = 0; $attempt -lt 16; $attempt++) {
-        $stamp = [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss-fff")
-        $token = [Guid]::NewGuid().ToString("N")
-        $candidate = Join-Path $Directory "$Prefix$stamp-$token$Suffix"
+        if ($null -ne $CandidateNames) {
+            if ($CandidateNames.Count -eq 0) {
+                throw "Controlled candidate names were exhausted without a safe unused path."
+            }
+            $candidateName = $CandidateNames.Dequeue()
+            if (
+                [System.IO.Path]::GetFileName($candidateName) -cne $candidateName -or
+                -not $candidateName.StartsWith($Prefix, [System.StringComparison]::Ordinal) -or
+                -not $candidateName.EndsWith($Suffix, [System.StringComparison]::Ordinal)
+            ) {
+                throw "Controlled candidate name must match the required direct-child prefix and suffix."
+            }
+        }
+        else {
+            $stamp = [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss-fff")
+            $token = [Guid]::NewGuid().ToString("N")
+            $candidateName = "$Prefix$stamp-$token$Suffix"
+        }
+        $candidate = Join-Path $Directory $candidateName
         Assert-DirectChild $Directory $candidate "Generated path"
         if (-not (Test-Path -LiteralPath $candidate)) {
             return $candidate
@@ -226,7 +262,7 @@ function Restore-InstalledHook {
         $ownsRollbackTemporary = $false
         $ownsRollbackDisplaced = $false
         try {
-            New-OwnedCopy $Backup $rollbackTemporary
+            $rollbackHash = New-OwnedCopy $Backup $rollbackTemporary
             $ownsRollbackTemporary = $true
             [System.IO.File]::Replace(
                 $rollbackTemporary,
@@ -251,7 +287,13 @@ function Restore-InstalledHook {
     }
 }
 
-try {
+function Invoke-HookInstaller {
+    param(
+        [string]$HookDirectory = "",
+        [System.Collections.Generic.Queue[string]]$CandidateNames = $null,
+        [scriptblock]$RepositoryOptInAction = $null
+    )
+
     $rootOutput = @(& git rev-parse --show-toplevel 2>$null)
     if ($LASTEXITCODE -ne 0 -or $rootOutput.Count -ne 1) {
         throw "Could not resolve exactly one repository root with Git."
@@ -262,7 +304,7 @@ try {
     }
 
     $expectedScript = Join-Path (Join-Path $repositoryRoot "scripts") "install-global-hook.ps1"
-    $actualScript = [System.IO.Path]::GetFullPath($MyInvocation.MyCommand.Path)
+    $actualScript = $script:InstallerScriptPath
     if (-not $actualScript.Equals($expectedScript, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Installer must run from the repository's fixed scripts/install-global-hook.ps1 path."
     }
@@ -318,16 +360,16 @@ try {
     $hadDestination = [System.IO.File]::Exists($destination)
     $backup = $null
     if ($hadDestination) {
-        $backup = New-UniqueChildPath $directory "pre-commit.backup-" ".bak"
+        $backup = New-UniqueChildPath $directory "pre-commit.backup-" ".bak" $CandidateNames
         Assert-DirectChild $directory $backup "Hook backup"
     }
-    $temporary = New-UniqueChildPath $directory "pre-commit.installing-" ".tmp"
+    $temporary = New-UniqueChildPath $directory "pre-commit.installing-" ".tmp" $CandidateNames
     Assert-DirectChild $directory $temporary "Hook temporary file"
 
     $ownsTemporary = $false
     $installed = $false
     try {
-        New-OwnedCopy $source $temporary
+        $installedHash = New-OwnedCopy $source $temporary
         $ownsTemporary = $true
         Assert-RegularDestination $destination
         if ($hadDestination) {
@@ -338,13 +380,17 @@ try {
         }
         $ownsTemporary = $false
         $installed = $true
-        $installedHash = Get-FileHashHex $source
 
-        $configOutput = @(& git config --local workflow.useRepositoryHook true 2>&1)
-        $configExit = $LASTEXITCODE
-        if ($configExit -ne 0) {
-            $detail = [string]::Join([System.Environment]::NewLine, @($configOutput | ForEach-Object { [string]$_ }))
-            throw "Failed to set repository opt-in with local Git config. $detail"
+        if ($null -ne $RepositoryOptInAction) {
+            & $RepositoryOptInAction
+        }
+        else {
+            $configOutput = @(& git config --local workflow.useRepositoryHook true 2>&1)
+            $configExit = $LASTEXITCODE
+            if ($configExit -ne 0) {
+                $detail = [string]::Join([System.Environment]::NewLine, @($configOutput | ForEach-Object { [string]$_ }))
+                throw "Failed to set repository opt-in with local Git config. $detail"
+            }
         }
         $configuredValues = @(& git config --local --get-all workflow.useRepositoryHook 2>$null)
         if ($LASTEXITCODE -ne 0 -or $configuredValues.Count -ne 1 -or $configuredValues[0] -cne "true") {
@@ -380,8 +426,15 @@ try {
         $quotedDestination = $destination.Replace("'", "''")
         Write-Host "Restore: Remove-Item -LiteralPath '$quotedDestination'"
     }
+    Write-Host "Opt-out: git config --local --unset-all workflow.useRepositoryHook"
 }
-catch {
-    Write-Failure $_.Exception.Message
-    exit 1
+
+if ($MyInvocation.InvocationName -ne '.') {
+    try {
+        Invoke-HookInstaller -HookDirectory $HookDirectory
+    }
+    catch {
+        Write-Failure $_.Exception.Message
+        exit 1
+    }
 }

@@ -279,7 +279,9 @@ The installer reads the absolute global `core.hooksPath`, atomically installs
 the dispatcher, preserves any previous hook as a unique byte-exact backup, and
 sets only this repository's `workflow.useRepositoryHook=true`. Keep the printed
 `Backup` path and run the exact printed `Restore` command if installation or
-later hook operation must be rolled back.
+later hook operation must be rolled back. `Restore` changes only the hook file;
+run the separately printed `Opt-out` command to remove this repository's local
+opt-in when returning to the generic dispatcher behavior.
 
 The repository-aware path verifies staged files only and never downloads or
 installs tools during a commit. If the repository verifier is unavailable or
