@@ -14,17 +14,11 @@ producer_is_active_job() {
     return 1
 }
 
-poll_producer_exit() {
-    polled_pid=$1
-    poll_count=0
-    while [ "$poll_count" -lt 5 ]; do
-        if ! producer_is_active_job "$polled_pid"; then
-            return 0
-        fi
-        sleep 0.1
-        poll_count=$((poll_count + 1))
-    done
-    return 1
+pause_then_check_producer() {
+    checked_pid=$1
+    grace_seconds=$2
+    sleep "$grace_seconds"
+    ! producer_is_active_job "$checked_pid"
 }
 
 cleanup_active_producer() {
@@ -37,11 +31,11 @@ cleanup_active_producer() {
     if producer_is_active_job "$producer_pid"; then
         kill -TERM "$producer_pid" 2>/dev/null || true
     fi
-    if ! poll_producer_exit "$producer_pid"; then
+    if ! pause_then_check_producer "$producer_pid" 0.3; then
         if producer_is_active_job "$producer_pid"; then
             kill -KILL "$producer_pid" 2>/dev/null || true
         fi
-        poll_producer_exit "$producer_pid" || true
+        pause_then_check_producer "$producer_pid" 0.05 || true
     fi
 
     if ! producer_is_active_job "$producer_pid"; then
