@@ -12,10 +12,30 @@ if (-not ("HookInstaller.NativeFileIdentity" -as [type])) {
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using Microsoft.Win32.SafeHandles;
 
 namespace HookInstaller {
     public static class NativeFileIdentity {
+        private const uint DeleteAccess = 0x00010000;
+        private const uint GenericRead = 0x80000000;
+        private const uint FileReadAttributes = 0x00000080;
+        private const uint ShareRead = 0x00000001;
+        private const uint ShareDelete = 0x00000004;
+        private const uint OpenExisting = 3;
+        private const uint OpenReparsePoint = 0x00200000;
+        private const uint ReparsePointAttribute = 0x00000400;
+
+        private enum FileInformationClass {
+            FileDispositionInfo = 4
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileDispositionInformation {
+            [MarshalAs(UnmanagedType.Bool)]
+            public bool DeleteFile;
+        }
+
         [StructLayout(LayoutKind.Sequential)]
         private struct FileInformation {
             public uint FileAttributes;
@@ -36,17 +56,90 @@ namespace HookInstaller {
             out FileInformation information
         );
 
-        public static string FromHandle(SafeFileHandle handle) {
-            FileInformation information;
-            if (!GetFileInformationByHandle(handle, out information)) {
-                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFile(
+            string fileName,
+            uint desiredAccess,
+            uint shareMode,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile
+        );
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool CreateHardLink(
+            string newFileName,
+            string existingFileName,
+            IntPtr securityAttributes
+        );
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetFileInformationByHandle(
+            SafeFileHandle handle,
+            FileInformationClass informationClass,
+            ref FileDispositionInformation information,
+            uint bufferSize
+        );
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool ReadFile(
+            SafeFileHandle handle,
+            byte[] buffer,
+            uint bytesToRead,
+            out uint bytesRead,
+            IntPtr overlapped
+        );
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetFilePointerEx(
+            SafeFileHandle handle,
+            long distance,
+            out long newPosition,
+            uint moveMethod
+        );
+
+        private static long Length(FileInformation information) {
+            return ((long)information.FileSizeHigh << 32) | information.FileSizeLow;
+        }
+
+        private static string Identity(FileInformation information) {
             return String.Format(
                 "{0:X8}:{1:X8}{2:X8}",
                 information.VolumeSerialNumber,
                 information.FileIndexHigh,
                 information.FileIndexLow
             );
+        }
+
+        private static string HashFromHandle(SafeFileHandle handle) {
+            long position;
+            if (!SetFilePointerEx(handle, 0, out position, 0)) {
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+            using (SHA256 sha256 = SHA256.Create()) {
+                byte[] buffer = new byte[65536];
+                uint bytesRead;
+                while (true) {
+                    if (!ReadFile(handle, buffer, (uint)buffer.Length, out bytesRead, IntPtr.Zero)) {
+                        throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                    }
+                    if (bytesRead == 0) {
+                        break;
+                    }
+                    sha256.TransformBlock(buffer, 0, (int)bytesRead, buffer, 0);
+                }
+                sha256.TransformFinalBlock(new byte[0], 0, 0);
+                return BitConverter.ToString(sha256.Hash).Replace("-", "");
+            }
+        }
+
+        public static string FromHandle(SafeFileHandle handle) {
+            FileInformation information;
+            if (!GetFileInformationByHandle(handle, out information)) {
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return Identity(information);
         }
 
         public static string FromPath(string path) {
@@ -57,6 +150,117 @@ namespace HookInstaller {
                 FileShare.ReadWrite | FileShare.Delete
             )) {
                 return FromHandle(stream.SafeFileHandle);
+            }
+        }
+
+        public static SafeFileHandle OpenVerifiedForDelete(
+            string path,
+            string expectedIdentity,
+            long expectedLength,
+            string expectedHash
+        ) {
+            SafeFileHandle handle = CreateFile(
+                path,
+                DeleteAccess | GenericRead | FileReadAttributes,
+                ShareRead | ShareDelete,
+                IntPtr.Zero,
+                OpenExisting,
+                OpenReparsePoint,
+                IntPtr.Zero
+            );
+            if (handle.IsInvalid) {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new System.ComponentModel.Win32Exception(error);
+            }
+            try {
+                FileInformation before;
+                if (!GetFileInformationByHandle(handle, out before)) {
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                }
+                if ((before.FileAttributes & ReparsePointAttribute) != 0) {
+                    throw new InvalidOperationException("Owned file became a reparse point.");
+                }
+                if (!String.Equals(Identity(before), expectedIdentity, StringComparison.Ordinal) ||
+                    Length(before) != expectedLength) {
+                    throw new InvalidOperationException("Owned file identity or length changed.");
+                }
+
+                string actualHash = HashFromHandle(handle);
+
+                FileInformation after;
+                if (!GetFileInformationByHandle(handle, out after)) {
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                }
+                if (!String.Equals(Identity(after), expectedIdentity, StringComparison.Ordinal) ||
+                    Length(after) != expectedLength ||
+                    !String.Equals(actualHash, expectedHash, StringComparison.Ordinal)) {
+                    throw new InvalidOperationException("Owned file identity or content changed.");
+                }
+                return handle;
+            }
+            catch {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        public static SafeFileHandle OpenVerifiedArtifactLock(
+            string path,
+            string expectedIdentity,
+            long expectedLength,
+            string expectedHash
+        ) {
+            SafeFileHandle handle = CreateFile(
+                path,
+                DeleteAccess | GenericRead | FileReadAttributes,
+                ShareRead,
+                IntPtr.Zero,
+                OpenExisting,
+                OpenReparsePoint,
+                IntPtr.Zero
+            );
+            if (handle.IsInvalid) {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new System.ComponentModel.Win32Exception(error);
+            }
+            try {
+                FileInformation information;
+                if (!GetFileInformationByHandle(handle, out information)) {
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                }
+                string actualHash = HashFromHandle(handle);
+                if ((information.FileAttributes & ReparsePointAttribute) != 0 ||
+                    !String.Equals(Identity(information), expectedIdentity, StringComparison.Ordinal) ||
+                    Length(information) != expectedLength ||
+                    !String.Equals(actualHash, expectedHash, StringComparison.Ordinal)) {
+                    throw new InvalidOperationException("Artifact identity or content changed.");
+                }
+                return handle;
+            }
+            catch {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        public static void CreateHardLinkNoReplace(string linkPath, string existingPath) {
+            if (!CreateHardLink(linkPath, existingPath, IntPtr.Zero)) {
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+
+        public static void DeleteByHandle(SafeFileHandle handle) {
+            FileDispositionInformation information = new FileDispositionInformation();
+            information.DeleteFile = true;
+            if (!SetFileInformationByHandle(
+                handle,
+                FileInformationClass.FileDispositionInfo,
+                ref information,
+                (uint)Marshal.SizeOf(typeof(FileDispositionInformation))
+            )) {
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             }
         }
     }
@@ -392,13 +596,33 @@ function Test-OwnedFileRecord {
 function Remove-OwnedFile {
     param(
         [object]$Record,
-        [string]$Description
+        [string]$Description,
+        [scriptblock]$AfterValidationAction = $null
     )
 
-    if (-not (Test-OwnedFileRecord $Record)) {
-        throw "$Description changed identity or content; preserved: $($Record.Path)"
+    $handle = $null
+    try {
+        try {
+            $handle = [HookInstaller.NativeFileIdentity]::OpenVerifiedForDelete(
+                $Record.Path,
+                $Record.Identity,
+                $Record.Length,
+                $Record.Hash
+            )
+        }
+        catch {
+            throw "$Description changed identity or content; preserved: $($Record.Path). $($_.Exception.Message)"
+        }
+        if ($null -ne $AfterValidationAction) {
+            & $AfterValidationAction $Record.Path
+        }
+        [HookInstaller.NativeFileIdentity]::DeleteByHandle($handle)
     }
-    [System.IO.File]::Delete($Record.Path)
+    finally {
+        if ($null -ne $handle) {
+            $handle.Dispose()
+        }
+    }
 }
 
 function Test-FileRecordsEqual {
@@ -456,11 +680,12 @@ function Restore-InstalledHook {
     param(
         [string]$Directory,
         [string]$Destination,
-        [string]$Backup,
+        [object]$BackupState,
         [bool]$HadDestination,
         [object]$InstalledRecord,
-        [object]$OriginalAclPolicy = $null,
-        [scriptblock]$BeforeRollbackReplaceAction = $null
+        [scriptblock]$BeforeRollbackReplaceAction = $null,
+        [scriptblock]$BeforeRollbackArtifactReplaceAction = $null,
+        [scriptblock]$BeforeRecoveryReplaceAction = $null
     )
 
     Assert-RegularDestination $Destination
@@ -471,33 +696,131 @@ function Restore-InstalledHook {
         & $BeforeRollbackReplaceAction $Destination
     }
     if ($HadDestination) {
-        if (-not [System.IO.File]::Exists($Backup)) {
-            throw "Cannot roll back because the backup is missing: $Backup"
+        if ($null -eq $BackupState -or -not (Test-OwnedFileRecord $BackupState.Record)) {
+            throw "Cannot roll back because the verified backup changed or is missing."
         }
         $rollbackTemporary = New-UniqueChildPath $Directory "pre-commit.installing-rollback-" ".tmp"
-        $rollbackDisplaced = New-UniqueChildPath $Directory "pre-commit.installing-displaced-" ".tmp"
         $rollbackRecord = $null
         $displacedRecord = $null
+        $preserveDisplaced = $false
         try {
-            $rollbackRecord = New-OwnedCopy $Backup $rollbackTemporary
-            [System.IO.File]::Replace(
-                $rollbackTemporary,
-                $Destination,
-                $rollbackDisplaced,
-                $true
-            )
+            $rollbackRecord = New-OwnedCopy $BackupState.Record.Path $rollbackTemporary
+            $rollbackReplaced = $false
+            for ($attempt = 0; $attempt -lt 16; $attempt++) {
+                $rollbackDisplaced = New-UniqueChildPath `
+                    $Directory `
+                    "pre-commit.installing-displaced-" `
+                    ".tmp"
+                if ($null -ne $BeforeRollbackArtifactReplaceAction) {
+                    & $BeforeRollbackArtifactReplaceAction $rollbackDisplaced
+                }
+                try {
+                    [HookInstaller.NativeFileIdentity]::CreateHardLinkNoReplace(
+                        $rollbackDisplaced,
+                        $Destination
+                    )
+                }
+                catch {
+                    if ([System.IO.File]::Exists($rollbackDisplaced)) {
+                        continue
+                    }
+                    throw "Could not bind rollback displaced artifact safely: $($_.Exception.Message)"
+                }
+                $rollbackDisplacedBefore = Get-OwnedFileRecord $rollbackDisplaced
+                $destinationBeforeRollback = Get-OwnedFileRecord $Destination
+                if (-not (Test-FileRecordsEqual $rollbackDisplacedBefore $destinationBeforeRollback)) {
+                    throw "Rollback destination changed before atomic replacement; artifacts preserved."
+                }
+                $rollbackDisplacedLock = $null
+                try {
+                    $rollbackDisplacedLock = [HookInstaller.NativeFileIdentity]::OpenVerifiedArtifactLock(
+                        $rollbackDisplacedBefore.Path,
+                        $rollbackDisplacedBefore.Identity,
+                        $rollbackDisplacedBefore.Length,
+                        $rollbackDisplacedBefore.Hash
+                    )
+                    [System.IO.File]::Replace(
+                        $rollbackTemporary,
+                        $Destination,
+                        $rollbackDisplaced,
+                        $true
+                    )
+                }
+                finally {
+                    if ($null -ne $rollbackDisplacedLock) {
+                        $rollbackDisplacedLock.Dispose()
+                    }
+                }
+                $rollbackDisplacedAfter = Get-OwnedFileRecord $rollbackDisplaced
+                if (-not (Test-FileRecordsEqual $rollbackDisplacedAfter $rollbackDisplacedBefore)) {
+                    throw "Rollback displaced artifact changed during replacement; artifacts preserved."
+                }
+                $rollbackReplaced = $true
+                break
+            }
+            if (-not $rollbackReplaced) {
+                throw "Rollback displaced candidates were exhausted; existing hook was preserved."
+            }
             $rollbackRecord = $null
-            $displacedRecord = Get-OwnedFileRecord $rollbackDisplaced
+            $displacedRecord = $rollbackDisplacedAfter
             if (-not (Test-FileRecordsEqual $displacedRecord $InstalledRecord)) {
+                $preserveDisplaced = $true
                 $concurrentAclPolicy = Get-FileAclPolicy $rollbackDisplaced
-                $recoveryArtifact = New-UniqueChildPath $Directory "pre-commit.recovery-" ".bak"
-                [System.IO.File]::Replace(
-                    $rollbackDisplaced,
-                    $Destination,
-                    $recoveryArtifact,
-                    $true
-                )
+                $recovered = $false
+                for ($attempt = 0; $attempt -lt 16; $attempt++) {
+                    $recoveryArtifact = New-UniqueChildPath $Directory "pre-commit.recovery-" ".bak"
+                    if ($null -ne $BeforeRecoveryReplaceAction) {
+                        & $BeforeRecoveryReplaceAction $recoveryArtifact
+                    }
+                    try {
+                        [HookInstaller.NativeFileIdentity]::CreateHardLinkNoReplace(
+                            $recoveryArtifact,
+                            $Destination
+                        )
+                    }
+                    catch {
+                        if ([System.IO.File]::Exists($recoveryArtifact)) {
+                            continue
+                        }
+                        throw "Could not bind recovery artifact safely: $($_.Exception.Message)"
+                    }
+                    $recoveryBeforeReplace = Get-OwnedFileRecord $recoveryArtifact
+                    $destinationBeforeRecovery = Get-OwnedFileRecord $Destination
+                    if (-not (Test-FileRecordsEqual $recoveryBeforeReplace $destinationBeforeRecovery)) {
+                        throw "Recovery destination changed before atomic replacement; artifacts preserved."
+                    }
+                    $recoveryLock = $null
+                    try {
+                        $recoveryLock = [HookInstaller.NativeFileIdentity]::OpenVerifiedArtifactLock(
+                            $recoveryBeforeReplace.Path,
+                            $recoveryBeforeReplace.Identity,
+                            $recoveryBeforeReplace.Length,
+                            $recoveryBeforeReplace.Hash
+                        )
+                        [System.IO.File]::Replace(
+                            $rollbackDisplaced,
+                            $Destination,
+                            $recoveryArtifact,
+                            $true
+                        )
+                    }
+                    finally {
+                        if ($null -ne $recoveryLock) {
+                            $recoveryLock.Dispose()
+                        }
+                    }
+                    $recoveryAfterReplace = Get-OwnedFileRecord $recoveryArtifact
+                    if (-not (Test-FileRecordsEqual $recoveryAfterReplace $recoveryBeforeReplace)) {
+                        throw "Recovery artifact changed during atomic replacement; artifacts preserved."
+                    }
+                    $recovered = $true
+                    break
+                }
+                if (-not $recovered) {
+                    throw "Recovery candidates were exhausted; concurrent hook remains in a displaced artifact."
+                }
                 $displacedRecord = $null
+                $preserveDisplaced = $false
                 Restore-FileAclPolicy $Destination $concurrentAclPolicy
                 throw (
                     "Concurrent hook content was preserved at the destination; " +
@@ -506,13 +829,17 @@ function Restore-InstalledHook {
             }
             Remove-OwnedFile $displacedRecord "rollback displaced installed hook"
             $displacedRecord = $null
-            Restore-FileAclPolicy $Destination $OriginalAclPolicy
+            Restore-FileAclPolicy $Destination $BackupState.AclPolicy
         }
         finally {
             if ($null -ne $rollbackRecord -and [System.IO.File]::Exists($rollbackRecord.Path)) {
                 Remove-OwnedFile $rollbackRecord "rollback temporary"
             }
-            if ($null -ne $displacedRecord -and [System.IO.File]::Exists($displacedRecord.Path)) {
+            if (
+                -not $preserveDisplaced -and
+                $null -ne $displacedRecord -and
+                [System.IO.File]::Exists($displacedRecord.Path)
+            ) {
                 Remove-OwnedFile $displacedRecord "rollback displaced file"
             }
         }
@@ -527,7 +854,10 @@ function Invoke-HookInstaller {
         [string]$HookDirectory = "",
         [System.Collections.Generic.Queue[string]]$CandidateNames = $null,
         [scriptblock]$RepositoryOptInAction = $null,
-        [scriptblock]$BeforeRollbackReplaceAction = $null
+        [scriptblock]$BeforeRollbackReplaceAction = $null,
+        [scriptblock]$BeforeInstallReplaceAction = $null,
+        [scriptblock]$BeforeRollbackArtifactReplaceAction = $null,
+        [scriptblock]$BeforeRecoveryReplaceAction = $null
     )
 
     $rootOutput = @(& git rev-parse --show-toplevel 2>$null)
@@ -594,9 +924,9 @@ function Invoke-HookInstaller {
     Assert-DirectChild $directory $destination "Hook destination"
     Assert-RegularDestination $destination
     $hadDestination = [System.IO.File]::Exists($destination)
-    $originalAclPolicy = $null
+    $originalDestinationRecord = $null
     if ($hadDestination) {
-        $originalAclPolicy = Get-FileAclPolicy $destination
+        $originalDestinationRecord = Get-OwnedFileRecord $destination
     }
     $backup = $null
     if ($hadDestination) {
@@ -609,11 +939,47 @@ function Invoke-HookInstaller {
     $ownedTemporary = $null
     $installed = $false
     $installedRecord = $null
+    $backupState = $null
     try {
         $ownedTemporary = New-OwnedCopy $source $temporary
         Assert-RegularDestination $destination
         if ($hadDestination) {
-            [System.IO.File]::Replace($temporary, $destination, $backup, $true)
+            if ($null -ne $BeforeInstallReplaceAction) {
+                & $BeforeInstallReplaceAction $backup
+            }
+            try {
+                [HookInstaller.NativeFileIdentity]::CreateHardLinkNoReplace($backup, $destination)
+            }
+            catch {
+                throw "Backup candidate collision or destination race; preserved: $backup. $($_.Exception.Message)"
+            }
+            $backupBeforeReplace = Get-OwnedFileRecord $backup
+            if (-not (Test-FileRecordsEqual $backupBeforeReplace $originalDestinationRecord)) {
+                throw "Hook destination changed before backup binding; backup preserved: $backup"
+            }
+            $backupLock = $null
+            try {
+                $backupLock = [HookInstaller.NativeFileIdentity]::OpenVerifiedArtifactLock(
+                    $backupBeforeReplace.Path,
+                    $backupBeforeReplace.Identity,
+                    $backupBeforeReplace.Length,
+                    $backupBeforeReplace.Hash
+                )
+                [System.IO.File]::Replace($temporary, $destination, $backup, $true)
+                $backupAfterReplace = Get-OwnedFileRecord $backup
+                if (-not (Test-FileRecordsEqual $backupAfterReplace $backupBeforeReplace)) {
+                    throw "Backup identity or content changed during atomic replacement; preserved: $backup"
+                }
+                $backupState = [pscustomobject]@{
+                    Record = $backupAfterReplace
+                    AclPolicy = Get-FileAclPolicy $backup
+                }
+            }
+            finally {
+                if ($null -ne $backupLock) {
+                    $backupLock.Dispose()
+                }
+            }
         }
         else {
             [System.IO.File]::Move($temporary, $destination)
@@ -642,11 +1008,12 @@ function Invoke-HookInstaller {
                 Restore-InstalledHook `
                     $directory `
                     $destination `
-                    $backup `
+                    $backupState `
                     $hadDestination `
                     $installedRecord `
-                    $originalAclPolicy `
-                    $BeforeRollbackReplaceAction
+                    $BeforeRollbackReplaceAction `
+                    $BeforeRollbackArtifactReplaceAction `
+                    $BeforeRecoveryReplaceAction
             }
             catch {
                 throw "$primaryFailure Rollback also failed: $($_.Exception.Message)"

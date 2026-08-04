@@ -276,13 +276,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-global-hook.
 ```
 
 The installer reads the absolute global `core.hooksPath`, atomically installs
-the dispatcher, preserves any previous hook as a unique byte-exact backup, and
-atomically replaces duplicate local opt-in values with exactly one
-`workflow.useRepositoryHook=true`. The installed hook ACL allows only the
-current user; a failed installation restores the prior hook content and ACL
-policy. Keep the printed `Backup` path and run the exact printed `Restore`
-command if installation or later hook operation must be rolled back. `Restore`
-changes only the hook file;
+the dispatcher, and binds any previous hook to a unique byte-exact backup with
+a no-overwrite filesystem operation before replacement. Candidate collisions
+are preserved rather than overwritten. Installer-owned temporary cleanup
+verifies identity and content through one open file handle and deletes that
+exact object through the same handle. Duplicate local opt-in values are
+atomically replaced with exactly one `workflow.useRepositoryHook=true`. The
+installed hook ACL allows only the current user; a failed installation restores
+the prior hook content and the ACL captured from the actual displaced backup.
+If the destination changed concurrently, rollback restores that concurrent
+content and its ACL while preserving diagnostic artifacts. Keep the printed
+`Backup` path and run the exact printed `Restore` command if installation or
+later hook operation must be rolled back. `Restore` changes only the hook file;
 run the separately printed `Opt-out` command to remove this repository's local
 opt-in when returning to the generic dispatcher behavior.
 

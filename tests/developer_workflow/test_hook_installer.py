@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
+from base64 import b64decode, b64encode
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -16,6 +18,113 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER_SOURCE = PROJECT_ROOT / "scripts" / "install-global-hook.ps1"
 HOOK_SOURCE = PROJECT_ROOT / "scripts" / "git-hooks" / "pre-commit"
 _BASELINE_REPO: tuple[Path, dict[str, str]] | None = None
+_INTERNAL_HOST: _PersistentPowerShellHost | None = None
+
+_INTERNAL_HOST_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+$script:ManagedEnvironmentNames = @()
+while (($line = [Console]::In.ReadLine()) -ne $null) {
+    if ($line -ceq '__EXIT__') { break }
+    $response = $null
+    try {
+        $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line))
+        $request = $json | ConvertFrom-Json
+        foreach ($name in $script:ManagedEnvironmentNames) {
+            [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        }
+        $script:ManagedEnvironmentNames = @(
+            $request.Environment.PSObject.Properties | ForEach-Object {
+                [Environment]::SetEnvironmentVariable($_.Name, [string]$_.Value, 'Process')
+                $_.Name
+            }
+        )
+        Set-Location -LiteralPath ([string]$request.WorkingDirectory)
+        $block = [ScriptBlock]::Create(
+            '. $env:HOOK_INSTALLER_TEST_SCRIPT; ' + [string]$request.Command
+        )
+        $output = (& $block *>&1 | Out-String)
+        $response = @{ Success = $true; Output = $output; Error = '' }
+    }
+    catch {
+        $response = @{
+            Success = $false
+            Output = ''
+            Error = ($_ | Out-String)
+        }
+    }
+    $responseJson = $response | ConvertTo-Json -Compress -Depth 4
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($responseJson))
+    [Console]::Out.WriteLine($encoded)
+    [Console]::Out.Flush()
+}
+"""
+
+
+class _PersistentPowerShellHost:
+    def __init__(self, environment: dict[str, str]) -> None:
+        command = [_powershell(), "-NoProfile"]
+        if Path(command[0]).name.lower().startswith("powershell"):
+            command.extend(["-ExecutionPolicy", "Bypass"])
+        command.extend(["-Command", _INTERNAL_HOST_SCRIPT])
+        self._process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            env=environment,
+        )
+
+    def run(
+        self,
+        repo: Path,
+        environment: dict[str, str],
+        command_text: str,
+    ) -> subprocess.CompletedProcess[str]:
+        assert self._process.stdin is not None
+        assert self._process.stdout is not None
+        managed_environment = {
+            name: value
+            for name, value in environment.items()
+            if name.startswith("GIT_") or name.startswith("HOOK_INSTALLER_TEST_")
+        }
+        request = {
+            "WorkingDirectory": str(repo),
+            "Environment": managed_environment,
+            "Command": command_text,
+        }
+        encoded = b64encode(json.dumps(request).encode("utf-8")).decode("ascii")
+        self._process.stdin.write(encoded + "\n")
+        self._process.stdin.flush()
+        response_line = self._process.stdout.readline()
+        if not response_line:
+            raise AssertionError("Persistent PowerShell host exited without a response")
+        response = json.loads(b64decode(response_line).decode("utf-8"))
+        if not response["Success"]:
+            raise AssertionError(
+                "Persistent PowerShell command failed. "
+                f"stdout={response['Output']!r}; stderr={response['Error']!r}"
+            )
+        return subprocess.CompletedProcess(
+            args=["persistent-powershell", command_text],
+            returncode=0,
+            stdout=response["Output"],
+            stderr=response["Error"],
+        )
+
+    def close(self) -> None:
+        if self._process.poll() is not None:
+            return
+        assert self._process.stdin is not None
+        self._process.stdin.write("__EXIT__\n")
+        self._process.stdin.flush()
+        self._process.stdin.close()
+        try:
+            self._process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._process.terminate()
+            self._process.wait(timeout=5)
 
 
 def _powershell() -> str:
@@ -27,7 +136,7 @@ def _powershell() -> str:
 
 @pytest.fixture(scope="session", autouse=True)
 def _installer_repo_baseline(tmp_path_factory: pytest.TempPathFactory):
-    global _BASELINE_REPO
+    global _BASELINE_REPO, _INTERNAL_HOST
     assert INSTALLER_SOURCE.is_file(), "installer has not been implemented"
     assert HOOK_SOURCE.is_file(), "global hook template has not been implemented"
     repo = tmp_path_factory.mktemp("hook-installer-baseline") / "repo"
@@ -44,8 +153,13 @@ def _installer_repo_baseline(tmp_path_factory: pytest.TempPathFactory):
         environment,
     )
     _BASELINE_REPO = (repo, environment)
-    yield
-    _BASELINE_REPO = None
+    _INTERNAL_HOST = _PersistentPowerShellHost(environment)
+    try:
+        yield
+    finally:
+        _INTERNAL_HOST.close()
+        _INTERNAL_HOST = None
+        _BASELINE_REPO = None
 
 
 def _prepare_repo(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
@@ -85,20 +199,12 @@ def _run_internal(
     environment: dict[str, str],
     command_text: str,
 ):
+    assert _INTERNAL_HOST is not None
     internal_environment = environment.copy()
     internal_environment["HOOK_INSTALLER_TEST_SCRIPT"] = str(
         repo / "scripts" / INSTALLER_SOURCE.name
     )
-    command = [_powershell(), "-NoProfile"]
-    if Path(command[0]).name.lower().startswith("powershell"):
-        command.extend(["-ExecutionPolicy", "Bypass"])
-    command.extend(
-        [
-            "-Command",
-            ". $env:HOOK_INSTALLER_TEST_SCRIPT; " + command_text,
-        ]
-    )
-    return run_command(command, repo, internal_environment, timeout=30)
+    return _INTERNAL_HOST.run(repo, internal_environment, command_text)
 
 
 def _internal_failure(
@@ -179,6 +285,15 @@ def _assert_restricted_acl(payload: dict[str, object]) -> None:
             "sid": payload["current"],
         }
     ]
+
+
+def test_internal_contracts_reuse_one_isolated_powershell_host(tmp_path: Path) -> None:
+    repo, environment, _ = _prepare_repo(tmp_path)
+
+    first = _run_internal(repo, environment, "$PID")
+    second = _run_internal(repo, environment, "$PID")
+
+    assert first.stdout.strip() == second.stdout.strip()
 
 
 @contextmanager
@@ -397,6 +512,34 @@ def test_controlled_candidate_collisions_preserve_existing_files(
     assert destination.read_bytes() == HOOK_SOURCE.read_bytes()
 
 
+def test_backup_collision_after_selection_fails_closed_and_preserves_sentinel(
+    tmp_path: Path,
+) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    destination = hook_directory / "pre-commit"
+    backup = hook_directory / "pre-commit.backup-selected.bak"
+    destination.write_bytes(b"old hook")
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_DIRECTORY"] = str(hook_directory)
+
+    failure = _internal_failure(
+        repo,
+        internal_environment,
+        "$candidates = New-Object 'System.Collections.Generic.Queue[string]'; "
+        "@('pre-commit.backup-selected.bak',"
+        "'pre-commit.installing-selected.tmp') | ForEach-Object { "
+        "$candidates.Enqueue($_) }; "
+        "$collide = { param($Backup) [System.IO.File]::WriteAllBytes($Backup, "
+        "[System.Text.Encoding]::UTF8.GetBytes('backup sentinel')) }; "
+        "Invoke-HookInstaller -HookDirectory $env:HOOK_INSTALLER_TEST_DIRECTORY "
+        "-CandidateNames $candidates -BeforeInstallReplaceAction $collide",
+    )
+
+    assert "collision" in failure.lower() or "changed" in failure.lower()
+    assert backup.read_bytes() == b"backup sentinel"
+    assert destination.read_bytes() == b"old hook"
+
+
 def test_failure_cleans_only_new_candidates_and_preserves_collisions(
     tmp_path: Path,
 ) -> None:
@@ -463,6 +606,36 @@ def test_owned_cleanup_preserves_a_replaced_path_and_reports_it(
     assert owned.read_bytes() == b"concurrent replacement"
 
 
+def test_owned_cleanup_deletes_the_verified_handle_not_a_replacement_path(
+    tmp_path: Path,
+) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    source = repo / "owned-source.bin"
+    owned = hook_directory / "pre-commit.installing-owned.tmp"
+    moved = hook_directory / "verified-owned-object.tmp"
+    source.write_bytes(b"owned bytes")
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_SOURCE"] = str(source)
+    internal_environment["HOOK_INSTALLER_TEST_OWNED"] = str(owned)
+    internal_environment["HOOK_INSTALLER_TEST_MOVED"] = str(moved)
+
+    _run_internal(
+        repo,
+        internal_environment,
+        "$record = New-OwnedCopy $env:HOOK_INSTALLER_TEST_SOURCE "
+        "$env:HOOK_INSTALLER_TEST_OWNED; "
+        "$replacePath = { param($Path) "
+        "[System.IO.File]::Move($Path, $env:HOOK_INSTALLER_TEST_MOVED); "
+        "[System.IO.File]::WriteAllBytes($Path, "
+        "[System.Text.Encoding]::UTF8.GetBytes('replacement sentinel')) }; "
+        "Remove-OwnedFile $record 'test owned file' "
+        "-AfterValidationAction $replacePath",
+    )
+
+    assert owned.read_bytes() == b"replacement sentinel"
+    assert not moved.exists()
+
+
 def test_rollback_race_restores_concurrent_destination_and_preserves_artifacts(
     tmp_path: Path,
 ) -> None:
@@ -477,13 +650,15 @@ def test_rollback_race_restores_concurrent_destination_and_preserves_artifacts(
         internal_environment,
         "$failConfig = { throw 'forced config failure' }; "
         "$race = { param($Destination) [System.IO.File]::WriteAllBytes("
-        "$Destination, [System.Text.Encoding]::UTF8.GetBytes('concurrent hook')) }; "
+        "$Destination, [System.Text.Encoding]::UTF8.GetBytes('concurrent hook')); "
+        "Set-RestrictedFileAcl $Destination }; "
         "Invoke-HookInstaller -HookDirectory $env:HOOK_INSTALLER_TEST_DIRECTORY "
         "-RepositoryOptInAction $failConfig -BeforeRollbackReplaceAction $race",
     )
 
     assert "concurrent" in failure.lower()
     assert destination.read_bytes() == b"concurrent hook"
+    _assert_restricted_acl(_read_acl(destination, repo, environment))
     backups = list(hook_directory.glob("pre-commit.backup-*.bak"))
     recoveries = list(hook_directory.glob("pre-commit.recovery-*.bak"))
     assert len(backups) == 1
@@ -491,6 +666,69 @@ def test_rollback_race_restores_concurrent_destination_and_preserves_artifacts(
     assert len(recoveries) == 1
     assert recoveries[0].read_bytes() == b"old hook"
     assert not list(hook_directory.glob("pre-commit.installing-*"))
+
+
+def test_recovery_collision_after_selection_preserves_sentinel_and_concurrent_hook(
+    tmp_path: Path,
+) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    destination = hook_directory / "pre-commit"
+    destination.write_bytes(b"old hook")
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_DIRECTORY"] = str(hook_directory)
+
+    failure = _internal_failure(
+        repo,
+        internal_environment,
+        "$failConfig = { throw 'forced config failure' }; "
+        "$race = { param($Destination) [System.IO.File]::WriteAllBytes("
+        "$Destination, [System.Text.Encoding]::UTF8.GetBytes('concurrent hook')) }; "
+        "$script:recoveryCollided = $false; "
+        "$collideOnce = { param($Recovery) if (-not $script:recoveryCollided) { "
+        "$script:recoveryCollided = $true; [System.IO.File]::WriteAllBytes("
+        "$Recovery, [System.Text.Encoding]::UTF8.GetBytes('recovery sentinel')) } }; "
+        "Invoke-HookInstaller -HookDirectory $env:HOOK_INSTALLER_TEST_DIRECTORY "
+        "-RepositoryOptInAction $failConfig -BeforeRollbackReplaceAction $race "
+        "-BeforeRecoveryReplaceAction $collideOnce",
+    )
+
+    assert "concurrent" in failure.lower()
+    assert destination.read_bytes() == b"concurrent hook"
+    recovery_contents = {
+        path.read_bytes() for path in hook_directory.glob("pre-commit.recovery-*.bak")
+    }
+    assert recovery_contents == {b"recovery sentinel", b"old hook"}
+
+
+def test_rollback_displaced_collision_preserves_sentinel_and_restores_old_hook(
+    tmp_path: Path,
+) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    destination = hook_directory / "pre-commit"
+    destination.write_bytes(b"old hook")
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_DIRECTORY"] = str(hook_directory)
+
+    failure = _internal_failure(
+        repo,
+        internal_environment,
+        "$failConfig = { throw 'forced config failure' }; "
+        "$script:rollbackCollided = $false; "
+        "$collideOnce = { param($Displaced) if (-not $script:rollbackCollided) { "
+        "$script:rollbackCollided = $true; [System.IO.File]::WriteAllBytes("
+        "$Displaced, [System.Text.Encoding]::UTF8.GetBytes('rollback sentinel')) } }; "
+        "Invoke-HookInstaller -HookDirectory $env:HOOK_INSTALLER_TEST_DIRECTORY "
+        "-RepositoryOptInAction $failConfig "
+        "-BeforeRollbackArtifactReplaceAction $collideOnce",
+    )
+
+    assert "forced config failure" in failure
+    assert destination.read_bytes() == b"old hook"
+    displaced_contents = {
+        path.read_bytes()
+        for path in hook_directory.glob("pre-commit.installing-displaced-*.tmp")
+    }
+    assert displaced_contents == {b"rollback sentinel"}
 
 
 @pytest.mark.parametrize("had_destination", [False, True])
@@ -768,6 +1006,36 @@ def test_existing_destination_reparse_point_is_rejected(tmp_path: Path) -> None:
 
     assert "reparse" in failure.lower() or "link" in failure.lower()
     assert target.read_text(encoding="utf-8") == "untouched"
+
+
+def test_rollback_restores_acl_captured_from_the_actual_displaced_backup(
+    tmp_path: Path,
+) -> None:
+    repo, environment, hook_directory = _prepare_repo(tmp_path)
+    destination = hook_directory / "pre-commit"
+    destination.write_bytes(b"old hook")
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_DIRECTORY"] = str(hook_directory)
+    internal_environment["HOOK_INSTALLER_TEST_DESTINATION"] = str(destination)
+
+    failure = _internal_failure(
+        repo,
+        internal_environment,
+        "$changeDisplacedAcl = { param($Backup) "
+        "Set-RestrictedFileAcl $env:HOOK_INSTALLER_TEST_DESTINATION }; "
+        "$failConfig = { throw 'forced config failure' }; "
+        "Invoke-HookInstaller -HookDirectory $env:HOOK_INSTALLER_TEST_DIRECTORY "
+        "-BeforeInstallReplaceAction $changeDisplacedAcl "
+        "-RepositoryOptInAction $failConfig",
+    )
+
+    assert "forced config failure" in failure
+    assert destination.read_bytes() == b"old hook"
+    _assert_restricted_acl(_read_acl(destination, repo, environment))
+    backups = list(hook_directory.glob("pre-commit.backup-*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == b"old hook"
+    _assert_restricted_acl(_read_acl(backups[0], repo, environment))
 
 
 def test_config_failure_restores_old_hook_and_keeps_diagnostic_backup(
