@@ -12,6 +12,7 @@ jobs:
   changes:
     name: Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       backend: ${{ steps.classify.outputs.backend }}
       frontend: ${{ steps.classify.outputs.frontend }}
@@ -35,7 +36,7 @@ jobs:
           if [[ "$EVENT_NAME" == "push" ]]; then
             printf '\0' | python scripts/classify-ci-paths.py --stdin-zero --force-full --github-output "$GITHUB_OUTPUT"
           else
-            git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" |
+            git diff --name-only -z --no-renames "$BASE_SHA" "$HEAD_SHA" |
               python scripts/classify-ci-paths.py --stdin-zero --github-output "$GITHUB_OUTPUT"
           fi
 
@@ -106,6 +107,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: always()
     needs: [changes, backend, frontend]
     steps:
@@ -117,7 +119,19 @@ jobs:
           BACKEND_RESULT: ${{ needs.backend.result }}
           FRONTEND_EXPECTED: ${{ needs.changes.outputs.frontend }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
         run: |
           [[ "$CHANGES_RESULT" == "success" ]] || exit 1
-          [[ "$BACKEND_EXPECTED" != "true" || "$BACKEND_RESULT" == "success" ]] || exit 1
-          [[ "$FRONTEND_EXPECTED" != "true" || "$FRONTEND_RESULT" == "success" ]] || exit 1
+          case "$BACKEND_EXPECTED:$BACKEND_RESULT" in
+            true:success|false:skipped) ;;
+            *) exit 1 ;;
+          esac
+          case "$FRONTEND_EXPECTED:$FRONTEND_RESULT" in
+            true:success|false:skipped) ;;
+            *) exit 1 ;;
+          esac
+          case "$DOCS_ONLY" in
+            true|false) ;;
+            *) exit 1 ;;
+          esac
+          [[ "$DOCS_ONLY" != "true" || ( "$BACKEND_EXPECTED" == "false" && "$FRONTEND_EXPECTED" == "false" ) ]] || exit 1

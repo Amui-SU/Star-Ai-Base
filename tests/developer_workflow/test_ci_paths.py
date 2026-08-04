@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import re
 import shutil
@@ -14,13 +13,31 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLASSIFIER_PATH = PROJECT_ROOT / "scripts" / "classify-ci-paths.py"
 CI_PATH = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
-FRONTEND_ROOT = PROJECT_ROOT / "frontend"
 OUTPUT_VALUES = {"backend": True, "frontend": False, "docs_only": False}
 OUTPUT_PAYLOAD = b"backend=true\nfrontend=false\ndocs_only=false\n"
+
+
+class _GitHubActionsSafeLoader(yaml.SafeLoader):
+    pass
+
+
+_GitHubActionsSafeLoader.yaml_implicit_resolvers = {
+    key: list(resolvers)
+    for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+for first_character in ("o", "O"):
+    _GitHubActionsSafeLoader.yaml_implicit_resolvers[first_character] = [
+        (tag, resolver)
+        for tag, resolver in _GitHubActionsSafeLoader.yaml_implicit_resolvers.get(
+            first_character, []
+        )
+        if tag != "tag:yaml.org,2002:bool"
+    ]
 
 
 def _load_classifier() -> ModuleType:
@@ -388,25 +405,9 @@ def test_trusted_single_writer_failure_preserves_destination_and_cleans_temp(
 
 
 def _load_ci_workflow() -> dict[str, object]:
-    result = subprocess.run(
-        [
-            "node",
-            "-e",
-            (
-                "const fs=require('fs');"
-                "const yaml=require('yaml');"
-                "const value=yaml.parse(fs.readFileSync(process.argv[1], 'utf8'));"
-                "process.stdout.write(JSON.stringify(value));"
-            ),
-            str(CI_PATH),
-        ],
-        cwd=FRONTEND_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+    value = yaml.load(
+        CI_PATH.read_text(encoding="utf-8"), Loader=_GitHubActionsSafeLoader
     )
-    assert result.returncode == 0, result.stderr
-    value = json.loads(result.stdout)
     assert isinstance(value, dict)
     return value
 
@@ -447,6 +448,28 @@ def test_ci_has_changes_and_summary_jobs() -> None:
     assert "\n  backend:\n" in workflow_text
     assert "\n  frontend:\n" in workflow_text
     assert "\n  ci-success:\n" in workflow_text
+
+
+def test_workflow_contract_loader_does_not_use_node_or_node_modules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_run = subprocess.run
+    real_read_text = Path.read_text
+
+    def reject_node(command, *args, **kwargs):
+        if command and Path(command[0]).stem.lower() == "node":
+            raise AssertionError("pytest workflow contracts must not require Node")
+        return real_run(command, *args, **kwargs)
+
+    def reject_node_modules(path: Path, *args, **kwargs):
+        if "node_modules" in path.parts:
+            raise AssertionError("pytest workflow contracts must not read node_modules")
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", reject_node)
+    monkeypatch.setattr(Path, "read_text", reject_node_modules)
+
+    assert "jobs" in _load_ci_workflow()
 
 
 def test_workflow_yaml_preserves_on_and_protected_push_triggers() -> None:
@@ -492,7 +515,7 @@ def test_changes_job_exposes_classifier_outputs_and_uses_full_history() -> None:
     script = str(classifier["run"])
     assert '[[ "$EVENT_NAME" == "push" ]]' in script
     assert "--force-full" in script
-    assert 'git diff --name-only -z "$BASE_SHA" "$HEAD_SHA"' in script
+    assert 'git diff --name-only -z --no-renames "$BASE_SHA" "$HEAD_SHA"' in script
     assert script.count("scripts/classify-ci-paths.py") == 2
     assert script.count('--github-output "$GITHUB_OUTPUT"') == 2
 
@@ -560,14 +583,27 @@ def test_all_actions_remain_pinned_to_commit_shas() -> None:
         "backend_result",
         "frontend_expected",
         "frontend_result",
+        "docs_only",
         "expected_code",
     ),
     [
-        ("success", "true", "success", "false", "skipped", 0),
-        ("success", "false", "skipped", "false", "skipped", 0),
-        ("success", "true", "skipped", "false", "skipped", 1),
-        ("success", "false", "skipped", "true", "failure", 1),
-        ("failure", "false", "skipped", "false", "skipped", 1),
+        ("success", "true", "success", "false", "skipped", "false", 0),
+        ("success", "false", "skipped", "true", "success", "false", 0),
+        ("success", "false", "skipped", "false", "skipped", "true", 0),
+        ("success", "", "skipped", "false", "skipped", "true", 1),
+        ("success", "garbage", "skipped", "false", "skipped", "true", 1),
+        ("success", "false", "skipped", "", "skipped", "true", 1),
+        ("success", "false", "skipped", "garbage", "skipped", "true", 1),
+        ("success", "false", "skipped", "false", "skipped", "", 1),
+        ("success", "false", "skipped", "false", "skipped", "garbage", 1),
+        ("success", "false", "success", "false", "skipped", "false", 1),
+        ("success", "true", "skipped", "false", "skipped", "false", 1),
+        ("success", "true", "failure", "false", "skipped", "false", 1),
+        ("success", "false", "skipped", "false", "success", "false", 1),
+        ("success", "false", "skipped", "true", "skipped", "false", 1),
+        ("success", "false", "skipped", "true", "failure", "false", 1),
+        ("success", "true", "success", "false", "skipped", "true", 1),
+        ("failure", "false", "skipped", "false", "skipped", "true", 1),
     ],
 )
 def test_ci_summary_enforces_expected_job_results(
@@ -576,6 +612,7 @@ def test_ci_summary_enforces_expected_job_results(
     backend_result: str,
     frontend_expected: str,
     frontend_result: str,
+    docs_only: str,
     expected_code: int,
 ) -> None:
     bash = _bash_executable()
@@ -594,6 +631,7 @@ def test_ci_summary_enforces_expected_job_results(
         "BACKEND_RESULT": "${{ needs.backend.result }}",
         "FRONTEND_EXPECTED": "${{ needs.changes.outputs.frontend }}",
         "FRONTEND_RESULT": "${{ needs.frontend.result }}",
+        "DOCS_ONLY": "${{ needs.changes.outputs.docs_only }}",
     }
     env = os.environ.copy()
     env.update(
@@ -603,6 +641,7 @@ def test_ci_summary_enforces_expected_job_results(
             "BACKEND_RESULT": backend_result,
             "FRONTEND_EXPECTED": frontend_expected,
             "FRONTEND_RESULT": frontend_result,
+            "DOCS_ONLY": docs_only,
         }
     )
 
@@ -616,3 +655,58 @@ def test_ci_summary_enforces_expected_job_results(
     )
 
     assert result.returncode == expected_code, result.stderr
+
+
+def _git(repo: Path, *args: str) -> bytes:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    ).stdout
+
+
+def test_pull_request_rename_keeps_the_deleted_source_boundary(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "rename-fixture"
+    repo.mkdir()
+    _git(repo, "init", "--quiet")
+    _git(repo, "config", "user.name", "CI Contract")
+    _git(repo, "config", "user.email", "ci@example.invalid")
+    source = repo / "app" / "moved.py"
+    source.parent.mkdir()
+    source.write_text("unchanged = True\n", encoding="utf-8")
+    _git(repo, "add", "--", "app/moved.py")
+    _git(repo, "commit", "--quiet", "-m", "add backend source")
+    base_sha = _git(repo, "rev-parse", "HEAD").decode().strip()
+    (repo / "docs").mkdir()
+    _git(repo, "mv", "--", "app/moved.py", "docs/moved.md")
+    _git(repo, "commit", "--quiet", "-m", "move source to docs")
+    head_sha = _git(repo, "rev-parse", "HEAD").decode().strip()
+
+    rename_aware = _git(repo, "diff", "--name-only", "-z", base_sha, head_sha)
+    no_renames = _git(
+        repo,
+        "diff",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        base_sha,
+        head_sha,
+    )
+    rename_output = tmp_path / "rename-output"
+    no_rename_output = tmp_path / "no-rename-output"
+
+    assert _run_classifier(rename_aware, rename_output).returncode == 0
+    assert rename_output.read_text(encoding="utf-8").splitlines() == [
+        "backend=false",
+        "frontend=false",
+        "docs_only=true",
+    ]
+    assert _run_classifier(no_renames, no_rename_output).returncode == 0
+    assert no_rename_output.read_text(encoding="utf-8").splitlines() == [
+        "backend=true",
+        "frontend=false",
+        "docs_only=false",
+    ]

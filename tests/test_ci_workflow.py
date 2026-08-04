@@ -52,11 +52,18 @@ def assert_ci_security_policy(content: str) -> None:
     workflow = yaml.safe_load(content)
     jobs = workflow["jobs"]
     frontend = jobs["frontend"]
+    allowed_job_conditions = {
+        "changes": None,
+        "backend": "needs.changes.outputs.backend == 'true'",
+        "frontend": "needs.changes.outputs.frontend == 'true'",
+        "ci-success": "always()",
+    }
 
     assert workflow["permissions"] == {"contents": "read"}
-    for job in jobs.values():
+    assert set(jobs) == set(allowed_job_conditions)
+    for job_name, job in jobs.items():
         assert "continue-on-error" not in job
-        assert "if" not in job
+        assert job.get("if") == allowed_job_conditions[job_name]
         assert "permissions" not in job
         assert job.get("timeout-minutes") == 30
 
@@ -138,8 +145,8 @@ def test_ci_jobs_have_bounded_runtime():
             "  frontend:\n    continue-on-error: ${{ true }}\n    name: Frontend",
         ),
         (
-            "  frontend:\n    name: Frontend",
-            "  frontend:\n    if: ${{ false }}\n    name: Frontend",
+            "    if: needs.changes.outputs.frontend == 'true'",
+            "    if: ${{ false }}",
         ),
     ],
 )
@@ -537,7 +544,7 @@ def test_workflows_pin_all_actions_and_use_read_only_contents_permission():
     ci_content = workflows["ci.yml"]
     assert (
         ci_content.count("actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0")
-        == 2
+        == 3
     )
     assert "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1" in ci_content
     assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" in ci_content
