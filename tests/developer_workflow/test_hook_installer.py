@@ -90,6 +90,7 @@ class _PersistentPowerShellHost:
         self._job = _WindowsJob(self._process) if os.name == "nt" else None
         self._request_timeout_seconds = request_timeout_seconds
         self._usable = True
+        self._request_lock = threading.RLock()
         self._responses: queue.Queue[str | None] = queue.Queue()
         self._reader = threading.Thread(target=self._read_responses, daemon=True)
         self._reader.start()
@@ -131,6 +132,15 @@ class _PersistentPowerShellHost:
         environment: dict[str, str],
         command_text: str,
     ) -> subprocess.CompletedProcess[str]:
+        with self._request_lock:
+            return self._run_locked(repo, environment, command_text)
+
+    def _run_locked(
+        self,
+        repo: Path,
+        environment: dict[str, str],
+        command_text: str,
+    ) -> subprocess.CompletedProcess[str]:
         if not self.is_usable:
             raise AssertionError("Persistent PowerShell host is not usable")
         assert self._process.stdin is not None
@@ -165,7 +175,25 @@ class _PersistentPowerShellHost:
         if response_line is None:
             self._terminate_owned_tree()
             raise AssertionError("Persistent PowerShell host exited without a response")
-        response = json.loads(b64decode(response_line).decode("utf-8"))
+        try:
+            response = json.loads(
+                b64decode(response_line.strip(), validate=True).decode("utf-8")
+            )
+            if not isinstance(response, dict):
+                raise TypeError("response must be a JSON object")
+            if set(response) != {"Success", "Output", "Error"}:
+                raise ValueError("response fields do not match the protocol schema")
+            if type(response["Success"]) is not bool:
+                raise TypeError("Success must be a boolean")
+            if not isinstance(response["Output"], str) or not isinstance(
+                response["Error"], str
+            ):
+                raise TypeError("Output and Error must be strings")
+        except (ValueError, TypeError, UnicodeError) as error:
+            self._terminate_owned_tree()
+            raise AssertionError(
+                f"Persistent PowerShell host returned a malformed response: {error}"
+            ) from error
         if not response["Success"]:
             raise AssertionError(
                 "Persistent PowerShell command failed. "
@@ -179,25 +207,27 @@ class _PersistentPowerShellHost:
         )
 
     def close(self) -> None:
-        if self._process.poll() is not None:
-            self._usable = False
-            if self._job is not None:
-                self._job.close()
-                self._job = None
-            return
-        assert self._process.stdin is not None
-        try:
-            self._process.stdin.write("__EXIT__\n")
-            self._process.stdin.flush()
-            self._process.stdin.close()
-            self._process.wait(timeout=5)
-            self._usable = False
-            if self._job is not None:
-                self._job.close()
-                self._job = None
-            self._reader.join(timeout=5)
-        except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
-            self._terminate_owned_tree()
+        with self._request_lock:
+            if self._process.poll() is not None:
+                self._usable = False
+                if self._job is not None:
+                    self._job.close()
+                    self._job = None
+                self._reader.join(timeout=5)
+                return
+            assert self._process.stdin is not None
+            try:
+                self._process.stdin.write("__EXIT__\n")
+                self._process.stdin.flush()
+                self._process.stdin.close()
+                self._process.wait(timeout=5)
+                self._usable = False
+                if self._job is not None:
+                    self._job.close()
+                    self._job = None
+                self._reader.join(timeout=5)
+            except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+                self._terminate_owned_tree()
 
 
 def _powershell() -> str:
@@ -435,6 +465,115 @@ def test_internal_host_timeout_reaps_tree_and_replaces_bad_host(tmp_path: Path) 
         if _INTERNAL_HOST is not None and _INTERNAL_HOST is not original_host:
             _INTERNAL_HOST.close()
         _INTERNAL_HOST = original_host
+
+
+def test_internal_host_malformed_response_reaps_tree_and_replaces_bad_host(
+    tmp_path: Path,
+) -> None:
+    global _INTERNAL_HOST
+    if os.name != "nt":
+        pytest.skip("process-tree host contracts apply to Windows")
+    repo, environment, _ = _prepare_repo(tmp_path)
+    child_pid_file = tmp_path / "malformed-host-child.pid"
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_CHILD_PID"] = str(child_pid_file)
+    original_host = _INTERNAL_HOST
+    malformed_host = _PersistentPowerShellHost(environment)
+    _INTERNAL_HOST = malformed_host
+    host_pid = malformed_host.pid
+    try:
+        started = time.monotonic()
+        with pytest.raises(AssertionError, match="malformed"):
+            _run_internal(
+                repo,
+                internal_environment,
+                "$child = Start-Process -FilePath powershell -WindowStyle Hidden -PassThru "
+                "-ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 60'; "
+                "[System.IO.File]::WriteAllText($env:HOOK_INSTALLER_TEST_CHILD_PID, "
+                "[string]$child.Id); [Console]::Out.WriteLine('%%%not-base64%%%'); "
+                "[Console]::Out.Flush(); while ($true) { Start-Sleep -Seconds 1 }",
+            )
+        assert time.monotonic() - started < 10
+        child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+        assert _windows_process_has_exited(host_pid)
+        assert _windows_process_has_exited(child_pid)
+        assert not malformed_host.is_usable
+
+        replacement = _run_internal(repo, environment, "$PID")
+        assert int(replacement.stdout.strip()) != host_pid
+        assert _INTERNAL_HOST is not malformed_host
+    finally:
+        if _INTERNAL_HOST is not None and _INTERNAL_HOST is not original_host:
+            _INTERNAL_HOST.close()
+        _INTERNAL_HOST = original_host
+
+
+def test_internal_host_serializes_concurrent_request_response_protocol(
+    tmp_path: Path,
+) -> None:
+    repo, environment, _ = _prepare_repo(tmp_path)
+    internal_environment = environment.copy()
+    internal_environment["HOOK_INSTALLER_TEST_SCRIPT"] = str(
+        repo / "scripts" / INSTALLER_SOURCE.name
+    )
+    host = _PersistentPowerShellHost(environment)
+    assert host._process.stdin is not None
+    original_stdin = host._process.stdin
+    writes: list[tuple[str, float]] = []
+    completions: dict[str, float] = {}
+    results: dict[str, str] = {}
+    errors: list[BaseException] = []
+    record_lock = threading.Lock()
+    start = threading.Barrier(3)
+
+    class RecordingStdin:
+        def write(self, value: str) -> int:
+            with record_lock:
+                writes.append((threading.current_thread().name, time.monotonic()))
+            return original_stdin.write(value)
+
+        def flush(self) -> None:
+            original_stdin.flush()
+
+        def close(self) -> None:
+            original_stdin.close()
+
+    host._process.stdin = RecordingStdin()  # type: ignore[assignment]
+
+    def invoke(token: str) -> None:
+        try:
+            start.wait()
+            result = host.run(
+                repo,
+                internal_environment,
+                f"Start-Sleep -Milliseconds 500; '{token}'",
+            )
+            with record_lock:
+                results[token] = result.stdout.strip()
+                completions[threading.current_thread().name] = time.monotonic()
+        except BaseException as error:
+            with record_lock:
+                errors.append(error)
+
+    first = threading.Thread(target=invoke, args=("first",), name="first")
+    second = threading.Thread(target=invoke, args=("second",), name="second")
+    first.start()
+    second.start()
+    start.wait()
+    first.join(timeout=30)
+    second.join(timeout=30)
+    try:
+        assert not first.is_alive()
+        assert not second.is_alive()
+        assert not errors
+        assert results == {"first": "first", "second": "second"}
+        assert len(writes) == 2
+        first_writer, _ = writes[0]
+        _, second_write_time = writes[1]
+        assert second_write_time >= completions[first_writer]
+    finally:
+        host._process.stdin = original_stdin
+        host.close()
 
 
 @contextmanager
