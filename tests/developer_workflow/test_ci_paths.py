@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -14,6 +17,8 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLASSIFIER_PATH = PROJECT_ROOT / "scripts" / "classify-ci-paths.py"
+CI_PATH = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
+FRONTEND_ROOT = PROJECT_ROOT / "frontend"
 OUTPUT_VALUES = {"backend": True, "frontend": False, "docs_only": False}
 OUTPUT_PAYLOAD = b"backend=true\nfrontend=false\ndocs_only=false\n"
 
@@ -380,3 +385,234 @@ def test_trusted_single_writer_failure_preserves_destination_and_cleans_temp(
     else:
         assert not output.exists()
     assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
+
+
+def _load_ci_workflow() -> dict[str, object]:
+    result = subprocess.run(
+        [
+            "node",
+            "-e",
+            (
+                "const fs=require('fs');"
+                "const yaml=require('yaml');"
+                "const value=yaml.parse(fs.readFileSync(process.argv[1], 'utf8'));"
+                "process.stdout.write(JSON.stringify(value));"
+            ),
+            str(CI_PATH),
+        ],
+        cwd=FRONTEND_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert isinstance(value, dict)
+    return value
+
+
+def _job(workflow: dict[str, object], name: str) -> dict[str, object]:
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    job = jobs[name]
+    assert isinstance(job, dict)
+    return job
+
+
+def _steps(job: dict[str, object]) -> list[dict[str, object]]:
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    assert all(isinstance(step, dict) for step in steps)
+    return steps
+
+
+def _bash_executable() -> str | None:
+    if os.name != "nt":
+        return shutil.which("bash")
+    git_exec_path = subprocess.run(
+        ["git", "--exec-path"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    git_bash = Path(git_exec_path).parents[2] / "bin" / "bash.exe"
+    return str(git_bash) if git_bash.is_file() else None
+
+
+def test_ci_has_changes_and_summary_jobs() -> None:
+    workflow_text = CI_PATH.read_text(encoding="utf-8")
+
+    assert "\n  changes:\n" in workflow_text
+    assert "\n  backend:\n" in workflow_text
+    assert "\n  frontend:\n" in workflow_text
+    assert "\n  ci-success:\n" in workflow_text
+
+
+def test_workflow_yaml_preserves_on_and_protected_push_triggers() -> None:
+    workflow = _load_ci_workflow()
+
+    assert "on" in workflow
+    triggers = workflow["on"]
+    assert isinstance(triggers, dict)
+    assert "pull_request" in triggers
+    push = triggers["push"]
+    assert isinstance(push, dict)
+    assert push["branches"] == ["main", "release/**"]
+
+
+def test_changes_job_exposes_classifier_outputs_and_uses_full_history() -> None:
+    changes = _job(_load_ci_workflow(), "changes")
+
+    assert changes["outputs"] == {
+        "backend": "${{ steps.classify.outputs.backend }}",
+        "frontend": "${{ steps.classify.outputs.frontend }}",
+        "docs_only": "${{ steps.classify.outputs.docs_only }}",
+    }
+    steps = _steps(changes)
+    checkout = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    assert checkout["with"] == {"fetch-depth": 0}
+    setup_python = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    )
+    assert setup_python["with"] == {"python-version": "3.12"}
+    classifier = next(step for step in steps if step.get("id") == "classify")
+    assert classifier["shell"] == "bash"
+    assert classifier["env"] == {
+        "EVENT_NAME": "${{ github.event_name }}",
+        "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
+        "HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+    }
+    script = str(classifier["run"])
+    assert '[[ "$EVENT_NAME" == "push" ]]' in script
+    assert "--force-full" in script
+    assert 'git diff --name-only -z "$BASE_SHA" "$HEAD_SHA"' in script
+    assert script.count("scripts/classify-ci-paths.py") == 2
+    assert script.count('--github-output "$GITHUB_OUTPUT"') == 2
+
+
+def test_heavy_jobs_are_gated_by_changes_outputs() -> None:
+    workflow = _load_ci_workflow()
+    backend = _job(workflow, "backend")
+    frontend = _job(workflow, "frontend")
+
+    assert backend["needs"] == "changes"
+    assert backend["if"] == "needs.changes.outputs.backend == 'true'"
+    assert frontend["needs"] == "changes"
+    assert frontend["if"] == "needs.changes.outputs.frontend == 'true'"
+
+
+def test_backend_uses_official_pip_cache() -> None:
+    setup_python = next(
+        step
+        for step in _steps(_job(_load_ci_workflow(), "backend"))
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    )
+
+    assert setup_python["with"] == {
+        "python-version": "3.12",
+        "cache": "pip",
+        "cache-dependency-path": "requirements.txt",
+    }
+
+
+def test_frontend_verification_steps_are_preserved() -> None:
+    names = {step.get("name") for step in _steps(_job(_load_ci_workflow(), "frontend"))}
+
+    assert {
+        "Install frontend dependencies",
+        "Audit production dependencies",
+        "Report full dependency audit",
+        "Install Playwright Chromium",
+        "Run lint",
+        "Run frontend tests",
+        "Build frontend",
+        "Run browser tests",
+    } <= names
+
+
+def test_all_actions_remain_pinned_to_commit_shas() -> None:
+    workflow = _load_ci_workflow()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    uses = [
+        str(step["uses"])
+        for job in jobs.values()
+        if isinstance(job, dict)
+        for step in _steps(job)
+        if "uses" in step
+    ]
+
+    assert uses
+    assert all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", value) for value in uses)
+
+
+@pytest.mark.parametrize(
+    (
+        "changes_result",
+        "backend_expected",
+        "backend_result",
+        "frontend_expected",
+        "frontend_result",
+        "expected_code",
+    ),
+    [
+        ("success", "true", "success", "false", "skipped", 0),
+        ("success", "false", "skipped", "false", "skipped", 0),
+        ("success", "true", "skipped", "false", "skipped", 1),
+        ("success", "false", "skipped", "true", "failure", 1),
+        ("failure", "false", "skipped", "false", "skipped", 1),
+    ],
+)
+def test_ci_summary_enforces_expected_job_results(
+    changes_result: str,
+    backend_expected: str,
+    backend_result: str,
+    frontend_expected: str,
+    frontend_result: str,
+    expected_code: int,
+) -> None:
+    bash = _bash_executable()
+    if bash is None:
+        pytest.skip("bash is required to execute the CI summary contract")
+    summary = _job(_load_ci_workflow(), "ci-success")
+    assert summary["if"] == "always()"
+    assert summary["needs"] == ["changes", "backend", "frontend"]
+    require_step = next(
+        step for step in _steps(summary) if step.get("name") == "Require expected jobs"
+    )
+    assert require_step["shell"] == "bash"
+    assert require_step["env"] == {
+        "CHANGES_RESULT": "${{ needs.changes.result }}",
+        "BACKEND_EXPECTED": "${{ needs.changes.outputs.backend }}",
+        "BACKEND_RESULT": "${{ needs.backend.result }}",
+        "FRONTEND_EXPECTED": "${{ needs.changes.outputs.frontend }}",
+        "FRONTEND_RESULT": "${{ needs.frontend.result }}",
+    }
+    env = os.environ.copy()
+    env.update(
+        {
+            "CHANGES_RESULT": changes_result,
+            "BACKEND_EXPECTED": backend_expected,
+            "BACKEND_RESULT": backend_result,
+            "FRONTEND_EXPECTED": frontend_expected,
+            "FRONTEND_RESULT": frontend_result,
+        }
+    )
+
+    result = subprocess.run(
+        [bash, "-c", str(require_step["run"])],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == expected_code, result.stderr
