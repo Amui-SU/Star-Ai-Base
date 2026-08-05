@@ -301,7 +301,208 @@ function Test-SafeMainDependencyChain {
     return (Test-SafeDirectoryChain $MainRoot $MainModules -RequireAll)
 }
 
-if ($Mode -ne "Status") {
+function Get-DependencyStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$DependencyPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedTarget,
+        [Parameter(Mandatory = $true)][string]$MainRoot
+    )
+
+    $state = "missing"
+    $stateTarget = $null
+    $dependencyItem = Get-Item -LiteralPath $DependencyPath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $dependencyItem) {
+        if (Test-ReparsePoint $dependencyItem) {
+            $state = "unsafe"
+            $targets = @($dependencyItem.Target)
+            if ($targets.Count -eq 1 -and
+                -not [string]::IsNullOrWhiteSpace([string]$targets[0])) {
+                try {
+                    $targetText = [string]$targets[0]
+                    if ([System.IO.Path]::IsPathRooted($targetText)) {
+                        $resolvedTarget = Normalize-Path $targetText
+                    }
+                    else {
+                        $parent = [System.IO.Directory]::GetParent($DependencyPath).FullName
+                        $resolvedTarget = Normalize-Path (Join-Path $parent $targetText)
+                    }
+                    $stateTarget = $resolvedTarget
+                    if ($isWindows -and
+                        [string]$dependencyItem.LinkType -ceq "Junction" -and
+                        $pathComparer.Equals($resolvedTarget, $ExpectedTarget) -and
+                        (Test-SafeMainDependencyChain $MainRoot $ExpectedTarget)) {
+                        $state = "shared"
+                    }
+                }
+                catch {
+                    $stateTarget = $null
+                }
+            }
+        }
+        elseif ($dependencyItem.PSIsContainer) {
+            $state = "isolated"
+        }
+        else {
+            $state = "unsafe"
+        }
+    }
+    return [pscustomobject]@{
+        State = $state
+        Target = $stateTarget
+    }
+}
+
+function Assert-RealManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    $path = Normalize-Path (Join-Path $Root $RelativePath)
+    $parent = [System.IO.Directory]::GetParent($path).FullName
+    if (-not (Test-SafeDirectoryChain $Root $parent -RequireAll)) {
+        throw "Manifest directory chain is missing, outside its root, or uses a reparse point: $path"
+    }
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $item -or $item.PSIsContainer -or (Test-ReparsePoint $item)) {
+        throw "Manifest must be a real leaf file without reparse points: $path"
+    }
+    $stage = Invoke-GitRaw @("-C", $Root, "ls-files", "--stage", "--", $RelativePath)
+    $stageText = ConvertFrom-StrictGitText $stage.Bytes "manifest index mode"
+    $stageLines = @($stageText -split "`r?`n" | Where-Object { $_.Length -gt 0 })
+    $expectedSuffix = "`t" + $RelativePath.Replace("\", "/")
+    if ($stageLines.Count -ne 1 -or
+        $stageLines[0] -notmatch '^100[67][45][45] [0-9a-fA-F]{40,64} 0\s+' -or
+        -not $stageLines[0].EndsWith($expectedSuffix, [System.StringComparison]::Ordinal)) {
+        throw "Manifest must be a regular Git file, not a Git symlink: $RelativePath"
+    }
+    return $path
+}
+
+function Assert-CompatibleManifests {
+    param(
+        [Parameter(Mandatory = $true)][string]$MainRoot,
+        [Parameter(Mandatory = $true)][string]$TargetRoot
+    )
+
+    foreach ($relativePath in @("frontend/package.json", "frontend/package-lock.json")) {
+        $mainPath = Assert-RealManifest $MainRoot $relativePath
+        $targetPath = Assert-RealManifest $TargetRoot $relativePath
+        $mainHash = (Get-FileHash -LiteralPath $mainPath -Algorithm SHA256).Hash
+        $targetHash = (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash
+        if (-not $mainHash.Equals($targetHash, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Manifest SHA256 mismatch requires isolated preparation: $relativePath"
+        }
+    }
+}
+
+function Get-RealTool {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string[]]$AllowedExtensions
+    )
+
+    $command = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -eq $command) {
+        throw "Required tool '$Name' is unavailable; isolated preparation is required"
+    }
+    $source = Normalize-Path $command.Source
+    $item = Get-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
+    $extension = [System.IO.Path]::GetExtension($source)
+    if ($null -eq $item -or $item.PSIsContainer -or (Test-ReparsePoint $item) -or
+        $AllowedExtensions -notcontains $extension.ToLowerInvariant()) {
+        throw "Required tool '$Name' must be a direct native entry without reparse points"
+    }
+    return $source
+}
+
+function Invoke-CheckedTool {
+    param(
+        [Parameter(Mandatory = $true)][string]$Tool,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    $argumentText = [string]::Join(
+        " ",
+        @($Arguments | ForEach-Object { ConvertTo-NativeArgument ([string]$_) })
+    )
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    if ([System.IO.Path]::GetExtension($Tool).Equals(".cmd", $pathComparison)) {
+        $startInfo.FileName = $env:ComSpec
+        $commandText = (ConvertTo-NativeArgument $Tool)
+        if ($argumentText.Length -gt 0) {
+            $commandText += " " + $argumentText
+        }
+        $startInfo.Arguments = '/d /s /c "' + $commandText + '"'
+    }
+    else {
+        $startInfo.FileName = $Tool
+        $startInfo.Arguments = $argumentText
+    }
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw "$Description could not be started"
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.Result
+        $stderr = $stderrTask.Result
+        if ($process.ExitCode -ne 0) {
+            $detail = $stderr.Trim()
+            if ($detail.Length -eq 0) {
+                $detail = $stdout.Trim()
+            }
+            if ($detail.Length -gt 0) {
+                throw "$Description failed with status $($process.ExitCode): $detail"
+            }
+            throw "$Description failed with status $($process.ExitCode)"
+        }
+        return [pscustomobject]@{ Stdout = $stdout; Stderr = $stderr }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Test-ExactJunction {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ExpectedTarget
+    )
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $item -or -not (Test-ReparsePoint $item) -or
+        [string]$item.LinkType -cne "Junction") {
+        return $false
+    }
+    $targets = @($item.Target)
+    if ($targets.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$targets[0])) {
+        return $false
+    }
+    try {
+        $targetText = [string]$targets[0]
+        if (-not [System.IO.Path]::IsPathRooted($targetText)) {
+            $targetText = Join-Path ([System.IO.Directory]::GetParent($Path).FullName) $targetText
+        }
+        return $pathComparer.Equals((Normalize-Path $targetText), $ExpectedTarget)
+    }
+    catch {
+        return $false
+    }
+}
+
+if ($Mode -eq "Detach") {
     throw "Mode '$Mode' is not implemented"
 }
 
@@ -385,54 +586,66 @@ try {
     $expectedTarget = Normalize-Path (
         Join-Path (Join-Path $mainRoot "frontend") "node_modules"
     )
-    $state = "missing"
-    $stateTarget = $null
-    $dependencyItem = Get-Item -LiteralPath $dependencyPath -Force -ErrorAction SilentlyContinue
-    if ($null -ne $dependencyItem) {
-        if (Test-ReparsePoint $dependencyItem) {
-            $state = "unsafe"
-            $targets = @($dependencyItem.Target)
-            if ($targets.Count -eq 1 -and
-                -not [string]::IsNullOrWhiteSpace([string]$targets[0])) {
-                try {
-                    $targetText = [string]$targets[0]
-                    if ([System.IO.Path]::IsPathRooted($targetText)) {
-                        $resolvedTarget = Normalize-Path ([string]$targets[0])
-                    }
-                    else {
-                        $resolvedTarget = Normalize-Path (
-                            Join-Path ([System.IO.Directory]::GetParent($dependencyPath).FullName) $targetText
-                        )
-                    }
-                    $stateTarget = $resolvedTarget
-                    if ($isWindows -and
-                        [string]$dependencyItem.LinkType -ceq "Junction" -and
-                        $pathComparer.Equals($resolvedTarget, $expectedTarget) -and
-                        (Test-SafeMainDependencyChain $mainRoot $expectedTarget)) {
-                        $state = "shared"
-                    }
-                }
-                catch {
-                    $stateTarget = $null
-                }
+    $dependencyStatus = Get-DependencyStatus $dependencyPath $expectedTarget $mainRoot
+    if ($Mode -eq "Prepare") {
+        if ($dependencyStatus.State -eq "isolated") {
+            # An existing normal directory is already a safe isolated preparation.
+        }
+        elseif ($dependencyStatus.State -eq "unsafe") {
+            throw "Unsafe dependency path cannot be prepared or overwritten; isolated preparation is required"
+        }
+        elseif ($dependencyStatus.State -eq "shared") {
+            Assert-CompatibleManifests $mainRoot $targetRoot
+            if (-not (Test-SafeMainDependencyChain $mainRoot $expectedTarget)) {
+                throw "Shared main dependency chain is unsafe; isolated preparation is required"
             }
         }
-        elseif ($dependencyItem.PSIsContainer) {
-            $state = "isolated"
-        }
         else {
-            $state = "unsafe"
+            Assert-CompatibleManifests $mainRoot $targetRoot
+            if (-not (Test-SafeMainDependencyChain $mainRoot $expectedTarget)) {
+                throw "Main node_modules must be a normal real directory; isolated preparation is required"
+            }
+            $node = Get-RealTool "node" @(".exe")
+            $npm = Get-RealTool "npm" @(".exe", ".cmd")
+            [void](Invoke-CheckedTool $node @("--version") $targetRoot "node --version")
+            $mainFrontend = Normalize-Path (Join-Path $mainRoot "frontend")
+            [void](Invoke-CheckedTool $npm @("ls", "--depth=0", "--json") $mainFrontend "npm ls")
+
+            if ($null -ne (Get-Item -LiteralPath $dependencyPath -Force -ErrorAction SilentlyContinue)) {
+                throw "Dependency path appeared concurrently; refusing to overwrite it"
+            }
+            $created = $false
+            try {
+                [void](New-Item -ItemType Junction -Path $dependencyPath -Target $expectedTarget -ErrorAction Stop)
+                $created = $true
+                $dependencyStatus = Get-DependencyStatus $dependencyPath $expectedTarget $mainRoot
+                if ($dependencyStatus.State -ne "shared") {
+                    throw "Created dependency junction did not verify as shared"
+                }
+            }
+            catch {
+                $creationError = $_.Exception.Message
+                if ($created -and (Test-ExactJunction $dependencyPath $expectedTarget)) {
+                    Remove-Item -LiteralPath $dependencyPath -Force -ErrorAction SilentlyContinue
+                }
+                throw "Could not create a verified shared dependency junction: $creationError"
+            }
         }
     }
 
     [pscustomobject]@{
-        state = $state
+        state = $dependencyStatus.State
         worktree = $targetRoot
         dependencyPath = $dependencyPath
-        target = $stateTarget
+        target = $dependencyStatus.Target
     } | ConvertTo-Json -Compress
 }
 catch {
-    [System.Console]::Error.WriteLine("worktree-deps: $($_.Exception.Message)")
+    $message = $_.Exception.Message
+    if ($Mode -eq "Prepare" -and
+        $message.IndexOf("isolated", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        $message += "; isolated preparation is required and is not implemented yet"
+    }
+    [System.Console]::Error.WriteLine("worktree-deps: $message")
     exit 1
 }

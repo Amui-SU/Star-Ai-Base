@@ -37,6 +37,9 @@ def repositories(tmp_path_factory: pytest.TempPathFactory):
     (main / "frontend" / "package.json").write_text(
         '{"name":"fixture"}\n', encoding="utf-8"
     )
+    (main / "frontend" / "package-lock.json").write_text(
+        '{"name":"fixture","lockfileVersion":3}\n', encoding="utf-8"
+    )
     (main / ".gitignore").write_text("frontend/node_modules/\n", encoding="utf-8")
     _checked(["git", "add", "."], main, environment)
     _checked(["git", "commit", "--no-gpg-sign", "-m", "baseline"], main, environment)
@@ -438,6 +441,320 @@ public static class GitShim {
     return output
 
 
+def _compile_tool_shims(directory: Path, environment: dict[str, str]) -> Path:
+    source = directory / "ToolShim.cs"
+    source.write_text(
+        r"""
+using System;
+using System.IO;
+using System.Text;
+
+public static class ToolShim {
+    public static int Main(string[] args) {
+        string tool = Environment.GetEnvironmentVariable("TOOL_SHIM_NAME");
+        if (String.IsNullOrEmpty(tool)) {
+            tool = Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).ToLowerInvariant();
+        }
+        string log = Environment.GetEnvironmentVariable("TOOL_SHIM_LOG");
+        using (var writer = new StreamWriter(log, true, new UTF8Encoding(false))) {
+            writer.Write(tool);
+            writer.Write('\t');
+            writer.Write(Convert.ToBase64String(Encoding.UTF8.GetBytes(Environment.CurrentDirectory)));
+            foreach (string arg in args) {
+                writer.Write('\t');
+                writer.Write(Convert.ToBase64String(Encoding.UTF8.GetBytes(arg)));
+            }
+            writer.WriteLine();
+        }
+        string exitName = tool.ToUpperInvariant() + "_SHIM_EXIT";
+        int exitCode = Int32.Parse(Environment.GetEnvironmentVariable(exitName) ?? "0");
+        if (tool == "node" && exitCode == 0) Console.WriteLine("v22.0.0");
+        if (tool == "npm" && exitCode == 0) Console.WriteLine("{}");
+        string createDirectory = Environment.GetEnvironmentVariable("NPM_SHIM_CREATE_DIRECTORY");
+        if (tool == "npm" && !String.IsNullOrEmpty(createDirectory)) {
+            Directory.CreateDirectory(createDirectory);
+        }
+        string replaceDirectory = Environment.GetEnvironmentVariable("NPM_SHIM_REPLACE_DIRECTORY_WITH_FILE");
+        if (tool == "npm" && !String.IsNullOrEmpty(replaceDirectory)) {
+            Directory.Delete(replaceDirectory);
+            File.WriteAllText(replaceDirectory, "changed concurrently");
+        }
+        if (exitCode != 0) Console.Error.WriteLine(tool + " fixture failure");
+        return exitCode;
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    output = directory / "tool-template.exe"
+    expression = (
+        "Add-Type -Path '"
+        + str(source).replace("'", "''")
+        + "' -OutputAssembly '"
+        + str(output).replace("'", "''")
+        + "' -OutputType ConsoleApplication"
+    )
+    _checked(
+        [_powershell(), "-NoProfile", "-Command", expression], directory, environment
+    )
+    shutil.copy2(output, directory / "node.exe")
+    shutil.copy2(output, directory / "npm.exe")
+    return directory
+
+
+@pytest.fixture(scope="module")
+def tool_shims(tmp_path_factory: pytest.TempPathFactory, repositories) -> Path:
+    if os.name != "nt":
+        pytest.skip("Native node/npm shim contract is Windows-specific")
+    directory = tmp_path_factory.mktemp("worktree-tool-shims")
+    return _compile_tool_shims(directory, repositories[3])
+
+
+def _tool_environment(
+    base_environment: dict[str, str],
+    tool_shims: Path,
+    log: Path,
+    *,
+    include_node: bool = True,
+    include_npm: bool = True,
+    npm_cmd: bool = False,
+) -> dict[str, str]:
+    directory = log.parent / f"tools-{log.stem}"
+    directory.mkdir(exist_ok=True)
+    if include_node:
+        shutil.copy2(tool_shims / "node.exe", directory / "node.exe")
+    if include_npm:
+        if npm_cmd:
+            shutil.copy2(tool_shims / "tool-template.exe", directory / "npm-tool.exe")
+            (directory / "npm.cmd").write_text(
+                '@set "TOOL_SHIM_NAME=npm"\r\n@"%~dp0npm-tool.exe" %*\r\n',
+                encoding="utf-8",
+            )
+        else:
+            shutil.copy2(tool_shims / "npm.exe", directory / "npm.exe")
+    real_git = shutil.which("git", path=base_environment["PATH"])
+    assert real_git is not None
+    environment = base_environment.copy()
+    environment.update(
+        {
+            "PATH": str(directory) + os.pathsep + str(Path(real_git).parent),
+            "TOOL_SHIM_LOG": str(log),
+        }
+    )
+    return environment
+
+
+def _tool_calls(log: Path) -> list[tuple[str, Path, list[str]]]:
+    if not log.exists():
+        return []
+    calls = []
+    for line in log.read_text(encoding="utf-8").splitlines():
+        fields = line.split("\t")
+        calls.append(
+            (
+                fields[0],
+                Path(base64.b64decode(fields[1]).decode("utf-8")),
+                [base64.b64decode(value).decode("utf-8") for value in fields[2:]],
+            )
+        )
+    return calls
+
+
+def _add_prepare_worktree(main: Path, environment: dict[str, str], name: str) -> Path:
+    target = main / ".worktrees" / name
+    _checked(
+        ["git", "worktree", "add", "-b", f"prepare-{name}", str(target)],
+        main,
+        environment,
+    )
+    return target
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_prepare_reuses_compatible_main_dependencies_idempotently(
+    repositories, tool_shims: Path, tmp_path: Path
+) -> None:
+    main, _, _, base_environment = repositories
+    target = _add_prepare_worktree(main, base_environment, "prepare-compatible")
+    main_modules = main / "frontend" / "node_modules"
+    main_modules.mkdir(exist_ok=True)
+    log = tmp_path / "compatible-tools.log"
+    environment = _tool_environment(base_environment, tool_shims, log)
+
+    first = _status(target, environment, "-Mode", "Prepare")
+    first_calls = _tool_calls(log)
+    second = _status(target, environment, "-Mode", "Prepare")
+
+    assert first["state"] == "shared"
+    assert second == first
+    assert Path(first["target"]) == main_modules
+    assert (target / "frontend" / "node_modules").is_dir()
+    assert _tool_calls(log) == first_calls
+    assert first_calls == [
+        ("node", target, ["--version"]),
+        ("npm", main / "frontend", ["ls", "--depth=0", "--json"]),
+    ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_prepare_preserves_existing_isolated_dependencies_without_tools(
+    repositories, tool_shims: Path, tmp_path: Path
+) -> None:
+    main, _, _, base_environment = repositories
+    target = _add_prepare_worktree(main, base_environment, "prepare-isolated")
+    dependency = target / "frontend" / "node_modules"
+    dependency.mkdir()
+    marker = dependency / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    log = tmp_path / "isolated-tools.log"
+    environment = _tool_environment(base_environment, tool_shims, log)
+
+    status = _status(target, environment, "-Mode", "Prepare")
+
+    assert status["state"] == "isolated"
+    assert marker.read_text(encoding="utf-8") == "keep"
+    assert _tool_calls(log) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows npm.cmd contract")
+def test_prepare_accepts_direct_npm_cmd_entry(
+    repositories, tool_shims: Path, tmp_path: Path
+) -> None:
+    main, _, _, base_environment = repositories
+    target = _add_prepare_worktree(main, base_environment, "prepare-npm-cmd")
+    (main / "frontend" / "node_modules").mkdir(exist_ok=True)
+    log = tmp_path / "npm-cmd-tools.log"
+    environment = _tool_environment(base_environment, tool_shims, log, npm_cmd=True)
+
+    status = _status(target, environment, "-Mode", "Prepare")
+
+    assert status["state"] == "shared"
+    assert _tool_calls(log)[-1] == (
+        "npm",
+        main / "frontend",
+        ["ls", "--depth=0", "--json"],
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+@pytest.mark.parametrize(
+    "failure_case",
+    [
+        "node-missing",
+        "npm-missing",
+        "node-failure",
+        "manifest-missing",
+        "manifest-mismatch",
+        "manifest-git-symlink",
+        "manifest-reparse",
+        "main-modules-missing",
+        "main-modules-file",
+        "main-modules-reparse",
+        "npm-failure",
+        "concurrent-isolated",
+        "main-changed-after-proof",
+    ],
+)
+def test_prepare_incompatible_or_unsafe_inputs_fail_without_creating_junction(
+    repositories, tool_shims: Path, tmp_path: Path, failure_case: str
+) -> None:
+    main, _, _, base_environment = repositories
+    target = _add_prepare_worktree(main, base_environment, f"failure-{failure_case}")
+    main_modules = main / "frontend" / "node_modules"
+    outside = main.parent / f"outside-{failure_case}"
+    main_modules.mkdir(exist_ok=True)
+    log = tmp_path / f"{failure_case}.log"
+    environment = _tool_environment(
+        base_environment,
+        tool_shims,
+        log,
+        include_node=failure_case != "node-missing",
+        include_npm=failure_case != "npm-missing",
+    )
+    cleanup: list[tuple[str, Path]] = []
+    if failure_case == "node-failure":
+        environment["NODE_SHIM_EXIT"] = "9"
+    elif failure_case == "manifest-missing":
+        (target / "frontend" / "package-lock.json").unlink()
+    elif failure_case == "manifest-mismatch":
+        (target / "frontend" / "package.json").write_text(
+            '{"name":"different"}\n', encoding="utf-8"
+        )
+    elif failure_case == "manifest-git-symlink":
+        manifest = target / "frontend" / "package.json"
+        symlink_blob = target / "symlink-target.txt"
+        symlink_blob.write_text("../package.json", encoding="utf-8")
+        hash_result = run_command(
+            ["git", "hash-object", "-w", str(symlink_blob)],
+            target,
+            base_environment,
+            timeout=60,
+        )
+        _checked(
+            [
+                "git",
+                "update-index",
+                "--cacheinfo",
+                f"120000,{hash_result.stdout.strip()},frontend/package.json",
+            ],
+            target,
+            base_environment,
+        )
+        manifest.write_text("../package.json", encoding="utf-8")
+    elif failure_case == "manifest-reparse":
+        manifest = target / "frontend" / "package.json"
+        manifest.unlink()
+        outside.mkdir(exist_ok=True)
+        _checked(
+            ["cmd", "/c", "mklink", "/J", str(manifest), str(outside)],
+            target,
+            environment,
+        )
+        cleanup.append(("junction", manifest))
+    elif failure_case == "main-modules-missing":
+        main_modules.rmdir()
+    elif failure_case == "main-modules-file":
+        main_modules.rmdir()
+        main_modules.write_text("not a directory", encoding="utf-8")
+        cleanup.append(("file", main_modules))
+    elif failure_case == "main-modules-reparse":
+        main_modules.rmdir()
+        outside.mkdir(exist_ok=True)
+        _checked(
+            ["cmd", "/c", "mklink", "/J", str(main_modules), str(outside)],
+            main,
+            environment,
+        )
+        cleanup.append(("junction", main_modules))
+    elif failure_case == "npm-failure":
+        environment["NPM_SHIM_EXIT"] = "17"
+    elif failure_case == "concurrent-isolated":
+        environment["NPM_SHIM_CREATE_DIRECTORY"] = str(
+            target / "frontend" / "node_modules"
+        )
+    elif failure_case == "main-changed-after-proof":
+        environment["NPM_SHIM_REPLACE_DIRECTORY_WITH_FILE"] = str(main_modules)
+        cleanup.append(("file", main_modules))
+
+    try:
+        failure = _failure(target, environment, "-Mode", "Prepare")
+        assert "isolated" in failure.casefold() or "unsafe" in failure.casefold()
+        dependency = target / "frontend" / "node_modules"
+        if failure_case == "concurrent-isolated":
+            assert dependency.is_dir()
+            assert not dependency.is_symlink()
+        else:
+            assert not os.path.lexists(dependency)
+        npm_calls = [call for call in _tool_calls(log) if call[0] == "npm"]
+        assert all(call[2] == ["ls", "--depth=0", "--json"] for call in npm_calls)
+    finally:
+        for kind, path in reversed(cleanup):
+            if kind == "junction":
+                _checked(["cmd", "/c", "rmdir", str(path)], main, environment)
+            else:
+                path.unlink()
+
+
 @pytest.fixture(scope="module")
 def git_shim(tmp_path_factory: pytest.TempPathFactory, repositories) -> Path:
     if os.name != "nt":
@@ -512,9 +829,8 @@ def test_status_worktree_records_require_one_primary_first_field(
     assert "worktree" in failure.casefold() or "primary" in failure.casefold()
 
 
-def test_prepare_and_detach_are_explicitly_unimplemented(repositories) -> None:
+def test_detach_is_explicitly_unimplemented(repositories) -> None:
     _, allowed, _, environment = repositories
 
-    for mode in ("Prepare", "Detach"):
-        failure = _failure(allowed, environment, "-Mode", mode)
-        assert "not implemented" in failure.casefold()
+    failure = _failure(allowed, environment, "-Mode", "Detach")
+    assert "not implemented" in failure.casefold()
