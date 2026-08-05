@@ -36,10 +36,10 @@ function Normalize-Path {
     }
     $fullPath = [System.IO.Path]::GetFullPath($Path)
     $root = [System.IO.Path]::GetPathRoot($fullPath)
-    $trimmed = $fullPath.TrimEnd($trimSeparators)
-    if ($trimmed.Length -lt $root.TrimEnd($trimSeparators).Length) {
+    if ($fullPath.Equals($root, $pathComparison)) {
         return $root
     }
+    $trimmed = $fullPath.TrimEnd($trimSeparators)
     return $trimmed
 }
 
@@ -165,22 +165,57 @@ function Get-RegisteredWorktrees {
         throw "Git returned an empty or truncated registered worktree list"
     }
     $text = ConvertFrom-StrictGitText $bytes "the registered worktree list"
+    $fields = $text.Split([char]0)
+    if ($fields.Count -lt 3 -or
+        $fields[$fields.Count - 1].Length -ne 0 -or
+        $fields[$fields.Count - 2].Length -ne 0) {
+        throw "Git returned malformed registered worktree records"
+    }
     $registered = New-Object "System.Collections.Generic.HashSet[string]" ($pathComparer)
-    foreach ($field in $text.Split([char]0)) {
-        if (-not $field.StartsWith("worktree ", [System.StringComparison]::Ordinal)) {
+    $record = New-Object "System.Collections.Generic.List[string]"
+    $primary = $null
+    $recordIndex = 0
+    for ($index = 0; $index -lt $fields.Count - 1; $index++) {
+        $field = $fields[$index]
+        if ($field.Length -gt 0) {
+            [void]$record.Add($field)
             continue
         }
-        $pathText = $field.Substring("worktree ".Length)
+
+        if ($record.Count -eq 0 -or
+            -not $record[0].StartsWith("worktree ", [System.StringComparison]::Ordinal)) {
+            throw "Each registered worktree record must start with one worktree path"
+        }
+        $worktreeFields = @(
+            $record | Where-Object {
+                $_.StartsWith("worktree ", [System.StringComparison]::Ordinal)
+            }
+        )
+        if ($worktreeFields.Count -ne 1) {
+            throw "Each registered worktree record must contain exactly one worktree path"
+        }
+        $pathText = $record[0].Substring("worktree ".Length)
         if ([string]::IsNullOrWhiteSpace($pathText) -or
             -not [System.IO.Path]::IsPathRooted($pathText)) {
             throw "Git returned an invalid registered worktree path"
         }
-        [void]$registered.Add((Normalize-Path $pathText))
+        $registeredPath = Normalize-Path $pathText
+        if (-not $registered.Add($registeredPath)) {
+            throw "Git returned a duplicate registered worktree path"
+        }
+        if ($recordIndex -eq 0) {
+            $primary = $registeredPath
+        }
+        $recordIndex++
+        $record.Clear()
     }
-    if ($registered.Count -eq 0) {
-        throw "Git returned no registered worktree paths"
+    if ($record.Count -ne 0 -or $recordIndex -eq 0 -or $null -eq $primary) {
+        throw "Git returned no unambiguous primary worktree record"
     }
-    return ,$registered
+    return [pscustomobject]@{
+        Primary = $primary
+        Paths = $registered
+    }
 }
 
 function Assert-StrictDescendant {
@@ -201,22 +236,59 @@ function Test-ReparsePoint {
     return ($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
 }
 
+function Test-SafeDirectoryChain {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Leaf,
+        [switch]$RequireAll
+    )
+
+    $rootPath = Normalize-Path $Root
+    $leafPath = Normalize-Path $Leaf
+    $paths = New-Object "System.Collections.Generic.List[string]"
+    [void]$paths.Add($rootPath)
+    if (-not $pathComparer.Equals($rootPath, $leafPath)) {
+        $prefix = $rootPath + [System.IO.Path]::DirectorySeparatorChar
+        if (-not $leafPath.StartsWith($prefix, $pathComparison)) {
+            return $false
+        }
+        $relative = $leafPath.Substring($prefix.Length)
+        $current = $rootPath
+        foreach ($component in $relative.Split(
+            $trimSeparators,
+            [System.StringSplitOptions]::RemoveEmptyEntries
+        )) {
+            $current = Join-Path $current $component
+            [void]$paths.Add($current)
+        }
+    }
+
+    for ($index = 0; $index -lt $paths.Count; $index++) {
+        $item = Get-Item -LiteralPath $paths[$index] -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item) {
+            return $index -gt 0 -and -not $RequireAll
+        }
+        if (-not $item.PSIsContainer -or (Test-ReparsePoint $item)) {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Assert-SafeWorktreeBoundary {
     param(
         [Parameter(Mandatory = $true)][string]$Target,
         [Parameter(Mandatory = $true)][string]$AllowedRoot
     )
 
-    $paths = @($AllowedRoot, $Target, (Join-Path $Target "frontend"))
-    $manifest = Join-Path (Join-Path $Target "frontend") "package.json"
-    if (Test-Path -LiteralPath $manifest) {
-        $paths += $manifest
+    $frontend = Join-Path $Target "frontend"
+    if (-not (Test-SafeDirectoryChain $AllowedRoot $frontend)) {
+        throw "Worktree boundary contains a missing root, non-directory, or reparse point"
     }
-    foreach ($path in $paths) {
-        $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-        if ($null -ne $item -and (Test-ReparsePoint $item)) {
-            throw "Worktree root and frontend manifest ancestors cannot use reparse points: $path"
-        }
+    $manifest = Join-Path (Join-Path $Target "frontend") "package.json"
+    $manifestItem = Get-Item -LiteralPath $manifest -Force -ErrorAction SilentlyContinue
+    if ($null -ne $manifestItem -and (Test-ReparsePoint $manifestItem)) {
+        throw "Worktree frontend manifest cannot use a reparse point: $manifest"
     }
 }
 
@@ -226,15 +298,7 @@ function Test-SafeMainDependencyChain {
         [Parameter(Mandatory = $true)][string]$MainModules
     )
 
-    foreach ($path in @($MainRoot, (Join-Path $MainRoot "frontend"), $MainModules)) {
-        $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-        if ($null -eq $item -or
-            -not $item.PSIsContainer -or
-            (Test-ReparsePoint $item)) {
-            return $false
-        }
-    }
-    return $true
+    return (Test-SafeDirectoryChain $MainRoot $MainModules -RequireAll)
 }
 
 if ($Mode -ne "Status") {
@@ -266,15 +330,51 @@ try {
     else {
         $commonDirectory = Normalize-Path (Join-Path $targetRoot $commonText)
     }
-    $mainRoot = Normalize-Path ([System.IO.Directory]::GetParent($commonDirectory).FullName)
+    $discovery = Get-RegisteredWorktrees $commonDirectory
+    $primaryRecord = Normalize-Path ([string]$discovery.Primary)
+    $primaryItem = Get-Item -LiteralPath $primaryRecord -Force -ErrorAction SilentlyContinue
+    if ($null -eq $primaryItem -or -not $primaryItem.PSIsContainer) {
+        throw "Git's primary worktree record must identify an existing directory"
+    }
+    if ($pathComparer.Equals($primaryRecord, $commonDirectory)) {
+        $configuredMainText = Get-GitSinglePath @(
+            "--git-dir", $commonDirectory, "config", "--path", "--get", "core.worktree"
+        ) "the separate Git directory's primary worktree"
+        if ([System.IO.Path]::IsPathRooted($configuredMainText)) {
+            $mainRoot = Normalize-Path $configuredMainText
+        }
+        else {
+            $mainRoot = Normalize-Path (Join-Path $commonDirectory $configuredMainText)
+        }
+    }
+    else {
+        $mainRoot = $primaryRecord
+    }
+    $mainItem = Get-Item -LiteralPath $mainRoot -Force -ErrorAction SilentlyContinue
+    if ($null -eq $mainItem -or
+        -not $mainItem.PSIsContainer -or
+        (Test-ReparsePoint $mainItem)) {
+        throw "Git's primary worktree must exist as a normal directory"
+    }
+    $primaryCommonText = Get-GitSinglePath @(
+        "-C", $mainRoot, "rev-parse", "--git-common-dir"
+    ) "the primary worktree Git common directory"
+    if ([System.IO.Path]::IsPathRooted($primaryCommonText)) {
+        $primaryCommonDirectory = Normalize-Path $primaryCommonText
+    }
+    else {
+        $primaryCommonDirectory = Normalize-Path (Join-Path $mainRoot $primaryCommonText)
+    }
+    if (-not $pathComparer.Equals($primaryCommonDirectory, $commonDirectory)) {
+        throw "Git's primary and target worktrees do not share one common directory"
+    }
     if ($pathComparer.Equals($targetRoot, $mainRoot)) {
         throw "Dependency reuse status requires a temporary worktree, not the main checkout"
     }
 
     $allowedRoot = Normalize-Path (Join-Path $mainRoot ".worktrees")
     Assert-StrictDescendant $targetRoot $allowedRoot
-    $registered = Get-RegisteredWorktrees $commonDirectory
-    if (-not $registered.Contains($targetRoot)) {
+    if (-not $discovery.Paths.Contains($targetRoot)) {
         throw "Target must be present in Git's registered worktree list"
     }
     Assert-SafeWorktreeBoundary $targetRoot $allowedRoot

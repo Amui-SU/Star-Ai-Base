@@ -155,6 +155,116 @@ def test_sibling_prefix_cannot_escape_allowed_root(repositories) -> None:
     assert ".worktrees" in failure
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_status_rejects_reparse_component_between_allowed_root_and_target(
+    repositories,
+) -> None:
+    main, _, _, environment = repositories
+    container = main / ".worktrees" / "nested container"
+    target = container / "registered nested feature"
+    _checked(
+        ["git", "worktree", "add", "-b", "fixture-nested", str(target)],
+        main,
+        environment,
+    )
+    moved_container = main.parent / "moved nested container"
+    container.rename(moved_container)
+    _checked(
+        ["cmd", "/c", "mklink", "/J", str(container), str(moved_container)],
+        main,
+        environment,
+    )
+    try:
+        failure = _failure(target, environment, "-WorktreePath", str(target))
+        assert "reparse" in failure.casefold() or "boundary" in failure.casefold()
+    finally:
+        _checked(["cmd", "/c", "rmdir", str(container)], main, environment)
+        moved_container.rename(container)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_status_uses_primary_record_with_separate_git_directory(tmp_path: Path) -> None:
+    main = tmp_path / "separate metadata main"
+    environment = init_repo(main)
+    (main / "frontend").mkdir()
+    (main / "frontend" / "package.json").write_text(
+        '{"name":"separate-fixture"}\n', encoding="utf-8"
+    )
+    _checked(["git", "add", "."], main, environment)
+    _checked(["git", "commit", "--no-gpg-sign", "-m", "baseline"], main, environment)
+    isolated_global = tmp_path / "separate-global-config"
+    isolated_global.write_text("", encoding="utf-8")
+    environment["GIT_CONFIG_GLOBAL"] = str(isolated_global)
+    common = tmp_path / "metadata outside main" / "repository.git"
+    common.parent.mkdir()
+    _checked(
+        ["git", "init", "--separate-git-dir", str(common), str(main)],
+        tmp_path,
+        environment,
+    )
+    _checked(
+        ["git", "--git-dir", str(common), "config", "core.worktree", str(main)],
+        tmp_path,
+        environment,
+    )
+    target = main / ".worktrees" / "separate feature"
+    _checked(
+        ["git", "worktree", "add", "-b", "separate-feature", str(target)],
+        main,
+        environment,
+    )
+    main_modules = main / "frontend" / "node_modules"
+    main_modules.mkdir()
+    dependency = target / "frontend" / "node_modules"
+    _checked(
+        ["cmd", "/c", "mklink", "/J", str(dependency), str(main_modules)],
+        target,
+        environment,
+    )
+
+    try:
+        status = _status(target, environment)
+    finally:
+        _checked(["cmd", "/c", "rmdir", str(dependency)], target, environment)
+
+    assert status["state"] == "shared"
+    assert Path(status["worktree"]) == target
+    assert Path(status["dependencyPath"]) == target / "frontend" / "node_modules"
+    assert Path(status["target"]) == main_modules
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows drive-root contract")
+def test_normalize_path_preserves_windows_drive_root(repositories) -> None:
+    _, allowed, _, environment = repositories
+    escaped_script = str(SCRIPT).replace("'", "''")
+    expression = f"""
+$tokens = $null
+$errors = $null
+$source = [IO.File]::ReadAllText('{escaped_script}')
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors)
+$functionAst = $ast.Find({{
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Normalize-Path'
+}}, $true)
+if ($null -eq $functionAst) {{ throw 'Normalize-Path function was not found' }}
+$pathComparison = [StringComparison]::OrdinalIgnoreCase
+$trimSeparators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+Invoke-Expression $functionAst.Extent.Text
+$root = [IO.Path]::GetPathRoot([Environment]::SystemDirectory)
+[Console]::Out.WriteLine((Normalize-Path $root))
+"""
+    result = run_command(
+        [_powershell(), "-NoProfile", "-Command", expression],
+        allowed,
+        environment,
+        timeout=60,
+    )
+
+    expected = Path(os.environ["SystemRoot"]).anchor
+    assert result.stdout.strip() == expected
+
+
 def test_status_reports_missing_isolated_and_unsafe(repositories) -> None:
     _, allowed, _, environment = repositories
     dependency = allowed / "frontend" / "node_modules"
@@ -374,6 +484,32 @@ def test_worktree_list_git_failure_fails_closed(repositories, git_shim: Path) ->
     failure = _failure(allowed, environment)
 
     assert "worktree" in failure.casefold()
+
+
+@pytest.mark.parametrize("malformation", ["missing-primary", "duplicate-primary"])
+def test_status_worktree_records_require_one_primary_first_field(
+    repositories, git_shim: Path, malformation: str
+) -> None:
+    _, allowed, external, base_environment = repositories
+    allowed_field = f"worktree {allowed}".encode()
+    if malformation == "missing-primary":
+        payload = b"HEAD deadbeef\0\0" + allowed_field + b"\0\0"
+    else:
+        payload = allowed_field + b"\0" + f"worktree {external}".encode() + b"\0\0"
+    environment = base_environment.copy()
+    real_git = shutil.which("git", path=base_environment["PATH"])
+    assert real_git is not None
+    environment.update(
+        {
+            "GIT_SHIM_REAL": real_git,
+            "GIT_SHIM_PAYLOAD": base64.b64encode(payload).decode("ascii"),
+            "PATH": str(git_shim.parent) + os.pathsep + environment["PATH"],
+        }
+    )
+
+    failure = _failure(allowed, environment)
+
+    assert "worktree" in failure.casefold() or "primary" in failure.casefold()
 
 
 def test_prepare_and_detach_are_explicitly_unimplemented(repositories) -> None:
