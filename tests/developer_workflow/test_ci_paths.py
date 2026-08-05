@@ -56,17 +56,74 @@ def _load_classifier() -> ModuleType:
     return module
 
 
+def _normalize_markdown_newlines(value: str) -> str:
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _fence_opener(line: str) -> tuple[str, int] | None:
+    match = re.match(r"^ {0,3}(?P<marker>`{3,}|~{3,})", line)
+    if match is None:
+        return None
+    marker = match.group("marker")
+    return marker[0], len(marker)
+
+
+def _is_fence_closer(line: str, marker: str, length: int) -> bool:
+    return (
+        re.fullmatch(rf" {{0,3}}{re.escape(marker)}{{{length},}}[ \t]*", line)
+        is not None
+    )
+
+
+def _lines_outside_fences(value: str) -> list[tuple[int, str]]:
+    lines: list[tuple[int, str]] = []
+    fence: tuple[str, int] | None = None
+    offset = 0
+    for raw_line in value.splitlines(keepends=True):
+        line = raw_line.removesuffix("\n")
+        if fence is not None:
+            if _is_fence_closer(line, *fence):
+                fence = None
+        else:
+            fence = _fence_opener(line)
+            if fence is None:
+                lines.append((offset, line))
+        offset += len(raw_line)
+    return lines
+
+
+def _without_fenced_code(value: str) -> str:
+    return "\n".join(line for _, line in _lines_outside_fences(value))
+
+
+def _atx_heading(line: str) -> tuple[int, str] | None:
+    match = re.fullmatch(r" {0,3}(?P<marks>#{1,6})(?:[ \t]+(?P<title>.*))?", line)
+    if match is None:
+        return None
+    title = (match.group("title") or "").strip()
+    title = re.sub(r"[ \t]+#+[ \t]*$", "", title).strip()
+    return len(match.group("marks")), title
+
+
 def _extract_path_aware_ci_section(policy: str) -> str:
-    headings = list(re.finditer(r"^### Path-aware CI[ \t]*$", policy, re.MULTILINE))
-    assert len(headings) == 1, "AGENTS.md must define exactly one Path-aware CI section"
-    heading = headings[0]
-    next_heading = re.search(r"^#{1,3}[ \t]+\S", policy[heading.end() :], re.MULTILINE)
-    end = heading.end() + next_heading.start() if next_heading else len(policy)
-    return policy[heading.start() : end]
+    policy = _normalize_markdown_newlines(policy)
+    headings = [
+        (offset, heading)
+        for offset, line in _lines_outside_fences(policy)
+        if (heading := _atx_heading(line)) is not None
+    ]
+    targets = [item for item in headings if item[1] == (3, "Path-aware CI")]
+    assert len(targets) == 1, "AGENTS.md must define exactly one Path-aware CI section"
+    start = targets[0][0]
+    end = next(
+        (offset for offset, (level, _) in headings if offset > start and level <= 3),
+        len(policy),
+    )
+    return policy[start:end]
 
 
 def _parse_path_aware_ci_rules(section: str) -> dict[str, str]:
-    lines = section.splitlines()
+    lines = _without_fenced_code(section).splitlines()
     assert lines and lines[0].strip() == "### Path-aware CI"
     content = [line for line in lines[1:] if line.strip()]
     assert content and content[0].strip() == "Inline policy tokens are normative."
@@ -93,14 +150,15 @@ def _parse_path_aware_ci_rules(section: str) -> dict[str, str]:
 def _assert_path_aware_ci_rules(section: str, rules: dict[str, str]) -> None:
     for label, expected_token in PATH_AWARE_CI_RULES.items():
         assert rules[label] == f"`{expected_token}`"
-    tokens = re.findall(r"`([^`\r\n]+=[^`\r\n]+)`", section)
+    tokens = re.findall(r"`([^`\r\n]+=[^`\r\n]+)`", _without_fenced_code(section))
     assert sorted(tokens) == sorted(PATH_AWARE_CI_RULES.values())
 
 
 def _assert_path_aware_ci_policy(policy: str) -> None:
+    policy = _normalize_markdown_newlines(policy)
     section = _extract_path_aware_ci_section(policy)
     _assert_path_aware_ci_rules(section, _parse_path_aware_ci_rules(section))
-    outside = policy.replace(section, "", 1)
+    outside = _without_fenced_code(policy.replace(section, "", 1))
     assert all(token not in outside for token in PATH_AWARE_CI_RULES.values())
 
 
@@ -213,6 +271,45 @@ def test_path_aware_ci_policy_rejects_invalid_bullet_structure(section: str) -> 
     ids=("inline-token", "wrapped-token"),
 )
 def test_path_aware_ci_policy_accepts_token_formatting(policy: str) -> None:
+    _assert_path_aware_ci_policy(policy)
+
+
+@pytest.mark.parametrize(
+    ("opener", "closer"),
+    [("```markdown", "````"), ("   ~~~~ markdown", "   ~~~~~")],
+    ids=("backtick-fence", "tilde-fence"),
+)
+def test_path_aware_ci_heading_inside_outer_fence_is_ignored(
+    opener: str,
+    closer: str,
+) -> None:
+    fenced_example = f"{opener}\n### Path-aware CI\n{closer}\n\n"
+
+    _assert_path_aware_ci_policy(fenced_example + VALID_PATH_AWARE_CI_POLICY)
+
+
+@pytest.mark.parametrize(
+    ("opener", "closer"),
+    [("```text", "````"), ("   ~~~~ text", "   ~~~~~")],
+    ids=("backtick-fence", "tilde-fence"),
+)
+def test_fenced_heading_and_token_inside_path_aware_section_are_ignored(
+    opener: str,
+    closer: str,
+) -> None:
+    fenced_example = f"{opener}\n## Example\n`extra-policy=true`\n{closer}\n"
+    policy = VALID_PATH_AWARE_CI_POLICY.replace(
+        "## Next section\n",
+        fenced_example + "## Next section\n",
+    )
+
+    _assert_path_aware_ci_policy(policy)
+
+
+@pytest.mark.parametrize("newline", ["\r\n", "\r"], ids=("crlf", "cr"))
+def test_path_aware_ci_policy_normalizes_input_newlines(newline: str) -> None:
+    policy = VALID_PATH_AWARE_CI_POLICY.replace("\n", newline)
+
     _assert_path_aware_ci_policy(policy)
 
 
