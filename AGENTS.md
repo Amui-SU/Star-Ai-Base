@@ -110,7 +110,7 @@ Inline policy tokens are normative.
 
 - **Pull requests:** `pr-routing=job-level-only`
 - **Unknown and policy paths:** `unknown-policy-paths=backend+frontend`
-- **Protected pushes:** `protected-pushes=full-backend+frontend`
+- **Protected pushes:** `protected-pushes[main,release/**]=full-backend+frontend`
 - **Required check:** `required-check=CI Success`
 
 ## Worktree Flow

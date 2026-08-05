@@ -24,7 +24,7 @@ OUTPUT_PAYLOAD = b"backend=true\nfrontend=false\ndocs_only=false\n"
 PATH_AWARE_CI_RULES = {
     "Pull requests": "pr-routing=job-level-only",
     "Unknown and policy paths": "unknown-policy-paths=backend+frontend",
-    "Protected pushes": "protected-pushes=full-backend+frontend",
+    "Protected pushes": "protected-pushes[main,release/**]=full-backend+frontend",
     "Required check": "required-check=CI Success",
 }
 
@@ -110,7 +110,7 @@ Inline policy tokens are normative.
 
 - **Pull requests:** `pr-routing=job-level-only`
 - **Unknown and policy paths:** `unknown-policy-paths=backend+frontend`
-- **Protected pushes:** `protected-pushes=full-backend+frontend`
+- **Protected pushes:** `protected-pushes[main,release/**]=full-backend+frontend`
 - **Required check:** `required-check=CI Success`
 """
 VALID_PATH_AWARE_CI_POLICY = (
@@ -148,6 +148,22 @@ def test_agents_defines_path_aware_ci_policy_boundaries() -> None:
             "`pr-routing=job-level-only` `extra-policy=true`",
         ),
         VALID_PATH_AWARE_CI_POLICY + "Outside: `required-check=CI Success`\n",
+        VALID_PATH_AWARE_CI_POLICY.replace(
+            "protected-pushes[main,release/**]=full-backend+frontend",
+            "protected-pushes[release/**]=full-backend+frontend",
+        ),
+        VALID_PATH_AWARE_CI_POLICY.replace(
+            "protected-pushes[main,release/**]=full-backend+frontend",
+            "protected-pushes[main]=full-backend+frontend",
+        ),
+        VALID_PATH_AWARE_CI_POLICY.replace(
+            "protected-pushes[main,release/**]=full-backend+frontend",
+            "protected-pushes[main,release/*]=full-backend+frontend",
+        ),
+        VALID_PATH_AWARE_CI_POLICY.replace(
+            "protected-pushes[main,release/**]=full-backend+frontend",
+            "protected-pushes[develop,hotfix/**]=full-backend+frontend",
+        ),
     ],
     ids=(
         "missing-token",
@@ -156,6 +172,10 @@ def test_agents_defines_path_aware_ci_policy_boundaries() -> None:
         "duplicate-token",
         "extra-token",
         "token-outside-section",
+        "protected-push-missing-main",
+        "protected-push-missing-release",
+        "protected-push-changed-release-glob",
+        "protected-push-other-branches",
     ),
 )
 def test_path_aware_ci_policy_rejects_token_mutations(policy: str) -> None:
@@ -186,8 +206,8 @@ def test_path_aware_ci_policy_rejects_invalid_bullet_structure(section: str) -> 
     [
         VALID_PATH_AWARE_CI_POLICY,
         VALID_PATH_AWARE_CI_POLICY.replace(
-            "- **Protected pushes:** `protected-pushes=full-backend+frontend`",
-            "- **Protected pushes:**\n  `protected-pushes=full-backend+frontend`",
+            "- **Protected pushes:** `protected-pushes[main,release/**]=full-backend+frontend`",
+            "- **Protected pushes:**\n  `protected-pushes[main,release/**]=full-backend+frontend`",
         ),
     ],
     ids=("inline-token", "wrapped-token"),
