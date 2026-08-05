@@ -50,21 +50,64 @@ def _load_classifier() -> ModuleType:
     return module
 
 
-def test_agents_defines_path_aware_ci_policy_boundaries() -> None:
-    policy = " ".join(AGENTS_PATH.read_text(encoding="utf-8").split())
+def _path_aware_ci_section() -> str:
+    policy = AGENTS_PATH.read_text(encoding="utf-8")
+    headings = list(re.finditer(r"^### Path-aware CI[ \t]*$", policy, re.MULTILINE))
+    assert len(headings) == 1, "AGENTS.md must define exactly one Path-aware CI section"
+    heading = headings[0]
+    next_heading = re.search(r"^#{1,3}[ \t]+\S", policy[heading.end() :], re.MULTILINE)
+    end = heading.end() + next_heading.start() if next_heading else len(policy)
+    return policy[heading.start() : end]
 
-    assert "Pull requests use job-level path routing only." in policy
-    assert (
-        "Unknown paths and policy paths fail closed: both backend and frontend CI "
-        "must run."
-    ) in policy
-    assert (
-        "Pushes to `main` and `release/**` always run both backend and frontend CI."
-        in policy
+
+def _normalized_policy_text(value: str) -> str:
+    return " ".join(value.replace("`", "").casefold().split())
+
+
+def test_agents_defines_path_aware_ci_policy_boundaries() -> None:
+    section = _normalized_policy_text(_path_aware_ci_section())
+
+    assert all(term in section for term in ("pull request", "job-level path routing"))
+    assert all(
+        term in section
+        for term in (
+            "unknown paths",
+            "policy paths",
+            "fail closed",
+            "backend",
+            "frontend",
+        )
     )
-    assert (
-        "`CI Success` is the stable required-check boundary for branch protection."
-        in policy
+    assert all(term in section for term in ("push", "main", "release/**"))
+    assert "always" in section or "full" in section
+    assert all(
+        term in section for term in ("ci success", "stable", "required", "check")
+    )
+
+
+def test_path_aware_ci_policy_has_no_duplicate_or_conflicting_rules() -> None:
+    policy = AGENTS_PATH.read_text(encoding="utf-8")
+    section = _path_aware_ci_section()
+    outside = _normalized_policy_text(policy.replace(section, "", 1))
+
+    assert policy.count("### Path-aware CI") == 1
+    assert all(
+        phrase not in outside
+        for phrase in (
+            "path-aware ci",
+            "job-level path routing",
+            "fail closed",
+            "release/**",
+            "ci success",
+        )
+    )
+    assert not re.search(
+        r"pull requests?.{0,80}(?:always|full).{0,40}(?:backend|frontend)",
+        _normalized_policy_text(policy),
+    )
+    assert not re.search(
+        r"push(?:es)?.{0,80}(?:main|release/\*\*).{0,80}(?:skip|path routing)",
+        _normalized_policy_text(policy),
     )
 
 
