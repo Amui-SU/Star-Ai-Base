@@ -179,7 +179,7 @@ def test_status_reports_missing_isolated_and_unsafe(repositories) -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
-def test_only_exact_main_node_modules_junction_is_shared(repositories) -> None:
+def test_status_only_exact_main_node_modules_junction_is_shared(repositories) -> None:
     main, allowed, external, environment = repositories
     source = main / "frontend" / "node_modules"
     source.mkdir(exist_ok=True)
@@ -207,6 +207,77 @@ def test_only_exact_main_node_modules_junction_is_shared(repositories) -> None:
         assert Path(unsafe["target"]) == other
     finally:
         _checked(["cmd", "/c", "rmdir", str(dependency)], allowed, environment)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+@pytest.mark.parametrize("main_state", ["missing", "file", "reparse"])
+def test_status_requires_normal_main_node_modules_to_share(
+    repositories, main_state: str
+) -> None:
+    main, allowed, _, environment = repositories
+    source = main / "frontend" / "node_modules"
+    if source.exists():
+        source.rmdir()
+    outside = main.parent / f"outside main modules {main_state}"
+    if main_state == "file":
+        source.write_text("not a directory", encoding="utf-8")
+    elif main_state == "reparse":
+        outside.mkdir(exist_ok=True)
+        _checked(
+            ["cmd", "/c", "mklink", "/J", str(source), str(outside)],
+            main,
+            environment,
+        )
+
+    dependency = allowed / "frontend" / "node_modules"
+    _checked(
+        ["cmd", "/c", "mklink", "/J", str(dependency), str(source)],
+        allowed,
+        environment,
+    )
+    try:
+        status = _status(allowed, environment)
+        assert status["state"] == "unsafe"
+        assert Path(status["target"]) == source
+    finally:
+        _checked(["cmd", "/c", "rmdir", str(dependency)], allowed, environment)
+        if main_state == "file":
+            source.unlink()
+        elif main_state == "reparse":
+            _checked(["cmd", "/c", "rmdir", str(source)], main, environment)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_status_rejects_main_frontend_reparse_for_lexical_target(
+    repositories,
+) -> None:
+    main, allowed, _, environment = repositories
+    frontend = main / "frontend"
+    saved_frontend = main / "frontend-real-for-boundary-test"
+    outside_frontend = main.parent / "outside frontend target"
+    outside_modules = outside_frontend / "node_modules"
+    outside_modules.mkdir(parents=True, exist_ok=True)
+    frontend.rename(saved_frontend)
+    _checked(
+        ["cmd", "/c", "mklink", "/J", str(frontend), str(outside_frontend)],
+        main,
+        environment,
+    )
+    dependency = allowed / "frontend" / "node_modules"
+    expected_target = frontend / "node_modules"
+    _checked(
+        ["cmd", "/c", "mklink", "/J", str(dependency), str(expected_target)],
+        allowed,
+        environment,
+    )
+    try:
+        status = _status(allowed, environment)
+        assert status["state"] == "unsafe"
+        assert Path(status["target"]) == expected_target
+    finally:
+        _checked(["cmd", "/c", "rmdir", str(dependency)], allowed, environment)
+        _checked(["cmd", "/c", "rmdir", str(frontend)], main, environment)
+        saved_frontend.rename(frontend)
 
 
 def _compile_git_shim(directory: Path, environment: dict[str, str]) -> Path:

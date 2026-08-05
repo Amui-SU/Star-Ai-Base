@@ -220,6 +220,23 @@ function Assert-SafeWorktreeBoundary {
     }
 }
 
+function Test-SafeMainDependencyChain {
+    param(
+        [Parameter(Mandatory = $true)][string]$MainRoot,
+        [Parameter(Mandatory = $true)][string]$MainModules
+    )
+
+    foreach ($path in @($MainRoot, (Join-Path $MainRoot "frontend"), $MainModules)) {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item -or
+            -not $item.PSIsContainer -or
+            (Test-ReparsePoint $item)) {
+            return $false
+        }
+    }
+    return $true
+}
+
 if ($Mode -ne "Status") {
     throw "Mode '$Mode' is not implemented"
 }
@@ -290,7 +307,8 @@ try {
                     $stateTarget = $resolvedTarget
                     if ($isWindows -and
                         [string]$dependencyItem.LinkType -ceq "Junction" -and
-                        $pathComparer.Equals($resolvedTarget, $expectedTarget)) {
+                        $pathComparer.Equals($resolvedTarget, $expectedTarget) -and
+                        (Test-SafeMainDependencyChain $mainRoot $expectedTarget)) {
                         $state = "shared"
                     }
                 }
