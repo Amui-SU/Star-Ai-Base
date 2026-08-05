@@ -106,13 +106,12 @@ full verification gate after integration.
 
 ### Path-aware CI
 
-- **Pull requests:** Use only job-level path routing.
-- **Unknown and policy paths:** Fail closed; both backend and frontend CI must
-  run.
-- **Protected pushes:** Pushes to `main` and `release/**` always run both
-  complete backend and frontend CI jobs.
-- **Required check:** `CI Success` is the stable required-check boundary for
-  branch protection.
+Inline policy tokens are normative.
+
+- **Pull requests:** `pr-routing=job-level-only`
+- **Unknown and policy paths:** `unknown-policy-paths=backend+frontend`
+- **Protected pushes:** `protected-pushes=full-backend+frontend`
+- **Required check:** `required-check=CI Success`
 
 ## Worktree Flow
 

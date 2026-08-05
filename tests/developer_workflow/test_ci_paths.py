@@ -21,12 +21,12 @@ CLASSIFIER_PATH = PROJECT_ROOT / "scripts" / "classify-ci-paths.py"
 CI_PATH = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 OUTPUT_VALUES = {"backend": True, "frontend": False, "docs_only": False}
 OUTPUT_PAYLOAD = b"backend=true\nfrontend=false\ndocs_only=false\n"
-PATH_AWARE_CI_LABELS = (
-    "Pull requests",
-    "Unknown and policy paths",
-    "Protected pushes",
-    "Required check",
-)
+PATH_AWARE_CI_RULES = {
+    "Pull requests": "pr-routing=job-level-only",
+    "Unknown and policy paths": "unknown-policy-paths=backend+frontend",
+    "Protected pushes": "protected-pushes=full-backend+frontend",
+    "Required check": "required-check=CI Success",
+}
 
 
 class _GitHubActionsSafeLoader(yaml.SafeLoader):
@@ -56,8 +56,7 @@ def _load_classifier() -> ModuleType:
     return module
 
 
-def _path_aware_ci_section() -> str:
-    policy = AGENTS_PATH.read_text(encoding="utf-8")
+def _extract_path_aware_ci_section(policy: str) -> str:
     headings = list(re.finditer(r"^### Path-aware CI[ \t]*$", policy, re.MULTILINE))
     assert len(headings) == 1, "AGENTS.md must define exactly one Path-aware CI section"
     heading = headings[0]
@@ -66,24 +65,18 @@ def _path_aware_ci_section() -> str:
     return policy[heading.start() : end]
 
 
-def _normalized_policy_text(value: str) -> str:
-    return " ".join(value.replace("`", "").casefold().split())
-
-
 def _parse_path_aware_ci_rules(section: str) -> dict[str, str]:
     lines = section.splitlines()
     assert lines and lines[0].strip() == "### Path-aware CI"
+    content = [line for line in lines[1:] if line.strip()]
+    assert content and content[0].strip() == "Inline policy tokens are normative."
     rules: dict[str, str] = {}
     current_label: str | None = None
-    for line in lines[1:]:
-        if not line.strip():
-            continue
+    for line in content[1:]:
         bullet = re.fullmatch(r"- \*\*(?P<label>[^*]+):\*\*[ \t]*(?P<body>.*)", line)
         if bullet:
             label = bullet.group("label")
-            assert (
-                label in PATH_AWARE_CI_LABELS
-            ), f"Unknown Path-aware CI label: {label}"
+            assert label in PATH_AWARE_CI_RULES, f"Unknown Path-aware CI label: {label}"
             assert label not in rules, f"Duplicate Path-aware CI label: {label}"
             rules[label] = bullet.group("body").strip()
             current_label = label
@@ -92,92 +85,92 @@ def _parse_path_aware_ci_rules(section: str) -> dict[str, str]:
             current_label is not None and line[:1].isspace()
         ), f"Unexpected Path-aware CI section content: {line}"
         rules[current_label] = f"{rules[current_label]} {line.strip()}".strip()
-    assert set(rules) == set(PATH_AWARE_CI_LABELS), "Missing Path-aware CI rule"
+    assert set(rules) == set(PATH_AWARE_CI_RULES), "Missing Path-aware CI rule"
     assert all(rules.values()), "Path-aware CI rule bodies must not be empty"
     return rules
 
 
-def _assert_path_aware_ci_rules(rules: dict[str, str]) -> None:
-    normalized = {label: _normalized_policy_text(body) for label, body in rules.items()}
-    forbidden = re.compile(r"\b(?:not|may|optional|either|or|skip|omit)\b")
-    assert all(not forbidden.search(body) for body in normalized.values())
+def _assert_path_aware_ci_rules(section: str, rules: dict[str, str]) -> None:
+    for label, expected_token in PATH_AWARE_CI_RULES.items():
+        assert rules[label] == f"`{expected_token}`"
+    tokens = re.findall(r"`([^`\r\n]+=[^`\r\n]+)`", section)
+    assert sorted(tokens) == sorted(PATH_AWARE_CI_RULES.values())
 
-    pull_requests = normalized["Pull requests"]
-    assert "only" in pull_requests
-    assert "job-level path routing" in pull_requests
 
-    unknown_paths = normalized["Unknown and policy paths"]
-    assert "fail closed" in unknown_paths
-    assert all(term in unknown_paths for term in ("both", "backend", "frontend"))
-    assert "must" in unknown_paths or "required" in unknown_paths
-    assert "run" in unknown_paths or "execute" in unknown_paths
-
-    protected_pushes = normalized["Protected pushes"]
-    assert all(
-        term in protected_pushes
-        for term in ("main", "release/**", "always", "both", "complete")
-    )
-    assert all(term in protected_pushes for term in ("backend", "frontend", "jobs"))
-    assert "run" in protected_pushes or "execute" in protected_pushes
-
-    required_check = normalized["Required check"]
-    assert all(term in required_check for term in ("ci success", "stable", "boundary"))
-    assert "required check" in required_check or "required-check" in required_check
+def _assert_path_aware_ci_policy(policy: str) -> None:
+    section = _extract_path_aware_ci_section(policy)
+    _assert_path_aware_ci_rules(section, _parse_path_aware_ci_rules(section))
+    outside = policy.replace(section, "", 1)
+    assert all(token not in outside for token in PATH_AWARE_CI_RULES.values())
 
 
 VALID_PATH_AWARE_CI_SECTION = """### Path-aware CI
 
-- **Pull requests:** Use only job-level path routing.
-- **Unknown and policy paths:** Fail closed; both backend and frontend CI must run.
-- **Protected pushes:** Pushes to `main` and `release/**` always run both complete backend and frontend CI jobs.
-- **Required check:** `CI Success` is the stable required-check boundary for branch protection.
+Inline policy tokens are normative.
+
+- **Pull requests:** `pr-routing=job-level-only`
+- **Unknown and policy paths:** `unknown-policy-paths=backend+frontend`
+- **Protected pushes:** `protected-pushes=full-backend+frontend`
+- **Required check:** `required-check=CI Success`
 """
+VALID_PATH_AWARE_CI_POLICY = (
+    "# Instructions\n\n" + VALID_PATH_AWARE_CI_SECTION + "\n## Next section\n"
+)
+SWAPPED_PATH_AWARE_CI_LABELS_POLICY = (
+    VALID_PATH_AWARE_CI_POLICY.replace("**Pull requests:**", "**Temporary:**")
+    .replace("**Protected pushes:**", "**Pull requests:**")
+    .replace("**Temporary:**", "**Protected pushes:**")
+)
 
 
 def test_agents_defines_path_aware_ci_policy_boundaries() -> None:
-    _assert_path_aware_ci_rules(_parse_path_aware_ci_rules(_path_aware_ci_section()))
+    _assert_path_aware_ci_policy(AGENTS_PATH.read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize(
-    "section",
+    "policy",
     [
-        VALID_PATH_AWARE_CI_SECTION.replace(
-            "Use only job-level path routing.",
-            "Always run both backend and frontend CI jobs.",
+        VALID_PATH_AWARE_CI_POLICY.replace(
+            "- **Required check:** `required-check=CI Success`\n",
+            "",
         ),
-        VALID_PATH_AWARE_CI_SECTION.replace(
-            "Fail closed; both backend and frontend CI must run.",
-            "Unknown and policy paths may run either backend or frontend CI.",
+        VALID_PATH_AWARE_CI_POLICY.replace(
+            "unknown-policy-paths=backend+frontend",
+            "unknown-policy-paths=backend",
         ),
-        VALID_PATH_AWARE_CI_SECTION.replace(
-            "Pushes to `main` and `release/**` always run both complete backend and frontend CI jobs.",
-            "Pushes to `main` and `release/**` may skip frontend CI.",
+        SWAPPED_PATH_AWARE_CI_LABELS_POLICY,
+        VALID_PATH_AWARE_CI_POLICY.replace(
+            "`pr-routing=job-level-only`",
+            "`pr-routing=job-level-only` `pr-routing=job-level-only`",
         ),
-        VALID_PATH_AWARE_CI_SECTION.replace(
-            "`CI Success` is the stable required-check boundary for branch protection.",
-            "`CI Success` is an optional check.",
+        VALID_PATH_AWARE_CI_POLICY.replace(
+            "`pr-routing=job-level-only`",
+            "`pr-routing=job-level-only` `extra-policy=true`",
         ),
+        VALID_PATH_AWARE_CI_POLICY + "Outside: `required-check=CI Success`\n",
     ],
     ids=(
-        "pull-request-always-full",
-        "unknown-path-either-job",
-        "protected-push-skips-job",
-        "required-check-optional",
+        "missing-token",
+        "changed-token-value",
+        "swapped-labels",
+        "duplicate-token",
+        "extra-token",
+        "token-outside-section",
     ),
 )
-def test_path_aware_ci_policy_rejects_conflicting_mutations(section: str) -> None:
+def test_path_aware_ci_policy_rejects_token_mutations(policy: str) -> None:
     with pytest.raises(AssertionError):
-        _assert_path_aware_ci_rules(_parse_path_aware_ci_rules(section))
+        _assert_path_aware_ci_policy(policy)
 
 
 @pytest.mark.parametrize(
     "section",
     [
         VALID_PATH_AWARE_CI_SECTION
-        + "- **Pull requests:** Use only job-level path routing.\n",
+        + "- **Pull requests:** `pr-routing=job-level-only`\n",
         VALID_PATH_AWARE_CI_SECTION.replace("Pull requests", "PR routing", 1),
         VALID_PATH_AWARE_CI_SECTION.replace(
-            "- **Required check:** `CI Success` is the stable required-check boundary for branch protection.\n",
+            "- **Required check:** `required-check=CI Success`\n",
             "",
         ),
     ],
@@ -189,41 +182,18 @@ def test_path_aware_ci_policy_rejects_invalid_bullet_structure(section: str) -> 
 
 
 @pytest.mark.parametrize(
-    "section",
+    "policy",
     [
-        VALID_PATH_AWARE_CI_SECTION.replace(
-            "Fail closed; both backend and frontend CI must run.",
-            "Fail closed; both backend and frontend CI\n  are required to execute.",
+        VALID_PATH_AWARE_CI_POLICY,
+        VALID_PATH_AWARE_CI_POLICY.replace(
+            "- **Protected pushes:** `protected-pushes=full-backend+frontend`",
+            "- **Protected pushes:**\n  `protected-pushes=full-backend+frontend`",
         ),
-        VALID_PATH_AWARE_CI_SECTION.replace(
-            "always run both complete backend and frontend CI jobs",
-            "always execute both complete backend and frontend CI jobs",
-        ).replace("stable required-check boundary", "stable required check boundary"),
     ],
-    ids=("wrapped-rule", "equivalent-wording"),
+    ids=("inline-token", "wrapped-token"),
 )
-def test_path_aware_ci_policy_accepts_formatting_and_wording_variants(
-    section: str,
-) -> None:
-    _assert_path_aware_ci_rules(_parse_path_aware_ci_rules(section))
-
-
-def test_path_aware_ci_policy_has_no_duplicate_or_conflicting_rules() -> None:
-    policy = AGENTS_PATH.read_text(encoding="utf-8")
-    section = _path_aware_ci_section()
-    outside = _normalized_policy_text(policy.replace(section, "", 1))
-
-    assert policy.count("### Path-aware CI") == 1
-    assert all(
-        phrase not in outside
-        for phrase in (
-            "path-aware ci",
-            "job-level path routing",
-            "fail closed",
-            "release/**",
-            "ci success",
-        )
-    )
+def test_path_aware_ci_policy_accepts_token_formatting(policy: str) -> None:
+    _assert_path_aware_ci_policy(policy)
 
 
 @pytest.mark.parametrize(
