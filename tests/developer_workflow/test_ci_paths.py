@@ -61,10 +61,12 @@ def _normalize_markdown_newlines(value: str) -> str:
 
 
 def _fence_opener(line: str) -> tuple[str, int] | None:
-    match = re.match(r"^ {0,3}(?P<marker>`{3,}|~{3,})", line)
+    match = re.fullmatch(r" {0,3}(?P<marker>`{3,}|~{3,})(?P<info>.*)", line)
     if match is None:
         return None
     marker = match.group("marker")
+    if marker[0] == "`" and "`" in match.group("info"):
+        return None
     return marker[0], len(marker)
 
 
@@ -124,7 +126,7 @@ def _extract_path_aware_ci_section(policy: str) -> str:
 
 def _parse_path_aware_ci_rules(section: str) -> dict[str, str]:
     lines = _without_fenced_code(section).splitlines()
-    assert lines and lines[0].strip() == "### Path-aware CI"
+    assert lines and _atx_heading(lines[0]) == (3, "Path-aware CI")
     content = [line for line in lines[1:] if line.strip()]
     assert content and content[0].strip() == "Inline policy tokens are normative."
     rules: dict[str, str] = {}
@@ -274,9 +276,26 @@ def test_path_aware_ci_policy_accepts_token_formatting(policy: str) -> None:
     _assert_path_aware_ci_policy(policy)
 
 
+def test_path_aware_ci_policy_accepts_atx_closing_hashes() -> None:
+    policy = VALID_PATH_AWARE_CI_POLICY.replace(
+        "### Path-aware CI",
+        "### Path-aware CI ###",
+        1,
+    )
+
+    _assert_path_aware_ci_policy(policy)
+
+
+def test_backtick_fence_with_backtick_in_info_does_not_hide_policy_content() -> None:
+    invalid_fence = "```markdown`bad\n### Path-aware CI\n`extra-policy=true`\n````\n\n"
+
+    with pytest.raises(AssertionError):
+        _assert_path_aware_ci_policy(invalid_fence + VALID_PATH_AWARE_CI_POLICY)
+
+
 @pytest.mark.parametrize(
     ("opener", "closer"),
-    [("```markdown", "````"), ("   ~~~~ markdown", "   ~~~~~")],
+    [("```markdown", "````"), ("   ~~~~ markdown`allowed", "   ~~~~~")],
     ids=("backtick-fence", "tilde-fence"),
 )
 def test_path_aware_ci_heading_inside_outer_fence_is_ignored(
