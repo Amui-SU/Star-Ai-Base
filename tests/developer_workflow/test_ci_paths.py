@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+AGENTS_PATH = PROJECT_ROOT / "AGENTS.md"
 CLASSIFIER_PATH = PROJECT_ROOT / "scripts" / "classify-ci-paths.py"
 CI_PATH = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 OUTPUT_VALUES = {"backend": True, "frontend": False, "docs_only": False}
@@ -47,6 +48,24 @@ def _load_classifier() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_agents_defines_path_aware_ci_policy_boundaries() -> None:
+    policy = " ".join(AGENTS_PATH.read_text(encoding="utf-8").split())
+
+    assert "Pull requests use job-level path routing only." in policy
+    assert (
+        "Unknown paths and policy paths fail closed: both backend and frontend CI "
+        "must run."
+    ) in policy
+    assert (
+        "Pushes to `main` and `release/**` always run both backend and frontend CI."
+        in policy
+    )
+    assert (
+        "`CI Success` is the stable required-check boundary for branch protection."
+        in policy
+    )
 
 
 @pytest.mark.parametrize(

@@ -104,6 +104,13 @@ with `scripts/verify-before-commit.ps1`. The fast lane replaces steps 2 and 3 of
 the Stable Commit Workflow only for a qualified micro task. CI remains the final
 full verification gate after integration.
 
+### Path-aware CI
+
+Pull requests use job-level path routing only. Unknown paths and policy paths
+fail closed: both backend and frontend CI must run. Pushes to `main` and
+`release/**` always run both backend and frontend CI. `CI Success` is the stable
+required-check boundary for branch protection.
+
 ## Worktree Flow
 
 Use an isolated worktree by default for feature, refactor, or maintenance
