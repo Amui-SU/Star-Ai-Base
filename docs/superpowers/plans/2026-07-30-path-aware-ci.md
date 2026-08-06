@@ -1,5 +1,7 @@
 # Path-aware CI Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Skip unrelated heavy pull-request jobs while preserving complete CI for pushes to main and release branches.
@@ -25,7 +27,7 @@
 - Create: `scripts/classify-ci-paths.py`
 - Create: `tests/developer_workflow/test_ci_paths.py`
 
-- [ ] **Step 1: Write failing policy tests**
+- [x] **Step 1: Write failing policy tests**
 
 ```python
 @pytest.mark.parametrize(
@@ -56,7 +58,7 @@ def test_force_full_ignores_paths():
     }
 ```
 
-- [ ] **Step 2: Write failing NUL CLI tests**
+- [x] **Step 2: Write failing NUL CLI tests**
 
 ```python
 def test_cli_reads_nul_names_and_writes_github_outputs(tmp_path):
@@ -95,13 +97,13 @@ def test_invalid_utf8_fails_closed(tmp_path):
     assert not output.exists()
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run: `python -m pytest -q tests/developer_workflow/test_ci_paths.py`
 
 Expected: FAIL because the classifier is absent.
 
-- [ ] **Step 4: Implement the pure classifier**
+- [x] **Step 4: Implement the pure classifier**
 
 ```python
 DOC_SUFFIXES = {".md", ".txt", ".rst"}
@@ -161,7 +163,7 @@ Treat fast-lane specification and plan paths as shared exact/prefix policy paths
 because backend contract tests assert their contents. Unknown paths force both
 jobs instead of being skipped.
 
-- [ ] **Step 5: Implement strict CLI output**
+- [x] **Step 5: Implement strict CLI output**
 
 ```python
 def read_zero_paths(stream: BinaryIO) -> list[str]:
@@ -191,7 +193,7 @@ def main() -> int:
 Catch only expected decode/value errors at the executable boundary, print a
 concise error to stderr, and return non-zero without writing partial outputs.
 
-- [ ] **Step 6: Verify GREEN and commit**
+- [x] **Step 6: Verify GREEN and commit**
 
 Run: `python -m pytest -q tests/developer_workflow/test_ci_paths.py`
 
@@ -211,7 +213,7 @@ git commit -m "feat: classify ci paths fail closed"
 - Modify: `frontend/package.json`
 - Modify: `frontend/package-lock.json`
 
-- [ ] **Step 1: Add failing workflow structure tests**
+- [x] **Step 1: Add failing workflow structure tests**
 
 ```python
 def test_ci_has_changes_and_summary_jobs():
@@ -241,13 +243,13 @@ def test_backend_uses_official_pip_cache():
 Use a YAML loader that preserves GitHub's `on` key as a string, or supplement
 structural loading with explicit text assertions.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `python -m pytest -q tests/developer_workflow/test_ci_paths.py`
 
 Expected: FAIL because the workflow has no routing jobs.
 
-- [ ] **Step 3: Pin the workflow YAML parser**
+- [x] **Step 3: Pin the workflow YAML parser**
 
 Run from `frontend`:
 
@@ -258,7 +260,7 @@ node -e "console.log(require('yaml').parse('ok: true').ok)"
 
 Expected: `true`; both manifest files record `yaml` version `2.8.1`.
 
-- [ ] **Step 4: Add the changes job**
+- [x] **Step 4: Add the changes job**
 
 Set triggers to pull requests plus pushes to `main` and `release/**`. Checkout
 with `fetch-depth: 0`. The classifier step must have `id: classify` and expose
@@ -293,7 +295,7 @@ changes:
         fi
 ```
 
-- [ ] **Step 5: Gate heavy jobs and enable pip cache**
+- [x] **Step 5: Gate heavy jobs and enable pip cache**
 
 Add `needs: changes` and the exact Boolean-output conditions to backend and
 frontend. Add to setup-python:
@@ -306,7 +308,7 @@ cache-dependency-path: requirements.txt
 Do not weaken the frontend steps: audit, Playwright installation, lint, unit
 tests, build, and E2E remain present.
 
-- [ ] **Step 6: Add an always-running summary**
+- [x] **Step 6: Add an always-running summary**
 
 ```yaml
 ci-success:
@@ -329,7 +331,7 @@ ci-success:
         [[ "$FRONTEND_EXPECTED" != "true" || "$FRONTEND_RESULT" == "success" ]] || exit 1
 ```
 
-- [ ] **Step 7: Verify workflow tests and commit**
+- [x] **Step 7: Verify workflow tests and commit**
 
 Run:
 
@@ -351,13 +353,13 @@ git commit -m "ci: skip unrelated pull request jobs"
 
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Document the boundary**
+- [x] **Step 1: Document the boundary**
 
 Add text stating that pull requests use job-level path routing only, unknown and
 policy paths fail closed to both jobs, and pushes to `main` and `release/**`
 always run full CI.
 
-- [ ] **Step 2: Add a policy assertion**
+- [x] **Step 2: Add a policy assertion**
 
 ```python
 def test_policy_preserves_full_protected_push_ci():
@@ -368,7 +370,7 @@ def test_policy_preserves_full_protected_push_ci():
     assert "both backend and frontend" in policy
 ```
 
-- [ ] **Step 3: Run focused and YAML validation**
+- [x] **Step 3: Run focused and YAML validation**
 
 Run:
 
@@ -380,7 +382,7 @@ git diff --check
 
 Expected: PASS; the Node command exits 0 after parsing the complete workflow.
 
-- [ ] **Step 4: Commit policy**
+- [x] **Step 4: Commit policy**
 
 ```powershell
 git add -- AGENTS.md tests/developer_workflow/test_ci_paths.py

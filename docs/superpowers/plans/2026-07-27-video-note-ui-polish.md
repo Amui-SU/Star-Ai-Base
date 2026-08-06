@@ -1,5 +1,7 @@
 # Video Note UI Polish Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Finish the four remaining video-note UI polish items: structured AI result provenance, safe overwrite confirmation, consistent video timestamp formatting, and debounced race-safe note search.
@@ -56,7 +58,7 @@ The checkout already contains uncommitted work in several files this plan must t
 - Modify: `frontend/lib/api/videoNoteTypes.ts`
 - Modify: `frontend/lib/api.ts`
 
-- [ ] **Step 1: Write failing backend mapping tests**
+- [x] **Step 1: Write failing backend mapping tests**
 
 Add assertions to the existing suggestion tests so all four internal states prove their public source value:
 
@@ -100,7 +102,7 @@ assert summary.json()["result_source"] == "ai"
 assert timestamps.json()["result_source"] == "official"
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run:
 
@@ -110,7 +112,7 @@ python -m pytest tests/test_video_note_ai_suggestions.py tests/test_video_notes.
 
 Expected: FAIL because `VideoNoteAiResponse` has no `result_source` attribute or serialized field.
 
-- [ ] **Step 3: Add the response type and mapping helper**
+- [x] **Step 3: Add the response type and mapping helper**
 
 In `app/schemas/video_notes.py`:
 
@@ -159,7 +161,7 @@ export interface VideoNoteAiResponse {
 Add `VideoNoteAiResultSource` to the existing named type exports from
 `./api/videoNoteTypes` in `frontend/lib/api.ts`.
 
-- [ ] **Step 4: Run the backend tests and verify GREEN**
+- [x] **Step 4: Run the backend tests and verify GREEN**
 
 Run:
 
@@ -169,7 +171,7 @@ python -m pytest tests/test_video_note_ai_suggestions.py tests/test_video_notes.
 
 Expected: all selected tests PASS.
 
-- [ ] **Step 5: Review and commit only Task 1 hunks**
+- [x] **Step 5: Review and commit only Task 1 hunks**
 
 ```powershell
 git diff -- app/schemas/video_notes.py app/services/video_note_ai_suggestions.py tests/test_video_note_ai_suggestions.py tests/test_video_notes.py frontend/lib/api/videoNoteTypes.ts frontend/lib/api.ts
@@ -195,7 +197,7 @@ If pre-existing hunks cannot be separated, skip the commit and record the affect
 - Modify: `frontend/app/styles/video-notes/responsive.css`
 - Modify: `frontend/components/video-notes/VideoNoteStyles.test.ts`
 
-- [ ] **Step 1: Write failing pure helper tests**
+- [x] **Step 1: Write failing pure helper tests**
 
 Create `videoNoteAiUi.test.ts`:
 
@@ -231,7 +233,7 @@ describe("video note AI UI rules", () => {
 });
 ```
 
-- [ ] **Step 2: Run helper tests and verify RED**
+- [x] **Step 2: Run helper tests and verify RED**
 
 Run:
 
@@ -243,7 +245,7 @@ Pop-Location
 
 Expected: FAIL because `videoNoteAiUi.ts` does not exist.
 
-- [ ] **Step 3: Implement the pure AI UI rules**
+- [x] **Step 3: Implement the pure AI UI rules**
 
 Create `videoNoteAiUi.ts`:
 
@@ -299,13 +301,13 @@ export function getAiResultPresentation(source: VideoNoteAiResultSource) {
 }
 ```
 
-- [ ] **Step 4: Run helper tests and verify GREEN**
+- [x] **Step 4: Run helper tests and verify GREEN**
 
 Run `npm test -- videoNoteAiUi.test.ts` from `frontend`.
 
 Expected: the helper test file PASS.
 
-- [ ] **Step 5: Write failing workspace interaction tests**
+- [x] **Step 5: Write failing workspace interaction tests**
 
 Extend `VideoNoteWorkspace.ai.test.tsx` with three focused tests:
 
@@ -426,7 +428,7 @@ it("confirms or cancels before replacing a non-empty AI target block", async () 
 
 Every mocked `VideoNoteAiResponse` in this file must include an explicit `result_source` value so TypeScript enforces the new contract.
 
-- [ ] **Step 6: Run workspace tests and verify RED**
+- [x] **Step 6: Run workspace tests and verify RED**
 
 Run:
 
@@ -438,7 +440,7 @@ Pop-Location
 
 Expected: FAIL because there is no structured status card or overwrite dialog.
 
-- [ ] **Step 7: Implement dialog and workspace request gate**
+- [x] **Step 7: Implement dialog and workspace request gate**
 
 Create `VideoNoteAiOverwriteDialog.tsx` using `ModalShell` and the existing
 focus-trap hook:
@@ -576,7 +578,7 @@ and undo reset behavior.
 
 Pass the source, pending target labels, confirm callback, and cancel callback through `VideoNoteWorkspaceView` into `VideoNoteAiPanel`. Render `VideoNoteAiOverwriteDialog` only while `pendingAiAction` is non-null.
 
-- [ ] **Step 8: Render structured result cards and styles**
+- [x] **Step 8: Render structured result cards and styles**
 
 In `VideoNoteAiPanel.tsx`, replace the message-only paragraph with:
 
@@ -605,7 +607,7 @@ const presentation = resultSource
 
 Add focused CSS classes in `side-panels.css` for neutral AI success, official-source, and warm-yellow fallback cards. Add a fixed-width confirmation card that collapses to `calc(100vw - 32px)` in `responsive.css`. Extend `VideoNoteStyles.test.ts` to assert the fallback class has a distinct background/border and the mobile confirmation card is viewport-safe.
 
-- [ ] **Step 9: Run Task 2 tests and verify GREEN**
+- [x] **Step 9: Run Task 2 tests and verify GREEN**
 
 Run:
 
@@ -617,7 +619,7 @@ Pop-Location
 
 Expected: all selected test files PASS.
 
-- [ ] **Step 10: Review and commit only Task 2 hunks**
+- [x] **Step 10: Review and commit only Task 2 hunks**
 
 ```powershell
 git diff -- frontend/components/video-notes frontend/app/styles/video-notes/side-panels.css frontend/app/styles/video-notes/responsive.css
@@ -639,7 +641,7 @@ If overlapping existing hunks cannot be separated, defer the commit.
 - Modify: `app/services/video_note_markdown.py`
 - Create: `tests/test_video_note_markdown.py`
 
-- [ ] **Step 1: Write failing frontend and backend formatter tests**
+- [x] **Step 1: Write failing frontend and backend formatter tests**
 
 Create `videoNoteTime.test.ts`:
 
@@ -685,7 +687,7 @@ expect(
 ).toBe("- [03:24] 核心概念\n- [01:02:03] 总结");
 ```
 
-- [ ] **Step 2: Run formatter tests and verify RED**
+- [x] **Step 2: Run formatter tests and verify RED**
 
 Run:
 
@@ -698,7 +700,7 @@ Pop-Location
 
 Expected: backend fails on invalid string; frontend fails because the helper does not exist and existing formatting returns `3:24` / `62:03`.
 
-- [ ] **Step 3: Implement shared frontend formatting and safe backend coercion**
+- [x] **Step 3: Implement shared frontend formatting and safe backend coercion**
 
 Create `videoNoteTime.ts`:
 
@@ -734,13 +736,13 @@ def _format_timestamp(seconds: Any) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 ```
 
-- [ ] **Step 4: Run formatter tests and verify GREEN**
+- [x] **Step 4: Run formatter tests and verify GREEN**
 
 Run the commands from Step 2 again.
 
 Expected: all selected tests PASS.
 
-- [ ] **Step 5: Review and commit only Task 3 hunks**
+- [x] **Step 5: Review and commit only Task 3 hunks**
 
 ```powershell
 git diff -- app/services/video_note_markdown.py tests/test_video_note_markdown.py frontend/components/video-notes/videoNoteTime.ts frontend/components/video-notes/videoNoteTime.test.ts frontend/components/video-notes/videoNoteMarkdownAdapter.ts frontend/components/video-notes/videoNoteMarkdownAdapter.test.ts
@@ -759,7 +761,7 @@ If the existing multipart URL hunks overlap, stage only formatter hunks or defer
 - Modify: `frontend/components/video-notes/VideoNoteWorkspace.tsx`
 - Modify: `frontend/components/video-notes/VideoNoteWorkspace.selection.test.tsx`
 
-- [ ] **Step 1: Write failing debounce test**
+- [x] **Step 1: Write failing debounce test**
 
 Add a test using fake timers and an empty first result:
 
@@ -788,7 +790,7 @@ it("debounces note search for 300ms", async () => {
 });
 ```
 
-- [ ] **Step 2: Write failing stale-response and immediate-toggle tests**
+- [x] **Step 2: Write failing stale-response and immediate-toggle tests**
 
 Add this helper and controlled-response tests:
 
@@ -872,7 +874,7 @@ it("applies body-search changes immediately", async () => {
 });
 ```
 
-- [ ] **Step 3: Run selection tests and verify RED**
+- [x] **Step 3: Run selection tests and verify RED**
 
 Run:
 
@@ -884,7 +886,7 @@ Pop-Location
 
 Expected: debounce test observes per-keystroke calls or immediate call; stale response replaces the newer list.
 
-- [ ] **Step 4: Implement effective query and request-id guard**
+- [x] **Step 4: Implement effective query and request-id guard**
 
 In `VideoNoteWorkspace.tsx`:
 
@@ -928,13 +930,13 @@ const loadList = useCallback(async () => {
 
 When `includeBodySearch` or `knowledgeBaseId` changes, `loadList` still runs immediately because they are direct dependencies. Keep the current list while a request is pending.
 
-- [ ] **Step 5: Run selection tests and verify GREEN**
+- [x] **Step 5: Run selection tests and verify GREEN**
 
 Run `npm test -- VideoNoteWorkspace.selection.test.tsx` from `frontend`.
 
 Expected: all selection tests PASS.
 
-- [ ] **Step 6: Run all video-note frontend tests**
+- [x] **Step 6: Run all video-note frontend tests**
 
 ```powershell
 Push-Location frontend
@@ -944,7 +946,7 @@ Pop-Location
 
 Expected: all video-note test files PASS.
 
-- [ ] **Step 7: Review and commit only Task 4 hunks**
+- [x] **Step 7: Review and commit only Task 4 hunks**
 
 ```powershell
 git diff -- frontend/components/video-notes/VideoNoteWorkspace.tsx frontend/components/video-notes/VideoNoteWorkspace.selection.test.tsx frontend/components/video-notes/VideoNoteListPanel.tsx
@@ -961,7 +963,7 @@ If request-race hunks overlap the existing note-switch protection, defer the com
 
 - Verify only; do not add screenshots, reports, traces, or temporary scripts to the repository.
 
-- [ ] **Step 1: Inspect the complete worktree and intended diff**
+- [x] **Step 1: Inspect the complete worktree and intended diff**
 
 ```powershell
 git status --short
@@ -971,7 +973,7 @@ git diff -- app/schemas/video_notes.py app/services/video_note_ai_suggestions.py
 
 Expected: no whitespace errors, no secret/generated files, and no unexplained edits from this plan.
 
-- [ ] **Step 2: Run repository formatting and full verification**
+- [x] **Step 2: Run repository formatting and full verification**
 
 Because the worktree contains pre-existing changes, first confirm all current changes are intended before allowing `-Format` to modify them. Then run:
 
@@ -982,7 +984,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-before-commit
 
 Expected: Black, backend tests, Prettier, frontend lint, frontend tests, production build, and whitespace checks all PASS.
 
-- [ ] **Step 3: Start the app for rendered QA**
+- [x] **Step 3: Start the app for rendered QA**
 
 Browser plugin classification: absent in this session. Prefer an existing repository Playwright workflow if discovered:
 
@@ -995,7 +997,7 @@ Pop-Location
 
 Start the existing development stack with the repository scripts and keep the configured host exact. Do not install new browser dependencies.
 
-- [ ] **Step 4: Run desktop and mobile interaction checks**
+- [x] **Step 4: Run desktop and mobile interaction checks**
 
 The flow under test is: open a video note -> run AI actions -> inspect source card -> protect an existing block with confirmation -> search quickly -> observe only the final result.
 
@@ -1011,7 +1013,7 @@ At desktop and one mobile viewport, verify:
 
 Save temporary screenshots outside the repository and include their absolute paths in the final QA report.
 
-- [ ] **Step 5: Final status verification**
+- [x] **Step 5: Final status verification**
 
 ```powershell
 git status --short

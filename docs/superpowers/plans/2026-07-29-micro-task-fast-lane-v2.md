@@ -1,9 +1,11 @@
 # Micro-task Fast Lane V2 Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Status: Implemented (historical plan).** The checklist below records the completed
-development sequence. The current contract tests live in `tests/fast_workflow`,
+The checklist below records the completed development sequence. The current
+contract tests live in `tests/fast_workflow`,
 with a lightweight split guard in `tests/test_fast_workflow_structure.py`; current
 policy and verifier behavior supersede illustrative snippets in this plan.
 

@@ -1,5 +1,7 @@
 # Video Note ID Reconciliation Performance Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reduce 3,000-block Markdown ID reconciliation to at most 50 ms without weakening semantic-ID safety.
@@ -23,7 +25,7 @@
 
 - Modify: `frontend/components/video-notes/videoNoteMarkdownAdapter.test.ts`
 
-- [ ] **Step 1: Add a failing 3,000-block performance regression**
+- [x] **Step 1: Add a failing 3,000-block performance regression**
 
 Add a deterministic test that creates 3,000 uniquely fingerprinted paragraph blocks, removes every 17th block, inserts a small unique paragraph every 31st position, performs one warm-up reconciliation, then measures three reconciliations and asserts that the fastest run is below 50 ms:
 
@@ -61,7 +63,7 @@ it("reconciles 3000 edited blocks within 50ms", () => {
 });
 ```
 
-- [ ] **Step 2: Add a repeated-fingerprint safety regression**
+- [x] **Step 2: Add a repeated-fingerprint safety regression**
 
 Add a test where several identical ordinary paragraphs appear on both sides around unique neighbors. Assert that unique neighbors retain IDs and none of the indistinguishable repeated paragraphs inherits an old ID arbitrarily.
 
@@ -75,7 +77,7 @@ expect(
 ).toBe(true);
 ```
 
-- [ ] **Step 3: Run the tests and verify RED**
+- [x] **Step 3: Run the tests and verify RED**
 
 Run:
 
@@ -86,7 +88,7 @@ npm test -- components/video-notes/videoNoteMarkdownAdapter.test.ts
 
 Expected: duplicate-safety behavior remains correct or exposes an existing guess, while the 3,000-block performance test fails above 50 ms against the quadratic matrix.
 
-- [ ] **Step 4: Commit the test-only RED checkpoint**
+- [x] **Step 4: Commit the test-only RED checkpoint**
 
 ```powershell
 git add frontend/components/video-notes/videoNoteMarkdownAdapter.test.ts
@@ -100,7 +102,7 @@ git commit -m "test: cover large video note reconciliation"
 - Create: `frontend/components/video-notes/videoNoteSequenceAlignment.ts`
 - Create: `frontend/components/video-notes/videoNoteSequenceAlignment.test.ts`
 
-- [ ] **Step 1: Write focused helper tests before the helper exists**
+- [x] **Step 1: Write focused helper tests before the helper exists**
 
 Cover ordered unique matches, insertions/deletions, reordered anchors, and duplicate exclusion:
 
@@ -121,7 +123,7 @@ expect(alignUniqueFingerprints(["a", "b", "c"], ["c", "b", "a"])).toHaveLength(
 );
 ```
 
-- [ ] **Step 2: Run the helper test and verify RED**
+- [x] **Step 2: Run the helper test and verify RED**
 
 Run:
 
@@ -132,7 +134,7 @@ npm test -- components/video-notes/videoNoteSequenceAlignment.test.ts
 
 Expected: FAIL because `videoNoteSequenceAlignment` does not exist.
 
-- [ ] **Step 3: Implement the O(n log n) helper**
+- [x] **Step 3: Implement the O(n log n) helper**
 
 Implement frequency/index collection followed by LIS reconstruction. Only fingerprints occurring once on both sides become pairs:
 
@@ -160,7 +162,7 @@ export function alignUniqueFingerprints(
 
 `collectUniqueIndexes` must remove a fingerprint from the unique map as soon as its second occurrence is observed and remember it in a duplicate set so later occurrences cannot re-add it. `longestIncreasingParsedSubsequence` must use binary-search tails plus predecessor indexes to reconstruct matches without sorting or mutating caller arrays.
 
-- [ ] **Step 4: Run helper tests and verify GREEN**
+- [x] **Step 4: Run helper tests and verify GREEN**
 
 Run:
 
@@ -171,7 +173,7 @@ npm test -- components/video-notes/videoNoteSequenceAlignment.test.ts
 
 Expected: all helper tests pass.
 
-- [ ] **Step 5: Commit the helper**
+- [x] **Step 5: Commit the helper**
 
 ```powershell
 git add frontend/components/video-notes/videoNoteSequenceAlignment.ts frontend/components/video-notes/videoNoteSequenceAlignment.test.ts
@@ -185,7 +187,7 @@ git commit -m "perf: add near-linear video note alignment"
 - Modify: `frontend/components/video-notes/videoNoteMarkdownAdapter.ts`
 - Test: `frontend/components/video-notes/videoNoteMarkdownAdapter.test.ts`
 
-- [ ] **Step 1: Replace the matrix with unique ordered anchors**
+- [x] **Step 1: Replace the matrix with unique ordered anchors**
 
 Import `alignUniqueFingerprints`. Build candidate fingerprint arrays once, call the helper, and translate returned candidate indexes back to actual block indexes before calling `assign`:
 
@@ -202,7 +204,7 @@ for (const match of alignUniqueFingerprints(
 
 Delete the complete two-dimensional `lcs` allocation and backtracking loop.
 
-- [ ] **Step 2: Make gap reconciliation linear**
+- [x] **Step 2: Make gap reconciliation linear**
 
 Precompute eligible parsed and previous candidates once. Walk sorted monotonic anchors with two cursors. For each gap, compare only the candidate slices between the current and next anchor; do not call `.map().filter()` over all blocks inside the anchor loop.
 
@@ -231,7 +233,7 @@ for (const anchor of orderedAnchorsWithSentinel) {
 
 The gap helper must assign only equal-length, positionally kind-compatible gaps. Ambiguous semantic candidates and already assigned/used candidates remain excluded.
 
-- [ ] **Step 3: Run focused tests and verify GREEN**
+- [x] **Step 3: Run focused tests and verify GREEN**
 
 Run:
 
@@ -242,7 +244,7 @@ npm test -- components/video-notes/videoNoteSequenceAlignment.test.ts components
 
 Expected: all tests pass and the measured 3,000-block minimum is below 50 ms.
 
-- [ ] **Step 4: Run all video-note tests and static checks**
+- [x] **Step 4: Run all video-note tests and static checks**
 
 Run:
 
@@ -256,7 +258,7 @@ npm run build
 
 Expected: all video-note tests, formatting, lint, TypeScript build, and production build pass.
 
-- [ ] **Step 5: Commit adapter integration**
+- [x] **Step 5: Commit adapter integration**
 
 ```powershell
 git add frontend/components/video-notes/videoNoteMarkdownAdapter.ts frontend/components/video-notes/videoNoteMarkdownAdapter.test.ts
@@ -269,7 +271,7 @@ git commit -m "perf: remove quadratic video note reconciliation"
 
 - Verify only; no planned production changes.
 
-- [ ] **Step 1: Run complete repository verification**
+- [x] **Step 1: Run complete repository verification**
 
 Run:
 
@@ -280,7 +282,7 @@ Run:
 
 Expected: backend tests, frontend tests, lint, formatting, and production build all pass.
 
-- [ ] **Step 2: Confirm commit and worktree hygiene**
+- [x] **Step 2: Confirm commit and worktree hygiene**
 
 Run:
 
@@ -292,7 +294,7 @@ git log --oneline origin/agent/video-note-ui-polish..HEAD
 
 Expected: clean worktree, no whitespace errors, and only the design/plan/performance commits are ahead of the remote branch.
 
-- [ ] **Step 3: Push the existing feature branch**
+- [x] **Step 3: Push the existing feature branch**
 
 ```powershell
 git push origin agent/video-note-ui-polish

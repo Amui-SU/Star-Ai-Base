@@ -1,5 +1,9 @@
 # Micro-task Fast Lane Implementation Plan
 
+**Status:** superseded
+
+**Superseded by:** [2026-07-29-micro-task-fast-lane-v2.md](2026-07-29-micro-task-fast-lane-v2.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a risk-based fast lane for micro-tasks with concise documentation and targeted verification.

@@ -1,5 +1,7 @@
 # Deterministic Pre-commit Hooks Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace per-file, network-capable global commit checks with an opt-in repository checker and a deterministic batched fallback.
@@ -26,7 +28,7 @@
 - Create: `tests/developer_workflow/__init__.py`
 - Create: `tests/developer_workflow/support.py`
 
-- [ ] **Step 1: Add bounded subprocess execution**
+- [x] **Step 1: Add bounded subprocess execution**
 
 ```python
 def run_command(args, cwd, env, timeout=30):
@@ -56,7 +58,7 @@ def run_command(args, cwd, env, timeout=30):
     return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 ```
 
-- [ ] **Step 2: Add isolated Git setup**
+- [x] **Step 2: Add isolated Git setup**
 
 ```python
 def init_repo(path):
@@ -71,7 +73,7 @@ def init_repo(path):
     return env
 ```
 
-- [ ] **Step 3: Verify and commit the helpers**
+- [x] **Step 3: Verify and commit the helpers**
 
 Run: `python -m pytest -q tests/developer_workflow/support.py`
 
@@ -91,7 +93,7 @@ git commit -m "test: add developer workflow contract support"
 - Modify: `frontend/package.json`
 - Modify: `frontend/package-lock.json`
 
-- [ ] **Step 1: Write failing literal-path and batching tests**
+- [x] **Step 1: Write failing literal-path and batching tests**
 
 ```python
 @pytest.mark.parametrize("name", ["space name.md", "中文.md", "line\nbreak.md"])
@@ -129,13 +131,13 @@ missing staged files, formatter failure propagation, and
 `git diff --cached --check` failure. Recording tool shims must preserve every
 argument and checker subprocesses must have a 60-second timeout.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `python -m pytest -q tests/developer_workflow/test_verify_staged.py`
 
 Expected: FAIL because `scripts/verify-staged.ps1` is absent.
 
-- [ ] **Step 3: Pin Prettier**
+- [x] **Step 3: Pin Prettier**
 
 Run from `frontend`:
 
@@ -146,7 +148,7 @@ npm exec --no -- prettier --version
 
 Expected: `3.6.2`; both manifest files contain the exact version.
 
-- [ ] **Step 4: Implement `scripts/verify-staged.ps1`**
+- [x] **Step 4: Implement `scripts/verify-staged.ps1`**
 
 Reuse the native NUL reader and safe path/link checks from
 `scripts/verify-fast.ps1`. The main flow is:
@@ -181,7 +183,7 @@ Git mode `120000`, and missing paths. `Resolve-PinnedPrettier` selects only
 `frontend/node_modules/.bin/prettier(.cmd)` and prints the dependency
 preparation command when absent.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run:
 
@@ -203,7 +205,7 @@ git commit -m "feat: add deterministic staged verification"
 - Create: `scripts/git-hooks/pre-commit`
 - Create: `tests/developer_workflow/test_global_hook.py`
 
-- [ ] **Step 1: Write failing dispatcher contracts**
+- [x] **Step 1: Write failing dispatcher contracts**
 
 ```python
 def test_true_opt_in_dispatches_fixed_script(global_repo):
@@ -239,13 +241,13 @@ def test_fallback_batches_without_npx(global_repo):
 Add empty-index, Unicode/newline filename, missing-tool warning, batched
 Ruff/Black, and non-zero formatter cases.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `python -m pytest -q tests/developer_workflow/test_global_hook.py`
 
 Expected: FAIL because `scripts/git-hooks/pre-commit` is absent.
 
-- [ ] **Step 3: Implement the Bash template**
+- [x] **Step 3: Implement the Bash template**
 
 ```bash
 #!/usr/bin/env bash
@@ -295,7 +297,7 @@ The final file must contain no `eval`, `npx`, `npm exec`, `--yes`, `curl`, or
 package-install command. Contract tests assert the resulting argv rather than
 matching only source text.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run: `python -m pytest -q tests/developer_workflow/test_global_hook.py`
 
@@ -315,7 +317,7 @@ git commit -m "feat: add no-network global hook dispatcher"
 - Modify: `AGENTS.md`
 - Modify after tests: `C:/Users/amui/.git-hooks/pre-commit`
 
-- [ ] **Step 1: Write failing installer contracts**
+- [x] **Step 1: Write failing installer contracts**
 
 ```python
 def test_installer_backs_up_and_opts_in(installer_repo):
@@ -344,13 +346,13 @@ def test_installer_rejects_reparse_hook_directory(installer_repo):
     assert "reparse" in result.stderr.lower()
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `python -m pytest -q tests/developer_workflow/test_hook_installer.py`
 
 Expected: FAIL because the installer is absent.
 
-- [ ] **Step 3: Implement atomic backup and replacement**
+- [x] **Step 3: Implement atomic backup and replacement**
 
 ```powershell
 param([string]$HookDirectory = "")
@@ -389,7 +391,7 @@ Create a missing hook directory only when its parent exists and is not a
 reparse point. Verify temporary and destination paths remain direct children of
 the resolved directory.
 
-- [ ] **Step 4: Update policy and verify repository contracts**
+- [x] **Step 4: Update policy and verify repository contracts**
 
 Document the installer command, backup/restore behavior, staged-only scope, and
 no-download rule in `AGENTS.md`.
@@ -402,14 +404,14 @@ python -m pytest -q tests/developer_workflow/test_global_hook.py tests/developer
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit repository changes**
+- [x] **Step 5: Commit repository changes**
 
 ```powershell
 git add -- scripts/install-global-hook.ps1 tests/developer_workflow/test_hook_installer.py AGENTS.md
 git commit -m "feat: install repository-aware commit hooks safely"
 ```
 
-- [ ] **Step 6: Install and verify the live hook**
+- [x] **Step 6: Install and verify the live hook**
 
 Run only after the repository tests pass:
 
@@ -424,7 +426,7 @@ config prints `true`. Invoke the live hook against a formatting-clean staged
 fixture without committing, verify exit 0 in under five seconds, then restore
 the fixture with `apply_patch`.
 
-- [ ] **Step 7: Final verification**
+- [x] **Step 7: Final verification**
 
 Run:
 

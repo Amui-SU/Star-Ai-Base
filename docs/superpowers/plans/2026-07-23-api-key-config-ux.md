@@ -1,5 +1,7 @@
 # API Key Configuration UX Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace cramped API Key editing with a shared, tabbed credential editor, give personal keys a list-first workflow, and polish only the official/personal source switch at the top of the existing model menu.
@@ -56,7 +58,7 @@ No backend, API schema, provider-list JSX, lockfile, or model-switching runtime 
 - Test: `frontend/components/api-credentials/ApiCredentialEditorShell.test.tsx`
 - Test: `frontend/components/api-credentials/ThinkingConfigEditor.test.tsx`
 
-- [ ] **Step 1: Write the failing shell tests**
+- [x] **Step 1: Write the failing shell tests**
 
 Create `ApiCredentialEditorShell.test.tsx` with tests that render both tabs and assert:
 
@@ -89,7 +91,7 @@ expect(onBack).toHaveBeenCalled();
 
 Add a second test with `showRequestTab={false}` and no `onBack`; assert the request tab and back button are absent while close and footer remain available.
 
-- [ ] **Step 2: Write the failing request-editor tests**
+- [x] **Step 2: Write the failing request-editor tests**
 
 Create `ThinkingConfigEditor.test.tsx` and cover:
 
@@ -113,7 +115,7 @@ expect(onErrorChange).toHaveBeenCalledWith("思考配置 JSON 格式错误");
 
 Also assert that “标准模板” is disabled for an empty template and that changing modes calls `onModeChange` without overwriting `customJson`.
 
-- [ ] **Step 3: Run the new tests and verify RED**
+- [x] **Step 3: Run the new tests and verify RED**
 
 Run:
 
@@ -124,7 +126,7 @@ npm test -- --run components/api-credentials/ApiCredentialEditorShell.test.tsx c
 
 Expected: FAIL because both shared components do not exist.
 
-- [ ] **Step 4: Implement the shell API**
+- [x] **Step 4: Implement the shell API**
 
 Create `ApiCredentialEditorShell.tsx` with this public shape:
 
@@ -148,7 +150,7 @@ interface ApiCredentialEditorShellProps {
 
 Render a single `.api-credential-editor` grid with header, `role="tablist"`, one scrollable body, and footer. Use `aria-selected`, `aria-controls`, and stable panel ids. Disable back and close while `saving`.
 
-- [ ] **Step 5: Implement the request editor**
+- [x] **Step 5: Implement the request editor**
 
 Create `ThinkingConfigEditor.tsx` with props:
 
@@ -166,7 +168,7 @@ interface ThinkingConfigEditorProps {
 
 Use `formatThinkingConfig` and `parseThinkingConfig`. Standard mode displays `formatThinkingConfig(template)` in a read-only textarea; custom mode displays `customJson`; off mode hides the textarea. “格式化 JSON” parses and formats custom JSON, reports parser errors through `onErrorChange`, and never mutates the draft on failure.
 
-- [ ] **Step 6: Add shared layout styles**
+- [x] **Step 6: Add shared layout styles**
 
 Import `api-credential-editor.css` from `styles/modals.css`. Define stable structure:
 
@@ -196,7 +198,7 @@ Import `api-credential-editor.css` from `styles/modals.css`. Define stable struc
 
 Keep item and section radii at `8px` or less. Do not add another scroll container around the main body.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 Run:
 
@@ -225,7 +227,7 @@ git commit -m "feat: add shared API credential editor"
 - Modify: `frontend/app/styles/modal-responsive.css`
 - Test: `frontend/components/ChatPanel.config.test.tsx`
 
-- [ ] **Step 1: Add failing official-editor interaction coverage**
+- [x] **Step 1: Add failing official-editor interaction coverage**
 
 Extend `ChatPanel.config.test.tsx` with an admin configuration test that:
 
@@ -256,7 +258,7 @@ expect(chatApi.saveModelProviderConfig).toHaveBeenCalledWith(
 
 Add an invalid JSON case asserting that the request is not called and the request tab remains selected with “思考配置 JSON 格式错误”.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -266,7 +268,7 @@ npm test -- --run components/ChatPanel.config.test.tsx
 
 Expected: FAIL because the modal does not expose the new tabs or shared editor labels.
 
-- [ ] **Step 3: Compose the shared editor in `ModelConfigModal`**
+- [x] **Step 3: Compose the shared editor in `ModelConfigModal`**
 
 Replace the current single-column body with `ApiCredentialEditorShell`:
 
@@ -297,19 +299,19 @@ Replace the current single-column body with `ApiCredentialEditorShell`:
 
 Keep the API Key placeholder, current save labels, and existing save callback. Replace the old `onClearError` prop with `onErrorChange: (value: string) => void`; `ChatPanel.tsx` passes `setConfigError`. Add local `activeTab` state that resets to `basic` when the provider changes.
 
-- [ ] **Step 4: Preserve custom JSON independently of request mode**
+- [x] **Step 4: Preserve custom JSON independently of request mode**
 
 Change the model settings callback so selecting off or standard changes only `configThinkingMode`. Keep `configThinkingJson` as the custom draft. On opening a provider, initialize it from the current `thinking_config`; on save, continue parsing only when mode is `custom`.
 
 When custom parsing fails in `handleSaveProviderConfig`, keep the provider modal open and set the existing error. In `ModelConfigModal`, add an effect that sets `activeTab` to `request` whenever `error === "思考配置 JSON 格式错误"` or `error === "思考配置必须是 JSON 对象"`.
 
-- [ ] **Step 5: Widen the modal without changing save behavior**
+- [x] **Step 5: Widen the modal without changing save behavior**
 
 In `modal-provider-config.css`, change `.thinking-provider-modal` to `width: min(840px, calc(100vw - 32px))`. Move duplicate `.thinking-mode-*` and `.thinking-json-*` declarations into the shared stylesheet, then delete the dead duplicates. Keep the existing modal backdrop z-index and theme tokens.
 
 In `modal-responsive.css`, use one-column basic fields and a non-sticky page-level width at mobile sizes while retaining the editor footer inside the modal.
 
-- [ ] **Step 6: Run official configuration regressions and commit**
+- [x] **Step 6: Run official configuration regressions and commit**
 
 Run:
 
@@ -335,7 +337,7 @@ git commit -m "fix: expand provider API configuration editor"
 - Create: `frontend/app/api-key-config-layout.test.ts`
 - Test: `frontend/components/ChatPanel.config.test.tsx`
 
-- [ ] **Step 1: Add a failing style guard**
+- [x] **Step 1: Add a failing style guard**
 
 Create `api-key-config-layout.test.ts` using `readStylesheetWithLocalImports()` and require:
 
@@ -359,7 +361,7 @@ expect(source).toContain("onSwitchProvider(provider.provider)");
 expect(source).toContain("onConfigureProvider(provider)");
 ```
 
-- [ ] **Step 2: Run the guard and verify RED**
+- [x] **Step 2: Run the guard and verify RED**
 
 Run:
 
@@ -369,13 +371,13 @@ npm test -- --run app/api-key-config-layout.test.ts components/ChatPanel.config.
 
 Expected: the new CSS assertions fail while existing source-switch interaction tests pass.
 
-- [ ] **Step 3: Change source-selector CSS only**
+- [x] **Step 3: Change source-selector CSS only**
 
 Update `.model-source-switch`, `.model-source-option`, `.model-source-option small`, and `.model-source-option.active` to create two stable equal segments. Use the existing warm accent only as selection emphasis, not health status. Keep menu width, provider rows, JSX, click handlers, labels, and disabled logic unchanged.
 
 Do not modify `ChatModelStatus.tsx` in this task.
 
-- [ ] **Step 4: Run tests, inspect scope, and commit**
+- [x] **Step 4: Run tests, inspect scope, and commit**
 
 Run:
 
@@ -403,7 +405,7 @@ git commit -m "style: clarify model source channels"
 - Modify: `frontend/components/ApiAccountsPanel.test.tsx`
 - Test: `frontend/components/ApiAccountsPanel.test.tsx`
 
-- [ ] **Step 1: Add failing personal-account state tests**
+- [x] **Step 1: Add failing personal-account state tests**
 
 Extend `ApiAccountsPanel.test.tsx` to mock `chatApi.getModelConfig` in addition to `apiAccountApi`. Add tests for:
 
@@ -428,7 +430,7 @@ Assert create sends `thinking_config: { thinking: true }`; edit initializes from
 
 Add a template-load rejection case in which the list renders and custom JSON remains available while “标准模板” is disabled.
 
-- [ ] **Step 2: Run the panel tests and verify RED**
+- [x] **Step 2: Run the panel tests and verify RED**
 
 Run:
 
@@ -438,7 +440,7 @@ npm test -- --run components/ApiAccountsPanel.test.tsx
 
 Expected: FAIL because the panel still renders list and form together and ignores `thinking_config` in create/update payloads.
 
-- [ ] **Step 3: Centralize personal-account types**
+- [x] **Step 3: Centralize personal-account types**
 
 Create `types.ts`:
 
@@ -461,7 +463,7 @@ export interface ApiAccountFormState {
 
 Import this type from the view and form instead of maintaining duplicate interfaces.
 
-- [ ] **Step 4: Extend `useApiAccountsPanel` state and template loading**
+- [x] **Step 4: Extend `useApiAccountsPanel` state and template loading**
 
 Add `view`, `activeTab`, and `providerTemplates`. On open, load accounts and call `chatApi.getModelConfig()`; convert provider templates to a map. Catch template failures independently so they do not replace account-list errors.
 
@@ -486,7 +488,7 @@ const thinkingConfig =
 
 On parsing failure set the error, switch to `request`, and do not call create/update. Include `thinking_config` in both valid payloads. After successful save, reload accounts and return to `list`.
 
-- [ ] **Step 5: Run state tests and commit**
+- [x] **Step 5: Run state tests and commit**
 
 Run:
 
@@ -517,7 +519,7 @@ git commit -m "feat: add personal credential editing state"
 - Modify: `frontend/app/api-key-config-layout.test.ts`
 - Test: `frontend/components/ApiAccountsPanel.test.tsx`
 
-- [ ] **Step 1: Add failing rendered-structure assertions**
+- [x] **Step 1: Add failing rendered-structure assertions**
 
 Extend the panel tests to assert:
 
@@ -529,7 +531,7 @@ Extend the panel tests to assert:
 
 Extend `api-key-config-layout.test.ts` to require a two-column `.api-accounts-grid`, a single main overflow container, two-column `.api-account-basic-grid`, and one-column mobile overrides.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -539,7 +541,7 @@ npm test -- --run components/ApiAccountsPanel.test.tsx app/api-key-config-layout
 
 Expected: FAIL because the current panel always mounts the side-by-side list and form and shows three inline action buttons.
 
-- [ ] **Step 3: Render one personal-panel view at a time**
+- [x] **Step 3: Render one personal-panel view at a time**
 
 Change `ApiAccountsPanelView`:
 
@@ -560,13 +562,13 @@ return view === "list" ? (
 
 Keep the outer `.modal-card.api-accounts-panel` width stable across all views.
 
-- [ ] **Step 4: Build compact account items and action menus**
+- [x] **Step 4: Build compact account items and action menus**
 
 Render each account as one repeated item with optional provider logo, name, model, health text, default badge, and a `···` button with `aria-expanded`. Only one action menu may be open. Close it after an action or outside click. Use the existing callbacks without changing API behavior.
 
 Do not add search or batch actions.
 
-- [ ] **Step 5: Compose the personal editor**
+- [x] **Step 5: Compose the personal editor**
 
 Use `ApiCredentialEditorShell` in `ApiAccountForm`. Basic content uses a two-column grid; API Key and Base URL span the full row. Hide “启用” during create because the backend already creates enabled accounts. Disable provider selection in edit. Use `ThinkingConfigEditor` for non-Tavily accounts and omit the request tab for Tavily.
 
@@ -576,7 +578,7 @@ Footer behavior:
 - Save uses the existing create/update callbacks.
 - No “验证” button appears beside unsaved form values.
 
-- [ ] **Step 6: Replace split-panel styles**
+- [x] **Step 6: Replace split-panel styles**
 
 Remove dead `.api-accounts-layout` split-column rules. Add:
 
@@ -596,7 +598,7 @@ Remove dead `.api-accounts-layout` split-column rules. Add:
 
 Keep account items at `border-radius: 8px`. On `max-width: 640px`, make both grids one column and keep footer buttons within the viewport. Remove selectors that no longer match rendered elements.
 
-- [ ] **Step 7: Run personal-panel regressions and commit**
+- [x] **Step 7: Run personal-panel regressions and commit**
 
 Run:
 
@@ -621,7 +623,7 @@ git commit -m "fix: give personal API keys focused editing views"
 - Create temporarily outside repository: `$env:TEMP\api-key-config-qa.cjs`
 - Produce screenshots outside repository: `$env:TEMP\api-key-*.png`
 
-- [ ] **Step 1: Define the target flows**
+- [x] **Step 1: Define the target flows**
 
 Validate:
 
@@ -632,11 +634,11 @@ User menu -> AI service keys -> list -> edit -> request tab -> back
 User menu -> AI service keys -> create -> save validation state
 ```
 
-- [ ] **Step 2: Start the frontend with mocked APIs**
+- [x] **Step 2: Start the frontend with mocked APIs**
 
 Run the app on `http://127.0.0.1:3000`. Use the Browser plugin first if available; otherwise record “Browser plugin not available” and use regular Playwright with Microsoft Edge. Mock auth, model config, API account CRUD, health, and unrelated startup APIs without writing secrets.
 
-- [ ] **Step 3: Assert desktop geometry and interaction**
+- [x] **Step 3: Assert desktop geometry and interaction**
 
 At `1280x800`, programmatically assert:
 
@@ -649,13 +651,13 @@ At `1280x800`, programmatically assert:
 
 Capture model menu, official editor, personal list, and personal editor screenshots.
 
-- [ ] **Step 4: Assert mobile geometry and interaction**
+- [x] **Step 4: Assert mobile geometry and interaction**
 
 At `390x844`, repeat official editor and personal list/edit flows. Assert one-column items and fields, visible back/close/save controls, no horizontal scroll, and no body scroll trap.
 
 Capture personal list and request editor screenshots.
 
-- [ ] **Step 5: Check runtime health and clean up**
+- [x] **Step 5: Check runtime health and clean up**
 
 For every flow verify URL/title, meaningful body content, no framework overlay, zero relevant console warnings/errors, and zero `pageerror`. Stop only the recorded dev-server PID and confirm port 3000 is closed. Keep scripts and screenshots outside the repository.
 
@@ -665,7 +667,7 @@ For every flow verify URL/title, meaningful body content, no framework overlay, 
 
 - Verify all changed files; no additional production files expected.
 
-- [ ] **Step 1: Run focused frontend regression set**
+- [x] **Step 1: Run focused frontend regression set**
 
 Run:
 
@@ -676,7 +678,7 @@ npm test -- --run components/api-credentials components/ApiAccountsPanel.test.ts
 
 Expected: all selected files pass with zero failures.
 
-- [ ] **Step 2: Run full repository verification**
+- [x] **Step 2: Run full repository verification**
 
 From repository root:
 
@@ -686,7 +688,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-before-commit
 
 Expected: git whitespace checks, backend tests, frontend formatting, lint, all frontend tests, and production build pass.
 
-- [ ] **Step 3: Inspect scope and remove generated dependencies**
+- [x] **Step 3: Inspect scope and remove generated dependencies**
 
 Run:
 
@@ -698,11 +700,11 @@ git diff 66997b5 --name-only
 
 Expected: only the approved spec, plan, shared editor files, model modal/hook files, personal account files, focused styles, and tests appear. No `.superpowers`, screenshots, TEMP scripts, `.next`, logs, data, secrets, lockfile changes, or `node_modules` are staged. Remove worktree-only `frontend/node_modules` before final worktree cleanup, never stage it.
 
-- [ ] **Step 4: Request final code review**
+- [x] **Step 4: Request final code review**
 
 Review `66997b5..HEAD` against the design. Fix every Critical or Important issue, rerun affected tests, and repeat review until the branch is Ready to merge. Minor issues that affect documented behavior or regression coverage should also be resolved before integration.
 
-- [ ] **Step 5: Fast-forward merge and post-merge verification**
+- [x] **Step 5: Fast-forward merge and post-merge verification**
 
 After review and a clean worktree:
 

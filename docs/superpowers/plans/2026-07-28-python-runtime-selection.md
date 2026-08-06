@@ -1,5 +1,7 @@
 # Python Runtime Selection Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the development launcher select a Python interpreter that can load the real backend and report child-process startup failures immediately.
@@ -24,7 +26,7 @@
 - Modify: `tests/test_dev_script_boundaries.py`
 - Create: `tests/test_dev_python_selection.py`
 
-- [ ] **Step 1: Add a reusable PowerShell test runner**
+- [x] **Step 1: Add a reusable PowerShell test runner**
 
 Create a pytest helper that dot-sources `scripts/dev.ps1`, overrides selected PowerShell functions, evaluates an expression, and returns stdout:
 
@@ -61,7 +63,7 @@ Add a source-boundary test requiring the final dispatcher to be guarded when dot
 assert "$MyInvocation.InvocationName -ne '.'" in source
 ```
 
-- [ ] **Step 2: Add failing interpreter-selection behavior tests**
+- [x] **Step 2: Add failing interpreter-selection behavior tests**
 
 Override candidate and probe functions in PowerShell so the first interpreter is runnable but cannot import the app and the second is healthy:
 
@@ -84,7 +86,7 @@ def test_runtime_selection_skips_runnable_interpreter_that_cannot_import_app():
 
 Add a second test without `-RequireBackendDependencies` and assert `broken-python` is returned for install mode. Add a third test where neither candidate is healthy and assert the result is empty and diagnostic entries identify both rejected candidates.
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 Run:
 
@@ -94,7 +96,7 @@ python -m pytest -q tests/test_dev_python_selection.py tests/test_dev_script_bou
 
 Expected: FAIL because the script invokes its dispatcher when dot-sourced and the new candidate/import functions or switch do not exist.
 
-- [ ] **Step 4: Add candidate enumeration and real import probing**
+- [x] **Step 4: Add candidate enumeration and real import probing**
 
 Replace inline candidate construction with:
 
@@ -139,7 +141,7 @@ function Resolve-ProjectPython {
 
 De-duplicate candidates case-insensitively without resolving command names into paths before testing them.
 
-- [ ] **Step 5: Use healthy selection in doctor, start, and status**
+- [x] **Step 5: Use healthy selection in doctor, start, and status**
 
 `Invoke-Doctor` and `Invoke-Start` call `Resolve-ProjectPython -RequireBackendDependencies`. `Invoke-Install` calls it without the switch. `Invoke-Status` prefers the Python recorded in runtime metadata for running services; otherwise it resolves a healthy interpreter.
 
@@ -149,7 +151,7 @@ When candidates are rejected, doctor prints one warning per interpreter. If no h
 No Python interpreter can import app.main. Run scripts\dev.ps1 install or set BILIBILI_RAG_PYTHON.
 ```
 
-- [ ] **Step 6: Guard normal dispatch when dot-sourced**
+- [x] **Step 6: Guard normal dispatch when dot-sourced**
 
 Replace the unconditional final call with:
 
@@ -159,7 +161,7 @@ if ($MyInvocation.InvocationName -ne ".") {
 }
 ```
 
-- [ ] **Step 7: Run tests and verify GREEN**
+- [x] **Step 7: Run tests and verify GREEN**
 
 Run:
 
@@ -169,7 +171,7 @@ python -m pytest -q tests/test_dev_python_selection.py tests/test_dev_script_bou
 
 Expected: all tests pass; the fallback test selects `healthy-python`, while install-mode selection returns `broken-python`.
 
-- [ ] **Step 8: Commit interpreter selection**
+- [x] **Step 8: Commit interpreter selection**
 
 ```powershell
 git add scripts/dev.ps1 tests/test_dev_script_boundaries.py tests/test_dev_python_selection.py
@@ -183,7 +185,7 @@ git commit -m "fix: select a healthy backend Python runtime"
 - Modify: `scripts/dev.ps1:431-447, 674-691`
 - Modify: `tests/test_dev_python_selection.py`
 
-- [ ] **Step 1: Add a failing early-exit test**
+- [x] **Step 1: Add a failing early-exit test**
 
 Start a real PowerShell child that exits with code 23, wait for it, and call the new process-aware helper with a long nominal timeout. Assert it returns false in under two seconds and exposes exit code 23:
 
@@ -206,7 +208,7 @@ def test_wait_port_stops_when_child_process_exits():
     assert int(elapsed) < 2000
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -216,7 +218,7 @@ python -m pytest -q tests/test_dev_python_selection.py::test_wait_port_stops_whe
 
 Expected: FAIL because `Wait-Port` does not accept `-Process` and waits by timeout only.
 
-- [ ] **Step 3: Add process-aware waiting**
+- [x] **Step 3: Add process-aware waiting**
 
 Extend `Wait-Port` with an optional `System.Diagnostics.Process` parameter. On every poll, refresh the process and return false immediately when `HasExited` is true:
 
@@ -229,7 +231,7 @@ if ($Process) {
 
 Keep the existing one-second polling interval and port-ready behavior.
 
-- [ ] **Step 4: Pass child processes and report exit codes**
+- [x] **Step 4: Pass child processes and report exit codes**
 
 Pass `$backendProcess` and `$frontendProcess` to their respective `Wait-Port` calls. When readiness fails, show both output and error logs, then distinguish early exit from timeout:
 
@@ -242,7 +244,7 @@ throw "Backend did not become ready on port 8000."
 
 Apply the same pattern to the frontend process.
 
-- [ ] **Step 5: Run focused and repository tests**
+- [x] **Step 5: Run focused and repository tests**
 
 Run:
 
@@ -253,7 +255,7 @@ python -m pytest -q tests
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit fast failure**
+- [x] **Step 6: Commit fast failure**
 
 ```powershell
 git add scripts/dev.ps1 tests/test_dev_python_selection.py
@@ -266,7 +268,7 @@ git commit -m "fix: fail fast when development services exit"
 
 - Verification only.
 
-- [ ] **Step 1: Stop the temporary runtime**
+- [x] **Step 1: Stop the temporary runtime**
 
 Run from the worktree:
 
@@ -276,7 +278,7 @@ Run from the worktree:
 
 Expected: ports 8000 and 3000 are free.
 
-- [ ] **Step 2: Verify doctor selects the healthy interpreter**
+- [x] **Step 2: Verify doctor selects the healthy interpreter**
 
 Clear only the process-level override and run doctor:
 
@@ -287,7 +289,7 @@ Remove-Item Env:BILIBILI_RAG_PYTHON -ErrorAction SilentlyContinue
 
 Expected: doctor warns that the incomplete Conda interpreter was rejected and reports Python 3.12 as healthy.
 
-- [ ] **Step 3: Start through the worktree batch file without overrides**
+- [x] **Step 3: Start through the worktree batch file without overrides**
 
 ```powershell
 cmd.exe /d /c "启动.bat -NoBrowser"
@@ -295,7 +297,7 @@ cmd.exe /d /c "启动.bat -NoBrowser"
 
 Expected: command exits zero, runtime metadata records the Python 3.12 executable, and both ports become ready.
 
-- [ ] **Step 4: Verify health and status**
+- [x] **Step 4: Verify health and status**
 
 ```powershell
 (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/docs -TimeoutSec 5).StatusCode
@@ -305,7 +307,7 @@ Expected: command exits zero, runtime metadata records the Python 3.12 executabl
 
 Expected: both HTTP status codes are 200; status reports both processes running and the runtime Python is Python 3.12.
 
-- [ ] **Step 5: Run repository verification**
+- [x] **Step 5: Run repository verification**
 
 ```powershell
 & .\scripts\verify-before-commit.ps1
@@ -313,7 +315,7 @@ Expected: both HTTP status codes are 200; status reports both processes running 
 
 Expected: backend tests, frontend tests, lint, formatting, and production build pass.
 
-- [ ] **Step 6: Push the existing branch**
+- [x] **Step 6: Push the existing branch**
 
 ```powershell
 git status --short

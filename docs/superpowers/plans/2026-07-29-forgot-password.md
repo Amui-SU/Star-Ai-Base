@@ -1,5 +1,7 @@
 # Forgot Password Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a secure email-code password reset flow to the login page that revokes existing sessions and returns the user to password login.
@@ -37,7 +39,7 @@
 - Modify: `tests/service_boundaries/test_model_boundaries.py`
 - Modify: `tests/test_schema_compatibility.py`
 
-- [ ] **Step 1: Write failing schema and boundary tests**
+- [x] **Step 1: Write failing schema and boundary tests**
 
 Add `PasswordResetSendCodeRequest` and `PasswordResetConfirmRequest` to the auth schema name set in `tests/service_boundaries/test_model_boundaries.py`, and add compatibility assertions in `tests/test_schema_compatibility.py`:
 
@@ -52,7 +54,7 @@ assert send_request.email == "member@example.com"
 assert confirm_request.new_password == "new password"
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run:
 
@@ -62,7 +64,7 @@ python -m pytest tests/service_boundaries/test_model_boundaries.py tests/test_sc
 
 Expected: FAIL because both request classes are missing.
 
-- [ ] **Step 3: Add the minimal DTOs and ORM table**
+- [x] **Step 3: Add the minimal DTOs and ORM table**
 
 Add to `app/schemas/auth.py`:
 
@@ -93,11 +95,11 @@ class PasswordResetCode(Base):
 
 The new table is created for existing SQLite installations by the existing `Base.metadata.create_all` startup path; do not add a legacy-column migration.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the Step 2 command. Expected: all selected tests PASS.
 
-- [ ] **Step 5: Commit the model boundary**
+- [x] **Step 5: Commit the model boundary**
 
 ```powershell
 git add app/models.py app/schemas/auth.py tests/service_boundaries/test_model_boundaries.py tests/test_schema_compatibility.py
@@ -112,7 +114,7 @@ git commit -m "feat: add password reset contracts"
 - Create: `tests/system_auth/test_password_reset.py`
 - Modify: `app/routers/system_auth.py`
 
-- [ ] **Step 1: Write failing send-code behavior tests**
+- [x] **Step 1: Write failing send-code behavior tests**
 
 Create helpers and tests in `tests/system_auth/test_password_reset.py` that register an active user, call the dedicated endpoint, and inspect the debug response:
 
@@ -181,7 +183,7 @@ async def test_reset_send_rejects_a_second_active_code(client):
     assert response.status_code == 429
 ```
 
-- [ ] **Step 2: Run the send tests and verify RED**
+- [x] **Step 2: Run the send tests and verify RED**
 
 Run:
 
@@ -191,7 +193,7 @@ python -m pytest tests/system_auth/test_password_reset.py -q
 
 Expected: FAIL with 404 because the reset routes do not exist.
 
-- [ ] **Step 3: Implement the send service**
+- [x] **Step 3: Implement the send service**
 
 In `app/services/system_auth_password_reset.py`, define constants by reusing `CODE_TTL_SECONDS` and helpers from `system_auth_codes`, then implement this interface:
 
@@ -250,7 +252,7 @@ async def send_password_reset_code(
 
 Use the existing project strings if the source files encode Chinese wording differently; keep response semantics exactly as asserted.
 
-- [ ] **Step 4: Add the thin send route**
+- [x] **Step 4: Add the thin send route**
 
 Import the request DTO and service, then add to `app/routers/system_auth.py`:
 
@@ -270,11 +272,11 @@ async def send_password_reset_code_route(
     )
 ```
 
-- [ ] **Step 5: Run the send tests and verify GREEN**
+- [x] **Step 5: Run the send tests and verify GREEN**
 
 Run the send-code tests selected by `-k "send or receives"`. Expected: all selected tests PASS. The unknown-email confirmation assertion is added in Task 3 after the confirm route exists.
 
-- [ ] **Step 6: Commit the send slice**
+- [x] **Step 6: Commit the send slice**
 
 ```powershell
 git add app/services/system_auth_password_reset.py app/routers/system_auth.py tests/system_auth/test_password_reset.py
@@ -289,7 +291,7 @@ git commit -m "feat: send password reset codes"
 - Modify: `app/routers/system_auth.py`
 - Modify: `tests/system_auth/test_password_reset.py`
 
-- [ ] **Step 1: Write failing confirmation and security tests**
+- [x] **Step 1: Write failing confirmation and security tests**
 
 Add tests that retain both a cookie and bearer token from registration, reset the password, then prove all security outcomes:
 
@@ -480,7 +482,7 @@ async def test_inactive_account_cannot_reset(client, db_session_factory):
     assert response.status_code == 400
 ```
 
-- [ ] **Step 2: Run confirmation tests and verify RED**
+- [x] **Step 2: Run confirmation tests and verify RED**
 
 Run:
 
@@ -490,7 +492,7 @@ python -m pytest tests/system_auth/test_password_reset.py -q
 
 Expected: FAIL because `/password-reset/confirm` is missing.
 
-- [ ] **Step 3: Implement confirmation as one success transaction**
+- [x] **Step 3: Implement confirmation as one success transaction**
 
 Add this public interface in `app/services/system_auth_password_reset.py`:
 
@@ -543,7 +545,7 @@ async def confirm_password_reset(
     return {"message": "瀵嗙爜宸查噸缃紝璇蜂娇鐢ㄦ柊瀵嗙爜鐧诲綍"}
 ```
 
-- [ ] **Step 4: Add the thin confirm route**
+- [x] **Step 4: Add the thin confirm route**
 
 ```python
 @router.post("/password-reset/confirm")
@@ -554,7 +556,7 @@ async def confirm_password_reset_route(
     return await _confirm_password_reset(db, payload=payload)
 ```
 
-- [ ] **Step 5: Run backend reset and authentication regressions**
+- [x] **Step 5: Run backend reset and authentication regressions**
 
 Run:
 
@@ -564,7 +566,7 @@ python -m pytest tests/system_auth/test_password_reset.py tests/system_auth/test
 
 Expected: all selected tests PASS.
 
-- [ ] **Step 6: Commit the confirm slice**
+- [x] **Step 6: Commit the confirm slice**
 
 ```powershell
 git add app/services/system_auth_password_reset.py app/routers/system_auth.py tests/system_auth/test_password_reset.py
@@ -578,7 +580,7 @@ git commit -m "feat: confirm password resets securely"
 - Modify: `frontend/lib/api/systemAuth.ts`
 - Create: `frontend/lib/api/__tests__/systemPasswordResetApi.test.ts`
 
-- [ ] **Step 1: Write failing request-contract tests**
+- [x] **Step 1: Write failing request-contract tests**
 
 Use `importApiForLocation` and a mocked fetch to assert both paths and bodies:
 
@@ -612,7 +614,7 @@ expect(fetchMock).toHaveBeenNthCalledWith(
 );
 ```
 
-- [ ] **Step 2: Run the API test and verify RED**
+- [x] **Step 2: Run the API test and verify RED**
 
 Run:
 
@@ -623,7 +625,7 @@ npx vitest run lib/api/__tests__/systemPasswordResetApi.test.ts
 
 Expected: FAIL because the methods do not exist.
 
-- [ ] **Step 3: Add the minimal API methods**
+- [x] **Step 3: Add the minimal API methods**
 
 Add to `systemAuthApi`:
 
@@ -645,11 +647,11 @@ confirmPasswordReset: (data: {
   }),
 ```
 
-- [ ] **Step 4: Run the API test and verify GREEN**
+- [x] **Step 4: Run the API test and verify GREEN**
 
 Run the Step 2 command. Expected: PASS.
 
-- [ ] **Step 5: Commit the API slice**
+- [x] **Step 5: Commit the API slice**
 
 ```powershell
 git add frontend/lib/api/systemAuth.ts frontend/lib/api/__tests__/systemPasswordResetApi.test.ts
@@ -667,7 +669,7 @@ git commit -m "feat: add password reset client"
 - Modify: `frontend/components/AuthPage.tsx`
 - Create: `frontend/components/AuthPage.password-reset.test.tsx`
 
-- [ ] **Step 1: Write failing interaction tests**
+- [x] **Step 1: Write failing interaction tests**
 
 Mock `sendPasswordResetCode` and `confirmPasswordReset`, then test the full visible flow:
 
@@ -694,7 +696,7 @@ Add separate test cases with the same explicit form queries and API mocks that:
 - display request errors and allow retry;
 - return to login without changing the email.
 
-- [ ] **Step 2: Run the component test and verify RED**
+- [x] **Step 2: Run the component test and verify RED**
 
 Run:
 
@@ -705,7 +707,7 @@ npx vitest run components/AuthPage.password-reset.test.tsx
 
 Expected: FAIL because the forgot-password button and auth state do not exist.
 
-- [ ] **Step 3: Add the reset auth state and hook contract**
+- [x] **Step 3: Add the reset auth state and hook contract**
 
 Change the type to:
 
@@ -725,7 +727,7 @@ backToLogin: () => void;
 
 Implement `handleSendPasswordResetCode` with the existing countdown helper and dedicated API method. Implement `handlePasswordReset` with these exact client checks in order: code required, password required, matching confirmation; on success clear code/password/confirmation, set step to `login`, and set the success notice. `startPasswordReset` clears login errors/passwords but preserves email; `backToLogin` clears reset secrets/errors and preserves email.
 
-- [ ] **Step 4: Render the entry point and reset form**
+- [x] **Step 4: Render the entry point and reset form**
 
 In `AuthLoginStep`, add:
 
@@ -747,11 +749,11 @@ Render it from `AuthCard`:
 
 Show the success notice above the login form with an accessible status element. Update `AuthPage` so the forgot-password title is `閲嶇疆瀵嗙爜` and its subtitle remains the normalized current email.
 
-- [ ] **Step 5: Run the component test and verify GREEN**
+- [x] **Step 5: Run the component test and verify GREEN**
 
 Run the Step 2 command. Expected: all reset component tests PASS.
 
-- [ ] **Step 6: Run existing auth layout regressions**
+- [x] **Step 6: Run existing auth layout regressions**
 
 Run:
 
@@ -761,7 +763,7 @@ npx vitest run components/AuthPage.test.tsx components/AuthPage.layout.test.ts
 
 Expected: all selected tests PASS.
 
-- [ ] **Step 7: Commit the UI slice**
+- [x] **Step 7: Commit the UI slice**
 
 ```powershell
 git add frontend/components/AuthPage.tsx frontend/components/AuthPage.password-reset.test.tsx frontend/components/auth/AuthCard.tsx frontend/components/auth/AuthCardSteps.tsx frontend/components/auth/authPageLogic.ts frontend/components/auth/useAuthForm.ts
@@ -774,7 +776,7 @@ git commit -m "feat: add forgot password form"
 
 - Modify only if verification exposes a defect in files already listed above.
 
-- [ ] **Step 1: Run targeted backend verification**
+- [x] **Step 1: Run targeted backend verification**
 
 ```powershell
 python -m pytest tests/system_auth/test_password_reset.py tests/system_auth/test_account_sessions.py tests/system_auth/test_email_codes.py tests/service_boundaries/test_model_boundaries.py tests/test_schema_compatibility.py -q
@@ -782,7 +784,7 @@ python -m pytest tests/system_auth/test_password_reset.py tests/system_auth/test
 
 Expected: all selected tests PASS with no new warnings.
 
-- [ ] **Step 2: Run targeted frontend verification**
+- [x] **Step 2: Run targeted frontend verification**
 
 ```powershell
 Set-Location frontend
@@ -793,11 +795,11 @@ npm run build
 
 Expected: all selected tests PASS, ESLint exits 0, and Next.js production build exits 0.
 
-- [ ] **Step 3: Inspect desktop and mobile rendering**
+- [x] **Step 3: Inspect desktop and mobile rendering**
 
 Start the app with the repository's normal local startup path and inspect the email, login, and forgot-password states at approximately 1440脳900 and 390脳844. Confirm the card stays within the viewport, all controls remain tappable, the current email is visible, the reset form does not overlap the header/demo panel, and keyboard focus order follows code 鈫?send button 鈫?password 鈫?confirmation 鈫?submit 鈫?back.
 
-- [ ] **Step 4: Run repository commit verification**
+- [x] **Step 4: Run repository commit verification**
 
 From the repository root:
 
@@ -810,7 +812,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-before-commit
 
 Expected: full backend tests, frontend formatting, lint, tests, build, and whitespace checks PASS.
 
-- [ ] **Step 5: Commit any verification-only fixes**
+- [x] **Step 5: Commit any verification-only fixes**
 
 If Step 1鈥? required changes, stage only the password-reset files and commit:
 
@@ -820,6 +822,6 @@ git commit -m "test: verify forgot password flow"
 
 If no files changed, do not create an empty commit.
 
-- [ ] **Step 6: Integrate and re-run targeted checks**
+- [x] **Step 6: Integrate and re-run targeted checks**
 
 Follow the repository worktree workflow: merge the feature branch into the original branch with `git merge --ff-only`, re-run the targeted commands from Steps 1 and 2 on the integrated branch, then remove the isolated worktree and its feature branch.

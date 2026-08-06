@@ -1,5 +1,7 @@
 # Worktree Dependency Reuse Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Prepare frontend dependencies in temporary worktrees within seconds when the main installation is provably compatible, with a safe isolated-install fallback.
@@ -16,7 +18,7 @@
 - **Task 4:** completed in `b1b7e81`; workflow docs, policy tests, and timing checks passed.
 - **Additional fix:** Git-normalized manifest comparison prevents LF/CRLF false mismatches.
 - **Verification:** `50 passed` in `tests/developer_workflow/test_worktree_deps.py`; warm compatible Prepare measured `3.676s` with no repeated tool calls. Initial creation measured `5.771s` because of PowerShell startup and first proof.
-- **Known limitation:** the current primary checkout's real `npm ls` reports extraneous packages, so it intentionally falls back to isolated preparation until that installation is cleaned.
+- **Dependency contract:** the frontend manifest records npm's lockfile-resolved optional packages explicitly, so a fresh `npm ci` produces a healthy `npm ls` result and compatible worktrees can reuse the primary installation.
 
 ---
 
