@@ -644,12 +644,8 @@ def test_prepare_accepts_direct_npm_cmd_entry(
         "npm-missing",
         "node-failure",
         "manifest-missing",
-        "manifest-mismatch",
         "manifest-git-symlink",
         "manifest-reparse",
-        "main-modules-missing",
-        "main-modules-file",
-        "main-modules-reparse",
         "npm-failure",
         "concurrent-isolated",
         "main-changed-after-proof",
@@ -676,10 +672,6 @@ def test_prepare_incompatible_or_unsafe_inputs_fail_without_creating_junction(
         environment["NODE_SHIM_EXIT"] = "9"
     elif failure_case == "manifest-missing":
         (target / "frontend" / "package-lock.json").unlink()
-    elif failure_case == "manifest-mismatch":
-        (target / "frontend" / "package.json").write_text(
-            '{"name":"different"}\n', encoding="utf-8"
-        )
     elif failure_case == "manifest-git-symlink":
         manifest = target / "frontend" / "package.json"
         symlink_blob = target / "symlink-target.txt"
@@ -711,21 +703,6 @@ def test_prepare_incompatible_or_unsafe_inputs_fail_without_creating_junction(
             environment,
         )
         cleanup.append(("junction", manifest))
-    elif failure_case == "main-modules-missing":
-        main_modules.rmdir()
-    elif failure_case == "main-modules-file":
-        main_modules.rmdir()
-        main_modules.write_text("not a directory", encoding="utf-8")
-        cleanup.append(("file", main_modules))
-    elif failure_case == "main-modules-reparse":
-        main_modules.rmdir()
-        outside.mkdir(exist_ok=True)
-        _checked(
-            ["cmd", "/c", "mklink", "/J", str(main_modules), str(outside)],
-            main,
-            environment,
-        )
-        cleanup.append(("junction", main_modules))
     elif failure_case == "npm-failure":
         environment["NPM_SHIM_EXIT"] = "17"
     elif failure_case == "concurrent-isolated":
@@ -746,7 +723,21 @@ def test_prepare_incompatible_or_unsafe_inputs_fail_without_creating_junction(
         else:
             assert not os.path.lexists(dependency)
         npm_calls = [call for call in _tool_calls(log) if call[0] == "npm"]
-        assert all(call[2] == ["ls", "--depth=0", "--json"] for call in npm_calls)
+        expected_arguments = {
+            "node-missing": [["ci"]],
+            "npm-missing": [],
+            "node-failure": [["ci"]],
+            "manifest-missing": [],
+            "manifest-git-symlink": [],
+            "manifest-reparse": [],
+            "npm-failure": [["ls", "--depth=0", "--json"], ["ci"]],
+            "concurrent-isolated": [["ls", "--depth=0", "--json"]],
+            "main-changed-after-proof": [["ls", "--depth=0", "--json"]],
+        }
+        assert [call[2] for call in npm_calls] == expected_arguments[failure_case]
+        assert all(call[2] not in (["install"], ["npx"]) for call in npm_calls)
+        if failure_case == "npm-failure":
+            assert "not implemented yet" not in failure.casefold()
     finally:
         for kind, path in reversed(cleanup):
             if kind == "junction":
@@ -829,8 +820,202 @@ def test_status_worktree_records_require_one_primary_first_field(
     assert "worktree" in failure.casefold() or "primary" in failure.casefold()
 
 
-def test_detach_is_explicitly_unimplemented(repositories) -> None:
-    _, allowed, _, environment = repositories
+@pytest.mark.skipif(os.name != "nt", reason="Windows isolated fallback contract")
+@pytest.mark.parametrize(
+    "mismatch", ["package", "lock", "missing-main", "invalid-main", "reparse-main"]
+)
+def test_prepare_uses_isolated_npm_ci_when_reuse_is_incompatible(
+    repositories, tool_shims: Path, tmp_path: Path, mismatch: str
+) -> None:
+    main, _, _, base_environment = repositories
+    target = _add_prepare_worktree(main, base_environment, f"fallback-{mismatch}")
+    main_modules = main / "frontend" / "node_modules"
+    main_modules.mkdir(exist_ok=True)
+    dependency = target / "frontend" / "node_modules"
+    log = tmp_path / f"fallback-{mismatch}.log"
+    environment = _tool_environment(base_environment, tool_shims, log)
+    environment["NPM_SHIM_CREATE_DIRECTORY"] = str(dependency)
 
-    failure = _failure(allowed, environment, "-Mode", "Detach")
-    assert "not implemented" in failure.casefold()
+    restore_main = False
+    if mismatch == "package":
+        (target / "frontend" / "package.json").write_text(
+            '{"name":"isolated-package"}\n', encoding="utf-8"
+        )
+    elif mismatch == "lock":
+        (target / "frontend" / "package-lock.json").write_text(
+            '{"name":"isolated-lock","lockfileVersion":3}\n', encoding="utf-8"
+        )
+    elif mismatch == "missing-main":
+        main_modules.rmdir()
+        restore_main = True
+    elif mismatch == "invalid-main":
+        main_modules.rmdir()
+        main_modules.write_text("not a directory", encoding="utf-8")
+        restore_main = True
+    else:
+        outside = main.parent / "outside-fallback-reparse-main"
+        main_modules.rmdir()
+        outside.mkdir(exist_ok=True)
+        _checked(
+            ["cmd", "/c", "mklink", "/J", str(main_modules), str(outside)],
+            main,
+            environment,
+        )
+        restore_main = True
+
+    try:
+        status = _status(target, environment, "-Mode", "Prepare")
+
+        assert status["state"] == "isolated"
+        assert dependency.is_dir()
+        assert not dependency.is_symlink()
+        assert _tool_calls(log) == [("npm", target / "frontend", ["ci"])]
+    finally:
+        if restore_main:
+            if mismatch == "reparse-main":
+                _checked(["cmd", "/c", "rmdir", str(main_modules)], main, environment)
+            elif main_modules.is_file():
+                main_modules.unlink()
+            main_modules.mkdir(exist_ok=True)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_manifest_change_detaches_shared_link_before_isolated_install(
+    repositories, tool_shims: Path, tmp_path: Path
+) -> None:
+    main, _, _, base_environment = repositories
+    target = _add_prepare_worktree(main, base_environment, "fallback-shared-change")
+    main_modules = main / "frontend" / "node_modules"
+    main_modules.mkdir(exist_ok=True)
+    sentinel = main_modules / "must-survive-shared-fallback.txt"
+    sentinel.write_text("safe", encoding="utf-8")
+    dependency = target / "frontend" / "node_modules"
+    first_log = tmp_path / "fallback-shared-first.log"
+    first_environment = _tool_environment(base_environment, tool_shims, first_log)
+    assert _status(target, first_environment, "-Mode", "Prepare")["state"] == "shared"
+
+    (target / "frontend" / "package.json").write_text(
+        '{"name":"changed-after-share"}\n', encoding="utf-8"
+    )
+    fallback_log = tmp_path / "fallback-shared-second.log"
+    fallback_environment = _tool_environment(base_environment, tool_shims, fallback_log)
+    fallback_environment["NPM_SHIM_CREATE_DIRECTORY"] = str(dependency)
+
+    status = _status(target, fallback_environment, "-Mode", "Prepare")
+
+    assert status["state"] == "isolated"
+    assert dependency.is_dir()
+    assert not dependency.is_symlink()
+    assert sentinel.read_text(encoding="utf-8") == "safe"
+    assert _tool_calls(fallback_log) == [("npm", target / "frontend", ["ci"])]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows isolated fallback contract")
+def test_prepare_rejects_non_directory_output_from_successful_npm_ci(
+    repositories, tool_shims: Path, tmp_path: Path
+) -> None:
+    main, _, _, base_environment = repositories
+    target = _add_prepare_worktree(main, base_environment, "fallback-output-file")
+    main_modules = main / "frontend" / "node_modules"
+    main_modules.mkdir(exist_ok=True)
+    (target / "frontend" / "package.json").write_text(
+        '{"name":"force-isolated-output"}\n', encoding="utf-8"
+    )
+    dependency = target / "frontend" / "node_modules"
+    log = tmp_path / "fallback-output-file.log"
+    environment = _tool_environment(base_environment, tool_shims, log)
+    environment["NPM_SHIM_CREATE_DIRECTORY"] = str(dependency)
+    environment["NPM_SHIM_REPLACE_DIRECTORY_WITH_FILE"] = str(dependency)
+
+    failure = _failure(target, environment, "-Mode", "Prepare")
+
+    assert "normal directory" in failure.casefold()
+    assert dependency.is_file()
+    assert dependency.read_text(encoding="utf-8") == "changed concurrently"
+    assert _tool_calls(log) == [("npm", target / "frontend", ["ci"])]
+
+
+def test_dependency_helper_avoids_recursive_or_implicit_dependency_commands() -> None:
+    source = SCRIPT.read_text(encoding="utf-8").casefold()
+
+    assert "remove-item" not in source
+    assert "cmd /c rmdir" not in source
+    assert 'invoke-checkedtool $npm @("install")' not in source
+    assert 'invoke-checkedtool $npm @("npx")' not in source
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_detach_removes_verified_link_but_preserves_main_sentinel(
+    repositories, tool_shims: Path, tmp_path: Path
+) -> None:
+    main, _, _, base_environment = repositories
+    target = _add_prepare_worktree(main, base_environment, "detach-shared")
+    main_modules = main / "frontend" / "node_modules"
+    main_modules.mkdir(exist_ok=True)
+    sentinel = main_modules / "must-survive-detach.txt"
+    sentinel.write_text("safe", encoding="utf-8")
+    dependency = target / "frontend" / "node_modules"
+    log = tmp_path / "detach-shared.log"
+    environment = _tool_environment(base_environment, tool_shims, log)
+    assert _status(target, environment, "-Mode", "Prepare")["state"] == "shared"
+
+    status = _status(target, environment, "-Mode", "Detach")
+
+    assert status["state"] == "missing"
+    assert not os.path.lexists(dependency)
+    assert sentinel.read_text(encoding="utf-8") == "safe"
+
+
+def test_detach_missing_is_idempotent(repositories) -> None:
+    main, _, _, environment = repositories
+    target = _add_prepare_worktree(main, environment, "detach-missing")
+
+    status = _status(target, environment, "-Mode", "Detach")
+
+    assert status["state"] == "missing"
+
+
+def test_detach_refuses_normal_directory_and_preserves_contents(repositories) -> None:
+    main, _, _, environment = repositories
+    target = _add_prepare_worktree(main, environment, "detach-isolated")
+    dependency = target / "frontend" / "node_modules"
+    dependency.mkdir(exist_ok=True)
+    marker = dependency / "owned.txt"
+    marker.write_text("keep", encoding="utf-8")
+
+    failure = _failure(target, environment, "-Mode", "Detach")
+
+    assert "verified junction" in failure.casefold()
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_detach_refuses_unexpected_junction_and_preserves_both_targets(
+    repositories, tmp_path: Path
+) -> None:
+    main, _, _, environment = repositories
+    target = _add_prepare_worktree(main, environment, "detach-unexpected")
+    dependency = target / "frontend" / "node_modules"
+    unexpected = tmp_path / "unexpected-modules"
+    unexpected.mkdir()
+    unexpected_marker = unexpected / "unexpected.txt"
+    unexpected_marker.write_text("keep", encoding="utf-8")
+    main_modules = main / "frontend" / "node_modules"
+    main_modules.mkdir(exist_ok=True)
+    main_marker = main_modules / "main.txt"
+    main_marker.write_text("keep", encoding="utf-8")
+    _checked(
+        ["cmd", "/c", "mklink", "/J", str(dependency), str(unexpected)],
+        target,
+        environment,
+    )
+
+    try:
+        failure = _failure(target, environment, "-Mode", "Detach")
+
+        assert "verified junction" in failure.casefold()
+        assert os.path.lexists(dependency)
+        assert unexpected_marker.read_text(encoding="utf-8") == "keep"
+        assert main_marker.read_text(encoding="utf-8") == "keep"
+    finally:
+        _checked(["cmd", "/c", "rmdir", str(dependency)], target, environment)

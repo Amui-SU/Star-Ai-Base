@@ -502,8 +502,78 @@ function Test-ExactJunction {
     }
 }
 
-if ($Mode -eq "Detach") {
-    throw "Mode '$Mode' is not implemented"
+function Assert-IsolatedInstallInputs {
+    param([Parameter(Mandatory = $true)][string]$TargetRoot)
+
+    $frontend = Normalize-Path (Join-Path $TargetRoot "frontend")
+    if (-not (Test-SafeDirectoryChain $TargetRoot $frontend -RequireAll)) {
+        throw "Target frontend must be a normal real directory for isolated preparation"
+    }
+    foreach ($relativePath in @("frontend/package.json", "frontend/package-lock.json")) {
+        [void](Assert-RealManifest $TargetRoot $relativePath)
+    }
+    return $frontend
+}
+
+function Remove-ExactJunctionLink {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ExpectedTarget
+    )
+
+    if (-not (Test-ExactJunction $Path $ExpectedTarget)) {
+        throw "Dependency path is not the verified junction to the main dependency directory"
+    }
+    [System.IO.Directory]::Delete($Path, $false)
+    if ($null -ne (Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue)) {
+        throw "Dependency junction still exists after detach"
+    }
+}
+
+function Remove-VerifiedSharedJunction {
+    param(
+        [Parameter(Mandatory = $true)][string]$DependencyPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedTarget,
+        [Parameter(Mandatory = $true)][string]$MainRoot,
+        [Parameter(Mandatory = $true)][string]$TargetRoot
+    )
+
+    $status = Get-DependencyStatus $DependencyPath $ExpectedTarget $MainRoot
+    if ($status.State -eq "missing") {
+        return
+    }
+    if ($status.State -ne "shared") {
+        throw "Detach only removes a verified junction to the main dependency directory"
+    }
+    $frontend = Normalize-Path (Join-Path $TargetRoot "frontend")
+    if (-not (Test-SafeDirectoryChain $TargetRoot $frontend -RequireAll)) {
+        throw "Dependency junction escaped the registered worktree"
+    }
+    Remove-ExactJunctionLink $DependencyPath $ExpectedTarget
+    if (-not (Test-SafeMainDependencyChain $MainRoot $ExpectedTarget)) {
+        throw "Main dependency directory became unsafe during detach"
+    }
+}
+
+function Invoke-IsolatedInstall {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetRoot,
+        [Parameter(Mandatory = $true)][string]$DependencyPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedTarget,
+        [Parameter(Mandatory = $true)][string]$MainRoot
+    )
+
+    $frontend = Assert-IsolatedInstallInputs $TargetRoot
+    if ($null -ne (Get-Item -LiteralPath $DependencyPath -Force -ErrorAction SilentlyContinue)) {
+        throw "Isolated preparation requires a missing dependency path"
+    }
+    $npm = Get-RealTool "npm" @(".exe", ".cmd")
+    [void](Invoke-CheckedTool $npm @("ci") $frontend "npm ci")
+    $installed = Get-DependencyStatus $DependencyPath $ExpectedTarget $MainRoot
+    if ($installed.State -ne "isolated") {
+        throw "Isolated dependency installation did not create a normal directory"
+    }
+    return $installed
 }
 
 try {
@@ -587,7 +657,12 @@ try {
         Join-Path (Join-Path $mainRoot "frontend") "node_modules"
     )
     $dependencyStatus = Get-DependencyStatus $dependencyPath $expectedTarget $mainRoot
-    if ($Mode -eq "Prepare") {
+    if ($Mode -eq "Detach") {
+        Remove-VerifiedSharedJunction `
+            $dependencyPath $expectedTarget $mainRoot $targetRoot
+        $dependencyStatus = Get-DependencyStatus $dependencyPath $expectedTarget $mainRoot
+    }
+    elseif ($Mode -eq "Prepare") {
         if ($dependencyStatus.State -eq "isolated") {
             # An existing normal directory is already a safe isolated preparation.
         }
@@ -595,40 +670,65 @@ try {
             throw "Unsafe dependency path cannot be prepared or overwritten; isolated preparation is required"
         }
         elseif ($dependencyStatus.State -eq "shared") {
-            Assert-CompatibleManifests $mainRoot $targetRoot
-            if (-not (Test-SafeMainDependencyChain $mainRoot $expectedTarget)) {
-                throw "Shared main dependency chain is unsafe; isolated preparation is required"
-            }
-        }
-        else {
-            Assert-CompatibleManifests $mainRoot $targetRoot
-            if (-not (Test-SafeMainDependencyChain $mainRoot $expectedTarget)) {
-                throw "Main node_modules must be a normal real directory; isolated preparation is required"
-            }
-            $node = Get-RealTool "node" @(".exe")
-            $npm = Get-RealTool "npm" @(".exe", ".cmd")
-            [void](Invoke-CheckedTool $node @("--version") $targetRoot "node --version")
-            $mainFrontend = Normalize-Path (Join-Path $mainRoot "frontend")
-            [void](Invoke-CheckedTool $npm @("ls", "--depth=0", "--json") $mainFrontend "npm ls")
-
-            if ($null -ne (Get-Item -LiteralPath $dependencyPath -Force -ErrorAction SilentlyContinue)) {
-                throw "Dependency path appeared concurrently; refusing to overwrite it"
-            }
-            $created = $false
+            [void](Assert-IsolatedInstallInputs $targetRoot)
+            $sharedCompatible = $true
             try {
-                [void](New-Item -ItemType Junction -Path $dependencyPath -Target $expectedTarget -ErrorAction Stop)
-                $created = $true
-                $dependencyStatus = Get-DependencyStatus $dependencyPath $expectedTarget $mainRoot
-                if ($dependencyStatus.State -ne "shared") {
-                    throw "Created dependency junction did not verify as shared"
+                Assert-CompatibleManifests $mainRoot $targetRoot
+                if (-not (Test-SafeMainDependencyChain $mainRoot $expectedTarget)) {
+                    throw "Shared main dependency chain is unsafe"
                 }
             }
             catch {
-                $creationError = $_.Exception.Message
-                if ($created -and (Test-ExactJunction $dependencyPath $expectedTarget)) {
-                    Remove-Item -LiteralPath $dependencyPath -Force -ErrorAction SilentlyContinue
+                $sharedCompatible = $false
+            }
+            if (-not $sharedCompatible) {
+                Remove-VerifiedSharedJunction `
+                    $dependencyPath $expectedTarget $mainRoot $targetRoot
+                $dependencyStatus = Invoke-IsolatedInstall `
+                    $targetRoot $dependencyPath $expectedTarget $mainRoot
+            }
+        }
+        else {
+            [void](Assert-IsolatedInstallInputs $targetRoot)
+            $reuseReady = $true
+            try {
+                Assert-CompatibleManifests $mainRoot $targetRoot
+                if (-not (Test-SafeMainDependencyChain $mainRoot $expectedTarget)) {
+                    throw "Main node_modules must be a normal real directory"
                 }
-                throw "Could not create a verified shared dependency junction: $creationError"
+                $node = Get-RealTool "node" @(".exe")
+                $npm = Get-RealTool "npm" @(".exe", ".cmd")
+                [void](Invoke-CheckedTool $node @("--version") $targetRoot "node --version")
+                $mainFrontend = Normalize-Path (Join-Path $mainRoot "frontend")
+                [void](Invoke-CheckedTool $npm @("ls", "--depth=0", "--json") $mainFrontend "npm ls")
+            }
+            catch {
+                $reuseReady = $false
+            }
+            if (-not $reuseReady) {
+                $dependencyStatus = Invoke-IsolatedInstall `
+                    $targetRoot $dependencyPath $expectedTarget $mainRoot
+            }
+            else {
+                if ($null -ne (Get-Item -LiteralPath $dependencyPath -Force -ErrorAction SilentlyContinue)) {
+                    throw "Dependency path appeared concurrently; refusing to overwrite it"
+                }
+                $created = $false
+                try {
+                    [void](New-Item -ItemType Junction -Path $dependencyPath -Target $expectedTarget -ErrorAction Stop)
+                    $created = $true
+                    $dependencyStatus = Get-DependencyStatus $dependencyPath $expectedTarget $mainRoot
+                    if ($dependencyStatus.State -ne "shared") {
+                        throw "Created dependency junction did not verify as shared"
+                    }
+                }
+                catch {
+                    $creationError = $_.Exception.Message
+                    if ($created -and (Test-ExactJunction $dependencyPath $expectedTarget)) {
+                        Remove-ExactJunctionLink $dependencyPath $expectedTarget
+                    }
+                    throw "Could not create a verified shared dependency junction: $creationError"
+                }
             }
         }
     }
@@ -644,7 +744,7 @@ catch {
     $message = $_.Exception.Message
     if ($Mode -eq "Prepare" -and
         $message.IndexOf("isolated", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
-        $message += "; isolated preparation is required and is not implemented yet"
+        $message += "; isolated preparation failed safely"
     }
     [System.Console]::Error.WriteLine("worktree-deps: $message")
     exit 1
