@@ -93,10 +93,10 @@ if [ "${#local_opt_ins[@]}" -eq 1 ] && [ "${local_opt_ins[0]}" = "true" ]; then
         exit 1
     fi
 
-    if command -v pwsh >/dev/null 2>&1; then
-        powershell_command=pwsh
-    elif command -v powershell.exe >/dev/null 2>&1; then
+    if command -v powershell.exe >/dev/null 2>&1; then
         powershell_command=powershell.exe
+    elif command -v pwsh >/dev/null 2>&1; then
+        powershell_command=pwsh
     elif command -v powershell >/dev/null 2>&1; then
         powershell_command=powershell
     else

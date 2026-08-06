@@ -370,6 +370,25 @@ def test_exact_local_true_dispatches_to_fixed_repository_verifier(
     ]
 
 
+def test_enabled_dispatch_prefers_native_powershell_exe_over_pwsh(
+    tmp_path: Path,
+) -> None:
+    repo, environment, log = _prepare_repo(tmp_path)
+    verifier = _add_repository_verifier(repo)
+    _tool(repo, "pwsh")
+    _tool(repo, "powershell.exe")
+    _configure_local(repo, environment, "true")
+
+    _run(repo, environment)
+
+    assert _records(log) == [
+        (
+            "powershell.exe",
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", verifier.as_posix()],
+        )
+    ]
+
+
 @pytest.mark.parametrize("value", ["false", "yes", "1", "TRUE", "true "])
 def test_noncanonical_local_values_do_not_dispatch(tmp_path: Path, value: str) -> None:
     repo, environment, log = _prepare_repo(tmp_path)
