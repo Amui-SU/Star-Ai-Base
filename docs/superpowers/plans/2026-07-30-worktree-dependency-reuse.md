@@ -8,6 +8,16 @@
 
 **Tech Stack:** PowerShell 5.1, Git worktrees, Windows NTFS junctions, npm, Python 3.12/pytest.
 
+## Completion Record
+
+- **Task 1:** completed in `ac361bd`; discovery/status contracts passed.
+- **Task 2:** completed in `f5d32df`; compatible junction reuse and idempotence passed.
+- **Task 3:** completed in `9c7bfcf`; isolated `npm ci` fallback and safe `Detach` passed.
+- **Task 4:** completed in `b1b7e81`; workflow docs, policy tests, and timing checks passed.
+- **Additional fix:** Git-normalized manifest comparison prevents LF/CRLF false mismatches.
+- **Verification:** `50 passed` in `tests/developer_workflow/test_worktree_deps.py`; warm compatible Prepare measured `3.676s` with no repeated tool calls. Initial creation measured `5.771s` because of PowerShell startup and first proof.
+- **Known limitation:** the current primary checkout's real `npm ls` reports extraneous packages, so it intentionally falls back to isolated preparation until that installation is cleaned.
+
 ---
 
 ## File map
@@ -24,7 +34,7 @@
 - Create: `scripts/worktree-deps.ps1`
 - Create: `tests/developer_workflow/test_worktree_deps.py`
 
-- [ ] **Step 1: Write failing registration and boundary tests**
+- [x] **Step 1: Write failing registration and boundary tests**
 
 ```python
 def test_status_rejects_main_checkout(worktree_repo):
@@ -55,13 +65,13 @@ def test_status_rejects_registered_worktree_outside_dot_worktrees(worktree_repo)
 All helper subprocesses use a 60-second timeout and process-tree cleanup from
 `tests/developer_workflow/support.py`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `python -m pytest -q tests/developer_workflow/test_worktree_deps.py -k status`
 
 Expected: FAIL because the helper script is absent.
 
-- [ ] **Step 3: Implement path discovery and registration**
+- [x] **Step 3: Implement path discovery and registration**
 
 ```powershell
 param(
@@ -108,7 +118,7 @@ reader and extract only `worktree <path>` fields into a `HashSet[string]`. It
 must use ordinal
 case-insensitive comparison on Windows and ordinal comparison elsewhere.
 
-- [ ] **Step 4: Implement status values**
+- [x] **Step 4: Implement status values**
 
 ```powershell
 function Get-DependencyState($TargetModules, $MainModules) {
@@ -146,7 +156,7 @@ A reparse point is `shared` only when its resolved target equals the main
 modules path; any other reparse point is `unsafe`. A normal directory is
 `isolated`.
 
-- [ ] **Step 5: Verify status GREEN and commit**
+- [x] **Step 5: Verify status GREEN and commit**
 
 Run: `python -m pytest -q tests/developer_workflow/test_worktree_deps.py -k status`
 
@@ -164,7 +174,7 @@ git commit -m "feat: inspect worktree dependency state safely"
 - Modify: `scripts/worktree-deps.ps1`
 - Modify: `tests/developer_workflow/test_worktree_deps.py`
 
-- [ ] **Step 1: Write failing compatibility tests**
+- [x] **Step 1: Write failing compatibility tests**
 
 ```python
 @pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
@@ -190,13 +200,13 @@ def test_prepare_is_idempotent_for_existing_verified_junction(worktree_fixture):
     assert calls("npm") == []
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `python -m pytest -q tests/developer_workflow/test_worktree_deps.py -k compatible`
 
 Expected: FAIL because `Prepare` has no junction path.
 
-- [ ] **Step 3: Implement compatibility proof**
+- [x] **Step 3: Implement compatibility proof**
 
 ```powershell
 function Test-ManifestsMatch($MainRoot, $TargetRoot) {
@@ -225,7 +235,7 @@ Before junction creation, require a runnable `node --version`, matching
 manifests, a normal non-reparse main modules directory, and successful
 `npm ls --depth=0 --json`.
 
-- [ ] **Step 4: Create only the validated junction**
+- [x] **Step 4: Create only the validated junction**
 
 ```powershell
 if ($state.Name -eq "missing" -and
@@ -246,7 +256,7 @@ Do not create parent directories outside the verified target worktree. If the
 target path already contains a normal directory, report `isolated` and leave it
 unchanged.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run: `python -m pytest -q tests/developer_workflow/test_worktree_deps.py -k "compatible or idempotent"`
 
@@ -264,7 +274,7 @@ git commit -m "feat: reuse compatible worktree dependencies"
 - Modify: `scripts/worktree-deps.ps1`
 - Modify: `tests/developer_workflow/test_worktree_deps.py`
 
-- [ ] **Step 1: Write failing fallback tests**
+- [x] **Step 1: Write failing fallback tests**
 
 ```python
 @pytest.mark.parametrize("mismatch", ["package", "lock", "missing-main", "invalid-main"])
@@ -291,7 +301,7 @@ def test_manifest_change_detaches_shared_link_before_isolated_install(worktree_f
     assert json.loads(run_helper(main, env, "Status", worktree).stdout)["state"] == "isolated"
 ```
 
-- [ ] **Step 2: Write failing detach safety tests**
+- [x] **Step 2: Write failing detach safety tests**
 
 ```python
 @pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
@@ -319,13 +329,13 @@ def test_detach_refuses_normal_directory(worktree_fixture):
 
 Add an unexpected-junction-target test and verify both targets remain intact.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run: `python -m pytest -q tests/developer_workflow/test_worktree_deps.py -k "isolated or detach"`
 
 Expected: FAIL because fallback and detach are absent.
 
-- [ ] **Step 4: Implement isolated fallback**
+- [x] **Step 4: Implement isolated fallback**
 
 When state is `missing` and compatibility fails, or state is `shared` but the
 manifests no longer match, call the same validated junction-removal function
@@ -348,7 +358,7 @@ if ($installed.Name -ne "isolated") {
 If state is already `isolated`, return success without reinstalling. If state
 is `unsafe`, fail without invoking npm.
 
-- [ ] **Step 5: Implement safe detach**
+- [x] **Step 5: Implement safe detach**
 
 ```powershell
 $state = Get-DependencyState $targetModules $mainModules
@@ -371,7 +381,7 @@ if (-not (Test-Path -LiteralPath $mainModules -PathType Container)) {
 Never call `Remove-Item -Recurse`, `cmd /c rmdir`, or delete the resolved
 junction target.
 
-- [ ] **Step 6: Verify GREEN and commit**
+- [x] **Step 6: Verify GREEN and commit**
 
 Run: `python -m pytest -q tests/developer_workflow/test_worktree_deps.py`
 
@@ -390,7 +400,7 @@ git commit -m "feat: isolate and detach worktree dependencies safely"
 - Modify: `docs/micro-task-template.md`
 - Modify: `tests/developer_workflow/test_worktree_deps.py`
 
-- [ ] **Step 1: Add failing policy assertions**
+- [x] **Step 1: Add failing policy assertions**
 
 ```python
 def test_worktree_policy_requires_dependency_detach_before_cleanup():
@@ -407,13 +417,13 @@ def test_template_forbids_dependency_mutation_while_shared():
     assert "shared" in template.lower()
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `python -m pytest -q tests/developer_workflow/test_worktree_deps.py -k policy`
 
 Expected: FAIL because the workflow documents do not include the helper.
 
-- [ ] **Step 3: Update the worktree sequence**
+- [x] **Step 3: Update the worktree sequence**
 
 Replace the unconditional dependency-install paragraph with these commands and
 rules:
@@ -429,7 +439,7 @@ State explicitly: while status is `shared`, do not run `npm install`,
 `npm ci`, or dependency update commands. Detach first when either manifest
 changes.
 
-- [ ] **Step 4: Measure the compatible path**
+- [x] **Step 4: Measure the compatible path**
 
 Create a disposable registered worktree under `.worktrees/timing-fixture`,
 ensure manifests match and main dependencies are valid, then run:
@@ -444,7 +454,7 @@ Expected: under five seconds and no recorded npm invocation. Run `Detach`,
 verify the main `node_modules` sentinel remains, then remove the disposable
 worktree from the main checkout.
 
-- [ ] **Step 5: Verify policy and all dependency contracts**
+- [x] **Step 5: Verify policy and all dependency contracts**
 
 Run:
 
@@ -455,7 +465,7 @@ git diff --check
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit documentation**
+- [x] **Step 6: Commit documentation**
 
 ```powershell
 git add -- AGENTS.md docs/micro-task-template.md tests/developer_workflow/test_worktree_deps.py
