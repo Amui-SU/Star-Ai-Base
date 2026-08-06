@@ -44,4 +44,4 @@ current repository policy.
 | [2026-07-30-deterministic-pre-commit-hooks.md](2026-07-30-deterministic-pre-commit-hooks.md)                     | completed  | Implemented and integrated.  |
 | [2026-07-30-path-aware-ci.md](2026-07-30-path-aware-ci.md)                                                       | completed  | Implemented and integrated.  |
 | [2026-07-30-worktree-dependency-reuse.md](2026-07-30-worktree-dependency-reuse.md)                               | completed  | Implemented and integrated.  |
-| [2026-08-06-dependency-and-plan-lifecycle.md](2026-08-06-dependency-and-plan-lifecycle.md)                       | planned    | Active implementation plan.  |
+| [2026-08-06-dependency-and-plan-lifecycle.md](2026-08-06-dependency-and-plan-lifecycle.md)                       | completed  | Implemented and integrated.  |

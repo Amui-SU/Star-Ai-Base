@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** planned
+**Status:** completed
 
 **Goal:** Make clean frontend installs reproducible and give every implementation plan an enforced lifecycle status.
 
@@ -11,6 +11,27 @@
 **Tech Stack:** Node.js, npm, JSON lockfile v3, GitHub Actions YAML, Python 3.12, pytest, Markdown.
 
 ---
+
+## Completion Record
+
+- **Dependency contract:** implemented in `cc36263`; the canonical baseline is
+  Node 22.13.1 with npm 10.9.2, and the three lockfile-resolved optional
+  dependencies are explicit and exact.
+- **Plan lifecycle:** implemented in `33a155d`; all 29 plans are indexed with
+  one standard status, 27 historical plans are completed, and the original
+  micro-task fast-lane plan is superseded by V2.
+- **Clean install:** a disposable npm 10.9.2 fixture installed 627 packages;
+  `npm ls --depth=0 --json` exited zero without a `problems` field.
+- **Focused verification:** `56 passed` across the dependency contract, plan
+  lifecycle, and worktree dependency suites.
+- **Backend verification:** `1540 passed, 6 skipped` in 29 minutes 17 seconds.
+- **Frontend verification:** `365 passed`; ESLint and the Next.js production
+  build passed. The isolated worktree required `VITEST_MAX_THREADS=4` to avoid
+  cold-directory scanner contention; no test threshold or repository setting
+  was changed.
+- **Commit verification:** both format and non-format verifier passes completed
+  all remaining steps. Backend pytest ran separately after the combined command
+  reached its original 30-minute tool timeout.
 
 ### Task 1: Lock The Frontend Dependency Contract
 
@@ -22,14 +43,14 @@
 - Modify: `.github/workflows/ci.yml`
 - Create: `tests/developer_workflow/test_frontend_dependency_contract.py`
 
-- [ ] **Step 1: Write failing toolchain and optional-dependency tests**
+- [x] **Step 1: Write failing toolchain and optional-dependency tests**
 
 Create tests that load `.nvmrc`, the manifest, lockfile, and CI YAML as text or
 structured JSON. Assert Node `22.13.1`, package manager `npm@10.9.2`, CI's use of
 `.nvmrc`, and exact optional versions for `@emnapi/runtime`,
 `@img/sharp-wasm32`, and `@tybys/wasm-util` in both manifest and lockfile.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -40,13 +61,13 @@ python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.p
 Expected: FAIL because `.nvmrc`, `packageManager`, optional declarations, and
 the CI node-version-file contract are absent.
 
-- [ ] **Step 3: Add the canonical toolchain baseline**
+- [x] **Step 3: Add the canonical toolchain baseline**
 
 Create `.nvmrc` containing `22.13.1`, set
 `"packageManager": "npm@10.9.2"` in `frontend/package.json`, and change the CI
 setup-node input from `node-version: "22"` to `node-version-file: ".nvmrc"`.
 
-- [ ] **Step 4: Record the optional compatibility dependencies**
+- [x] **Step 4: Record the optional compatibility dependencies**
 
 Add the following exact `optionalDependencies` and update only the existing
 lockfile through npm:
@@ -59,7 +80,7 @@ lockfile through npm:
 }
 ```
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run:
 
@@ -77,14 +98,14 @@ Expected: PASS.
 - Create: `docs/superpowers/plans/README.md`
 - Modify: `docs/superpowers/plans/*.md`
 
-- [ ] **Step 1: Write the failing lifecycle policy test**
+- [x] **Step 1: Write the failing lifecycle policy test**
 
 Scan every plan except `README.md`. Require one status matching
 `completed|partial|superseded|planned`, require every plan in the index exactly
 once, reject unchecked steps in completed plans, and require superseded entries
 to identify a replacement.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -95,27 +116,27 @@ python -m pytest -q tests/developer_workflow/test_plan_lifecycle.py
 Expected: FAIL because historical plans lack standardized status metadata and
 the index does not exist.
 
-- [ ] **Step 3: Add the lifecycle index and definitions**
+- [x] **Step 3: Add the lifecycle index and definitions**
 
 Create `docs/superpowers/plans/README.md` with the four status definitions and
 one row per plan. Mark the original `2026-07-28-micro-task-fast-lane.md` as
 `superseded` by `2026-07-29-micro-task-fast-lane-v2.md`; mark plans with current
 implementation evidence as `completed`.
 
-- [ ] **Step 4: Normalize historical plan headers and checklists**
+- [x] **Step 4: Normalize historical plan headers and checklists**
 
 Add one standard status line near each plan title. Convert remaining unchecked
 steps to checked steps only for plans classified `completed`. Replace the V2
 plan's non-standard historical status sentence with the standard status line
 while retaining its explanatory paragraph.
 
-- [ ] **Step 5: Remove stale dependency limitation text**
+- [x] **Step 5: Remove stale dependency limitation text**
 
 Update `2026-07-30-worktree-dependency-reuse.md` so its completion record names
 the optional-dependency contract instead of claiming the primary installation
 is currently unhealthy.
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 Run:
 
@@ -133,19 +154,19 @@ unchecked step.
 - Verify: `frontend/package.json`
 - Verify: `frontend/package-lock.json`
 
-- [ ] **Step 1: Create a disposable install fixture**
+- [x] **Step 1: Create a disposable install fixture**
 
 Copy only `frontend/package.json` and `frontend/package-lock.json` into a new
 temporary directory outside the repository.
 
-- [ ] **Step 2: Run the clean-install acceptance test**
+- [x] **Step 2: Run the clean-install acceptance test**
 
 Run `npm ci --no-audit --no-fund` followed by `npm ls --depth=0 --json` in the
 fixture.
 
 Expected: both commands exit zero and the JSON contains no `problems` field.
 
-- [ ] **Step 3: Verify the normal frontend workflow**
+- [x] **Step 3: Verify the normal frontend workflow**
 
 Run:
 
@@ -163,7 +184,7 @@ Expected: all commands exit zero.
 
 - Modify: `docs/superpowers/plans/2026-08-06-dependency-and-plan-lifecycle.md`
 
-- [ ] **Step 1: Run focused workflow regressions**
+- [x] **Step 1: Run focused workflow regressions**
 
 Run:
 
@@ -173,7 +194,7 @@ python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.p
 
 Expected: PASS, with only documented platform skips.
 
-- [ ] **Step 2: Run complete commit verification**
+- [x] **Step 2: Run complete commit verification**
 
 Run:
 
@@ -184,13 +205,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-before-commit
 
 Expected: PASS.
 
-- [ ] **Step 3: Mark this plan complete**
+- [x] **Step 3: Mark this plan complete**
 
 Change this plan's status to `completed`, check every step, and add a completion
 record with the fresh-install, frontend, workflow, and repository verification
 results.
 
-- [ ] **Step 4: Inspect and commit**
+- [x] **Step 4: Inspect and commit**
 
 Run `git diff --check`, inspect the complete diff, stage only the files named in
 this plan, and create focused commits for the dependency contract and plan
