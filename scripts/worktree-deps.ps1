@@ -379,6 +379,26 @@ function Assert-RealManifest {
     return $path
 }
 
+function Get-GitManifestObjectId {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    $result = Invoke-GitRaw @(
+        "-C", $Root, "hash-object", "--path=$RelativePath", "--", $RelativePath
+    )
+    $text = ConvertFrom-StrictGitText $result.Bytes "the manifest object ID"
+    if ($text.IndexOf([char]0) -ge 0) {
+        throw "Git returned invalid manifest object ID data: $RelativePath"
+    }
+    $lines = @($text -split "`r?`n" | Where-Object { $_.Length -gt 0 })
+    if ($lines.Count -ne 1 -or $lines[0] -notmatch '^[0-9a-fA-F]{40,64}$') {
+        throw "Git returned invalid manifest object ID: $RelativePath"
+    }
+    return [string]$lines[0]
+}
+
 function Assert-CompatibleManifests {
     param(
         [Parameter(Mandatory = $true)][string]$MainRoot,
@@ -388,10 +408,10 @@ function Assert-CompatibleManifests {
     foreach ($relativePath in @("frontend/package.json", "frontend/package-lock.json")) {
         $mainPath = Assert-RealManifest $MainRoot $relativePath
         $targetPath = Assert-RealManifest $TargetRoot $relativePath
-        $mainHash = (Get-FileHash -LiteralPath $mainPath -Algorithm SHA256).Hash
-        $targetHash = (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash
-        if (-not $mainHash.Equals($targetHash, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "Manifest SHA256 mismatch requires isolated preparation: $relativePath"
+        $mainObjectId = Get-GitManifestObjectId $MainRoot $relativePath
+        $targetObjectId = Get-GitManifestObjectId $TargetRoot $relativePath
+        if (-not $mainObjectId.Equals($targetObjectId, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Manifest Git object mismatch requires isolated preparation: $relativePath"
         }
     }
 }

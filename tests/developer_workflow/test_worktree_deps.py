@@ -596,6 +596,44 @@ def test_prepare_reuses_compatible_main_dependencies_idempotently(
     ]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows line-ending contract")
+def test_prepare_treats_git_normalized_manifest_line_endings_as_compatible(
+    repositories, tool_shims: Path, tmp_path: Path
+) -> None:
+    main, _, _, base_environment = repositories
+    _checked(["git", "config", "core.autocrlf", "true"], main, base_environment)
+    main_lock = main / "frontend" / "package-lock.json"
+    original_main_lock = main_lock.read_bytes()
+    main_lock.write_bytes(main_lock.read_bytes().replace(b"\r\n", b"\n"))
+    target = _add_prepare_worktree(main, base_environment, "prepare-crlf-compatible")
+    target_lock = target / "frontend" / "package-lock.json"
+    assert main_lock.read_bytes() != target_lock.read_bytes()
+    _checked(
+        ["git", "diff", "--quiet", "--", "frontend/package-lock.json"],
+        target,
+        base_environment,
+    )
+    main_modules = main / "frontend" / "node_modules"
+    main_modules.mkdir(exist_ok=True)
+    log = tmp_path / "compatible-crlf-tools.log"
+    environment = _tool_environment(base_environment, tool_shims, log)
+
+    try:
+        status = _status(target, environment, "-Mode", "Prepare")
+
+        assert status["state"] == "shared"
+        assert _tool_calls(log) == [
+            ("node", target, ["--version"]),
+            ("npm", main / "frontend", ["ls", "--depth=0", "--json"]),
+        ]
+    finally:
+        main_lock.write_bytes(original_main_lock)
+        _checked(["git", "config", "--unset", "core.autocrlf"], main, base_environment)
+        dependency = target / "frontend" / "node_modules"
+        if os.path.lexists(dependency):
+            _status(target, environment, "-Mode", "Detach")
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
 def test_prepare_preserves_existing_isolated_dependencies_without_tools(
     repositories, tool_shims: Path, tmp_path: Path
@@ -942,6 +980,29 @@ def test_dependency_helper_avoids_recursive_or_implicit_dependency_commands() ->
     assert "cmd /c rmdir" not in source
     assert 'invoke-checkedtool $npm @("install")' not in source
     assert 'invoke-checkedtool $npm @("npx")' not in source
+
+
+def test_worktree_policy_requires_dependency_detach_before_cleanup() -> None:
+    policy = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert "worktree-deps.ps1 -Mode Prepare" in policy
+    assert "worktree-deps.ps1 -Mode Status" in policy
+    assert "worktree-deps.ps1 -Mode Detach" in policy
+    assert policy.index("-Mode Detach") < policy.index("git worktree remove")
+
+
+def test_micro_task_template_forbids_dependency_mutation_while_shared() -> None:
+    template = (PROJECT_ROOT / "docs" / "micro-task-template.md").read_text(
+        encoding="utf-8"
+    )
+    lowered = template.casefold()
+
+    assert "worktree-deps.ps1 -Mode Prepare" in template
+    assert "worktree-deps.ps1 -Mode Detach" in template
+    assert "shared" in lowered
+    assert "npm install" in lowered
+    assert "npm ci" in lowered
+    assert lowered.index("-mode detach") < lowered.index("git worktree remove")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")

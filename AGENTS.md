@@ -131,20 +131,35 @@ worktree. Use one only when target files overlap existing changes or verificatio
 shares mutable state.
 
 1. Create the branch under `.worktrees/<slice-name>`.
-2. Confirm the baseline with targeted tests before editing.
-3. Write or update the failing test/guard first for behavior or boundary
-   changes.
-4. Make the smallest implementation that satisfies the test.
-5. Run targeted regressions in the worktree.
-6. For normal, high-risk, release, or escalated work, run the full commit
-   verification before committing.
-7. Merge back to `main` with `git merge --ff-only`.
-8. Re-run targeted regressions on `main`.
-9. Remove the worktree and branch.
+2. When frontend dependencies are needed, prepare them and inspect the reported
+   state:
 
-If `frontend/node_modules` is needed only for verification inside a temporary
-worktree, install it there, then remove it before removing the worktree. Never
-stage generated dependencies or build output.
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/worktree-deps.ps1 -Mode Prepare
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/worktree-deps.ps1 -Mode Status
+   ```
+
+3. Confirm the baseline with targeted tests before editing.
+4. Write or update the failing test/guard first for behavior or boundary
+   changes.
+5. Make the smallest implementation that satisfies the test.
+6. Run targeted regressions in the worktree.
+7. For normal, high-risk, release, or escalated work, run the full commit
+   verification before committing.
+8. Merge back to `main` with `git merge --ff-only`.
+9. Re-run targeted regressions on `main`.
+10. Detach shared dependencies before removing the worktree:
+
+    ```powershell
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/worktree-deps.ps1 -Mode Detach
+    git worktree remove .worktrees/<slice-name>
+    ```
+
+While dependency status is `shared`, do not run `npm install`, `npm ci`, or any
+dependency update command in that worktree. Run `Detach` first when either
+`frontend/package.json` or `frontend/package-lock.json` changes. Existing
+isolated dependencies are preserved. Never stage generated dependencies or
+build output.
 
 ## File Boundary Rules
 
