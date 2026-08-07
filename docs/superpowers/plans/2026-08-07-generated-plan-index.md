@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** planned
+**Status:** completed
 
 **Goal:** Generate the implementation-plan index deterministically from each plan's authoritative status field and detect committed index drift.
 
@@ -221,7 +221,7 @@ Run the combined pytest command from Step 2. Expected: all tests pass.
 - Modify: `docs/superpowers/plans/2026-08-07-generated-plan-index.md`
 - Modify: `docs/superpowers/plans/README.md`
 
-- [ ] **Step 1: Close the implementation plan**
+- [x] **Step 1: Close the implementation plan**
 
 Change this plan's status to `completed`, check every implementation step, add
 a completion record containing the exact verification commands, and rerun:
@@ -245,7 +245,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-before-commit
 Expected: all commands exit 0 with no formatting, lifecycle, backend, or
 whitespace failures.
 
-- [ ] **Step 3: Commit the implementation**
+- [x] **Step 3: Commit the implementation**
 
 Stage only the generator, focused tests, README, and this plan. Verify the
 staged file list, then commit:
@@ -254,9 +254,27 @@ staged file list, then commit:
 git commit -m "docs: generate implementation plan index"
 ```
 
-- [ ] **Step 4: Merge, recheck, and publish**
+- [x] **Step 4: Merge, recheck, and publish**
 
 Fast-forward merge the feature branch into
 `release/video-security-integration-20260729`, rerun the focused pytest and
 `--check` commands, remove the owned worktree, delete the merged feature branch,
 and push the release branch to `origin`.
+
+## Completion Record
+
+- TDD parser/renderer RED: the focused test failed because
+  `scripts/generate-plan-index.py` did not exist.
+- TDD marker/check RED: `6 failed, 4 passed` because marker replacement and
+  check/write functions were absent.
+- TDD committed-index RED: `1 failed, 14 passed` because README had no generated
+  marker pair.
+- Final focused verification: `16 passed` for the generator and lifecycle
+  suites, including the real `--check` CLI entry point.
+- Complete backend verification: `1551 passed, 6 skipped, 2 warnings`.
+- Commit verification: format and check modes passed with backend, frontend
+  tests, and frontend build intentionally de-duplicated; frontend lint passed in
+  both modes.
+- Integration: fast-forward merged through `1807694`, rechecked on the release
+  branch, detached shared dependencies, removed the owned worktree and feature
+  branch, and pushed `release/video-security-integration-20260729` to origin.

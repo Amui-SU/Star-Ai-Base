@@ -64,6 +64,6 @@ python scripts/generate-plan-index.py --check
 | [2026-07-30-path-aware-ci.md](2026-07-30-path-aware-ci.md)                                                       | completed  |
 | [2026-07-30-worktree-dependency-reuse.md](2026-07-30-worktree-dependency-reuse.md)                               | completed  |
 | [2026-08-06-dependency-and-plan-lifecycle.md](2026-08-06-dependency-and-plan-lifecycle.md)                       | completed  |
-| [2026-08-07-generated-plan-index.md](2026-08-07-generated-plan-index.md)                                         | planned    |
+| [2026-08-07-generated-plan-index.md](2026-08-07-generated-plan-index.md)                                         | completed  |
 
 <!-- END GENERATED PLAN INDEX -->
