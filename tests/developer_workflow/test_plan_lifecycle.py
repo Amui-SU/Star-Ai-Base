@@ -1,9 +1,11 @@
+import importlib.util
 import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PLANS_ROOT = PROJECT_ROOT / "docs" / "superpowers" / "plans"
 INDEX_PATH = PLANS_ROOT / "README.md"
+GENERATOR_PATH = PROJECT_ROOT / "scripts" / "generate-plan-index.py"
 ALLOWED_STATUSES = {"completed", "partial", "superseded", "planned"}
 STATUS_PATTERN = re.compile(
     r"^\*\*Status:\*\* (completed|partial|superseded|planned)$", re.MULTILINE
@@ -13,6 +15,12 @@ INDEX_ROW_PATTERN = re.compile(
     r"(completed|partial|superseded|planned)\s*\|",
     re.MULTILINE,
 )
+
+spec = importlib.util.spec_from_file_location("generate_plan_index", GENERATOR_PATH)
+assert spec is not None
+assert spec.loader is not None
+generator = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(generator)
 
 
 def implementation_plans() -> list[Path]:
@@ -43,6 +51,14 @@ def test_plan_index_matches_plan_files_and_declared_statuses():
         declared_status = STATUS_PATTERN.findall(path.read_text(encoding="utf-8"))[0]
         assert target == path.name
         assert indexed_status == declared_status
+
+
+def test_committed_plan_index_matches_generated_output():
+    current = INDEX_PATH.read_text(encoding="utf-8")
+    expected = generator.replace_generated_region(
+        current, generator.render_index(PLANS_ROOT)
+    )
+    assert current == expected
 
 
 def test_completed_plans_have_no_unchecked_steps():
