@@ -19,7 +19,7 @@
 - Create: `tests/developer_workflow/test_plan_index_generator.py`
 - Create: `scripts/generate-plan-index.py`
 
-- [ ] **Step 1: Write failing parser and renderer tests**
+- [x] **Step 1: Write failing parser and renderer tests**
 
 Create a test module that loads `scripts/generate-plan-index.py` with
 `importlib.util.spec_from_file_location`. Use temporary plan files to assert:
@@ -45,7 +45,7 @@ def test_render_index_sorts_plans_and_uses_declared_statuses(tmp_path):
 Also assert `extract_status()` raises `ValueError` for missing, duplicate, and
 unsupported statuses.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run:
 
@@ -55,7 +55,7 @@ python -m pytest -q tests/developer_workflow/test_plan_index_generator.py
 
 Expected: FAIL because `scripts/generate-plan-index.py` does not exist.
 
-- [ ] **Step 3: Implement status parsing and deterministic table rendering**
+- [x] **Step 3: Implement status parsing and deterministic table rendering**
 
 Implement these public functions without third-party dependencies:
 
@@ -89,7 +89,7 @@ def render_index(plans_root: Path) -> str:
     return "\n".join(lines)
 ```
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the command from Step 2. Expected: all parser and renderer tests pass.
 
@@ -100,7 +100,7 @@ Run the command from Step 2. Expected: all parser and renderer tests pass.
 - Modify: `tests/developer_workflow/test_plan_index_generator.py`
 - Modify: `scripts/generate-plan-index.py`
 
-- [ ] **Step 1: Write failing replacement and drift tests**
+- [x] **Step 1: Write failing replacement and drift tests**
 
 Add tests proving the generator replaces only the marked region, rejects
 missing or duplicate markers, writes in default mode, and does not write in
@@ -117,12 +117,12 @@ def test_update_index_check_mode_reports_drift_without_writing(tmp_path):
     assert index_path.read_text(encoding="utf-8") == original
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run the focused pytest command. Expected: FAIL because marker replacement and
 `update_index()` are not implemented.
 
-- [ ] **Step 3: Implement marker validation and CLI modes**
+- [x] **Step 3: Implement marker validation and CLI modes**
 
 Add exact marker constants and functions:
 
@@ -157,7 +157,7 @@ Use `argparse` for the sole public flag `--check`; resolve the project root
 from `Path(__file__).resolve().parents[1]`. Catch `ValueError`, print its message
 to stderr, and exit nonzero without modifying README.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the focused pytest command. Expected: all generator tests pass.
 
@@ -168,7 +168,7 @@ Run the focused pytest command. Expected: all generator tests pass.
 - Modify: `docs/superpowers/plans/README.md`
 - Modify: `tests/developer_workflow/test_plan_lifecycle.py`
 
-- [ ] **Step 1: Write the failing committed-index check**
+- [x] **Step 1: Write the failing committed-index check**
 
 Load the generator in the lifecycle test and add:
 
@@ -181,7 +181,7 @@ def test_committed_plan_index_matches_generated_output():
     assert current == expected
 ```
 
-- [ ] **Step 2: Run the lifecycle tests and verify RED**
+- [x] **Step 2: Run the lifecycle tests and verify RED**
 
 Run:
 
@@ -191,7 +191,7 @@ python -m pytest -q tests/developer_workflow/test_plan_index_generator.py tests/
 
 Expected: FAIL because README does not yet contain generated-region markers.
 
-- [ ] **Step 3: Mark the table and generate it**
+- [x] **Step 3: Mark the table and generate it**
 
 Update README to state that plan status fields are authoritative, remove the
 manual `Notes` column, surround the table with:
@@ -210,7 +210,7 @@ python scripts/generate-plan-index.py --check
 
 Expected: both commands exit 0; the second command changes no files.
 
-- [ ] **Step 4: Run focused workflow regression tests**
+- [x] **Step 4: Run focused workflow regression tests**
 
 Run the combined pytest command from Step 2. Expected: all tests pass.
 
@@ -230,7 +230,7 @@ a completion record containing the exact verification commands, and rerun:
 python scripts/generate-plan-index.py
 ```
 
-- [ ] **Step 2: Run repository verification**
+- [x] **Step 2: Run repository verification**
 
 Run:
 

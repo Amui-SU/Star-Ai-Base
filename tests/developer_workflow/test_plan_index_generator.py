@@ -1,4 +1,6 @@
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -120,3 +122,15 @@ def test_update_index_default_mode_writes_generated_content(tmp_path):
 
     assert result == 0
     assert "stale" not in index_path.read_text(encoding="utf-8")
+
+
+def test_cli_check_accepts_committed_index():
+    result = subprocess.run(
+        [sys.executable, str(GENERATOR_PATH), "--check"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
