@@ -53,3 +53,70 @@ def test_extract_status_rejects_invalid_status_fields(tmp_path, contents):
 
     with pytest.raises(ValueError):
         generator.extract_status(plan_path)
+
+
+def create_plan_fixture(tmp_path):
+    plans_root = tmp_path / "plans"
+    plans_root.mkdir()
+    (plans_root / "2026-01-plan.md").write_text(
+        "# Plan\n\n**Status:** planned\n", encoding="utf-8"
+    )
+    index_path = plans_root / "README.md"
+    index_path.write_text(
+        "# Index\n\n"
+        "<!-- BEGIN GENERATED PLAN INDEX -->\n\n"
+        "stale\n\n"
+        "<!-- END GENERATED PLAN INDEX -->\n\n"
+        "Footer\n",
+        encoding="utf-8",
+    )
+    return plans_root, index_path
+
+
+def test_replace_generated_region_preserves_surrounding_content(tmp_path):
+    plans_root, index_path = create_plan_fixture(tmp_path)
+    original = index_path.read_text(encoding="utf-8")
+
+    updated = generator.replace_generated_region(
+        original, generator.render_index(plans_root)
+    )
+
+    assert updated.startswith("# Index\n\n<!-- BEGIN GENERATED PLAN INDEX -->")
+    assert "[2026-01-plan.md](2026-01-plan.md)" in updated
+    assert updated.endswith("<!-- END GENERATED PLAN INDEX -->\n\nFooter\n")
+
+
+@pytest.mark.parametrize(
+    "index_text",
+    [
+        "# Missing markers\n",
+        "<!-- BEGIN GENERATED PLAN INDEX -->\n"
+        "<!-- BEGIN GENERATED PLAN INDEX -->\n"
+        "<!-- END GENERATED PLAN INDEX -->\n",
+        "<!-- END GENERATED PLAN INDEX -->\n" "<!-- BEGIN GENERATED PLAN INDEX -->\n",
+    ],
+    ids=["missing", "duplicate", "out-of-order"],
+)
+def test_replace_generated_region_rejects_invalid_markers(index_text):
+    with pytest.raises(ValueError):
+        generator.replace_generated_region(index_text, "| Plan | Status |")
+
+
+def test_update_index_check_mode_reports_drift_without_writing(tmp_path, capsys):
+    plans_root, index_path = create_plan_fixture(tmp_path)
+    original = index_path.read_text(encoding="utf-8")
+
+    result = generator.update_index(plans_root, index_path, check=True)
+
+    assert result == 1
+    assert index_path.read_text(encoding="utf-8") == original
+    assert "python scripts/generate-plan-index.py" in capsys.readouterr().out
+
+
+def test_update_index_default_mode_writes_generated_content(tmp_path):
+    plans_root, index_path = create_plan_fixture(tmp_path)
+
+    result = generator.update_index(plans_root, index_path, check=False)
+
+    assert result == 0
+    assert "stale" not in index_path.read_text(encoding="utf-8")
