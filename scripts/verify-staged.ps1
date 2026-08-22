@@ -276,7 +276,7 @@ function Get-PythonFormatterCommand {
         exit 1
     }
     if (
-        $isWindows -and
+        $runningOnWindows -and
         [System.IO.Path]::GetExtension($pythonPath).ToLowerInvariant() -ne ".exe"
     ) {
         Write-Fail "Python must resolve to a native python.exe executable on Windows."
@@ -300,7 +300,7 @@ function Get-NodeCommand {
         exit 1
     }
     if (
-        $isWindows -and
+        $runningOnWindows -and
         [System.IO.Path]::GetExtension($nodeCommand.Source).ToLowerInvariant() -ne ".exe"
     ) {
         Write-Fail "Node.js must resolve to a native node.exe executable on Windows."
@@ -422,7 +422,7 @@ function Get-FileSha256 {
 function Confirm-ApprovedNodeModulesJunction {
     param([string]$NodeModulesRoot)
 
-    if (-not $isWindows) {
+    if (-not $runningOnWindows) {
         Write-Fail "frontend/node_modules reparse points are allowed only for Windows junction reuse"
         exit 1
     }
@@ -641,10 +641,10 @@ function Resolve-PinnedPrettierCli {
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $frontendRoot = Join-Path $projectRoot "frontend"
 $projectRootPrefix = $projectRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
-$isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+$runningOnWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
     [System.Runtime.InteropServices.OSPlatform]::Windows
 )
-$pathComparison = if ($isWindows) {
+$pathComparison = if ($runningOnWindows) {
     [System.StringComparison]::OrdinalIgnoreCase
 }
 else {

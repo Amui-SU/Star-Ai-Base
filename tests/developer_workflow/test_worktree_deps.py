@@ -133,6 +133,24 @@ def test_status_handles_space_and_unicode_worktree_path(repositories) -> None:
     assert Path(status["dependencyPath"]) == allowed / "frontend" / "node_modules"
 
 
+def test_status_runs_under_powershell_core(repositories) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell Core is required for the cross-platform contract")
+    _, allowed, _, environment = repositories
+
+    result = run_command(
+        [pwsh, "-NoProfile", "-File", str(SCRIPT), "-WorktreePath", str(allowed)],
+        allowed,
+        environment,
+        timeout=60,
+    )
+
+    assert result.stderr == ""
+    status = json.loads(result.stdout)
+    assert Path(status["worktree"]) == allowed
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows path comparison contract")
 def test_registered_worktree_comparison_is_case_insensitive(repositories) -> None:
     _, allowed, _, environment = repositories

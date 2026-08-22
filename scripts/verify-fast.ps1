@@ -485,10 +485,10 @@ $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $frontendRoot = Join-Path $projectRoot "frontend"
 $projectRootPrefix = $projectRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
 $frontendRootPrefix = $frontendRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
-$isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+$runningOnWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
     [System.Runtime.InteropServices.OSPlatform]::Windows
 )
-$pathComparison = if ($isWindows) {
+$pathComparison = if ($runningOnWindows) {
     [System.StringComparison]::OrdinalIgnoreCase
 } else {
     [System.StringComparison]::Ordinal
@@ -680,7 +680,7 @@ if ($BackendTest.Count -gt 0) {
 if ($FrontendTest.Count -gt 0 -or $LintFile.Count -gt 0) {
     Push-Location $frontendRoot
     try {
-        $binSuffix = if ($isWindows) { ".cmd" } else { "" }
+        $binSuffix = if ($runningOnWindows) { ".cmd" } else { "" }
         $vitest = Join-Path $frontendRoot "node_modules/.bin/vitest$binSuffix"
         $eslint = Join-Path $frontendRoot "node_modules/.bin/eslint$binSuffix"
 

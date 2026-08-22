@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** planned
+**Status:** partial
 
 **Goal:** Make the release branch pass its Linux backend workflow and mandatory production dependency audit without weakening either guard.
 
@@ -32,14 +32,18 @@
 - Modify: `scripts/worktree-deps.ps1`
 - Test: `tests/fast_workflow/test_cli_targets.py`
 - Test: `tests/developer_workflow/test_verify_staged.py`
-- Test: `tests/developer_workflow/test_worktree_deps.py`
+- Modify: `tests/developer_workflow/test_worktree_deps.py`
 
 **Interfaces:**
 
 - Consumes: repository PowerShell scripts executed by fast, staged, and worktree workflow tests.
 - Produces: the internal `$runningOnWindows` Boolean flag in each affected script; no public CLI change.
 
-- [ ] **Step 1: Run the existing PowerShell Core workflows and verify RED**
+- [x] **Step 1: Run the existing PowerShell Core workflows and verify RED**
+
+Add a focused worktree dependency test that invokes `worktree-deps.ps1`
+explicitly with `pwsh`, without changing the Windows-only shim compiler used by
+the rest of that module.
 
 Run:
 
@@ -53,13 +57,13 @@ python -m pytest -q `
 Expected: all three workflows fail under `pwsh` with `Cannot overwrite variable
 IsWindows because it is read-only or constant`.
 
-- [ ] **Step 2: Apply the minimal mechanical rename**
+- [x] **Step 2: Apply the minimal mechanical rename**
 
 In each affected script, change the declaration and every read of
 `$isWindows` to `$runningOnWindows`. Do not change the expressions that compute
 the Boolean or either branch selected from it.
 
-- [ ] **Step 3: Verify the focused workflows and regressions**
+- [x] **Step 3: Verify the focused workflows and regressions**
 
 Run:
 
@@ -73,9 +77,10 @@ python -m pytest -q `
 Expected: all tests pass, and no subprocess reports `Cannot overwrite variable
 IsWindows because it is read-only or constant`.
 
-- [ ] **Step 4: Commit the portability fix**
+- [x] **Step 4: Commit the portability fix**
 
-Stage only the three PowerShell scripts, verify the staged list, then commit:
+Stage only the test helper, plan, and three PowerShell scripts; verify the
+staged list, then commit:
 
 ```powershell
 git commit -m "fix: avoid PowerShell automatic variable collision"

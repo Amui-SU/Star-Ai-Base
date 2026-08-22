@@ -65,6 +65,6 @@ python scripts/generate-plan-index.py --check
 | [2026-07-30-worktree-dependency-reuse.md](2026-07-30-worktree-dependency-reuse.md)                               | completed  |
 | [2026-08-06-dependency-and-plan-lifecycle.md](2026-08-06-dependency-and-plan-lifecycle.md)                       | completed  |
 | [2026-08-07-generated-plan-index.md](2026-08-07-generated-plan-index.md)                                         | completed  |
-| [2026-08-22-ci-release-blockers.md](2026-08-22-ci-release-blockers.md)                                           | planned    |
+| [2026-08-22-ci-release-blockers.md](2026-08-22-ci-release-blockers.md)                                           | partial    |
 
 <!-- END GENERATED PLAN INDEX -->

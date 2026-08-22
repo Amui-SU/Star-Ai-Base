@@ -9,14 +9,14 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
-$isWindows = $env:OS -eq "Windows_NT"
-$pathComparer = if ($isWindows) {
+$runningOnWindows = $env:OS -eq "Windows_NT"
+$pathComparer = if ($runningOnWindows) {
     [System.StringComparer]::OrdinalIgnoreCase
 }
 else {
     [System.StringComparer]::Ordinal
 }
-$pathComparison = if ($isWindows) {
+$pathComparison = if ($runningOnWindows) {
     [System.StringComparison]::OrdinalIgnoreCase
 }
 else {
@@ -327,7 +327,7 @@ function Get-DependencyStatus {
                         $resolvedTarget = Normalize-Path (Join-Path $parent $targetText)
                     }
                     $stateTarget = $resolvedTarget
-                    if ($isWindows -and
+                    if ($runningOnWindows -and
                         [string]$dependencyItem.LinkType -ceq "Junction" -and
                         $pathComparer.Equals($resolvedTarget, $ExpectedTarget) -and
                         (Test-SafeMainDependencyChain $MainRoot $ExpectedTarget)) {
