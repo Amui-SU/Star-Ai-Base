@@ -292,6 +292,48 @@ branch again and push the documentation-only commit. Confirm its workflow
 finishes successfully, then remove the owned worktree, prune, and delete the
 merged feature branch.
 
+### Task 5: Resolve Linux Backend Failures Exposed By Remote CI
+
+**Files:**
+
+- Create: `requirements-dev.txt`
+- Modify: `.github/workflows/ci.yml`
+- Modify: `scripts/verify-staged.ps1`
+- Modify: `tests/developer_workflow/test_ci_paths.py`
+- Modify: `tests/developer_workflow/test_global_hook.py`
+- Modify: `tests/developer_workflow/test_hook_installer.py`
+- Modify: `tests/developer_workflow/test_support.py`
+- Modify: `tests/fast_workflow/test_execution_and_cleanup.py`
+- Modify: `tests/fast_workflow/test_static_scanning.py`
+
+- [x] **Step 1: Capture and classify the remote RED evidence**
+
+Push run `32577837180` and pull-request run `32577838401` both reported
+`50 failed, 1448 passed, 62 skipped`. Frontend and both high-severity audits
+passed in each run.
+
+- [x] **Step 2: Correct the platform and developer-tool contracts**
+
+Add a pinned development requirements file for Black, make CI install it,
+retain POSIX hook tests with the `python3` executable name, mark only the
+kernel32/Windows ACL installer module Windows-only, and scope Windows process
+and reparse checks to Windows.
+
+- [x] **Step 3: Run focused Windows regression**
+
+The affected workflow, support, CI-path, execution, and static-scanning modules
+must pass locally without weakening their Windows coverage.
+
+- [x] **Step 4: Run full local verification and commit the follow-up**
+
+Run the complete repository verifier, record exact counts, and commit the
+follow-up without closing the plan.
+
+- [ ] **Step 5: Fast-forward, push, and monitor replacement CI runs**
+
+Fast-forward the release branch, push without force, and require both new full
+CI runs to succeed before returning to Task 4 Step 5.
+
 ## Local Verification Record
 
 - PowerShell red evidence: fast and staged workflows failed under `pwsh` with
@@ -309,3 +351,11 @@ merged feature branch.
 - Complete pure-check verification: backend `1554 passed, 6 skipped, 2 warnings`;
   frontend `365 passed`; Prettier, ESLint, Next.js build, and Git whitespace
   checks passed.
+- First remote full CI: push `32577837180` and pull request `32577838401` each
+  passed Changes and Frontend but failed Backend with
+  `50 failed, 1448 passed, 62 skipped`; Task 5 tracks the surfaced Linux
+  contracts.
+- Linux follow-up focused regression: `228 passed, 4 skipped`.
+- Linux follow-up complete local verification: backend
+  `1555 passed, 6 skipped, 2 warnings`; frontend `365 passed`; Black, Prettier,
+  ESLint, Next.js build, and Git whitespace checks passed.

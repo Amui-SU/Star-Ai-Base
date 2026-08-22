@@ -824,8 +824,22 @@ def test_backend_uses_official_pip_cache() -> None:
     assert setup_python["with"] == {
         "python-version": "3.12",
         "cache": "pip",
-        "cache-dependency-path": "requirements.txt",
+        "cache-dependency-path": "requirements.txt\nrequirements-dev.txt\n",
     }
+
+
+def test_backend_installs_pinned_developer_tools() -> None:
+    backend = _job(_load_ci_workflow(), "backend")
+    install = next(
+        step
+        for step in _steps(backend)
+        if step.get("name") == "Install Python dependencies"
+    )
+
+    assert install["run"] == "python -m pip install -r requirements-dev.txt"
+    requirements = (PROJECT_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    assert "-r requirements.txt" in requirements
+    assert "black==26.5.1" in requirements
 
 
 def test_frontend_verification_steps_are_preserved() -> None:

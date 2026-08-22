@@ -96,6 +96,7 @@ def test_run_command_times_out_and_cleans_up_child_process_tree(tmp_path: Path) 
     assert not _process_exists(child_pid)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object ownership contract")
 def test_run_command_owns_child_when_parent_exits_before_timeout(
     tmp_path: Path,
 ) -> None:

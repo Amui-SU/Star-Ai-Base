@@ -16,6 +16,7 @@ from .support import init_repo, run_command
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 HOOK_SOURCE = PROJECT_ROOT / "scripts" / "git-hooks" / "pre-commit"
 _WINDOWS_GIT_SHIM: Path | None = None
+_PYTHON_FALLBACK = "python" if os.name == "nt" else "python3"
 
 
 def _git_bash() -> str:
@@ -453,7 +454,19 @@ def test_config_value_is_data_and_never_executed(tmp_path: Path) -> None:
     assert _records(log) == []
 
 
-@pytest.mark.parametrize("missing", ["script", "powershell"])
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "script",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                os.name != "nt",
+                reason="POSIX test PATH retains the system PowerShell Core executable",
+            ),
+        ),
+    ],
+)
 def test_enabled_repository_dispatch_fails_closed_when_prerequisite_missing(
     tmp_path: Path, missing: str
 ) -> None:
@@ -648,7 +661,10 @@ def test_newline_path_is_passed_as_one_literal_argument(tmp_path: Path) -> None:
             ("ruff", ["format", "--check", "--", "a.py", "b.py"]),
         ),
         (("black", "python"), ("black", ["--check", "--", "a.py", "b.py"])),
-        (("python",), ("python", ["-m", "py_compile", "--", "a.py", "b.py"])),
+        (
+            (_PYTHON_FALLBACK,),
+            (_PYTHON_FALLBACK, ["-m", "py_compile", "--", "a.py", "b.py"]),
+        ),
     ],
 )
 def test_python_tool_priority_and_batching(
@@ -677,12 +693,13 @@ def test_missing_optional_tools_warn_without_network_access(tmp_path: Path) -> N
     stderr = _run(repo, environment)
 
     assert "warning" in stderr.casefold()
-    assert "python" in stderr.casefold()
+    if os.name == "nt":
+        assert "python" in stderr.casefold()
     assert "prettier" in stderr.casefold()
     assert _records(log) == []
 
 
-@pytest.mark.parametrize("tool", ["ruff", "black", "python", "prettier"])
+@pytest.mark.parametrize("tool", ["ruff", "black", _PYTHON_FALLBACK, "prettier"])
 def test_tool_failure_is_propagated(tmp_path: Path, tool: str) -> None:
     repo, environment, _ = _prepare_repo(tmp_path)
     _tool(repo, tool, exit_code="29")

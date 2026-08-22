@@ -259,7 +259,7 @@ def test_untracked_symbolic_link_is_rejected_without_scanning_target(
     assert "trailing whitespace" not in output
 
 
-def test_static_file_rejects_case_variant_sibling_on_case_sensitive_filesystem(
+def test_static_file_rejects_parent_traversal_to_case_variant_sibling(
     verifier_repo: VerifierRepo,
 ):
     repo, environment = verifier_repo
@@ -275,7 +275,7 @@ def test_static_file_rejects_case_variant_sibling_on_case_sensitive_filesystem(
     result = run_verifier(repo, environment, "-StaticFile", "../REPO/outside.md")
 
     assert result.returncode != 0
-    assert "Static file must stay within project root" in result.stdout + result.stderr
+    assert "Static file target must not contain '..'" in result.stdout + result.stderr
 
 
 def test_static_file_rejects_symbolic_link_to_outside_repo(verifier_repo: VerifierRepo):

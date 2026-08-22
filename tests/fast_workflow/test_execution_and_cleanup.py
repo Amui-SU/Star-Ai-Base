@@ -131,6 +131,9 @@ def test_timeout_diagnostics_remain_bounded_when_a_descendant_keeps_pipes_open(
 
     monkeypatch.setattr(support.os, "name", "nt")
     monkeypatch.setattr(
+        support.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False
+    )
+    monkeypatch.setattr(
         support.subprocess, "Popen", lambda *args, **kwargs: FakeProcess()
     )
     monkeypatch.setattr(support.subprocess, "run", fail_taskkill)

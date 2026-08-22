@@ -95,6 +95,31 @@ successfully for the pushed commit. A skipped, cancelled, or failed required
 job is not success. Pull request 7 remains a draft after CI turns green; this
 task does not merge it into `main`.
 
+## Linux Suite Follow-Up
+
+The first post-fix remote runs (`32577837180` push and `32577838401` pull
+request) confirmed the complete frontend path but exposed 50 additional backend
+test failures after the automatic-variable collision was removed. The failures
+are test-environment contracts rather than application behavior regressions:
+
+- the Windows ACL/kernel32 hook installer suite was not marked Windows-only;
+- POSIX hook tests assumed the Windows `python` executable name and an isolated
+  PowerShell lookup despite retaining system tools on `PATH`;
+- CI installed runtime requirements but not the Black formatter exercised by
+  fast-workflow subprocess tests;
+- Windows-only process-tree unit branches referenced Windows subprocess
+  constants while running on Linux;
+- the staged verifier rejected the normal symbolic-link chain used by hosted
+  POSIX Python installations; and
+- one traversal test asserted a later containment error even though the script
+  rejects `..` earlier.
+
+Keep cross-platform hook and verifier behavior covered. Skip only the installer
+module whose production implementation explicitly depends on Windows ACLs and
+kernel32. Install pinned developer tooling through a separate
+`requirements-dev.txt`, preserve runtime-only `requirements.txt` for deployment,
+and limit executable reparse-path enforcement to Windows.
+
 ## Out Of Scope
 
 - Lowering or bypassing the production audit policy.

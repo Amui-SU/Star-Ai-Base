@@ -283,7 +283,10 @@ function Get-PythonFormatterCommand {
         exit 1
     }
     $pythonPathRoot = [System.IO.Path]::GetPathRoot($pythonPath)
-    if (Test-PathFromRootHasReparsePoint $pythonPath $pythonPathRoot $pythonPathRoot) {
+    if (
+        $runningOnWindows -and
+        (Test-PathFromRootHasReparsePoint $pythonPath $pythonPathRoot $pythonPathRoot)
+    ) {
         Write-Fail "Python executable path cannot contain a symbolic link or reparse point."
         exit 1
     }

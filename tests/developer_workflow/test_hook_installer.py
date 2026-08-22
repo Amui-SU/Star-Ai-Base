@@ -24,6 +24,11 @@ HOOK_SOURCE = PROJECT_ROOT / "scripts" / "git-hooks" / "pre-commit"
 _BASELINE_REPO: tuple[Path, dict[str, str]] | None = None
 _INTERNAL_HOST: _PersistentPowerShellHost | None = None
 
+pytestmark = pytest.mark.skipif(
+    os.name != "nt",
+    reason="The hook installer enforces Windows ACL and kernel32 file-identity contracts",
+)
+
 _INTERNAL_HOST_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
 $script:ManagedEnvironmentNames = @()
