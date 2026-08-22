@@ -86,7 +86,6 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
 
       - name: Report full dependency audit
-        continue-on-error: true
         run: npm audit --audit-level=high
 
       - name: Install Playwright Chromium

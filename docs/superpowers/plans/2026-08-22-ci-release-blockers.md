@@ -98,7 +98,7 @@ git commit -m "fix: avoid PowerShell automatic variable collision"
 - Consumes: `frontend/package.json`, `.nvmrc`, npm registry advisory data, and the npm 10 lockfile format.
 - Produces: a reproducible lockfile whose production tree contains `brace-expansion >=5.0.9` and `nanoid >=3.3.18` where those packages are resolved.
 
-- [ ] **Step 1: Detach shared dependencies and record the failing audit**
+- [x] **Step 1: Detach shared dependencies and record the failing audit**
 
 If `scripts/worktree-deps.ps1 -Mode Status` reports `shared`, run `-Mode Detach`
 before any npm mutation. Then use the pinned npm version:
@@ -112,7 +112,7 @@ npx --yes npm@10.9.2 audit --omit=dev --audit-level=high
 Expected: npm reports version `10.9.2`; the audit exits nonzero and names the
 existing production findings before the lockfile changes.
 
-- [ ] **Step 2: Apply the non-forced lockfile remediation**
+- [x] **Step 2: Apply the non-forced lockfile remediation**
 
 Run:
 
@@ -124,7 +124,7 @@ Do not add `--force`. Inspect the diff and stop if npm changes
 `frontend/package.json`, introduces a direct dependency, or performs a broad
 unrelated major upgrade.
 
-- [ ] **Step 3: Verify a clean reproducible install and audit GREEN**
+- [x] **Step 3: Verify a clean reproducible install and audit GREEN**
 
 Run:
 
@@ -137,7 +137,7 @@ npx --yes npm@10.9.2 audit --omit=dev --audit-level=high
 Expected: all commands exit 0; `npm ls` contains no `problems`; the production
 audit reports no high or critical vulnerabilities.
 
-- [ ] **Step 4: Verify dependency contracts and the frontend**
+- [x] **Step 4: Verify dependency contracts and the frontend**
 
 Run:
 
@@ -153,7 +153,7 @@ npm run build
 Expected: dependency contracts, frontend tests, lint, and production build all
 pass with the new lockfile.
 
-- [ ] **Step 5: Commit the lockfile remediation**
+- [x] **Step 5: Commit the lockfile remediation**
 
 Stage only `frontend/package-lock.json`, confirm `frontend/package.json` is
 unchanged, then commit:
@@ -162,7 +162,48 @@ unchanged, then commit:
 git commit -m "fix: remediate frontend production advisories"
 ```
 
-### Task 3: Verify And Integrate The Release Fixes
+### Task 3: Close The Resolved Dependency Exception
+
+**Files:**
+
+- Modify: `.github/workflows/ci.yml`
+- Modify: `docs/security/dependency-audit-exceptions.md`
+- Modify: `tests/test_ci_workflow.py`
+- Modify: `tests/test_dependency_security_policy.py`
+
+**Interfaces:**
+
+- Consumes: the patched development dependency tree and the expired temporary exception.
+- Produces: a blocking full high-severity audit and a dated closed-exception record.
+
+- [x] **Step 1: Write and run the failing security lifecycle contracts**
+
+Require the full audit step to omit `continue-on-error`, require the current
+register to contain no active exception, and retain generic deadline and
+removal-criteria checks for any future active exception.
+
+- [x] **Step 2: Close the exception and strengthen CI**
+
+Remove `continue-on-error` from the full dependency audit. Mark
+`GHSA-mh99-v99m-4gvg` closed on 2026-08-22 and record patched
+`brace-expansion` versions `1.1.18` and `5.0.9`.
+
+- [x] **Step 3: Verify the security policy and full audit**
+
+```powershell
+python -m pytest -q tests/test_ci_workflow.py tests/test_dependency_security_policy.py
+npx --yes npm@10.9.2 audit --audit-level=high
+```
+
+Expected: all policy tests pass and the full high-severity audit exits 0.
+
+- [x] **Step 4: Commit the security policy closure**
+
+```powershell
+git commit -m "ci: close resolved dependency audit exception"
+```
+
+### Task 4: Verify And Integrate The Release Fixes
 
 **Files:**
 
@@ -223,7 +264,9 @@ From the main repository, verify the release checkout is clean, then:
 ```powershell
 git merge --ff-only chore/ci-release-blockers
 python -m pytest -q `
-  tests/developer_workflow/test_powershell_platform_flag.py `
+  tests/fast_workflow/test_cli_targets.py::test_static_file_accepts_supported_extensions `
+  tests/developer_workflow/test_verify_staged.py::test_empty_index_succeeds_without_starting_formatters `
+  tests/developer_workflow/test_worktree_deps.py::test_status_runs_under_powershell_core `
   tests/developer_workflow/test_frontend_dependency_contract.py `
   tests/developer_workflow/test_plan_lifecycle.py
 python scripts/generate-plan-index.py --check

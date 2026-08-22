@@ -7,25 +7,17 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def assert_brace_expansion_exception_policy(policy: str) -> None:
-    for required in [
-        "GHSA-mh99-v99m-4gvg",
-        "development-only",
-        "2026-08-11",
-        "npm audit --omit=dev --audit-level=high",
-    ]:
-        assert required in policy
-
-    review_date_match = re.search(
-        r"Review no later than:\s*(\d{4}-\d{2}-\d{2})", policy
-    )
-    assert review_date_match
-    assert date.today() <= date.fromisoformat(review_date_match.group(1))
-
-    removal_marker = "- Removal criteria:"
-    assert removal_marker in policy
-    removal_criteria = policy.split(removal_marker, 1)[1]
-    assert "npm audit --audit-level=high" in removal_criteria
+def assert_dependency_exception_policy(policy: str) -> None:
+    sections = re.split(r"(?m)^#{2,3} ", policy)[1:]
+    for section in sections:
+        if "- Status: active" not in section:
+            continue
+        review_date_match = re.search(
+            r"Review no later than:\s*(\d{4}-\d{2}-\d{2})", section
+        )
+        assert review_date_match
+        assert date.today() <= date.fromisoformat(review_date_match.group(1))
+        assert "- Removal criteria:" in section
 
 
 def read_dependency_exception_policy() -> str:
@@ -34,13 +26,18 @@ def read_dependency_exception_policy() -> str:
     ).read_text(encoding="utf-8")
 
 
-def test_brace_expansion_exception_is_documented_and_time_bounded():
-    assert_brace_expansion_exception_policy(read_dependency_exception_policy())
-
-
-def test_brace_expansion_exception_rejects_missing_removal_criteria():
+def test_dependency_exceptions_are_current_or_closed():
     policy = read_dependency_exception_policy()
-    policy_without_removal_criteria = policy.split("- Removal criteria:", 1)[0]
+
+    assert_dependency_exception_policy(policy)
+    assert "- Status: active" not in policy
+    assert "GHSA-mh99-v99m-4gvg" in policy
+    assert "- Status: closed" in policy
+
+
+def test_active_dependency_exception_rejects_missing_lifecycle_fields():
+    policy = read_dependency_exception_policy()
+    invalid_policy = policy + "\n## GHSA-test\n\n- Status: active\n"
 
     with pytest.raises(AssertionError):
-        assert_brace_expansion_exception_policy(policy_without_removal_criteria)
+        assert_dependency_exception_policy(invalid_policy)

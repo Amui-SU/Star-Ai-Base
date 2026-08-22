@@ -25,6 +25,11 @@ committed lockfile resolves vulnerable transitive versions of
 required release guard, the workflow must not ignore or conditionally bypass
 the result.
 
+Local complete verification also exposes an expired development-dependency
+exception for `GHSA-mh99-v99m-4gvg`. The same non-forced lockfile remediation
+resolves patched `brace-expansion` versions for the development tree, and the
+full high-severity audit now exits successfully.
+
 ## PowerShell Portability Fix
 
 Rename the repository-owned platform flag to `$runningOnWindows` in all three
@@ -58,12 +63,19 @@ The required dependency acceptance checks are:
 npm ci --no-audit --no-fund
 npm ls --depth=0 --json
 npm audit --omit=dev --audit-level=high
+npm audit --audit-level=high
 ```
 
 The audit must exit zero. The dependency tree must have no `problems`. If npm
 cannot remediate both production findings without a manifest or direct
 dependency change, stop and reassess the smallest compatible upgrade rather
 than applying a forced major update.
+
+Because the full high-severity audit passes after the lockfile update, close
+the expired `GHSA-mh99-v99m-4gvg` exception with a dated resolution record and
+remove `continue-on-error` from the full audit CI step. Generic policy tests
+continue to reject active exceptions that lack a review deadline or removal
+criteria.
 
 ## Verification And Integration
 
@@ -87,8 +99,8 @@ task does not merge it into `main`.
 
 - Lowering or bypassing the production audit policy.
 - Broad dependency modernization unrelated to the reported advisories.
-- Fixing development-only audit findings that do not block the production
-  audit, unless they are removed by the same non-forced lockfile resolution.
+- Broad development-dependency upgrades beyond patches selected by the same
+  non-forced lockfile remediation.
 - Redesigning the fast or staged verification workflows.
 - Eliminating duplicate push and pull-request workflow runs.
 - Marking pull request 7 ready or merging it into `main`.

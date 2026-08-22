@@ -78,7 +78,7 @@ def assert_ci_security_policy(content: str) -> None:
 
     full_audit = steps["Report full dependency audit"]
     assert full_audit["run"] == "npm audit --audit-level=high"
-    assert full_audit["continue-on-error"] is True
+    assert "continue-on-error" not in full_audit
     assert "if" not in full_audit
 
 
@@ -176,6 +176,7 @@ def test_ci_security_policy_rejects_an_unbounded_new_job():
     [
         ("Audit production dependencies", "continue-on-error: ${{ true }}"),
         ("Audit production dependencies", "if: ${{ false }}"),
+        ("Report full dependency audit", "continue-on-error: ${{ true }}"),
         ("Report full dependency audit", "if: ${{ false }}"),
     ],
 )
