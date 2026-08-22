@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** partial
+**Status:** completed
 
 **Goal:** Make the release branch pass its Linux backend workflow and mandatory production dependency audit without weakening either guard.
 
@@ -257,7 +257,7 @@ Commit the plan and generated index with:
 git commit -m "docs: record CI blocker verification"
 ```
 
-- [ ] **Step 4: Fast-forward, recheck, push, and monitor full CI**
+- [x] **Step 4: Fast-forward, recheck, push, and monitor full CI**
 
 From the main repository, verify the release checkout is clean, then:
 
@@ -283,7 +283,7 @@ new full commit SHA. Wait for both to complete and confirm `Changes`, `Backend`,
 `Frontend`, and `CI Success` are successful in each run. Leave pull request 7
 as a draft and do not merge it.
 
-- [ ] **Step 5: Close the plan, push the record, and clean up**
+- [x] **Step 5: Close the plan, push the record, and clean up**
 
 Only after both full CI runs are green, mark every step completed, add the
 remote run IDs and results, set status to `completed`, regenerate the index,
@@ -329,7 +329,7 @@ must pass locally without weakening their Windows coverage.
 Run the complete repository verifier, record exact counts, and commit the
 follow-up without closing the plan.
 
-- [ ] **Step 5: Fast-forward, push, and monitor replacement CI runs**
+- [x] **Step 5: Fast-forward, push, and monitor replacement CI runs**
 
 Fast-forward the release branch, push without force, and require both new full
 CI runs to succeed before returning to Task 4 Step 5.
@@ -359,3 +359,6 @@ CI runs to succeed before returning to Task 4 Step 5.
 - Linux follow-up complete local verification: backend
   `1555 passed, 6 skipped, 2 warnings`; frontend `365 passed`; Black, Prettier,
   ESLint, Next.js build, and Git whitespace checks passed.
+- Replacement remote full CI: push run `32579588343` and pull-request run
+  `32579590159` both passed Changes, Backend, Frontend, and CI Success for
+  commit `4781017`.
