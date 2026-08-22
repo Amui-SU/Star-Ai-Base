@@ -38,11 +38,11 @@ Every read of the old local flag changes with its declaration. No behavior,
 path comparison, executable suffix, or junction rule changes beyond avoiding
 the automatic-variable collision.
 
-A focused developer-workflow contract scans these scripts and rejects an
-assignment to `$isWindows` with case-insensitive matching. Existing subprocess
-tests remain the behavioral proof that the scripts continue to enforce target,
-staging, and worktree boundaries. The Linux CI backend suite is the final
-cross-platform execution proof.
+Existing subprocess tests execute all three scripts with PowerShell Core and
+already fail on the automatic-variable collision. Those tests are the focused
+behavioral contract: they must pass after the rename while continuing to enforce
+target, staging, and worktree boundaries. The Linux CI backend suite is the
+final cross-platform execution proof.
 
 ## Dependency Remediation
 

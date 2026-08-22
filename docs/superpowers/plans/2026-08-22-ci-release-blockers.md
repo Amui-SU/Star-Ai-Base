@@ -27,66 +27,44 @@
 
 **Files:**
 
-- Create: `tests/developer_workflow/test_powershell_platform_flag.py`
 - Modify: `scripts/verify-fast.ps1`
 - Modify: `scripts/verify-staged.ps1`
 - Modify: `scripts/worktree-deps.ps1`
+- Test: `tests/fast_workflow/test_cli_targets.py`
+- Test: `tests/developer_workflow/test_verify_staged.py`
+- Test: `tests/developer_workflow/test_worktree_deps.py`
 
 **Interfaces:**
 
 - Consumes: repository PowerShell scripts executed by fast, staged, and worktree workflow tests.
 - Produces: the internal `$runningOnWindows` Boolean flag in each affected script; no public CLI change.
 
-- [ ] **Step 1: Write the failing platform-variable contract**
-
-Create a focused test that scans all three scripts case-insensitively:
-
-```python
-import re
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATHS = [
-    PROJECT_ROOT / "scripts" / "verify-fast.ps1",
-    PROJECT_ROOT / "scripts" / "verify-staged.ps1",
-    PROJECT_ROOT / "scripts" / "worktree-deps.ps1",
-]
-AUTOMATIC_VARIABLE_PATTERN = re.compile(r"\$iswindows\b", re.IGNORECASE)
-
-
-def test_powershell_scripts_do_not_shadow_iswindows_automatic_variable():
-    offenders = []
-    for path in SCRIPT_PATHS:
-        if AUTOMATIC_VARIABLE_PATTERN.search(path.read_text(encoding="utf-8")):
-            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
-
-    assert offenders == []
-```
-
-- [ ] **Step 2: Run the test and verify RED**
-
-Run:
-
-```powershell
-python -m pytest -q tests/developer_workflow/test_powershell_platform_flag.py
-```
-
-Expected: FAIL listing all three scripts because PowerShell variable names are
-case-insensitive and each contains `$isWindows`.
-
-- [ ] **Step 3: Apply the minimal mechanical rename**
-
-In each affected script, change the declaration and every read of
-`$isWindows` to `$runningOnWindows`. Do not change the expressions that compute
-the Boolean or either branch selected from it.
-
-- [ ] **Step 4: Verify the focused contract and workflow regressions**
+- [ ] **Step 1: Run the existing PowerShell Core workflows and verify RED**
 
 Run:
 
 ```powershell
 python -m pytest -q `
-  tests/developer_workflow/test_powershell_platform_flag.py `
+  tests/fast_workflow/test_cli_targets.py::test_static_file_accepts_supported_extensions `
+  tests/developer_workflow/test_verify_staged.py::test_empty_index_succeeds_without_starting_formatters `
+  tests/developer_workflow/test_worktree_deps.py::test_status_handles_space_and_unicode_worktree_path
+```
+
+Expected: all three workflows fail under `pwsh` with `Cannot overwrite variable
+IsWindows because it is read-only or constant`.
+
+- [ ] **Step 2: Apply the minimal mechanical rename**
+
+In each affected script, change the declaration and every read of
+`$isWindows` to `$runningOnWindows`. Do not change the expressions that compute
+the Boolean or either branch selected from it.
+
+- [ ] **Step 3: Verify the focused workflows and regressions**
+
+Run:
+
+```powershell
+python -m pytest -q `
   tests/developer_workflow/test_verify_staged.py `
   tests/developer_workflow/test_worktree_deps.py `
   tests/fast_workflow
@@ -95,10 +73,9 @@ python -m pytest -q `
 Expected: all tests pass, and no subprocess reports `Cannot overwrite variable
 IsWindows because it is read-only or constant`.
 
-- [ ] **Step 5: Commit the portability fix**
+- [ ] **Step 4: Commit the portability fix**
 
-Stage only the test and three PowerShell scripts, verify the staged list, then
-commit:
+Stage only the three PowerShell scripts, verify the staged list, then commit:
 
 ```powershell
 git commit -m "fix: avoid PowerShell automatic variable collision"
