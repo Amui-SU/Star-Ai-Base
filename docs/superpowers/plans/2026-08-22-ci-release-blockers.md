@@ -215,7 +215,7 @@ git commit -m "ci: close resolved dependency audit exception"
 - Consumes: Task 1 and Task 2 commits plus the repository verification scripts.
 - Produces: a verified fast-forward update on `release/video-security-integration-20260729` and a closed implementation plan.
 
-- [ ] **Step 1: Run focused acceptance checks**
+- [x] **Step 1: Run focused acceptance checks**
 
 Run the Task 1 regression command, then:
 
@@ -226,24 +226,24 @@ npx --yes npm@10.9.2 audit --omit=dev --audit-level=high
 
 Expected: every command exits 0.
 
-- [ ] **Step 2: Run complete commit verification**
+- [x] **Step 2: Run complete commit verification**
 
 Run from the isolated worktree:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-before-commit.ps1 -Format
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-before-commit.ps1 -Format -SkipBackendTests
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-before-commit.ps1
 ```
 
-Expected: Black, pytest, Prettier, ESLint, Vitest, the Next.js production build,
-and Git whitespace checks all pass. If the format run changes a file, inspect
-and include only changes already in this plan's scope.
+Expected: Black, pytest once in the pure-check round, Prettier, ESLint, Vitest,
+the Next.js production build, and Git whitespace checks all pass. If the format
+run changes a file, inspect and include only changes already in this plan's
+scope.
 
-- [ ] **Step 3: Close and commit the implementation plan**
+- [x] **Step 3: Record local verification and commit plan progress**
 
-After local verification, mark completed implementation steps, add a completion
-record with exact test counts and commands, change the plan status only when no
-local work remains, then run:
+Record exact local verification counts while keeping the status `partial`, then
+run:
 
 ```powershell
 python scripts/generate-plan-index.py
@@ -254,10 +254,10 @@ python -m pytest -q tests/developer_workflow/test_plan_lifecycle.py
 Commit the plan and generated index with:
 
 ```powershell
-git commit -m "docs: close CI release blocker fixes"
+git commit -m "docs: record CI blocker verification"
 ```
 
-- [ ] **Step 4: Fast-forward merge and recheck the release branch**
+- [ ] **Step 4: Fast-forward, recheck, push, and monitor full CI**
 
 From the main repository, verify the release checkout is clean, then:
 
@@ -272,12 +272,7 @@ python -m pytest -q `
 python scripts/generate-plan-index.py --check
 ```
 
-Expected: merge and all checks succeed before worktree cleanup.
-
-- [ ] **Step 5: Clean up, push, and monitor both CI runs**
-
-Detach shared dependencies if present, remove the owned worktree, prune, delete
-the merged feature branch, and push without force:
+Push without force after the merged checks:
 
 ```powershell
 git push origin release/video-security-integration-20260729
@@ -287,3 +282,30 @@ Use GitHub CLI to identify both the `push` and `pull_request` CI runs for the
 new full commit SHA. Wait for both to complete and confirm `Changes`, `Backend`,
 `Frontend`, and `CI Success` are successful in each run. Leave pull request 7
 as a draft and do not merge it.
+
+- [ ] **Step 5: Close the plan, push the record, and clean up**
+
+Only after both full CI runs are green, mark every step completed, add the
+remote run IDs and results, set status to `completed`, regenerate the index,
+and commit `docs: close CI release blocker fixes`. Fast-forward the release
+branch again and push the documentation-only commit. Confirm its workflow
+finishes successfully, then remove the owned worktree, prune, and delete the
+merged feature branch.
+
+## Local Verification Record
+
+- PowerShell red evidence: fast and staged workflows failed under `pwsh` with
+  `Cannot overwrite variable IsWindows`; the dedicated worktree Core test also
+  failed before the rename.
+- PowerShell regression: `208 passed, 2 skipped`.
+- Dependency acceptance: clean npm 10.9.2 install added 627 packages;
+  `npm ls --depth=0 --json` had no problems; production high audit reported
+  `found 0 vulnerabilities`.
+- Security policy: `41 passed`; the complete high audit exits 0 with one
+  remaining moderate `yaml` advisory.
+- Focused integrated acceptance: `47 passed`.
+- Format verification with backend deduplicated: Prettier, ESLint, 365 Vitest
+  tests, Next.js build, and Git whitespace checks passed.
+- Complete pure-check verification: backend `1554 passed, 6 skipped, 2 warnings`;
+  frontend `365 passed`; Prettier, ESLint, Next.js build, and Git whitespace
+  checks passed.
