@@ -257,6 +257,7 @@ class PasswordResetCode(Base):
     """One-time email codes dedicated to password resets."""
 
     __tablename__ = "password_reset_codes"
+    __table_args__ = (UniqueConstraint("email", name="uq_password_reset_codes_email"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String(255), index=True, nullable=False)

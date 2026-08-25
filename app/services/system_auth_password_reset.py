@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -66,23 +67,42 @@ async def send_password_reset_code(
         )
     )
     if existing_result.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=429,
-            detail="验证码已发送，请查收邮箱或等待过期后重试",
-        )
+        return response
 
-    db.add(
-        PasswordResetCode(
-            email=normalized_email,
-            code_hash=hash_code(code),
-            expires_at=now_naive + timedelta(seconds=CODE_TTL_SECONDS),
-        )
+    code_row = PasswordResetCode(
+        email=normalized_email,
+        code_hash=hash_code(code),
+        expires_at=now_naive + timedelta(seconds=CODE_TTL_SECONDS),
     )
-    await db.commit()
+    db.add(code_row)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        competing_result = await db.execute(
+            select(PasswordResetCode.id).where(
+                PasswordResetCode.email == normalized_email,
+                PasswordResetCode.expires_at > now_naive,
+            )
+        )
+        if competing_result.scalar_one_or_none() is not None:
+            return response
+        raise
 
     if not debug:
-        sent = await send_verification_email(normalized_email, code)
+        sent = await send_verification_email(
+            normalized_email,
+            code,
+            purpose="password_reset",
+        )
         if not sent:
+            await db.execute(
+                delete(PasswordResetCode).where(
+                    PasswordResetCode.id == code_row.id,
+                    PasswordResetCode.code_hash == code_row.code_hash,
+                )
+            )
+            await db.commit()
             raise HTTPException(status_code=500, detail="验证码发送失败，请稍后重试")
 
     return response

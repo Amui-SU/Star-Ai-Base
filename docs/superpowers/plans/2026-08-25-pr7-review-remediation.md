@@ -40,14 +40,14 @@
 - Consumes: `send_password_reset_code(db, email, client_ip, debug)` and SQLite startup migration hooks.
 - Produces: one reset-code row per email, generic duplicate-send responses, rollback after SMTP failure, and reset-specific mail copy.
 
-- [ ] **Step 1: Write failing endpoint and migration tests**
+- [x] **Step 1: Write failing endpoint and migration tests**
 
 Add tests proving duplicate and unknown sends have the same status/message,
 parallel sends leave one row, SMTP failure removes the reserved row and permits
 retry, reset email copy does not mention registration, and a legacy duplicate
 table is deduplicated before its unique index is created.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 ```powershell
 python -m pytest -q tests/system_auth/test_password_reset.py tests/test_sqlite_password_reset_migration.py
@@ -57,18 +57,18 @@ Expected: the new assertions fail because duplicate sends return 429, failed
 mail leaves a row, reset copy uses registration wording, and email uniqueness
 is absent.
 
-- [ ] **Step 3: Implement the minimal send and schema changes**
+- [x] **Step 3: Implement the minimal send and schema changes**
 
 Declare a unique email constraint, add an idempotent SQLite migration that
 keeps the newest duplicate row, catch only the insert uniqueness race, return
 the generic response for a live row, delete the exact reservation after mail
 failure, and add an explicit reset email purpose/template.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the Step 2 command and require every test to pass.
 
-- [ ] **Step 5: Commit Batch 1 sending changes**
+- [x] **Step 5: Commit Batch 1 sending changes**
 
 ```powershell
 git add app/models.py app/services/sqlite_legacy_schema.py app/services/system_auth_password_reset.py app/services/email.py tests/system_auth/test_password_reset.py tests/test_sqlite_password_reset_migration.py
