@@ -87,13 +87,13 @@ git commit -m "fix: harden password reset delivery"
 - Consumes: a unique `PasswordResetCode.email`, `MAX_ATTEMPTS`, and the submitted code hash.
 - Produces: atomic invalid-attempt increments and single-use successful consumption.
 
-- [ ] **Step 1: Write failing concurrency tests**
+- [x] **Step 1: Write failing concurrency tests**
 
 Add tests that run parallel invalid confirmations and assert the row is removed
 at the configured attempt limit, then run parallel valid confirmations and
 assert exactly one succeeds.
 
-- [ ] **Step 2: Run the concurrency tests and verify RED**
+- [x] **Step 2: Run the concurrency tests and verify RED**
 
 ```powershell
 python -m pytest -q tests/system_auth/test_password_reset.py -k "parallel or atomic"
@@ -102,20 +102,20 @@ python -m pytest -q tests/system_auth/test_password_reset.py -k "parallel or ato
 Expected: lost increments or multiple successful confirmations expose the
 current read-modify-write behavior.
 
-- [ ] **Step 3: Implement atomic invalid update and valid consumption**
+- [x] **Step 3: Implement atomic invalid update and valid consumption**
 
 Use conditional SQL `UPDATE ... attempts = attempts + 1 RETURNING attempts`
 for an incorrect live code and conditional `DELETE ... RETURNING` for a correct
 live code. Delete a row that reaches `MAX_ATTEMPTS`; update the password and
 revoke sessions only after successful consumption.
 
-- [ ] **Step 4: Run password-reset regressions and verify GREEN**
+- [x] **Step 4: Run password-reset regressions and verify GREEN**
 
 ```powershell
 python -m pytest -q tests/system_auth/test_password_reset.py
 ```
 
-- [ ] **Step 5: Commit Batch 1 atomic confirmation**
+- [x] **Step 5: Commit Batch 1 atomic confirmation**
 
 ```powershell
 git add app/services/system_auth_password_reset.py tests/system_auth/test_password_reset.py

@@ -120,27 +120,40 @@ async def confirm_password_reset(
         raise HTTPException(status_code=400, detail="密码长度不能超过 72 字节")
 
     now_naive = utc_now_naive()
-    code_result = await db.execute(
-        select(PasswordResetCode).where(
+    submitted_code_hash = hash_code(payload.code.strip())
+    consumed_result = await db.execute(
+        delete(PasswordResetCode)
+        .where(
             PasswordResetCode.email == email,
             PasswordResetCode.expires_at > now_naive,
+            PasswordResetCode.code_hash == submitted_code_hash,
         )
+        .returning(PasswordResetCode.id)
     )
-    code_row = code_result.scalar_one_or_none()
-    if code_row is None:
-        raise HTTPException(
-            status_code=400,
-            detail="验证码未发送或已过期，请重新获取",
+    consumed_id = consumed_result.scalar_one_or_none()
+    if consumed_id is None:
+        attempt_result = await db.execute(
+            update(PasswordResetCode)
+            .where(
+                PasswordResetCode.email == email,
+                PasswordResetCode.expires_at > now_naive,
+                PasswordResetCode.code_hash != submitted_code_hash,
+                PasswordResetCode.attempts < MAX_ATTEMPTS,
+            )
+            .values(attempts=PasswordResetCode.attempts + 1)
+            .returning(PasswordResetCode.id, PasswordResetCode.attempts)
         )
-
-    code_matches = secrets.compare_digest(
-        code_row.code_hash,
-        hash_code(payload.code.strip()),
-    )
-    if not code_matches:
-        code_row.attempts += 1
-        if code_row.attempts >= MAX_ATTEMPTS:
-            await db.delete(code_row)
+        attempt_row = attempt_result.one_or_none()
+        if attempt_row is None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail="验证码未发送或已过期，请重新获取",
+            )
+        if attempt_row.attempts >= MAX_ATTEMPTS:
+            await db.execute(
+                delete(PasswordResetCode).where(PasswordResetCode.id == attempt_row.id)
+            )
         await db.commit()
         raise HTTPException(status_code=400, detail="验证码错误")
 
@@ -152,7 +165,6 @@ async def confirm_password_reset(
     )
     user = user_result.scalar_one_or_none()
     if user is None:
-        await db.delete(code_row)
         await db.commit()
         raise HTTPException(
             status_code=400,
@@ -160,7 +172,6 @@ async def confirm_password_reset(
         )
 
     user.password_hash = hash_password(payload.new_password)
-    await db.delete(code_row)
     await db.execute(
         update(SystemSession)
         .where(

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 from email import message_from_string
 from email.header import decode_header, make_header
@@ -8,10 +9,18 @@ from sqlalchemy import delete, func, select, update
 
 import pytest
 
-from app.models import PasswordResetCode, SystemUser, VerificationIpRateLimit
+from app.models import (
+    PasswordResetCode,
+    PasswordResetConfirmRequest,
+    SystemUser,
+    VerificationIpRateLimit,
+)
 from app.routers.system_auth import _IP_RATE_MAX, _MAX_ATTEMPTS
 from app.services.email import send_verification_email
-from app.services.system_auth_password_reset import send_password_reset_code
+from app.services.system_auth_password_reset import (
+    confirm_password_reset,
+    send_password_reset_code,
+)
 from app.time_utils import utc_now_naive
 from tests.system_auth.helpers import register_user, send_code
 
@@ -300,6 +309,75 @@ async def test_reset_code_is_deleted_at_the_attempt_limit(client, db_session_fac
     )
 
     assert rejected.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_parallel_invalid_reset_attempts_are_counted_atomically(
+    client, db_session_factory
+):
+    await register_user(client, "parallel-invalid@example.com")
+    await clear_ip_rate_limit(db_session_factory)
+    assert await send_reset_code(client, "parallel-invalid@example.com")
+
+    async def submit_invalid_code() -> int:
+        async with db_session_factory() as db:
+            try:
+                await confirm_password_reset(
+                    db,
+                    payload=PasswordResetConfirmRequest(
+                        email="parallel-invalid@example.com",
+                        code="wrong-code",
+                        new_password="new secure password",
+                    ),
+                )
+            except HTTPException as exc:
+                return exc.status_code
+        return 200
+
+    statuses = await asyncio.gather(
+        *(submit_invalid_code() for _ in range(_MAX_ATTEMPTS - 1))
+    )
+
+    assert statuses == [400] * (_MAX_ATTEMPTS - 1)
+    async with db_session_factory() as db:
+        attempts = await db.scalar(
+            select(PasswordResetCode.attempts).where(
+                PasswordResetCode.email == "parallel-invalid@example.com"
+            )
+        )
+    assert attempts == _MAX_ATTEMPTS - 1
+
+
+@pytest.mark.asyncio
+async def test_parallel_valid_reset_code_is_consumed_atomically(
+    client, db_session_factory
+):
+    await register_user(client, "parallel-valid@example.com")
+    await clear_ip_rate_limit(db_session_factory)
+    code = await send_reset_code(client, "parallel-valid@example.com")
+    assert code
+
+    async def submit_valid_code(new_password: str) -> int:
+        async with db_session_factory() as db:
+            try:
+                await confirm_password_reset(
+                    db,
+                    payload=PasswordResetConfirmRequest(
+                        email="parallel-valid@example.com",
+                        code=code,
+                        new_password=new_password,
+                    ),
+                )
+            except HTTPException as exc:
+                return exc.status_code
+        return 200
+
+    statuses = await asyncio.gather(
+        submit_valid_code("first secure password"),
+        submit_valid_code("second secure password"),
+    )
+
+    assert sorted(statuses) == [200, 400]
 
 
 @pytest.mark.asyncio
