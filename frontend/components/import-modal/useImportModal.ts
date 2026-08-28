@@ -5,13 +5,12 @@ import {
   importApi,
   sourceBindingApi,
   type ImportMethod,
-  type ImportTaskStatus,
   type QRCodeResponse,
   type VideoMultiPartInfo,
 } from "@/lib/api";
+import { useImportTaskTracking } from "./useImportTaskTracking";
 
 const BVID_RE = /BV[0-9A-Za-z]{10}/;
-const TASK_POLL_INTERVAL_MS = 2000;
 
 export interface ImportTaskProgressItem {
   id: string;
@@ -79,12 +78,7 @@ export function useImportModal({
     null,
   );
   const [selectedPages, setSelectedPages] = useState<number[]>([]);
-  const [trackedTasks, setTrackedTasks] = useState<
-    { id: string; label: string }[]
-  >([]);
-  const [taskStatuses, setTaskStatuses] = useState<
-    Record<string, ImportTaskStatus>
-  >({});
+  const { trackTasks, taskProgress } = useImportTaskTracking(onImported);
   const [localVideoFile, setLocalVideoFile] = useState<File | null>(null);
   const [localVideoMessage, setLocalVideoMessage] = useState("");
   const [localVideoSubmitting, setLocalVideoSubmitting] = useState(false);
@@ -104,8 +98,6 @@ export function useImportModal({
         setUrlSubmitting(false);
         setMultiPartInfo(null);
         setSelectedPages([]);
-        setTrackedTasks([]);
-        setTaskStatuses({});
         setLocalVideoFile(null);
         setLocalVideoMessage("");
         setLocalVideoSubmitting(false);
@@ -208,14 +200,10 @@ export function useImportModal({
       });
       setUrlMessage(res.message);
       if (res.ok) {
-        onImported?.();
         setUrl("");
         if (res.task_id) {
           const taskId = res.task_id;
-          setTrackedTasks((current) => [
-            ...current,
-            { id: taskId, label: res.bvid || "视频导入" },
-          ]);
+          trackTasks([{ id: taskId, label: res.bvid || "视频导入" }]);
         }
       }
     } catch (err) {
@@ -266,16 +254,14 @@ export function useImportModal({
       });
       setUrlMessage(res.message);
       if (res.ok) {
-        onImported?.();
         setUrl("");
         // task_ids 与选中的分P顺序一致
-        setTrackedTasks((current) => [
-          ...current,
-          ...res.task_ids.map((taskId, index) => ({
+        trackTasks(
+          res.task_ids.map((taskId, index) => ({
             id: taskId,
             label: `P${selectedPages[index] ?? index + 1}`,
           })),
-        ]);
+        );
         setMultiPartInfo(null);
         setSelectedPages([]);
       }
@@ -285,53 +271,6 @@ export function useImportModal({
       setUrlSubmitting(false);
     }
   };
-
-  const hasPendingTasks = trackedTasks.some((task) => {
-    const status = taskStatuses[task.id]?.status;
-    return status !== "completed" && status !== "failed";
-  });
-
-  useEffect(() => {
-    if (!open || !hasPendingTasks) return;
-    let cancelled = false;
-    const poll = async () => {
-      const updates = await Promise.all(
-        trackedTasks.map(async (task) => {
-          try {
-            return await importApi.taskStatus(task.id);
-          } catch {
-            return null;
-          }
-        }),
-      );
-      if (cancelled) return;
-      setTaskStatuses((current) => {
-        const next = { ...current };
-        for (const update of updates) {
-          if (update?.task_id) next[update.task_id] = update;
-        }
-        return next;
-      });
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), TASK_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [open, hasPendingTasks, trackedTasks]);
-
-  const taskProgress: ImportTaskProgressItem[] = trackedTasks.map((task) => {
-    const status = taskStatuses[task.id];
-    return {
-      id: task.id,
-      label: task.label,
-      status: status?.status,
-      progress: status?.progress,
-      step: status?.current_step,
-      message: status?.message,
-    };
-  });
 
   const submitLocalVideo = async () => {
     if (!localVideoFile || localVideoSubmitting) return;
@@ -345,11 +284,10 @@ export function useImportModal({
       });
       setLocalVideoMessage(res.message);
       if (res.ok) {
-        onImported?.();
         if (res.task_id) {
           const taskId = res.task_id;
           const label = localVideoFile.name;
-          setTrackedTasks((current) => [...current, { id: taskId, label }]);
+          trackTasks([{ id: taskId, label }]);
         }
         setLocalVideoFile(null);
       }

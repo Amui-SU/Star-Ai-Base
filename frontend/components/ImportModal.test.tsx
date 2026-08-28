@@ -33,6 +33,44 @@ afterEach(() => {
 });
 
 describe("ImportModal", () => {
+  it("shows an interrupted import and its recovery message", async () => {
+    const user = userEvent.setup();
+    vi.mocked(importApi.methods).mockResolvedValue({ methods: [] });
+    vi.mocked(importApi.importUrl).mockResolvedValue({
+      ok: true,
+      status: "pending",
+      source_type: "video",
+      message: "已创建任务",
+      task_id: "interrupted-task",
+    });
+    vi.mocked(importApi.taskStatus).mockResolvedValue({
+      task_id: "interrupted-task",
+      status: "interrupted",
+      progress: 20,
+      current_step: "转写中",
+      message: "服务重启，请重新导入",
+    });
+    render(
+      <ImportModal
+        open
+        knowledgeBaseId={7}
+        hasBilibiliBinding={false}
+        onClose={vi.fn()}
+        onBound={vi.fn()}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /导入视频/ }));
+    await user.type(
+      screen.getByLabelText("粘贴视频链接"),
+      "https://example.com/video",
+    );
+    await user.click(screen.getByRole("button", { name: "开始导入" }));
+    expect(
+      await screen.findByText("已中断：服务重启，请重新导入"),
+    ).toBeVisible();
+    expect(screen.queryByText("转写中 20%")).not.toBeInTheDocument();
+  });
+
   it("uploads a selected local video from the video import option", async () => {
     const user = userEvent.setup();
     vi.mocked(importApi.methods).mockResolvedValue({
@@ -224,7 +262,7 @@ describe("ImportModal", () => {
         page_indices: [1, 3],
       });
     });
-    expect(onImported).toHaveBeenCalled();
+    expect(onImported).not.toHaveBeenCalled();
     expect(screen.getByText("已创建 2 个导入任务")).toBeInTheDocument();
 
     // 导入后轮询任务状态并展示每个分P的进度

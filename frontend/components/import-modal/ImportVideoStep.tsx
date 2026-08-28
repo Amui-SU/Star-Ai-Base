@@ -50,7 +50,9 @@ function TaskProgressList({ tasks }: { tasks: ImportTaskProgressItem[] }) {
               ? "✓ 完成"
               : task.status === "failed"
                 ? `✗ 失败${task.message ? `：${task.message}` : ""}`
-                : `${task.step || "等待中"} ${task.progress ?? 0}%`}
+                : task.status === "interrupted"
+                  ? `已中断：${task.message || "请重新导入"}`
+                  : `${task.step || "等待中"} ${task.progress ?? 0}%`}
           </span>
         </li>
       ))}
