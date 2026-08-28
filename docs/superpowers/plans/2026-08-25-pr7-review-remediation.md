@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** partial
+**Status:** completed
 
 **Goal:** Fix the authentication, CI-routing, and import-refresh blockers found during the final review of pull request 7.
 
@@ -256,7 +256,7 @@ accurately rather than describing the full tree as vulnerability-free.
 Review the complete remediation range. Fix every Critical or Important finding
 and repeat focused plus complete verification after any production change.
 
-- [ ] **Step 4: Record local verification and integrate the worktree**
+- [x] **Step 4: Record local verification and integrate the worktree**
 
 Keep the status `partial`, record exact verification results, regenerate the
 plan index, commit progress, and fast-forward
@@ -264,18 +264,18 @@ plan index, commit progress, and fast-forward
 `release/video-security-integration-20260729` only while both checkouts are
 clean.
 
-- [ ] **Step 5: Push and wait for both remote CI events**
+- [x] **Step 5: Push and wait for both remote CI events**
 
 Push without force. Require successful `Changes`, `Backend`, `Frontend`, and
 `CI Success` jobs for both the push and pull-request runs at the final SHA.
 
-- [ ] **Step 6: Update PR facts and mark Ready**
+- [x] **Step 6: Update PR facts and mark Ready**
 
 Replace stale commit/test/audit statements in pull request 7 with the final
 evidence. Mark it Ready only after Step 5 succeeds and no Critical or Important
 review findings remain. Do not merge it into `main`.
 
-- [ ] **Step 7: Close the plan after remote acceptance**
+- [x] **Step 7: Close the plan after remote acceptance**
 
 Only after the remote checks and Ready transition succeed, record their exact
 SHA/run IDs, mark the plan completed, regenerate the index, and commit the
@@ -322,3 +322,34 @@ completion record. Push the record and verify its remote checks too.
 - Batch 2 commits: `82990d7` (CI routing), `e87eb47` (frontend refresh), and
   `69342ee` (parallel send/attempt-limit/migration retry coverage). All normal
   pre-commit hooks passed without invoking an Open With dialog.
+
+## Completion Record — 2026-08-29
+
+- Fast-forward integrated `84890f08fa08d4f930622702fc597bdd5118b97f` into
+  `release/video-security-integration-20260729`. Both checkouts were clean.
+  Post-integration checks passed: 121 backend/policy tests, 21 frontend tests,
+  and the generated plan-index check.
+- Pushed without force. Both exact-SHA CI events passed every expected job
+  (`Changes`, `Backend`, `Frontend`, `CI Success`):
+  [push 33189979946](https://github.com/Amui-SU/Star-Ai-Base/actions/runs/33189979946)
+  and
+  [pull request 33189984064](https://github.com/Amui-SU/Star-Ai-Base/actions/runs/33189984064).
+- Updated [PR 7](https://github.com/Amui-SU/Star-Ai-Base/pull/7) with the current
+  validation, audit, and review facts; marked it Ready after both CI events
+  succeeded. Verified `isDraft=false`, `state=OPEN`, and `mergeStateStatus=CLEAN`.
+  The PR was not merged into `main`; no production deployment was performed.
+- Retained the worktree for PR feedback. Its shared dependency junction and
+  ignored local verification logs remain local and are not part of the PR.
+- This closing change only updates the plan status, evidence, and generated
+  index. Acceptance is a completed plan with all steps checked and an index
+  matching the authoritative status. Verify with:
+
+  ```powershell
+  python scripts/generate-plan-index.py --check
+  python -m pytest -q tests/developer_workflow/test_plan_lifecycle.py tests/developer_workflow/test_plan_index_generator.py
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-fast.ps1 -StaticFile docs/superpowers/plans/2026-08-25-pr7-review-remediation.md,docs/superpowers/plans/README.md
+  ```
+
+  The closing record is pushed separately; its final exact-SHA CI results are
+  attached to the PR's checks and recorded in the final handoff to avoid a
+  self-referential documentation-commit loop.
