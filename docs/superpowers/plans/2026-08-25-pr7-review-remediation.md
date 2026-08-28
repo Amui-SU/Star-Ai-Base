@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** planned
+**Status:** partial
 
 **Goal:** Fix the authentication, CI-routing, and import-refresh blockers found during the final review of pull request 7.
 
@@ -134,28 +134,28 @@ git commit -m "fix: consume password reset codes atomically"
 - Consumes: repository-relative changed paths.
 - Produces: `backend=true`, `frontend=false`, and `docs_only=false` for `requirements-dev.txt` and plan lifecycle inputs.
 
-- [ ] **Step 1: Add failing exact-path classifier cases**
+- [x] **Step 1: Add failing exact-path classifier cases**
 
 Cover `requirements-dev.txt`, a dated file in `docs/superpowers/plans/`, and
 `docs/superpowers/plans/README.md`. Assert each schedules backend policy tests
 and is not docs-only.
 
-- [ ] **Step 2: Run classifier tests and verify RED**
+- [x] **Step 2: Run classifier tests and verify RED**
 
 ```powershell
 python -m pytest -q tests/developer_workflow/test_ci_paths.py
 ```
 
-- [ ] **Step 3: Add minimal backend dependency and policy path rules**
+- [x] **Step 3: Add minimal backend dependency and policy path rules**
 
 Introduce focused backend-only exact/prefix collections before the generic
 documentation suffix branch. Do not broaden all documentation to full CI.
 
-- [ ] **Step 4: Run classifier tests and verify GREEN**
+- [x] **Step 4: Run classifier tests and verify GREEN**
 
 Run the Step 2 command and require every test to pass.
 
-- [ ] **Step 5: Commit Batch 2 CI routing**
+- [x] **Step 5: Commit Batch 2 CI routing**
 
 ```powershell
 git add scripts/classify-ci-paths.py tests/developer_workflow/test_ci_paths.py
@@ -167,45 +167,50 @@ git commit -m "ci: route dependency and plan policy changes"
 **Files:**
 
 - Modify: `frontend/components/import-modal/useImportModal.ts`
+- Create: `frontend/components/import-modal/useImportTaskTracking.ts`
+- Modify: `frontend/components/import-modal/ImportVideoStep.tsx`
+- Create: `frontend/components/import-modal/useImportModal.tasks.test.ts`
 - Modify: `frontend/components/ImportModal.test.tsx`
 - Modify: `frontend/components/chat/useChatKnowledgeContext.ts`
-- Modify: `frontend/components/ChatPanel.test.tsx`
+- Create: `frontend/components/chat/useChatKnowledgeContext.test.ts`
 
 **Interfaces:**
 
 - Consumes: `ImportTaskStatus.status`, `onImported`, and the existing `kb-stats` refresh version.
 - Produces: one `onImported()` call for each terminal batch containing a completed task; `failed` and `interrupted` stop polling; scope options reload on `statsKey` without chat reset.
 
-- [ ] **Step 1: Write failing polling and refresh tests**
+- [x] **Step 1: Write failing polling and refresh tests**
 
 Test pending to completed notification, multi-part single notification,
 interrupted terminal behavior, no notification for an all-failed batch, and a
 `statsKey` change that reloads stats and scope options without invoking reset
 actions.
 
-- [ ] **Step 2: Run focused frontend tests and verify RED**
+- [x] **Step 2: Run focused frontend tests and verify RED**
 
 ```powershell
 $env:VITEST_MAX_THREADS='4'
 $env:VITEST_MIN_THREADS='1'
-npm test -- components/ImportModal.test.tsx components/ChatPanel.test.tsx
+npm test -- components/import-modal/useImportModal.tasks.test.ts components/chat/useChatKnowledgeContext.test.ts components/ImportModal.test.tsx components/ChatPanel.test.tsx
 ```
 
-- [ ] **Step 3: Implement terminal batch notification and context refresh**
+- [x] **Step 3: Implement terminal batch notification and context refresh**
 
 Remove submission-time `onImported` calls, model terminal states explicitly,
-track the notified task-set signature, and emit after polling observes a
-terminal batch with a completion. Split scope loading from knowledge-base reset
-so `statsKey` reloads data without clearing chat state.
+track each submission batch separately, and emit after polling observes a
+terminal batch with a completion. Keep tracking when the modal closes, and use
+completion-scheduled polling to avoid overlapping slow requests. Split scope
+loading from knowledge-base reset so `statsKey` reloads data without clearing
+chat state.
 
-- [ ] **Step 4: Run focused frontend tests and verify GREEN**
+- [x] **Step 4: Run focused frontend tests and verify GREEN**
 
 Run the Step 2 command and require every test to pass.
 
-- [ ] **Step 5: Commit Batch 2 frontend consistency**
+- [x] **Step 5: Commit Batch 2 frontend consistency**
 
 ```powershell
-git add frontend/components/import-modal/useImportModal.ts frontend/components/ImportModal.test.tsx frontend/components/chat/useChatKnowledgeContext.ts frontend/components/ChatPanel.test.tsx
+git add frontend/components/import-modal/useImportModal.ts frontend/components/import-modal/useImportTaskTracking.ts frontend/components/import-modal/ImportVideoStep.tsx frontend/components/import-modal/useImportModal.tasks.test.ts frontend/components/ImportModal.test.tsx frontend/components/chat/useChatKnowledgeContext.ts frontend/components/chat/useChatKnowledgeContext.test.ts
 git commit -m "fix: refresh completed imports consistently"
 ```
 
@@ -221,7 +226,7 @@ git commit -m "fix: refresh completed imports consistently"
 - Consumes: Tasks 1-4, repository verification scripts, GitHub CI, and pull request 7.
 - Produces: a completed plan, fast-forwarded release branch, current PR description, and Ready status only after all gates pass.
 
-- [ ] **Step 1: Run focused integrated checks**
+- [x] **Step 1: Run focused integrated checks**
 
 ```powershell
 python -m pytest -q tests/system_auth/test_password_reset.py tests/test_sqlite_password_reset_migration.py tests/developer_workflow/test_ci_paths.py tests/developer_workflow/test_plan_lifecycle.py
@@ -230,11 +235,15 @@ python scripts/generate-plan-index.py --check
 
 Run the two focused frontend files from Task 4 and require success.
 
-- [ ] **Step 2: Run complete local verification and audits**
+- [x] **Step 2: Run complete local verification and audits**
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-before-commit.ps1 -Format -SkipBackendTests
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-before-commit.ps1
+$env:VITEST_MAX_THREADS='4'
+$env:VITEST_MIN_THREADS='1'
+function black { & python -m black @args }
+& ./scripts/verify-before-commit.ps1 -Format -SkipBackendTests
+& ./scripts/verify-before-commit.ps1
+# Run the audits from frontend/.
 npm audit --omit=dev --audit-level=high
 npm audit --audit-level=high
 ```
@@ -242,15 +251,15 @@ npm audit --audit-level=high
 The two high-severity audits must exit zero. Record any lower-severity advisory
 accurately rather than describing the full tree as vulnerability-free.
 
-- [ ] **Step 3: Request a fresh code review**
+- [x] **Step 3: Request a fresh code review**
 
 Review the complete remediation range. Fix every Critical or Important finding
 and repeat focused plus complete verification after any production change.
 
-- [ ] **Step 4: Close the plan and integrate the worktree**
+- [ ] **Step 4: Record local verification and integrate the worktree**
 
-Set the status to `completed`, check every step, record exact verification
-results, regenerate the plan index, commit the closure, and fast-forward
+Keep the status `partial`, record exact verification results, regenerate the
+plan index, commit progress, and fast-forward
 `fix/pr7-review-blockers` into
 `release/video-security-integration-20260729` only while both checkouts are
 clean.
@@ -265,3 +274,51 @@ Push without force. Require successful `Changes`, `Backend`, `Frontend`, and
 Replace stale commit/test/audit statements in pull request 7 with the final
 evidence. Mark it Ready only after Step 5 succeeds and no Critical or Important
 review findings remain. Do not merge it into `main`.
+
+- [ ] **Step 7: Close the plan after remote acceptance**
+
+Only after the remote checks and Ready transition succeed, record their exact
+SHA/run IDs, mark the plan completed, regenerate the index, and commit the
+completion record. Push the record and verify its remote checks too.
+
+## Execution Notes
+
+- On 2026-08-28, the interrupted Task 3 verification process could not be
+  recovered. Batch 2 code is verified together before its focused commits to
+  avoid rerunning the full suite on an identical integrated tree.
+- Task 4 uses focused hook test files instead of expanding the existing
+  ChatPanel test file. Tests also reproduce modal-close loss of task tracking,
+  independent simultaneous batches, and overlapping slow polling requests.
+- The initial frontend RED run had nine expected behavioral failures; the
+  interruption presentation test failed separately before the UI correction.
+- Authentication full verification before Task 2 commit: 1560 passed,
+  6 skipped, 2 existing warnings; frontend 365 passed, lint/build passed.
+- Final integrated local verification on 2026-08-29: backend 1564 passed,
+  6 skipped, 2 existing httpx cookie deprecation warnings (17m07s); frontend
+  376 passed across 76 files; lint, production build, Black, Prettier, and
+  whitespace checks passed. The full script exited zero. Logs are retained
+  locally at `logs/pr7-format-20260829.log` and
+  `logs/pr7-full-verification-20260829.log` (ignored, not committed).
+- The process-local `black` function selects the pinned Python module
+  (Black 26.5.1 on Python 3.12.10) instead of the unrelated Anaconda Black
+  24.10.0 executable on PATH. No global configuration was changed.
+- Focused backend/auth/migration/CI/lifecycle checks: 121 passed. Focused
+  frontend tracking/context/modal/chat checks: 21 passed. New-file Prettier
+  checks passed separately because the full verifier enumerates tracked diffs.
+- Browser check from `frontend/`: `npm run test:e2e -- --workers=1` passed
+  all 3 tests, including desktop/mobile login and password-reset flow. Login
+  screenshots were inspected; no overflow or overlapping controls observed.
+- Both high-severity audit commands exited zero. Production dependencies have
+  zero vulnerabilities; the full tree has one moderate `yaml` advisory,
+  GHSA-48c2-rrv3-qjmp, outside this remediation's dependency-update scope.
+- Independent review found one Important issue: a stalled request in the
+  shared polling `Promise.all` blocked other batches. A held-promise regression
+  failed first; per-task serial polling fixed it. Re-review passed with no
+  Critical/Important findings and 9/9 tracking tests passing independently.
+- Non-blocking review follow-up (P3): adding a batch restarts pending polling
+  effects, so an old in-flight request can briefly overlap a new request for
+  the same task. Old responses are ignored; cross-effect deduplication is
+  deferred, not described as fixed here.
+- Batch 2 commits: `82990d7` (CI routing), `e87eb47` (frontend refresh), and
+  `69342ee` (parallel send/attempt-limit/migration retry coverage). All normal
+  pre-commit hooks passed without invoking an Open With dialog.
