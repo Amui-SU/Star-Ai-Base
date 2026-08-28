@@ -345,6 +345,18 @@ def test_path_aware_ci_policy_normalizes_input_newlines(newline: str) -> None:
             {"backend": True, "frontend": False, "docs_only": False},
         ),
         (
+            ["requirements-dev.txt"],
+            {"backend": True, "frontend": False, "docs_only": False},
+        ),
+        (
+            ["docs/superpowers/plans/2026-08-25-example.md"],
+            {"backend": True, "frontend": False, "docs_only": False},
+        ),
+        (
+            ["docs/superpowers/plans/README.md"],
+            {"backend": True, "frontend": False, "docs_only": False},
+        ),
+        (
             ["frontend/components/App.tsx"],
             {"backend": False, "frontend": True, "docs_only": False},
         ),

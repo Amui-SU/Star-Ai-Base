@@ -28,6 +28,8 @@ POLICY_PREFIXES = (
     "docs/superpowers/specs/2026-07-29-micro-task-fast-lane",
     "docs/superpowers/plans/2026-07-29-micro-task-fast-lane",
 )
+BACKEND_EXACT = {"requirements-dev.txt"}
+BACKEND_POLICY_PREFIXES = ("docs/superpowers/plans/",)
 BACKEND_PREFIXES = ("app/", "tests/")
 FRONTEND_PREFIXES = ("frontend/",)
 FULL_CI = {"backend": True, "frontend": True, "docs_only": False}
@@ -54,6 +56,9 @@ def classify_paths(paths: list[str], force_full: bool = False) -> dict[str, bool
             or path.startswith(POLICY_PREFIXES)
         ):
             backend = frontend = True
+            docs_only = False
+        elif path in BACKEND_EXACT or path.startswith(BACKEND_POLICY_PREFIXES):
+            backend = True
             docs_only = False
         elif path.startswith(BACKEND_PREFIXES) or (
             path.startswith("scripts/") and path.endswith((".py", ".ps1", ".sh"))
