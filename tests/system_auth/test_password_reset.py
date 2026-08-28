@@ -104,6 +104,32 @@ async def test_reset_send_hides_a_second_active_code(client, db_session_factory)
 
 
 @pytest.mark.asyncio
+async def test_parallel_reset_sends_reserve_one_code_and_deliver_once(
+    client, db_session_factory, monkeypatch
+):
+    await register_user(client, "parallel-send@example.com")
+    send_email = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "app.services.system_auth_password_reset.send_verification_email", send_email
+    )
+
+    async def send(index):
+        async with db_session_factory() as db:
+            return await send_password_reset_code(
+                db,
+                email="parallel-send@example.com",
+                client_ip=f"parallel-send-{index}",
+                debug=False,
+            )
+
+    responses = await asyncio.gather(send(1), send(2), return_exceptions=True)
+    assert responses == [{"message": "如果该邮箱已注册，重置验证码已发送"}] * 2
+    async with db_session_factory() as db:
+        assert await db.scalar(select(func.count()).select_from(PasswordResetCode)) == 1
+    assert send_email.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_reset_send_removes_reserved_code_after_delivery_failure(
     client, db_session_factory, monkeypatch
 ):
@@ -346,6 +372,16 @@ async def test_parallel_invalid_reset_attempts_are_counted_atomically(
             )
         )
     assert attempts == _MAX_ATTEMPTS - 1
+    assert await submit_invalid_code() == 400
+    async with db_session_factory() as db:
+        assert (
+            await db.scalar(
+                select(PasswordResetCode.id).where(
+                    PasswordResetCode.email == "parallel-invalid@example.com"
+                )
+            )
+            is None
+        )
 
 
 @pytest.mark.asyncio

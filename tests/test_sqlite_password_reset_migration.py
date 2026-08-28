@@ -27,6 +27,7 @@ def test_password_reset_index_keeps_newest_row_and_enforces_one_per_email():
             """)
 
         sqlite_create_password_reset_indexes(conn)
+        sqlite_create_password_reset_indexes(conn)
 
         rows = conn.exec_driver_sql(
             "SELECT id, code_hash FROM password_reset_codes ORDER BY id"
