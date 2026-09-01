@@ -212,6 +212,28 @@ describe("import completion tracking", () => {
     expect(hook.onImported).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses an in-flight status request when another batch rebuilds polling", async () => {
+    vi.mocked(importApi.taskStatus).mockImplementation((id) =>
+      id === "https://example.com/in-flight"
+        ? new Promise(() => {})
+        : Promise.resolve({
+            task_id: id,
+            status: "completed",
+            progress: 100,
+            message: "",
+          }),
+    );
+    const hook = mount();
+    await queueUrl(hook, "https://example.com/in-flight");
+    await queueUrl(hook, "https://example.com/new-batch");
+
+    expect(
+      vi
+        .mocked(importApi.taskStatus)
+        .mock.calls.filter(([id]) => id === "https://example.com/in-flight"),
+    ).toHaveLength(1);
+  });
+
   it("does not overlap polling while a status response is pending", async () => {
     let resolve!: (value: ImportTaskStatus) => void;
     vi.mocked(importApi.taskStatus).mockReturnValue(

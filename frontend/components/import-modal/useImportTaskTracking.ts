@@ -19,6 +19,7 @@ export function useImportTaskTracking(onImported?: () => void) {
   );
   const statusesRef = useRef<Record<string, ImportTaskStatus>>({});
   const notifiedRef = useRef(new Set<string>());
+  const inFlightRef = useRef(new Map<string, Promise<ImportTaskStatus>>());
 
   const trackTasks = useCallback((tasks: TrackedTask[]) => {
     if (tasks.length) setBatches((current) => [...current, tasks]);
@@ -30,10 +31,19 @@ export function useImportTaskTracking(onImported?: () => void) {
     const poll = async (task: TrackedTask) => {
       if (isTerminal(statusesRef.current[task.id]?.status)) return;
       let update: ImportTaskStatus | null = null;
+      let request = inFlightRef.current.get(task.id);
       try {
-        update = await importApi.taskStatus(task.id);
+        if (!request) {
+          request = importApi.taskStatus(task.id);
+          inFlightRef.current.set(task.id, request);
+        }
+        update = await request;
       } catch {
         // A transient error retries this task without holding up other tasks.
+      } finally {
+        if (request && inFlightRef.current.get(task.id) === request) {
+          inFlightRef.current.delete(task.id);
+        }
       }
       if (cancelled) return;
       const next = { ...statusesRef.current };
