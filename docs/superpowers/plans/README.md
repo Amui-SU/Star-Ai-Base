@@ -67,5 +67,6 @@ python scripts/generate-plan-index.py --check
 | [2026-08-07-generated-plan-index.md](2026-08-07-generated-plan-index.md)                                         | completed  |
 | [2026-08-22-ci-release-blockers.md](2026-08-22-ci-release-blockers.md)                                           | completed  |
 | [2026-08-25-pr7-review-remediation.md](2026-08-25-pr7-review-remediation.md)                                     | completed  |
+| [2026-09-01-yaml-advisory-remediation.md](2026-09-01-yaml-advisory-remediation.md)                               | planned    |
 
 <!-- END GENERATED PLAN INDEX -->
