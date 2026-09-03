@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** planned
+**Status:** partial
 
-**Goal:** Upgrade the root `yaml` development security pin from 2.8.1 to 2.9.0 so both production and full npm audits report zero vulnerabilities without changing any unrelated dependency.
+**Goal:** Upgrade the root `yaml` development security pin from 2.8.1 to 2.9.0 and pin the patched transitive releases newly required by the live npm advisory database so both production and full audits report zero vulnerabilities.
 
 **Architecture:** Preserve the existing root exact-pin mechanism used by the Vitest/Vite dependency tree. Add a manifest/lock contract first, detach shared worktree dependencies before any npm mutation, regenerate only the two dependency files with npm 10.9.2, and accept the change only after fresh installation, complete local verification, independent review, and exact-SHA remote CI.
 
@@ -15,8 +15,12 @@
 ## Global Constraints
 
 - Keep `yaml` as an exact root dev dependency and set it to exactly `2.9.0`.
-- Change no dependency other than `yaml`; do not use `npm audit fix --force`.
-- Do not add an override or an audit exception and do not weaken either CI audit gate.
+- Apart from `yaml`, change only the two patched transitive dependencies and
+  the browser-database packages required by patched Browserslist; do not use
+  `npm audit fix --force`.
+- Use exact overrides for `browserslist@4.28.8` and
+  `@xmldom/xmldom@0.9.12`; do not add an audit exception or weaken either CI
+  audit gate.
 - Detach the shared `frontend/node_modules` junction before running any npm install or dependency mutation command in this worktree.
 - Use npm 10.9.2 to regenerate the lockfile and preserve lockfile version 3.
 - On this host, invoke the exact CLI as `npx --yes npm@10.9.2`; the PATH npm
@@ -38,7 +42,7 @@
 - Consumes: the root `devDependencies`, lockfile root package, and `node_modules/yaml` lock entry.
 - Produces: an exact `yaml@2.9.0` security pin shared by the Vitest/Vite tree and a contract preventing manifest/lock drift.
 
-- [ ] **Step 1: Detach the shared dependency junction**
+- [x] **Step 1: Detach the shared dependency junction**
 
 From the worktree root, run:
 
@@ -47,9 +51,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/worktree-deps.ps1 -M
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/worktree-deps.ps1 -Mode Status
 ```
 
-Require `state=absent` before any `npm install`, `npm ci`, or lockfile mutation.
+Require `state=missing` before any `npm install`, `npm ci`, or lockfile mutation.
 
-- [ ] **Step 2: Add the failing exact-pin contract**
+- [x] **Step 2: Add the failing exact-pin contract**
 
 Add the following constant and test to
 `tests/developer_workflow/test_frontend_dependency_contract.py`:
@@ -68,7 +72,7 @@ def test_security_pinned_dev_dependencies_are_exact_and_locked():
         assert lockfile["packages"][f"node_modules/{name}"]["version"] == version
 ```
 
-- [ ] **Step 3: Run the contract and verify RED**
+- [x] **Step 3: Run the contract and verify RED**
 
 ```powershell
 python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.py
@@ -77,7 +81,7 @@ python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.p
 Expected: the new test fails because all three observed values are `2.8.1`
 rather than `2.9.0`.
 
-- [ ] **Step 4: Verify the pinned toolchain**
+- [x] **Step 4: Verify the pinned toolchain**
 
 ```powershell
 node --version
@@ -88,7 +92,7 @@ Require Node to satisfy `.nvmrc`/`engines` and npm to report exactly `10.9.2`.
 If npm differs, stop and resolve the pinned local tool path rather than
 regenerating the lockfile with another npm version.
 
-- [ ] **Step 5: Update only the exact YAML dependency**
+- [x] **Step 5: Update only the exact YAML dependency**
 
 From `frontend/`, run:
 
@@ -106,7 +110,7 @@ Require the manifest and lockfile root to contain exact `2.9.0`, the
 `node_modules/yaml` entry to use the 2.9.0 registry artifact, lockfile version
 to remain 3, and no unrelated package resolution to change.
 
-- [ ] **Step 6: Run the contract and verify GREEN**
+- [x] **Step 6: Run the contract and verify GREEN**
 
 ```powershell
 python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.py tests/test_dependency_security_policy.py
@@ -115,7 +119,16 @@ python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.p
 Require every test to pass and the exception register to remain free of active
 exceptions.
 
-- [ ] **Step 7: Verify a fresh reproducible dependency tree**
+- [x] **Step 6a: Address advisories published during final review**
+
+The live 2026-09-03 audit added high advisories for the baseline
+`browserslist@4.28.4` and a moderate advisory for baseline
+`@xmldom/xmldom@0.9.10`. Add a failing transitive-pin contract, then exact
+manifest overrides for patched `browserslist@4.28.8` and
+`@xmldom/xmldom@0.9.12`. Regenerate the lockfile with npm 10.9.2 and require
+the focused contract/security suite to pass.
+
+- [x] **Step 7: Verify a fresh reproducible dependency tree**
 
 From `frontend/`, run:
 
@@ -130,7 +143,7 @@ npx --yes npm@10.9.2 audit --audit-level=high
 Require `npm ci` and both `npm ls` commands to exit zero, no `problems` array,
 only `yaml@2.9.0` in the YAML tree, and zero vulnerabilities in both audits.
 
-- [ ] **Step 8: Run complete local verification and browser tests**
+- [x] **Step 8: Run complete local verification and browser tests**
 
 From the worktree root, use the Python 3.12 Black module for the full verifier:
 
@@ -151,13 +164,14 @@ npm run test:e2e -- --workers=1
 Require backend tests, frontend tests, lint, build, formatting, whitespace, and
 all browser tests to pass. Record exact counts and warnings.
 
-- [ ] **Step 9: Request independent review**
+- [x] **Step 9: Request independent review**
 
-Review the full dependency diff and verification evidence. Fix every Critical
-or Important finding and repeat the affected focused checks plus complete
-verification after any dependency or production change.
+Review the full dependency diff and verification evidence. The first review
+found the newly published audit failures described in Step 6a. Fix every
+Critical or Important finding, repeat the affected focused checks plus complete
+verification after any dependency change, and obtain a clean follow-up review.
 
-- [ ] **Step 10: Commit the dependency remediation**
+- [x] **Step 10: Commit the dependency remediation**
 
 ```powershell
 git add tests/developer_workflow/test_frontend_dependency_contract.py frontend/package.json frontend/package-lock.json
@@ -166,6 +180,31 @@ git commit -m "build: update patched yaml security pin"
 ```
 
 Let the normal pre-commit hook run; do not bypass it.
+
+#### Task 1 execution record
+
+- Dependency state was `missing` before mutation and `isolated` after the fresh
+  install.
+- Runtime: Node `v24.11.0` (allowed by repository engines); lockfile operations:
+  npm `10.9.2` via `npx --yes npm@10.9.2`.
+- TDD red: the YAML contract failed against `2.8.1`; after the 2026-09-03
+  advisory change, the transitive contract failed because the two overrides
+  were absent.
+- Focused green: dependency contract plus security policy `6 passed`; plan
+  lifecycle and index tests `16 passed`.
+- Fresh install: `627` packages; root dependency tree exited zero without a
+  `problems` array. The resolved security tree contains `yaml@2.9.0`,
+  `browserslist@4.28.8`, and `@xmldom/xmldom@0.9.12` only at their expected
+  paths.
+- Both the production and complete npm audits reported `0 vulnerabilities`.
+- Final verifier: backend `1566 passed, 6 skipped, 2 warnings`; frontend lint
+  passed, Vitest `377 passed`, and the Next.js production build passed.
+- Playwright with one worker: `3 passed`.
+- Independent review round one found the newly published baseline
+  Browserslist/xmldom advisories. After remediation, round two found no
+  High/Medium issue; its single Low wording correction was applied.
+- Dependency remediation commit: `f14fbbe` (`build: update patched frontend
+security dependencies`). The normal pre-commit hook passed without bypass.
 
 ### Task 2: Integrate, Verify Remote CI, And Close The Follow-Up
 
@@ -180,7 +219,7 @@ Let the normal pre-commit hook run; do not bypass it.
 - Consumes: the clean dependency commit, local verification evidence, GitHub CI, and pull request 7.
 - Produces: a completed indexed plan, clean release branch, current PR audit facts, and exact-SHA CI evidence.
 
-- [ ] **Step 1: Record local evidence with partial status**
+- [x] **Step 1: Record local evidence with partial status**
 
 Mark Task 1 complete, set this plan to `partial`, record the exact Node/npm
 versions, install/audit/tree results, test counts, browser result, review

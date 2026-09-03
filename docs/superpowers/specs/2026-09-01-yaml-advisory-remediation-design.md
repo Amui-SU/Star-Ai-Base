@@ -2,9 +2,9 @@
 
 ## Goal
 
-Remove the remaining moderate `yaml` development-dependency advisory without
-changing application behavior, broadening dependency updates, weakening audit
-gates, or altering the release and deployment boundary of pull request 7.
+Remove the current frontend dependency advisories without changing application
+behavior, weakening audit gates, or altering the release and deployment
+boundary of pull request 7.
 
 ## Current State And Root Cause
 
@@ -16,6 +16,14 @@ through 2.8.2. Production dependency audit remains clean. npm identifies
 2.9.0 as the available fix, but `npm audit fix --force` would cross the exact
 declared range and is too broad for this repository.
 
+During final review on 2026-09-03, the live npm advisory database began
+reporting two advisories that were not present during the 2026-09-01 audit:
+`browserslist@4.28.4` now has two high-severity advisories through 4.28.6, and
+`@xmldom/xmldom@0.9.10` has a moderate advisory through 0.9.11. Both packages
+were already present in the baseline lockfile. The former makes the unchanged
+CI high-severity audit gate fail, while the latter invalidates the planned
+zero-vulnerability production-audit result.
+
 `yaml@2.9.0` requires Node 14.6 or later, so it is compatible with the
 repository engine range (`^20.19.0 || ^22.13.0 || >=24.0.0`) and canonical
 Node 22.13.1 baseline. The release exposes no runtime YAML interface whose
@@ -23,11 +31,14 @@ behavior should change.
 
 ## Dependency Change
 
-Keep `yaml` as a root exact dev dependency and change only its version from
-`2.8.1` to `2.9.0`. Regenerate `frontend/package-lock.json` with the pinned
-`npm@10.9.2`, preserving all unrelated dependency resolutions. Do not add an
-override, widen the version range, run `npm audit fix --force`, or update any
-other package.
+Keep `yaml` as a root exact dev dependency and change its version from `2.8.1`
+to `2.9.0`. Use the repository's existing exact override mechanism to select
+`browserslist@4.28.8` and `@xmldom/xmldom@0.9.12`, the selected patched
+releases available on 2026-09-03. Both versions satisfy their parents' existing
+semver ranges. Regenerate `frontend/package-lock.json` with pinned `npm@10.9.2` and
+accept only the browser-database packages necessarily re-resolved by the
+patched Browserslist release. Do not widen version ranges, run
+`npm audit fix --force`, or update unrelated packages.
 
 The implementation must begin by detaching the worktree's shared
 `frontend/node_modules` junction. Dependency installation or lockfile mutation
@@ -42,6 +53,10 @@ explicit security-pin contract. It must require `yaml` to equal `2.9.0` in the
 manifest root package, the lockfile root package, and the
 `node_modules/yaml` lock entry. The test must fail against the 2.8.1 baseline
 before either dependency file changes.
+
+The same contract must require exact manifest overrides and lock entries for
+`browserslist@4.28.8` and `@xmldom/xmldom@0.9.12`. This preserves the live-audit
+remediation when the lockfile is regenerated later.
 
 This contract protects the remediation from a later lockfile-only downgrade
 or accidental range widening. Existing optional-dependency and Node/npm
@@ -74,8 +89,8 @@ the pull request into `main` and do not deploy production.
 
 ## Out Of Scope
 
-- Updating Vitest, Vite, Next.js, Playwright, or other direct/transitive
-  dependencies.
+- Updating Vitest, Vite, Next.js, Playwright, or any transitive dependency not
+  required by the three patched packages.
 - Removing the root `yaml` security pin or replacing it with an npm override.
 - Changing audit severity thresholds, CI routing, or exception policy.
 - Changing application YAML parsing behavior; the application has no direct
