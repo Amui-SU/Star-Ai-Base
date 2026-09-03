@@ -10,6 +10,11 @@ OPTIONAL_DEPENDENCIES = {
     "@img/sharp-wasm32": "0.35.3",
     "@tybys/wasm-util": "0.10.2",
 }
+SECURITY_PINNED_DEV_DEPENDENCIES = {"yaml": "2.9.0"}
+SECURITY_PINNED_TRANSITIVE_DEPENDENCIES = {
+    "@xmldom/xmldom": "0.9.12",
+    "browserslist": "4.28.8",
+}
 
 
 def load_json(path: Path) -> dict:
@@ -35,4 +40,23 @@ def test_optional_dependency_workarounds_are_exact_and_locked():
     assert lockfile["packages"][""]["optionalDependencies"] == OPTIONAL_DEPENDENCIES
 
     for name, version in OPTIONAL_DEPENDENCIES.items():
+        assert lockfile["packages"][f"node_modules/{name}"]["version"] == version
+
+
+def test_security_pinned_dev_dependencies_are_exact_and_locked():
+    manifest = load_json(FRONTEND_ROOT / "package.json")
+    lockfile = load_json(FRONTEND_ROOT / "package-lock.json")
+
+    for name, version in SECURITY_PINNED_DEV_DEPENDENCIES.items():
+        assert manifest["devDependencies"][name] == version
+        assert lockfile["packages"][""]["devDependencies"][name] == version
+        assert lockfile["packages"][f"node_modules/{name}"]["version"] == version
+
+
+def test_security_pinned_transitive_dependencies_are_exact_and_locked():
+    manifest = load_json(FRONTEND_ROOT / "package.json")
+    lockfile = load_json(FRONTEND_ROOT / "package-lock.json")
+
+    for name, version in SECURITY_PINNED_TRANSITIVE_DEPENDENCIES.items():
+        assert manifest["overrides"][name] == version
         assert lockfile["packages"][f"node_modules/{name}"]["version"] == version
