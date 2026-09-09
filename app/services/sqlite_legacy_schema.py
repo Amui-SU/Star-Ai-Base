@@ -82,6 +82,10 @@ SQLITE_LEGACY_COLUMNS: dict[str, dict[str, str]] = {
     },
     "system_users": {
         "llm_api_source": "VARCHAR(20)",
+        "credential_version": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "system_sessions": {
+        "credential_version": "INTEGER NOT NULL DEFAULT 0",
     },
     "chat_conversations": {
         "user_id": "INTEGER",

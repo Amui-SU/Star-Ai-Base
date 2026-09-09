@@ -42,8 +42,11 @@ async def login_system_user(
     ):
         raise invalid_credentials_exception()
 
+    credential_version = user.credential_version
     workspace, member = await get_primary_workspace(db, user.id)
-    token = await create_system_session(db, user.id, response)
+    token = await create_system_session(
+        db, user.id, response, credential_version=credential_version
+    )
     await db.commit()
 
     return SystemAuthResponse(

@@ -130,26 +130,33 @@ async def test_parallel_reset_sends_reserve_one_code_and_deliver_once(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("delivery_error", [False, True])
 async def test_reset_send_removes_reserved_code_after_delivery_failure(
-    client, db_session_factory, monkeypatch
+    client, db_session_factory, monkeypatch, delivery_error, caplog
 ):
     await register_user(client, "delivery-failure@example.com")
     await clear_ip_rate_limit(db_session_factory)
     send_email = AsyncMock(return_value=False)
+    if delivery_error:
+        send_email.side_effect = RuntimeError("private SMTP diagnostic")
     monkeypatch.setattr(
         "app.services.system_auth_password_reset.send_verification_email",
         send_email,
     )
 
     async with db_session_factory() as db:
-        with pytest.raises(HTTPException) as failure:
-            await send_password_reset_code(
-                db,
-                email="delivery-failure@example.com",
-                client_ip="delivery-failure-1",
-                debug=False,
-            )
-        assert failure.value.status_code == 500
+        response = await send_password_reset_code(
+            db,
+            email="delivery-failure@example.com",
+            client_ip="delivery-failure-1",
+            debug=False,
+        )
+        unknown_response = await send_password_reset_code(
+            db, email="unknown@example.com", client_ip="unknown-ip", debug=False
+        )
+        assert response == unknown_response
+        assert "private SMTP diagnostic" not in caplog.text
+        assert "delivery-failure@example.com" not in caplog.text
 
     async with db_session_factory() as db:
         count = await db.scalar(
@@ -160,6 +167,7 @@ async def test_reset_send_removes_reserved_code_after_delivery_failure(
         assert count == 0
 
     send_email.return_value = True
+    send_email.side_effect = None
     async with db_session_factory() as db:
         response = await send_password_reset_code(
             db,
@@ -170,6 +178,31 @@ async def test_reset_send_removes_reserved_code_after_delivery_failure(
 
     assert response == {"message": "如果该邮箱已注册，重置验证码已发送"}
     assert send_email.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_reset_delivery_diagnostics_do_not_log_transport_secrets(monkeypatch):
+    from loguru import logger
+
+    def fail_connection(*args, **kwargs):
+        raise RuntimeError("SMTP secret=private-password code=123456")
+
+    monkeypatch.setattr("app.services.email.smtplib.SMTP_SSL", fail_connection)
+    monkeypatch.setattr("app.services.email.settings.smtp_use_tls", False)
+    monkeypatch.setattr("app.services.email.settings.smtp_user", "smtp@example.com")
+    monkeypatch.setattr("app.services.email.settings.smtp_password", "private-password")
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        assert not await send_verification_email(
+            "member@example.com", "123456", purpose="password_reset"
+        )
+    finally:
+        logger.remove(sink)
+    recorded = "".join(messages)
+    assert recorded
+    assert "private-password" not in recorded
+    assert "123456" not in recorded
 
 
 @pytest.mark.asyncio

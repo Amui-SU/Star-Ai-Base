@@ -1,5 +1,6 @@
 """Self-service password reset flows for system authentication."""
 
+import logging
 import secrets
 from datetime import timedelta
 
@@ -27,6 +28,7 @@ from app.services.system_auth_codes import (
 from app.time_utils import utc_now_naive
 
 GENERIC_SEND_MESSAGE = "如果该邮箱已注册，重置验证码已发送"
+logger = logging.getLogger(__name__)
 
 
 async def send_password_reset_code(
@@ -90,11 +92,14 @@ async def send_password_reset_code(
         raise
 
     if not debug:
-        sent = await send_verification_email(
-            normalized_email,
-            code,
-            purpose="password_reset",
-        )
+        try:
+            sent = await send_verification_email(
+                normalized_email,
+                code,
+                purpose="password_reset",
+            )
+        except Exception:
+            sent = False
         if not sent:
             await db.execute(
                 delete(PasswordResetCode).where(
@@ -103,7 +108,7 @@ async def send_password_reset_code(
                 )
             )
             await db.commit()
-            raise HTTPException(status_code=500, detail="验证码发送失败，请稍后重试")
+            logger.warning("Password reset email delivery failed; reservation removed")
 
     return response
 
@@ -171,7 +176,14 @@ async def confirm_password_reset(
             detail="验证码未发送或已过期，请重新获取",
         )
 
-    user.password_hash = hash_password(payload.new_password)
+    await db.execute(
+        update(SystemUser)
+        .where(SystemUser.id == user.id)
+        .values(
+            password_hash=hash_password(payload.new_password),
+            credential_version=SystemUser.credential_version + 1,
+        )
+    )
     await db.execute(
         update(SystemSession)
         .where(

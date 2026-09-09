@@ -72,6 +72,7 @@ async def send_verification_email(
         await asyncio.to_thread(_send)
         logger.info("验证码邮件已发送到 {}", to_email)
         return True
-    except Exception as e:
-        logger.error("发送验证码邮件到 {} 失败: {}", to_email, e)
+    except Exception:
+        # SMTP diagnostics can contain credentials or the message body.
+        logger.error("验证码邮件发送失败，请检查 SMTP 服务配置和可用性")
         return False
