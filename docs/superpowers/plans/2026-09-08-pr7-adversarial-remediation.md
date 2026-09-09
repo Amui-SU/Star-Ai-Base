@@ -141,7 +141,38 @@
 - [ ] Commit batch 2 with normal hooks; fresh dependency installation in an isolated temporary directory uses npm 10.9.2 and verifies tree/audits without touching shared dependencies.
 - [ ] Integrate and push the release branch; validate push and PR workflows for final SHA. Update plan status/checklist and regenerate index using `python scripts/generate-plan-index.py` when the behavior is integrated.
 
-## Execution Record
+## Task 7: Approved dependency security batch (2026-09-10)
+
+**Files:** `frontend/package.json`, `frontend/package-lock.json`,
+`tests/developer_workflow/test_frontend_dependency_contract.py`, this plan,
+the associated design addendum, and generated plan index.
+
+**Contract:** keep Node 22.13.1 and npm 10.9.2; pin Next.js/eslint-config-next
+16.3.4, sharp/sharp-wasm 0.35.4, @emnapi/runtime 1.11.3, Vitest 4.1.11,
+and js-yaml 4.3.2. Audit thresholds and application interfaces remain unchanged.
+
+- [ ] Extend dependency contract fixtures for the approved versions and assert every locked copy of Next.js, sharp, Vitest/mocker, and js-yaml avoids the affected versions. Run `python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.py` and observe failure against the existing vulnerable lockfile.
+- [ ] Run `scripts/worktree-deps.ps1 -Mode Status`, verify the shared junction points to the main workspace, then run `-Mode Detach`. Update only the approved manifest entries with apply_patch and regenerate the lockfile with `npm exec --yes --package=npm@10.9.2 -- npm install --package-lock-only --ignore-scripts --no-audit --no-fund`.
+- [ ] Install fresh isolated dependencies with `npm exec --yes --package=npm@10.9.2 -- npm ci --no-audit --no-fund`; verify `npm ls --depth=0 --json`, `npm audit --omit=dev --audit-level=high`, and `npm audit --audit-level=high` all exit 0. Inspect the lockfile diff for unrelated upgrades and rerun the dependency contracts.
+- [ ] Run the full `scripts/verify-before-commit.ps1` with formatting, lint, tests and build; run `npm run test:e2e -- --workers=1` with CI=true. Obtain independent review, fix material findings, and commit explicitly scoped files with normal hooks.
+- [ ] Fast-forward the release branch, refresh its installed dependencies only after checking other shared consumers, run integration regressions, push without force, and verify both push/PR CI runs for the final SHA. Close this plan and regenerate its index only when all acceptance gates are satisfied.
+
+### Security addendum evidence
+
+The initial code commits are `8764f7c` and `04d002d`; both are integrated and
+pushed. Main-workspace regressions passed 150 backend and 44 frontend tests.
+The PR run [34373614201](https://github.com/Amui-SU/Star-Ai-Base/actions/runs/34373614201)
+and push run [34373609078](https://github.com/Amui-SU/Star-Ai-Base/actions/runs/34373609078)
+failed on production dependency audit, not application tests. A fresh local
+audit also reports five affected package entries (one critical, two high,
+two moderate); the earlier zero-audit observation is historical, not current.
+References: [Next.js](https://github.com/advisories/GHSA-p293-qw3h-jr36),
+[AVIF](https://github.com/advisories/GHSA-2xp9-vwfh-vxw4),
+[sharp](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c),
+[Vitest](https://github.com/advisories/GHSA-82fw-gwwq-j7x9), and
+[js-yaml](https://github.com/advisories/GHSA-2883-xcg3-v3hh).
+
+## Prior Execution Record
 
 Design approved on 2026-09-08. Baseline is `8dd218d`; worktree is clean and frontend dependencies are shared. Prior full baseline evidence: backend 1566 passed / 6 skipped and frontend 377 passed, lint/build passed. Documentation-only plan preparation uses index/lifecycle and formatting checks; full implementation verification is performed per batch.
 

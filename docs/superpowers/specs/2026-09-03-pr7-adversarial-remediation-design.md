@@ -222,6 +222,27 @@ Pull request 7 remains Open and Ready. This work does not merge the pull request
 into `main`, publish a production release from `main`, copy production secrets,
 modify the active ECS host, or deploy containers.
 
+## Approved security addendum (2026-09-10)
+
+After the two remediation commits were integrated and pushed, both exact-SHA
+CI runs failed the production audit. The user approved an additional dependency
+security batch. This narrowly supersedes the dependency-upgrade exclusion below:
+upgrade Next.js and eslint-config-next together to 16.3.4, sharp to 0.35.4,
+Vitest to 4.1.11, and js-yaml to 4.3.2. Synchronize the existing optional
+sharp-wasm workaround to 0.35.4 and its required @emnapi/runtime to 1.11.3.
+Keep Node 22.13.1, npm 10.9.2, existing API/UI behavior, and audit thresholds.
+Do not use a blanket audit fix, waive advisories, or upgrade unrelated packages.
+
+Detach the verified shared dependency junction before lockfile/install changes;
+install isolated dependencies in this worktree. Extend the dependency contract
+to prevent vulnerable locked copies, including nested copies, from returning.
+Regenerate the lockfile using npm 10.9.2, verify a clean npm ci/tree and zero
+production/full audit findings, run full repository verification and browser
+tests, and obtain independent review. Commit normally, fast-forward and push
+the existing release branch, then verify both exact-SHA CI runs. Keep PR 7 open
+and do not deploy. Preserve the original six-fix history and record this batch
+and its evidence in the existing implementation plan.
+
 ## Out Of Scope
 
 - Replacing the email provider or adding background mail infrastructure.
