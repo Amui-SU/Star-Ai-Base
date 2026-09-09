@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import BinaryIO
 
-DOC_SUFFIXES = {".md", ".txt", ".rst"}
+DOCS_ONLY_PATHS = {"README.md"}
 SHARED_EXACT = {
     ".github/workflows/ci.yml",
     "AGENTS.md",
@@ -25,7 +25,9 @@ SHARED_EXACT = {
     "scripts/verify-staged.ps1",
 }
 POLICY_PREFIXES = (
-    "docs/superpowers/specs/2026-07-29-micro-task-fast-lane",
+    "docs/security/",
+    "docs/deployment/",
+    "docs/superpowers/specs/",
     "docs/superpowers/plans/2026-07-29-micro-task-fast-lane",
 )
 BACKEND_EXACT = {"requirements-dev.txt"}
@@ -68,7 +70,7 @@ def classify_paths(paths: list[str], force_full: bool = False) -> dict[str, bool
         elif path.startswith(FRONTEND_PREFIXES):
             frontend = True
             docs_only = False
-        elif Path(path).suffix.lower() not in DOC_SUFFIXES:
+        elif path not in DOCS_ONLY_PATHS:
             backend = frontend = True
             docs_only = False
 

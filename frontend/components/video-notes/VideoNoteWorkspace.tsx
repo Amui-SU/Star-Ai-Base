@@ -318,6 +318,7 @@ export default function VideoNoteWorkspace({
     if (!note) return;
     const requestNoteId = note.id;
     const requestId = ++aiRequestIdRef.current;
+    const startingBlocks = blocks;
     setAiLoading(true);
     setAiResultSource(null);
     setAiMessage(
@@ -344,7 +345,10 @@ export default function VideoNoteWorkspace({
         aiRequestIdRef.current !== requestId
       )
         return;
-      aiEditing.applyAiOperations(response.operations);
+      if (!aiEditing.applyAiOperations(response.operations, startingBlocks)) {
+        setAiMessage("笔记内容已修改，请重新生成，已保留你的编辑。");
+        return;
+      }
       if (action === "summary") {
         setTags((current) =>
           Array.from(new Set([...current, ...response.tag_suggestions])),

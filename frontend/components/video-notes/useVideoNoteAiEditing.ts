@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import type { VideoNoteAiOperation, VideoNoteBlock } from "@/lib/api";
 import { applyVideoNoteAiOperations } from "./videoNoteBlocks";
+import { hasVideoNoteAiConflict } from "./videoNoteAiConflicts";
 
 interface UseVideoNoteAiEditingOptions {
   blocks: VideoNoteBlock[];
@@ -15,14 +16,26 @@ export function useVideoNoteAiEditing({
   onBlocksChange,
 }: UseVideoNoteAiEditingOptions) {
   const [undoStack, setUndoStack] = useState<VideoNoteBlock[][]>([]);
+  const latest = useRef({ blocks, onBlocksChange });
+  useLayoutEffect(() => {
+    latest.current = { blocks, onBlocksChange };
+  }, [blocks, onBlocksChange]);
 
   const applyAiOperations = useCallback(
-    (operations: VideoNoteAiOperation[]) => {
-      const nextBlocks = applyVideoNoteAiOperations(blocks, operations);
-      setUndoStack((current) => [...current, blocks]);
-      onBlocksChange(nextBlocks);
+    (
+      operations: VideoNoteAiOperation[],
+      startingBlocks: VideoNoteBlock[] = blocks,
+    ) => {
+      const currentBlocks = latest.current.blocks;
+      if (hasVideoNoteAiConflict(startingBlocks, currentBlocks, operations))
+        return false;
+      const nextBlocks = applyVideoNoteAiOperations(currentBlocks, operations);
+      setUndoStack((current) => [...current, currentBlocks]);
+      latest.current.blocks = nextBlocks;
+      latest.current.onBlocksChange(nextBlocks);
+      return true;
     },
-    [blocks, onBlocksChange],
+    [blocks],
   );
 
   const undoAiEdit = useCallback(() => {

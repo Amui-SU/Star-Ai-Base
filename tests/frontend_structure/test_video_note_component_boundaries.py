@@ -2,7 +2,6 @@ import re
 
 from .helpers import get_project_root
 
-
 VIDEO_NOTE_STYLE_FILES = [
     "video-notes/shell.css",
     "video-notes/list.css",
@@ -133,6 +132,7 @@ def test_video_note_workspace_tests_are_split_by_workflow():
             "downloads exported Markdown from the toolbar export menu",
         ],
         "VideoNoteWorkspace.ai.test.tsx": [
+            "rejects a late AI result targeting manually edited content",
             "collapses and restores the right AI tools",
             "applies AI suggestions with status",
             "discards in-flight AI results and undo history",
@@ -157,7 +157,7 @@ def test_video_note_workspace_tests_are_split_by_workflow():
             assert expected_name in source
 
     assert not original_path.exists()
-    assert focused_source.count("it(") == 23
+    assert focused_source.count("it(") == 24
 
 
 def test_video_note_workspace_uses_focused_view_component():

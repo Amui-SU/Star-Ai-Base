@@ -47,6 +47,26 @@ for first_character in ("o", "O"):
     ]
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/security/exception.md",
+        "docs/deployment/runbook.txt",
+        "docs/superpowers/specs/ordinary-design.md",
+        "UNKNOWN.md",
+        "docs/user-guide.md",
+        "nested/readme.rst",
+        "README.txt",
+    ],
+)
+def test_unrecognized_and_policy_documents_require_both_jobs(path):
+    assert _load_classifier().classify_paths([path]) == {
+        "backend": True,
+        "frontend": True,
+        "docs_only": False,
+    }
+
+
 def _load_classifier() -> ModuleType:
     assert CLASSIFIER_PATH.is_file(), "scripts/classify-ci-paths.py is missing"
     spec = importlib.util.spec_from_file_location("classify_ci_paths", CLASSIFIER_PATH)
@@ -336,7 +356,7 @@ def test_path_aware_ci_policy_normalizes_input_newlines(newline: str) -> None:
     ("paths", "expected"),
     [
         (
-            ["docs/user-guide.md"],
+            ["README.md"],
             {"backend": False, "frontend": False, "docs_only": True},
         ),
         (["app/main.py"], {"backend": True, "frontend": False, "docs_only": False}),
@@ -467,7 +487,7 @@ def test_cli_reads_nul_names_and_writes_github_outputs(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr.decode()
     assert output.read_text(encoding="utf-8").splitlines() == [
-        "backend=false",
+        "backend=true",
         "frontend=true",
         "docs_only=false",
     ]
@@ -991,7 +1011,7 @@ def test_pull_request_rename_keeps_the_deleted_source_boundary(
     _git(repo, "commit", "--quiet", "-m", "add backend source")
     base_sha = _git(repo, "rev-parse", "HEAD").decode().strip()
     (repo / "docs").mkdir()
-    _git(repo, "mv", "--", "app/moved.py", "docs/moved.md")
+    _git(repo, "mv", "--", "app/moved.py", "README.md")
     _git(repo, "commit", "--quiet", "-m", "move source to docs")
     head_sha = _git(repo, "rev-parse", "HEAD").decode().strip()
 

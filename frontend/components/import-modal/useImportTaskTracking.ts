@@ -1,15 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { importApi, type ImportTaskStatus } from "@/lib/api";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import type { ImportTaskStatus } from "@/lib/api";
+import {
+  isImportTaskTerminal,
+  startImportTaskPolling,
+} from "./importTaskPolling";
 
 interface TrackedTask {
   id: string;
   label: string;
 }
-
-const isTerminal = (status?: string) =>
-  status === "completed" || status === "failed" || status === "interrupted";
 
 /** Keep background imports observable even while the dialog is closed. */
 export function useImportTaskTracking(onImported?: () => void) {
@@ -18,64 +25,54 @@ export function useImportTaskTracking(onImported?: () => void) {
     {},
   );
   const statusesRef = useRef<Record<string, ImportTaskStatus>>({});
-  const notifiedRef = useRef(new Set<string>());
-  const inFlightRef = useRef(new Map<string, Promise<ImportTaskStatus>>());
+  const notifiedRef = useRef(new Set<TrackedTask[]>());
+  const pollersRef = useRef(new Map<string, () => void>());
+  const latest = useRef({ batches, onImported });
+  useLayoutEffect(() => {
+    latest.current = { batches, onImported };
+  }, [batches, onImported]);
 
   const trackTasks = useCallback((tasks: TrackedTask[]) => {
     if (tasks.length) setBatches((current) => [...current, tasks]);
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const timers = new Set<number>();
-    const poll = async (task: TrackedTask) => {
-      if (isTerminal(statusesRef.current[task.id]?.status)) return;
-      let update: ImportTaskStatus | null = null;
-      let request = inFlightRef.current.get(task.id);
-      try {
-        if (!request) {
-          request = importApi.taskStatus(task.id);
-          inFlightRef.current.set(task.id, request);
-        }
-        update = await request;
-      } catch {
-        // A transient error retries this task without holding up other tasks.
-      } finally {
-        if (request && inFlightRef.current.get(task.id) === request) {
-          inFlightRef.current.delete(task.id);
-        }
-      }
-      if (cancelled) return;
-      const next = { ...statusesRef.current };
-      if (update?.task_id === task.id) next[task.id] = update;
+    const pollers = pollersRef.current;
+    return () => {
+      for (const cancel of pollers.values()) cancel();
+      pollers.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    const updateStatus = (update: ImportTaskStatus) => {
+      const next = { ...statusesRef.current, [update.task_id]: update };
       statusesRef.current = next;
       setStatuses(next);
-      for (const batch of batches) {
-        const key = batch[0].id;
+      for (const batch of latest.current.batches) {
         if (
-          notifiedRef.current.has(key) ||
-          !batch.every((task) => isTerminal(next[task.id]?.status))
+          notifiedRef.current.has(batch) ||
+          !batch.every((task) => isImportTaskTerminal(next[task.id]?.status))
         )
           continue;
-        notifiedRef.current.add(key);
+        notifiedRef.current.add(batch);
         if (batch.some((task) => next[task.id]?.status === "completed")) {
-          onImported?.();
+          latest.current.onImported?.();
         }
       }
-      if (!cancelled && !isTerminal(next[task.id]?.status)) {
-        const timer = window.setTimeout(() => {
-          timers.delete(timer);
-          void poll(task);
-        }, 2000);
-        timers.add(timer);
-      }
     };
-    for (const task of batches.flat()) void poll(task);
-    return () => {
-      cancelled = true;
-      for (const timer of timers) window.clearTimeout(timer);
-    };
-  }, [batches, onImported]);
+    for (const task of batches.flat()) {
+      if (
+        pollersRef.current.has(task.id) ||
+        isImportTaskTerminal(statusesRef.current[task.id]?.status)
+      )
+        continue;
+      pollersRef.current.set(
+        task.id,
+        startImportTaskPolling(task.id, updateStatus),
+      );
+    }
+  }, [batches]);
 
   const taskProgress = batches.flat().map((task) => ({
     ...task,

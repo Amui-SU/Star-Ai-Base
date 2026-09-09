@@ -409,7 +409,7 @@ def test_internal_contracts_reuse_one_isolated_powershell_host(tmp_path: Path) -
     assert first.stdout.strip() == second.stdout.strip()
 
 
-def _windows_process_has_exited(process_id: int) -> bool:
+def _wait_for_windows_process_exit(process_id: int) -> bool:
     if os.name != "nt":
         pytest.skip("process-tree host contracts apply to Windows")
     import ctypes
@@ -429,7 +429,9 @@ def _windows_process_has_exited(process_id: int) -> bool:
     if not handle:
         return True
     try:
-        return wait_for_single_object(handle, 0) == 0
+        # Job termination can signal the parent before a child finishes exiting.
+        # Wait on the process itself; callers still enforce the total time budget.
+        return wait_for_single_object(handle, 5000) == 0
     finally:
         close_handle(handle)
 
@@ -457,10 +459,10 @@ def test_internal_host_timeout_reaps_tree_and_replaces_bad_host(tmp_path: Path) 
                 "[System.IO.File]::WriteAllText($env:HOOK_INSTALLER_TEST_CHILD_PID, "
                 "[string]$child.Id); while ($true) { Start-Sleep -Seconds 1 }",
             )
-        assert time.monotonic() - started < 20
         child_pid = int(child_pid_file.read_text(encoding="utf-8"))
-        assert _windows_process_has_exited(host_pid)
-        assert _windows_process_has_exited(child_pid)
+        assert _wait_for_windows_process_exit(host_pid)
+        assert _wait_for_windows_process_exit(child_pid)
+        assert time.monotonic() - started < 20
         assert not timed_host.is_usable
 
         replacement = _run_internal(repo, environment, "$PID")
@@ -498,10 +500,10 @@ def test_internal_host_malformed_response_reaps_tree_and_replaces_bad_host(
                 "[string]$child.Id); [Console]::Out.WriteLine('%%%not-base64%%%'); "
                 "[Console]::Out.Flush(); while ($true) { Start-Sleep -Seconds 1 }",
             )
-        assert time.monotonic() - started < 10
         child_pid = int(child_pid_file.read_text(encoding="utf-8"))
-        assert _windows_process_has_exited(host_pid)
-        assert _windows_process_has_exited(child_pid)
+        assert _wait_for_windows_process_exit(host_pid)
+        assert _wait_for_windows_process_exit(child_pid)
+        assert time.monotonic() - started < 10
         assert not malformed_host.is_usable
 
         replacement = _run_internal(repo, environment, "$PID")

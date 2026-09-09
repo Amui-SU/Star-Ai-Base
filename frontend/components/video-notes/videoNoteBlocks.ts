@@ -8,6 +8,10 @@ const replaceTargetAliases: Record<string, string[]> = {
   "ai-review-questions": ["questions", "ai-review-questions"],
 };
 
+export function getVideoNoteReplacementTargetIds(targetId: string): string[] {
+  return replaceTargetAliases[targetId] ?? [targetId];
+}
+
 export function createVideoNoteBlock(
   type: VideoNoteBlock["type"] = "paragraph",
   values: Partial<VideoNoteBlock> = {},
@@ -47,7 +51,7 @@ function replaceOrInsertBlock(
 ): VideoNoteBlock[] {
   if (!operation.block) return blocks;
   const targetId = operation.target_block_id ?? operation.block.id;
-  const targetIds = replaceTargetAliases[targetId] ?? [targetId];
+  const targetIds = getVideoNoteReplacementTargetIds(targetId);
   const index = blocks.findIndex((block) => targetIds.includes(block.id));
   const replacement = { ...operation.block, id: targetIds[0] };
   if (index === -1) return [...blocks, replacement];

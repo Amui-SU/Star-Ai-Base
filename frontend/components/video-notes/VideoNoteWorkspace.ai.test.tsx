@@ -16,6 +16,50 @@ import {
   videoNoteApi,
 } from "./VideoNoteWorkspace.test-utils";
 import VideoNoteWorkspace from "./VideoNoteWorkspace";
+import type { VideoNoteAiResponse } from "@/lib/api";
+
+it("rejects a late AI result targeting manually edited content", async () => {
+  vi.mocked(videoNoteApi.list).mockResolvedValue({
+    knowledge_base_id: 7,
+    items: [],
+  });
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+  let finish!: (response: VideoNoteAiResponse) => void;
+  vi.mocked(videoNoteApi.generateSummary).mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  renderWorkspace({ initialBvid: "BVNOTE123" });
+  const editor = await findMarkdownEditor();
+  fireEvent.click(screen.getByRole("button", { name: "生成摘要" }));
+  fireEvent.input(editor, {
+    target: { value: editor.value.replace("旧内容", "手动保留内容") },
+  });
+  await act(async () =>
+    finish({
+      message: "已应用摘要",
+      tag_suggestions: ["不应应用标签"],
+      result_source: "ai",
+      operations: [
+        {
+          kind: "replace_or_insert_block",
+          target_block_id: "p1",
+          block: { id: "p1", type: "ai_summary", text: "迟到内容" },
+        },
+      ],
+    }),
+  );
+  expect(editor.value).toContain("手动保留内容");
+  expect(editor.value).not.toContain("迟到内容");
+  expect(screen.getByRole("status")).toHaveTextContent("重新生成");
+  expect(screen.getByRole("button", { name: "撤销 AI 编辑" })).toBeDisabled();
+  expect(screen.queryByText("不应应用标签")).toBeNull();
+});
 
 it("collapses and restores the right AI tools without removing editor tools", async () => {
   const user = userEvent.setup();

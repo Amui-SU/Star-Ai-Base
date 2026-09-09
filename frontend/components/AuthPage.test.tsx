@@ -135,7 +135,7 @@ describe("AuthPage third-party login notice", () => {
 
   it("marks the brand separately so desktop alignment does not move header actions", () => {
     const { container } = render(<AuthPage onAuthSuccess={vi.fn()} />);
-    const brand = container.querySelector(".auth-brand");
+    const brand = container.querySelector<HTMLElement>(".auth-brand");
 
     expect(brand).toBeInTheDocument();
     expect(brand).toContainElement(

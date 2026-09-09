@@ -42,7 +42,7 @@ it("reloads statistics and scope options on content refresh without resetting ch
     { initialProps: { statsKey: 0 } },
   );
   await waitFor(() => expect(result.current.stats?.total_videos).toBe(0));
-  act(() => result.current.setChatScope({ folder_ids: [10], bvids: [] }));
+  act(() => result.current.setChatScope({ folderIds: [10], bvids: [] }));
   vi.mocked(knowledgeBaseApi.stats).mockResolvedValue({
     knowledge_base_id: 7,
     workspace_id: 1,
@@ -65,7 +65,7 @@ it("reloads statistics and scope options on content refresh without resetting ch
     expect(result.current.scopeOptions.folders[0]?.title).toBe("新导入"),
   );
   expect(result.current.stats?.total_videos).toBe(1);
-  expect(result.current.chatScope).toEqual({ folder_ids: [10], bvids: [] });
+  expect(result.current.chatScope).toEqual({ folderIds: [10], bvids: [] });
   expect(actionsRef.current.onResetChat).toHaveBeenCalledTimes(1);
   expect(actionsRef.current.onResetConversationIdentity).toHaveBeenCalledTimes(
     1,

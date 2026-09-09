@@ -7,7 +7,7 @@ export type {
   ApiAccountDraftValidationResponse,
   ApiAccountDraftValidationStatus,
 } from "./api/apiAccountTypes";
-export { API_BASE_URL, getApiBaseUrl, request } from "./api/client";
+export { API_BASE_URL, ApiError, getApiBaseUrl, request } from "./api/client";
 export { chatApi } from "./api/chat";
 export { chatHistoryApi } from "./api/chatHistory";
 export type {

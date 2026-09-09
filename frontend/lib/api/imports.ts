@@ -20,8 +20,11 @@ export const importApi = {
       body: JSON.stringify(data),
     }),
 
-  taskStatus: (taskId: string) =>
-    request<ImportTaskStatus>(`/imports/tasks/${taskId}`),
+  taskStatus: (taskId: string, signal?: AbortSignal) =>
+    request<ImportTaskStatus>(`/imports/tasks/${taskId}`, {
+      signal,
+      skipErrorBody: true,
+    }),
 
   detectMultiPart: (url: string) =>
     request<DetectMultiPartResponse>("/imports/detect-multi-part", {
