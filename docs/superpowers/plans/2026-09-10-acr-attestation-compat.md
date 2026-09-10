@@ -1,6 +1,6 @@
 # ACR Attestation Compatibility Implementation Plan
 
-**Status:** partial
+**Status:** completed
 
 > **For agentic workers:** Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
@@ -46,8 +46,8 @@
 - [x] Document the compatibility reason, preserved provenance, and unchanged release safeguards.
 - [x] Run the complete workflow test file and plan/index tests; verify whitespace.
 - [x] Run `scripts/verify-before-commit.ps1 -Format` and complete verification with durable logs. A local Docker daemon is not available; real registry compatibility is accepted only by GitHub publication.
-- [ ] Review the diff, commit explicitly scoped files with normal hooks, and push the focused branch for CI/review.
-- [ ] After authorized integration, verify main CI and Publish Images for the exact new commit. Record results; no production deployment.
+- [x] Review the diff, commit explicitly scoped files with normal hooks, and push the focused branch for CI/review.
+- [x] After authorized integration, verify main CI and Publish Images for the exact new commit. Record results; no production deployment.
 
 ## Execution record
 
@@ -65,4 +65,21 @@ Critical, Important, or actionable Minor issues. Full verification exited 0:
 frontend tests passed, along with Black, Prettier, lint, TypeScript and the
 production build. Its durable output is
 `.pytest_cache/acr-attestation-full-verification.log`. This is local acceptance
-only; exact-SHA CI and actual ACR publication remain pending.
+only; the subsequent exact-SHA release evidence is recorded below.
+
+## Completion record (2026-09-11)
+
+Implementation commit `b52a30046239f44104426d04e74468d078f1b52b` passed normal
+hooks and [PR CI 34500146719](https://github.com/Amui-SU/Star-Ai-Base/actions/runs/34500146719).
+[PR 8](https://github.com/Amui-SU/Star-Ai-Base/pull/8) merged as
+`794440a611a5ee3c30a9f1da78f121ee5a3fb84a`; the merged tree is identical to
+the locally verified implementation.
+
+For that exact merge SHA, [main CI 34500892335](https://github.com/Amui-SU/Star-Ai-Base/actions/runs/34500892335)
+and [Publish Images 34501562886](https://github.com/Amui-SU/Star-Ai-Base/actions/runs/34501562886)
+both succeeded. Backend and frontend publication, both SHA revision checks,
+and the manual deployment summary completed successfully. This proves ACR
+accepted both images with the compatible attestation envelope. No provenance,
+SHA guard, credentials, registry permissions, or production service was changed.
+ECS was not deployed. This completion record is documentation-only and does not
+change the verified compatibility implementation.
