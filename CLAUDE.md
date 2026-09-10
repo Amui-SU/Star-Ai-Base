@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Task classification, worktree choice, and verification rules are defined only in `AGENTS.md`.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 项目概述
@@ -113,6 +115,8 @@ SystemUser → Workspace (1:1 via WorkspaceMember) → KnowledgeBase (1:N)
 **提问范围**：`KnowledgeBaseChatRequest` 支持 `folder_ids` 与 `bvids`。`/knowledge-bases/{id}/scope-options` 返回当前知识库可提问的收藏夹和视频；前端 `ChatScopePicker` 可在整个知识库、收藏夹、单个视频之间切换，最终仍走 scoped chat/chat-stream。
 
 **导入体系**：`imports.py` 提供一级导入入口。`/imports/methods` 返回 B 站收藏夹、导入视频、抖音、通用 URL 等方式；`导入视频` 使用方法 id `video_import`，前端兼容旧 `video_url` id。当前已实现 B 站视频 URL 导入与本地视频文件导入：URL 路径走 `/imports/url`，本地文件走 `/imports/local-video` multipart 表单（`knowledge_base_id`、可选 `title`、`file`），依赖 `python-multipart`。两条路径都写入 `VideoCache`、`FavoriteFolder("单条视频导入")`、`FavoriteVideo`、`IngestionTask` 并同步向量。本地视频会保存到 `data/local_imports`，交给 `ASRService.transcribe_local_file()` 转写，任务结束时兜底清理上传源文件；扩展本地导入时必须保留工作区/知识库隔离与失败清理。B 站收藏夹扫码绑定仍作为第二层级入口复用 `source_bindings.py`。
+
+**分P视频导入**：`/imports/detect-multi-part` 检测分P，`/imports/multi-part` 按选中的 `page_indices` 逐P创建任务（每P一个 `IngestionTask`）。分P以**存储 ID `{bvid}_p{page}`**（如 `BV1xx_p2`）作为逻辑 bvid 落库，使每个分P在 `VideoCache`、`FavoriteVideo`、向量库、`VideoNote` 中都是独立视频，互不覆盖、可各记一份笔记。转换助手集中在 `bilibili_multi_part.py`（`make_part_video_id` / `split_part_video_id` / `bilibili_video_url`），前端对应 `frontend/lib/bilibiliVideo.ts`。约定：**调 B 站 API 前必须用 `split_part_video_id` 还原真实 bvid；构造视频 URL 必须走 `bilibili_video_url`（自动带 `?p=`），不要手拼 `bilibili.com/video/{bvid}`**。笔记时间戳的 `time` 一律为单P内秒数，官方章节的累计秒换算在 `video_note_chapters.py::_normalize_part_relative_timestamps`（换算失败返回空走兜底，不回退累计值）。前端 `useImportModal` 提交 B 站链接时先检测分P，多P进入勾选界面走 `/imports/multi-part`，检测失败回退 `/imports/url`。相关测试：`tests/test_imports.py`（分P端点与隔离）、`tests/test_bilibili_multi_part.py`、`tests/test_video_note_chapters.py`、`frontend/components/ImportModal.test.tsx`。
 
 **自定义视频名**：`VideoTitleOverride` 以 workspace + knowledge_base + source_binding + bvid 为唯一作用域保存自定义标题。`source_bindings.py` 在返回收藏夹视频时合并 `custom_title/display_title/original_title`，`/source-bindings/{id}/videos/title` 负责创建、更新和清除覆盖名。
 

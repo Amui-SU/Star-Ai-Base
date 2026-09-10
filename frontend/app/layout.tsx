@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { DevIndicatorGuard } from "@/components/DevIndicatorGuard";
 import LocalConnectionBootstrap from "@/components/LocalConnectionBootstrap";
+import { RefreshBusProvider } from "@/hooks/refreshBus";
 import "vditor/dist/index.css";
 import "./globals.css";
 
@@ -29,7 +30,7 @@ export default function RootLayout({
       <body className={`${body.variable} antialiased`}>
         <DevIndicatorGuard />
         <LocalConnectionBootstrap />
-        {children}
+        <RefreshBusProvider>{children}</RefreshBusProvider>
       </body>
     </html>
   );

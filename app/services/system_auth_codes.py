@@ -7,7 +7,8 @@ import time
 from datetime import timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import VerificationCode, VerificationIpRateLimit
@@ -56,43 +57,56 @@ async def check_ip_rate_limit(db: AsyncSession, client_ip: str) -> bool:
     window_expires_before = now_naive - timedelta(seconds=IP_RATE_WINDOW)
     await db.execute(
         delete(VerificationIpRateLimit).where(
-            VerificationIpRateLimit.window_start < window_expires_before
+            VerificationIpRateLimit.window_start < window_expires_before,
+            VerificationIpRateLimit.ip_address != client_ip,
         )
     )
-
-    result = await db.execute(
-        select(VerificationIpRateLimit).where(
-            VerificationIpRateLimit.ip_address == client_ip
-        )
-    )
-    entry = result.scalar_one_or_none()
-    if entry is None:
-        db.add(
-            VerificationIpRateLimit(
-                ip_address=client_ip,
-                count=1,
-                window_start=now_naive,
+    expired = VerificationIpRateLimit.window_start < window_expires_before
+    for _ in range(3):
+        result = await db.execute(
+            update(VerificationIpRateLimit)
+            .where(
+                VerificationIpRateLimit.ip_address == client_ip,
+                or_(expired, VerificationIpRateLimit.count < IP_RATE_MAX),
+            )
+            .values(
+                count=case((expired, 1), else_=VerificationIpRateLimit.count + 1),
+                window_start=case(
+                    (expired, now_naive), else_=VerificationIpRateLimit.window_start
+                ),
                 updated_at=now_naive,
             )
+            .returning(VerificationIpRateLimit.ip_address)
+            .execution_options(synchronize_session=False)
         )
+        if result.scalar_one_or_none() is not None:
+            await db.commit()
+            return True
+        existing = await db.scalar(
+            select(VerificationIpRateLimit.ip_address).where(
+                VerificationIpRateLimit.ip_address == client_ip
+            )
+        )
+        if existing is not None:
+            await db.commit()
+            return False
+        try:
+            async with db.begin_nested():
+                db.add(
+                    VerificationIpRateLimit(
+                        ip_address=client_ip,
+                        count=1,
+                        window_start=now_naive,
+                        updated_at=now_naive,
+                    )
+                )
+                await db.flush()
+        except IntegrityError:
+            continue
         await db.commit()
         return True
-
-    if entry.window_start < window_expires_before:
-        entry.count = 1
-        entry.window_start = now_naive
-        entry.updated_at = now_naive
-        await db.commit()
-        return True
-
-    if entry.count >= IP_RATE_MAX:
-        await db.commit()
-        return False
-
-    entry.count += 1
-    entry.updated_at = now_naive
-    await db.commit()
-    return True
+    await db.rollback()
+    return False
 
 
 def hash_code(code: str) -> str:

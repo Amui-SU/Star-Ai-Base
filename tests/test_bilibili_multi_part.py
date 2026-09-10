@@ -170,3 +170,38 @@ def test_build_import_summary_partial():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_make_and_split_part_video_id():
+    """分P存储ID的生成与还原"""
+    from app.services.bilibili_multi_part import (
+        make_part_video_id,
+        split_part_video_id,
+    )
+
+    assert make_part_video_id("BV1xx411x7xx", 2) == "BV1xx411x7xx_p2"
+    assert split_part_video_id("BV1xx411x7xx_p2") == ("BV1xx411x7xx", 2)
+    assert split_part_video_id("BV1xx411x7xx") == ("BV1xx411x7xx", None)
+    assert split_part_video_id("LV1234567890ABCDEF12") == (
+        "LV1234567890ABCDEF12",
+        None,
+    )
+    assert split_part_video_id("") == ("", None)
+
+
+def test_bilibili_video_url_for_part_ids():
+    """分P存储ID构造URL时自动带 ?p= 参数"""
+    from app.services.bilibili_multi_part import bilibili_video_url
+
+    assert (
+        bilibili_video_url("BV1xx411x7xx")
+        == "https://www.bilibili.com/video/BV1xx411x7xx"
+    )
+    assert (
+        bilibili_video_url("BV1xx411x7xx_p1")
+        == "https://www.bilibili.com/video/BV1xx411x7xx"
+    )
+    assert (
+        bilibili_video_url("BV1xx411x7xx_p3")
+        == "https://www.bilibili.com/video/BV1xx411x7xx?p=3"
+    )

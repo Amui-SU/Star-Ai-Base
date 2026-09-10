@@ -1,4 +1,10 @@
-import { screen, within, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  within,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 
@@ -10,6 +16,419 @@ import {
   videoNoteApi,
   vditorState,
 } from "./VideoNoteWorkspace.test-utils";
+import VideoNoteWorkspace from "./VideoNoteWorkspace";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+async function advanceTimersByTime(ms: number) {
+  await act(async () => {
+    vi.advanceTimersByTime(ms);
+    await Promise.resolve();
+  });
+}
+
+const searchResult = (bvid: string, title: string, knowledgeBaseId = 7) => ({
+  knowledge_base_id: knowledgeBaseId,
+  items: [
+    {
+      bvid,
+      title,
+      folder_title: "搜索结果",
+      has_note: true,
+      note_id: 9,
+      summary_status: "seeded" as const,
+      tags: [],
+    },
+  ],
+});
+
+it("debounces incremental search input and requests only the final query", async () => {
+  vi.useFakeTimers();
+  vi.mocked(videoNoteApi.list).mockResolvedValue(
+    searchResult("BVINITIAL", "初始结果"),
+  );
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  renderWorkspace({ initialBvid: "BVINITIAL" });
+  await advanceTimersByTime(0);
+
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+  const searchInput = screen.getByRole("searchbox", {
+    name: "搜索视频笔记",
+  });
+  fireEvent.change(searchInput, { target: { value: "视" } });
+  fireEvent.change(searchInput, { target: { value: "视频" } });
+  fireEvent.change(searchInput, { target: { value: "视频笔记" } });
+
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(1);
+  await advanceTimersByTime(299);
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(1);
+
+  await advanceTimersByTime(1);
+  await advanceTimersByTime(0);
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(2);
+  expect(videoNoteApi.list).toHaveBeenLastCalledWith({
+    knowledgeBaseId: 7,
+    q: "视频笔记",
+    includeBodySearch: false,
+  });
+});
+
+it("ignores an old search response that resolves after the final query", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  const newRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockReturnValueOnce(newRequest.promise);
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "搜索视频笔记" }), {
+    target: { value: "最终" },
+  });
+  await advanceTimersByTime(300);
+  await advanceTimersByTime(0);
+
+  await act(async () => {
+    newRequest.resolve(searchResult("BVNEW", "最终结果"));
+    await newRequest.promise;
+  });
+  await advanceTimersByTime(0);
+  expect(screen.getByText("最终结果")).toBeVisible();
+  expect(videoNoteApi.detail).toHaveBeenCalledWith(7, "BVNEW");
+
+  await act(async () => {
+    oldRequest.resolve(searchResult("BVOLD", "过期结果"));
+    await oldRequest.promise;
+  });
+  expect(screen.queryByText("过期结果")).toBeNull();
+  expect(screen.getByText("最终结果")).toBeVisible();
+  expect(videoNoteApi.detail).not.toHaveBeenCalledWith(7, "BVOLD");
+});
+
+it("ignores an old search rejection after the query changes", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockResolvedValueOnce(searchResult("BVNEW", "最终结果"));
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "搜索视频笔记" }), {
+    target: { value: "最终" },
+  });
+
+  await act(async () => {
+    oldRequest.reject(new Error("过期请求失败"));
+    try {
+      await oldRequest.promise;
+    } catch {
+      // The component handles the rejection; this await only flushes it.
+    }
+  });
+
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  await advanceTimersByTime(300);
+  await advanceTimersByTime(0);
+  expect(screen.getByText("最终结果")).toBeVisible();
+});
+
+it("keeps the final query loading when an old request settles", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  const newRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockReturnValueOnce(newRequest.promise);
+
+  renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "搜索视频笔记" }), {
+    target: { value: "最终" },
+  });
+  await advanceTimersByTime(300);
+  await advanceTimersByTime(0);
+
+  await act(async () => {
+    oldRequest.resolve(searchResult("BVOLD", "过期结果"));
+    await oldRequest.promise;
+  });
+
+  expect(screen.getByText("加载中...")).toBeVisible();
+  expect(screen.queryByText("过期结果")).toBeNull();
+
+  await act(async () => {
+    newRequest.resolve(searchResult("BVNEW", "最终结果"));
+    await newRequest.promise;
+  });
+  expect(screen.queryByText("加载中...")).toBeNull();
+  expect(screen.getByText("最终结果")).toBeVisible();
+});
+
+it("requests immediately when body search or the knowledge base changes", async () => {
+  vi.useFakeTimers();
+  vi.mocked(videoNoteApi.list).mockResolvedValue(
+    searchResult("BVINITIAL", "初始结果"),
+  );
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  const { rerender } = renderWorkspace({ initialBvid: "BVINITIAL" });
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "搜索正文" }));
+  await advanceTimersByTime(0);
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(2);
+  expect(videoNoteApi.list).toHaveBeenLastCalledWith({
+    knowledgeBaseId: 7,
+    q: undefined,
+    includeBodySearch: true,
+  });
+
+  rerender(
+    <VideoNoteWorkspace
+      knowledgeBaseId={8}
+      initialBvid="BVINITIAL"
+      autosaveDelayMs={2000}
+    />,
+  );
+  await advanceTimersByTime(0);
+  expect(videoNoteApi.list).toHaveBeenCalledTimes(3);
+  expect(videoNoteApi.list).toHaveBeenLastCalledWith({
+    knowledgeBaseId: 8,
+    q: undefined,
+    includeBodySearch: true,
+  });
+});
+
+it("invalidates a pending list response as soon as the knowledge base changes", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  const newRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockReturnValueOnce(newRequest.promise);
+  vi.mocked(videoNoteApi.detail).mockResolvedValue({
+    note: baseNote,
+    video,
+    can_create: false,
+  });
+
+  const { rerender } = renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+  await act(async () => {
+    oldRequest.resolve(searchResult("BVOLD", "旧知识库结果"));
+    await oldRequest.promise;
+  });
+
+  expect(screen.queryByText("旧知识库结果")).toBeNull();
+  expect(screen.getByText("加载中...")).toBeVisible();
+  expect(videoNoteApi.detail).not.toHaveBeenCalledWith(7, "BVOLD");
+
+  await advanceTimersByTime(0);
+  await act(async () => {
+    newRequest.resolve(searchResult("BVNEW", "新知识库结果", 8));
+    await newRequest.promise;
+  });
+  await advanceTimersByTime(0);
+
+  expect(screen.getByText("新知识库结果")).toBeVisible();
+  expect(screen.queryByText("加载中...")).toBeNull();
+  expect(videoNoteApi.detail).toHaveBeenCalledWith(8, "BVNEW");
+  expect(videoNoteApi.detail).not.toHaveBeenCalledWith(7, "BVOLD");
+});
+
+it("ignores a pending list rejection as soon as the knowledge base changes", async () => {
+  vi.useFakeTimers();
+  const oldRequest = deferred<ReturnType<typeof searchResult>>();
+  const newRequest = deferred<ReturnType<typeof searchResult>>();
+  vi.mocked(videoNoteApi.list)
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockReturnValueOnce(newRequest.promise);
+
+  const { rerender } = renderWorkspace();
+  await advanceTimersByTime(0);
+  fireEvent.click(screen.getByRole("button", { name: "选择笔记" }));
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+  await act(async () => {
+    oldRequest.reject(new Error("旧知识库请求失败"));
+    try {
+      await oldRequest.promise;
+    } catch {
+      // The component handles the rejection; this await only flushes it.
+    }
+  });
+
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText("加载中...")).toBeVisible();
+
+  await advanceTimersByTime(0);
+  await act(async () => {
+    newRequest.resolve(searchResult("BVNEW", "新知识库结果", 8));
+    await newRequest.promise;
+  });
+
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText("加载中...")).toBeNull();
+  expect(screen.getByText("新知识库结果")).toBeVisible();
+});
+
+it("resets the selected video before loading a different knowledge base", async () => {
+  vi.useFakeTimers();
+  vi.mocked(videoNoteApi.list)
+    .mockResolvedValueOnce(searchResult("BVOLD", "旧知识库视频"))
+    .mockResolvedValueOnce(searchResult("BVNEW", "新知识库视频", 8));
+  vi.mocked(videoNoteApi.detail).mockImplementation(
+    async (knowledgeBaseId, bvid) => ({
+      note: {
+        ...baseNote,
+        knowledge_base_id: knowledgeBaseId,
+        bvid,
+        title: bvid === "BVOLD" ? "旧知识库笔记" : "新知识库笔记",
+      },
+      video: {
+        ...video,
+        bvid,
+        title: bvid === "BVOLD" ? "旧知识库视频" : "新知识库视频",
+      },
+      can_create: false,
+    }),
+  );
+
+  const { rerender } = renderWorkspace({ initialBvid: "BVOLD" });
+  await advanceTimersByTime(0);
+  expect(screen.getByLabelText("笔记标题")).toHaveValue("旧知识库笔记");
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+  expect(screen.queryByLabelText("Vditor mock editor")).toBeNull();
+
+  await advanceTimersByTime(0);
+  await advanceTimersByTime(0);
+
+  expect(videoNoteApi.detail).toHaveBeenCalledWith(7, "BVOLD");
+  expect(videoNoteApi.detail).not.toHaveBeenCalledWith(8, "BVOLD");
+  expect(videoNoteApi.detail).toHaveBeenCalledWith(8, "BVNEW");
+  expect(screen.getByLabelText("笔记标题")).toHaveValue("新知识库笔记");
+});
+
+it("discards a stale create while a new knowledge base create stays pending", async () => {
+  const user = userEvent.setup();
+  const oldCreate = deferred<typeof baseNote>();
+  const newCreate = deferred<typeof baseNote>();
+  vi.mocked(videoNoteApi.list).mockImplementation(
+    async ({ knowledgeBaseId }) => ({
+      knowledge_base_id: knowledgeBaseId,
+      items: [
+        {
+          bvid: knowledgeBaseId === 7 ? "BVOLD" : "BVNEW",
+          title: knowledgeBaseId === 7 ? "旧知识库视频" : "新知识库视频",
+          has_note: false,
+          summary_status: "not_created",
+          tags: [],
+        },
+      ],
+    }),
+  );
+  vi.mocked(videoNoteApi.detail).mockImplementation(
+    async (_knowledgeBaseId, bvid) => ({
+      note: null,
+      video: {
+        ...video,
+        bvid,
+        title: bvid === "BVOLD" ? "旧知识库视频" : "新知识库视频",
+      },
+      can_create: true,
+    }),
+  );
+  vi.mocked(videoNoteApi.create)
+    .mockReturnValueOnce(oldCreate.promise)
+    .mockReturnValueOnce(newCreate.promise);
+
+  const { rerender } = renderWorkspace({ initialBvid: "BVOLD" });
+  await user.click(await screen.findByRole("button", { name: /标准模板/ }));
+  expect(videoNoteApi.create).toHaveBeenCalledWith({
+    knowledge_base_id: 7,
+    bvid: "BVOLD",
+    template_id: "standard",
+  });
+
+  rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+  await user.click(await screen.findByRole("button", { name: /标准模板/ }));
+  const newCreateButton = screen.getByRole("button", { name: /标准模板/ });
+  expect(newCreateButton).toBeDisabled();
+  expect(videoNoteApi.create).toHaveBeenLastCalledWith({
+    knowledge_base_id: 8,
+    bvid: "BVNEW",
+    template_id: "standard",
+  });
+
+  await act(async () => {
+    oldCreate.resolve({
+      ...baseNote,
+      bvid: "BVOLD",
+      title: "过期创建结果",
+    });
+    await oldCreate.promise;
+  });
+
+  expect(newCreateButton).toBeDisabled();
+  expect(screen.queryByDisplayValue("过期创建结果")).toBeNull();
+  expect(
+    vi
+      .mocked(videoNoteApi.list)
+      .mock.calls.filter(([options]) => options.knowledgeBaseId === 7),
+  ).toHaveLength(1);
+
+  await act(async () => {
+    newCreate.resolve({
+      ...baseNote,
+      id: 10,
+      knowledge_base_id: 8,
+      bvid: "BVNEW",
+      title: "新知识库创建结果",
+    });
+    await newCreate.promise;
+  });
+
+  expect(await findMarkdownEditor()).toBeVisible();
+  expect(screen.getByLabelText("笔记标题")).toHaveValue("新知识库创建结果");
+});
 
 it("opens directly into the first existing note when no video is preselected", async () => {
   vi.mocked(videoNoteApi.list).mockResolvedValue({
@@ -185,15 +604,23 @@ it("shows a workspace error when the selected note detail fails to load", async 
       },
     ],
   });
-  vi.mocked(videoNoteApi.detail).mockRejectedValue(new Error("后端暂时不可用"));
+  vi.mocked(videoNoteApi.detail).mockImplementation(async (knowledgeBaseId) => {
+    if (knowledgeBaseId === 7) throw new Error("后端暂时不可用");
+    return { note: baseNote, video, can_create: false };
+  });
 
   try {
-    renderWorkspace({ initialBvid: "BVNOTE123" });
+    const { rerender } = renderWorkspace({ initialBvid: "BVNOTE123" });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "无法加载视频信息：后端暂时不可用",
     );
     expect(consoleError).not.toHaveBeenCalled();
+
+    rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(await findMarkdownEditor()).toBeVisible();
+    expect(videoNoteApi.detail).toHaveBeenCalledWith(8, "BVNOTE123");
   } finally {
     consoleError.mockRestore();
   }

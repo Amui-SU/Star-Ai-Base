@@ -72,4 +72,5 @@ def video_content_from_cache(
         content=text,
         source=source,
         outline=cache.outline_json,
+        subtitle_timeline=cache.subtitle_timeline_json,
     )

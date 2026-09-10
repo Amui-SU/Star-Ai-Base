@@ -364,7 +364,7 @@ async def test_bilibili_video_import_task_persists_cid_for_timestamp_generation(
         def __init__(self, bili, asr):
             pass
 
-        async def fetch_content(self, bvid, cid=None, title=None):
+        async def fetch_content(self, bvid, cid=None, title=None, video_info=None):
             from app.schemas.content import VideoContent
 
             assert (bvid, cid, title) == ("BVCIDIMPORT", 456, "B 站导入视频")
@@ -454,7 +454,7 @@ async def test_bilibili_multi_part_import_uses_part_duration_for_timestamps(
         def __init__(self, bili, asr):
             pass
 
-        async def fetch_content(self, bvid, cid=None, title=None):
+        async def fetch_content(self, bvid, cid=None, title=None, video_info=None):
             from app.schemas.content import VideoContent
 
             assert (bvid, cid, title) == ("BVPARTIMPORT", 222, "合集视频")
@@ -579,3 +579,533 @@ async def test_local_video_import_task_cleans_upload_when_transcription_fails(
 
     assert not file_path.exists()
     assert task.status == "failed"
+
+
+# ---------------------------------------------------------------------------
+# 分P导入端点与分P数据隔离
+
+
+class _FakeMultiPartBili:
+    async def get_video_info(self, bvid):
+        return {
+            "bvid": bvid,
+            "cid": 111,
+            "title": "教程合集",
+            "desc": "合集简介",
+            "owner": {"name": "UP 主", "mid": 9},
+            "duration": 900,
+            "pic": "https://example.test/cover.jpg",
+            "videos": 2,
+            "pages": [
+                {"cid": 111, "page": 1, "part": "第一讲", "duration": 400},
+                {"cid": 222, "page": 2, "part": "第二讲", "duration": 500},
+            ],
+        }
+
+    async def close(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_detect_multi_part_endpoint_returns_pages(client, monkeypatch):
+    monkeypatch.setattr("app.routers.imports.BilibiliService", _FakeMultiPartBili)
+    await register_user(client, "detect-multi-part@example.com")
+
+    response = await client.post(
+        "/imports/detect-multi-part",
+        json={"url": "https://www.bilibili.com/video/BV1Multi0001"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    info = body["multi_part_info"]
+    assert info["is_multi_part"] is True
+    assert info["total_parts"] == 2
+    assert [page["page"] for page in info["pages"]] == [1, 2]
+    assert [page["cid"] for page in info["pages"]] == [111, 222]
+
+
+@pytest.mark.asyncio
+async def test_import_multi_part_endpoint_creates_one_task_per_part(
+    client,
+    db_session_factory,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.routers.imports.BilibiliService", _FakeMultiPartBili)
+    scheduled = []
+
+    async def fake_run_batch(jobs, bvid, workspace_id, knowledge_base_id, video_info):
+        scheduled.append(
+            {
+                "jobs": jobs,
+                "bvid": bvid,
+                "workspace_id": workspace_id,
+                "knowledge_base_id": knowledge_base_id,
+                "video_info": video_info,
+            }
+        )
+
+    monkeypatch.setattr(
+        "app.routers.imports._run_multi_part_batch",
+        fake_run_batch,
+    )
+
+    await register_user(client, "multi-part-import@example.com")
+    knowledge_base = await create_knowledge_base(client)
+
+    response = await client.post(
+        "/imports/multi-part",
+        json={
+            "url": "https://www.bilibili.com/video/BV1Multi0001",
+            "knowledge_base_id": knowledge_base["id"],
+            "page_indices": [1, 2],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["total_selected"] == 2
+    assert len(body["task_ids"]) == 2
+
+    async with db_session_factory() as session:
+        tasks = (
+            (
+                await session.execute(
+                    select(IngestionTask).where(
+                        IngestionTask.task_id.in_(body["task_ids"])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(tasks) == 2
+    assert {task.knowledge_base_id for task in tasks} == {knowledge_base["id"]}
+
+    # 整批分P调度为一个后台任务，video_info 直接透传不再重复请求
+    assert len(scheduled) == 1
+    batch = scheduled[0]
+    assert batch["bvid"] == "BV1Multi0001"
+    assert batch["knowledge_base_id"] == knowledge_base["id"]
+    assert batch["video_info"]["title"] == "教程合集"
+    first, second = batch["jobs"]
+    assert (first["cid"], second["cid"]) == (111, 222)
+    assert first["storage_bvid"] == "BV1Multi0001_p1"
+    assert second["storage_bvid"] == "BV1Multi0001_p2"
+    assert "P1/2" in first["title"] and "第一讲" in first["title"]
+    assert "P2/2" in second["title"] and "第二讲" in second["title"]
+
+
+@pytest.mark.asyncio
+async def test_import_multi_part_endpoint_rejects_missing_knowledge_base(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.routers.imports.BilibiliService", _FakeMultiPartBili)
+    await register_user(client, "multi-part-no-kb@example.com")
+
+    response = await client.post(
+        "/imports/multi-part",
+        json={
+            "url": "https://www.bilibili.com/video/BV1Multi0001",
+            "knowledge_base_id": 987654,
+            "page_indices": [1],
+        },
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_multi_part_imports_keep_each_part_cached_and_indexed(
+    db_session_factory,
+    monkeypatch,
+):
+    import app.database as database
+    from app.services.import_tasks import run_bilibili_video_import
+
+    monkeypatch.setattr(database, "async_session_factory", db_session_factory)
+
+    class FakeBili:
+        async def get_video_info(self, bvid):
+            assert bvid == "BVPARTS"
+            return {
+                "cid": 111,
+                "title": "教程合集",
+                "desc": "合集简介",
+                "owner": {"name": "UP 主", "mid": 9},
+                "duration": 900,
+                "pic": "https://example.test/cover.jpg",
+            }
+
+        async def close(self):
+            pass
+
+    class FakeASR:
+        pass
+
+    class FakeFetcher:
+        def __init__(self, bili, asr):
+            pass
+
+        async def fetch_content(self, bvid, cid=None, title=None, video_info=None):
+            from app.schemas.content import VideoContent
+
+            assert bvid == "BVPARTS"
+            return VideoContent(
+                bvid=bvid,
+                title=title,
+                content=f"分P内容 cid={cid} " * 8,
+                source=ContentSource.SUBTITLE,
+                outline=[],
+            )
+
+    deleted = []
+    added = []
+
+    class FakeRAG:
+        def delete_video_in_knowledge_base(self, **kwargs):
+            deleted.append(kwargs["bvid"])
+
+        def add_video_content(self, content, **kwargs):
+            added.append(content.bvid)
+            return 1
+
+    async with db_session_factory() as session:
+        for task_id in ("part-task-1", "part-task-2"):
+            session.add(
+                IngestionTask(
+                    task_id=task_id,
+                    workspace_id=3,
+                    knowledge_base_id=9,
+                    source_binding_id=None,
+                    created_by=5,
+                    status="pending",
+                    total_items=1,
+                )
+            )
+        await session.commit()
+
+    rag = FakeRAG()
+    for task_id, cid, page, part, storage in (
+        ("part-task-1", 111, 1, "第一讲", "BVPARTS_p1"),
+        ("part-task-2", 222, 2, "第二讲", "BVPARTS_p2"),
+    ):
+        await run_bilibili_video_import(
+            task_id=task_id,
+            bvid="BVPARTS",
+            workspace_id=3,
+            knowledge_base_id=9,
+            cid=cid,
+            page_number=page,
+            part_title=part,
+            total_parts=2,
+            part_duration=400,
+            storage_bvid=storage,
+            title_override=f"教程合集 P{page}/2: {part}",
+            bilibili_service_class=FakeBili,
+            asr_service_class=FakeASR,
+            content_fetcher_class=FakeFetcher,
+            rag_factory=lambda: rag,
+        )
+
+    async with db_session_factory() as session:
+        caches = (
+            (
+                await session.execute(
+                    select(VideoCache).where(
+                        VideoCache.bvid.in_(["BVPARTS_p1", "BVPARTS_p2"])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        favorites = (
+            (
+                await session.execute(
+                    select(FavoriteVideo).where(
+                        FavoriteVideo.bvid.in_(["BVPARTS_p1", "BVPARTS_p2"])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    by_bvid = {cache.bvid: cache for cache in caches}
+    assert set(by_bvid) == {"BVPARTS_p1", "BVPARTS_p2"}
+    assert by_bvid["BVPARTS_p1"].cid == 111
+    assert by_bvid["BVPARTS_p2"].cid == 222
+    assert by_bvid["BVPARTS_p1"].title == "教程合集 P1/2: 第一讲"
+    assert by_bvid["BVPARTS_p2"].title == "教程合集 P2/2: 第二讲"
+    assert len(favorites) == 2
+    # 向量删除只影响各自分P，后导入的分P不会误删先导入的分P
+    assert deleted == ["BVPARTS_p1", "BVPARTS_p2"]
+    assert added == ["BVPARTS_p1", "BVPARTS_p2"]
+
+
+@pytest.mark.asyncio
+async def test_bilibili_video_import_uses_provided_video_info(
+    db_session_factory,
+    monkeypatch,
+):
+    import app.database as database
+    from app.services.import_tasks import run_bilibili_video_import
+
+    monkeypatch.setattr(database, "async_session_factory", db_session_factory)
+    api_calls = []
+
+    class FakeBili:
+        async def get_video_info(self, bvid):
+            api_calls.append(bvid)
+            raise AssertionError("video_info 已透传，不应再请求 B 站")
+
+        async def close(self):
+            pass
+
+    class FakeASR:
+        pass
+
+    class FakeFetcher:
+        def __init__(self, bili, asr):
+            pass
+
+        async def fetch_content(self, bvid, cid=None, title=None, video_info=None):
+            from app.schemas.content import VideoContent
+
+            assert video_info is not None
+            assert video_info["title"] == "透传标题"
+            return VideoContent(
+                bvid=bvid,
+                title=title,
+                content="字幕内容 " * 8,
+                source=ContentSource.SUBTITLE,
+                outline=[],
+            )
+
+    class FakeRAG:
+        def delete_video_in_knowledge_base(self, **kwargs):
+            pass
+
+        def add_video_content(self, content, **kwargs):
+            return 1
+
+    async with db_session_factory() as session:
+        session.add(
+            IngestionTask(
+                task_id="passthrough-task",
+                workspace_id=3,
+                knowledge_base_id=9,
+                source_binding_id=None,
+                created_by=5,
+                status="pending",
+                total_items=1,
+            )
+        )
+        await session.commit()
+
+    await run_bilibili_video_import(
+        task_id="passthrough-task",
+        bvid="BVPASSTHRU01",
+        workspace_id=3,
+        knowledge_base_id=9,
+        cid=111,
+        video_info={
+            "cid": 111,
+            "title": "透传标题",
+            "desc": "",
+            "owner": {},
+            "duration": 100,
+            "pic": "",
+        },
+        bilibili_service_class=FakeBili,
+        asr_service_class=FakeASR,
+        content_fetcher_class=FakeFetcher,
+        rag_factory=lambda: FakeRAG(),
+    )
+
+    assert api_calls == []
+    async with db_session_factory() as session:
+        cache = (
+            (
+                await session.execute(
+                    select(VideoCache).where(VideoCache.bvid == "BVPASSTHRU01")
+                )
+            )
+            .scalars()
+            .one()
+        )
+    assert cache.title == "透传标题"
+
+
+@pytest.mark.asyncio
+async def test_bilibili_video_import_reuses_cached_transcript(
+    db_session_factory,
+    monkeypatch,
+):
+    import app.database as database
+    from app.services.import_tasks import run_bilibili_video_import
+
+    monkeypatch.setattr(database, "async_session_factory", db_session_factory)
+
+    class FakeBili:
+        async def get_video_info(self, bvid):
+            raise AssertionError("命中缓存时不应请求 B 站")
+
+        async def close(self):
+            pass
+
+    class FakeASR:
+        pass
+
+    class FakeFetcher:
+        def __init__(self, bili, asr):
+            pass
+
+        async def fetch_content(self, bvid, cid=None, title=None, video_info=None):
+            raise AssertionError("命中缓存时不应重新抓取/转写")
+
+    added = []
+
+    class FakeRAG:
+        def delete_video_in_knowledge_base(self, **kwargs):
+            pass
+
+        def add_video_content(self, content, **kwargs):
+            added.append(content)
+            return 1
+
+    async with db_session_factory() as session:
+        session.add(
+            IngestionTask(
+                task_id="reuse-cache-task",
+                workspace_id=3,
+                knowledge_base_id=9,
+                source_binding_id=None,
+                created_by=5,
+                status="pending",
+                total_items=1,
+            )
+        )
+        session.add(
+            VideoCache(
+                bvid="BVREUSE00001",
+                title="已缓存视频",
+                workspace_id=3,
+                knowledge_base_id=9,
+                source_binding_id=None,
+                content="已有 ASR 转写内容 " * 10,
+                content_source=ContentSource.ASR.value,
+                is_processed=True,
+            )
+        )
+        await session.commit()
+
+    await run_bilibili_video_import(
+        task_id="reuse-cache-task",
+        bvid="BVREUSE00001",
+        workspace_id=3,
+        knowledge_base_id=9,
+        bilibili_service_class=FakeBili,
+        asr_service_class=FakeASR,
+        content_fetcher_class=FakeFetcher,
+        rag_factory=lambda: FakeRAG(),
+    )
+
+    assert len(added) == 1
+    assert added[0].bvid == "BVREUSE00001"
+    assert "已有 ASR 转写内容" in added[0].content
+
+    async with db_session_factory() as session:
+        task = (
+            (
+                await session.execute(
+                    select(IngestionTask).where(
+                        IngestionTask.task_id == "reuse-cache-task"
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+    assert task.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_run_multi_part_video_imports_limits_concurrency():
+    import asyncio
+
+    from app.services.import_tasks import run_multi_part_video_imports
+
+    running = 0
+    peak = 0
+    finished = []
+
+    async def fake_run_import(**kwargs):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        finished.append(kwargs["task_id"])
+
+    jobs = [
+        {
+            "task_id": f"task-{index}",
+            "cid": index,
+            "page": index,
+            "part": f"P{index}",
+            "total_parts": 5,
+            "duration": 100,
+            "storage_bvid": f"BVBATCH00001_p{index}",
+            "title": f"合集 P{index}/5",
+        }
+        for index in range(1, 6)
+    ]
+
+    await run_multi_part_video_imports(
+        jobs,
+        bvid="BVBATCH00001",
+        workspace_id=3,
+        knowledge_base_id=9,
+        video_info={"title": "合集"},
+        concurrency=2,
+        run_import=fake_run_import,
+    )
+
+    assert sorted(finished) == [f"task-{index}" for index in range(1, 6)]
+    assert peak <= 2
+
+
+@pytest.mark.asyncio
+async def test_import_task_status_endpoint(client, db_session_factory):
+    auth = await register_user(client, "task-status@example.com")
+
+    async with db_session_factory() as session:
+        session.add(
+            IngestionTask(
+                task_id="status-task-1",
+                workspace_id=auth["workspace"]["id"],
+                knowledge_base_id=1,
+                source_binding_id=None,
+                created_by=auth["user"]["id"],
+                status="running",
+                progress=36,
+                current_step="提取视频内容...",
+                total_items=1,
+            )
+        )
+        await session.commit()
+
+    response = await client.get("/imports/tasks/status-task-1")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "running"
+    assert body["progress"] == 36
+    assert body["current_step"] == "提取视频内容..."
+
+    missing = await client.get("/imports/tasks/unknown-task")
+    assert missing.status_code == 404

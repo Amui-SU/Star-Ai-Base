@@ -6,6 +6,7 @@ from typing import Any
 from langchain.schema import Document
 
 from app.schemas.content import VideoContent
+from app.services.bilibili_multi_part import bilibili_video_url
 
 
 def build_video_content_text(video: VideoContent) -> str:
@@ -52,7 +53,7 @@ def build_video_documents(
             "title": title,
             "source": video.source.value,
             "chunk_index": index,
-            "url": f"https://www.bilibili.com/video/{video.bvid}",
+            "url": bilibili_video_url(video.bvid),
         }
         documents.append(
             Document(

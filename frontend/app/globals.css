@@ -11,7 +11,7 @@
 @import "./styles/import-organize.css";
 @import "./styles/demo.css";
 
-/* 閳光偓閳光偓 濞ｈ精澹婃稉濠氼暯閿涘牆顧侀梻?姒涙顓婚敍澶嗘敘閳光偓 Claude 妞嬪孩鐗?閳光偓閳光偓 */
+/* —— 主题变量（默认深色，参考 Claude 配色）—— */
 :root {
   --bg: #141413;
   --panel-bg: #262624;
@@ -47,7 +47,7 @@
   --header-bg: #141413;
 }
 
-/* 閳光偓閳光偓 濞村懓澹婃稉濠氼暯閿涘牏娅ф径鈺嬬礆閳光偓閳光偓 閺嗘牜鐒婇懝?閳光偓閳光偓 */
+/* —— 浅色主题变量（html.light）—— */
 html.light {
   --bg: #f7f1e8;
   --panel-bg: rgba(247, 241, 232, 0.88);
@@ -174,7 +174,7 @@ a {
     overflow: hidden;
   }
 }
-/* 閳光偓閳光偓 Mobile Workspace Polish 閳光偓閳光偓 */
+/* —— Mobile Workspace Polish —— */
 
 /* Mobile chat shell refinements */
 @media (max-width: 1024px) {

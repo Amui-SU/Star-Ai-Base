@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class VideoPageInfo(BaseModel):
     """单个分P的信息"""
 
-    cid: int
+    cid: int | None = None
     page: int = Field(..., ge=1, description="分P编号，从1开始")
     part: str = Field(default="", description="分P标题")
     duration: int = Field(default=0, ge=0, description="时长（秒）")

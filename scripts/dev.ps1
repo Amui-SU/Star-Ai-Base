@@ -56,7 +56,7 @@ function Test-PythonRunnable {
     }
 }
 
-function Resolve-ProjectPython {
+function Get-ProjectPythonCandidates {
     param([string]$ProjectRoot)
 
     $candidates = @(
@@ -72,29 +72,99 @@ function Resolve-ProjectPython {
     }
 
     $candidates += "C:\ProgramData\anaconda3\envs\bilibili-rag\python.exe"
-    if (Test-CommandExists "python") {
-        $candidates += "python"
+    $candidates += "python"
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($candidate in $candidates) {
+        if ($candidate -and $seen.Add($candidate)) {
+            $candidate
+        }
+    }
+}
+
+function Test-BackendApplicationImport {
+    param(
+        [string]$PythonExe,
+        [string]$ProjectRoot
+    )
+
+    Push-Location -LiteralPath $ProjectRoot
+    try {
+        & $PythonExe -c "import app.main" *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Resolve-PythonExecutablePath {
+    param([string]$PythonExe)
+
+    if ([System.IO.Path]::IsPathRooted($PythonExe)) {
+        return $PythonExe
     }
 
-    foreach ($candidate in $candidates) {
-        if (($candidate -eq "python" -or (Test-Path -LiteralPath $candidate -PathType Leaf)) -and (Test-PythonRunnable $candidate)) {
-            return $candidate
+    $command = Get-Command $PythonExe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) {
+        if ($command.Source) {
+            return $command.Source
         }
+        if ($command.Path) {
+            return $command.Path
+        }
+    }
+
+    return $PythonExe
+}
+
+function Resolve-ProjectPython {
+    param(
+        [string]$ProjectRoot,
+        [switch]$RequireBackendDependencies,
+        [ref]$RejectedCandidates
+    )
+
+    if ($RejectedCandidates) {
+        $RejectedCandidates.Value = @()
+    }
+
+    foreach ($candidate in @(Get-ProjectPythonCandidates -ProjectRoot $ProjectRoot)) {
+        if (-not (Test-PythonRunnable -PythonExe $candidate)) {
+            continue
+        }
+        if ($RequireBackendDependencies -and -not (Test-BackendApplicationImport -PythonExe $candidate -ProjectRoot $ProjectRoot)) {
+            if ($RejectedCandidates) {
+                $RejectedCandidates.Value += [pscustomobject]@{
+                    candidate = $candidate
+                    reason = "cannot import app.main"
+                }
+            }
+            continue
+        }
+        return Resolve-PythonExecutablePath -PythonExe $candidate
     }
 
     return $null
 }
 
 function Test-BackendDependencies {
-    param([string]$PythonExe)
+    param(
+        [string]$PythonExe,
+        [string]$ProjectRoot = (Get-ProjectRoot)
+    )
 
-    $code = "import fastapi, uvicorn, cryptography, jose; from passlib.context import CryptContext; CryptContext(schemes=['bcrypt'], deprecated='auto').hash('dependency-check')"
-    try {
-        & $PythonExe -c $code *> $null
-        return $LASTEXITCODE -eq 0
-    }
-    catch {
-        return $false
+    return Test-BackendApplicationImport -PythonExe $PythonExe -ProjectRoot $ProjectRoot
+}
+
+function Write-RejectedPythonCandidates {
+    param([object[]]$Candidates)
+
+    foreach ($entry in @($Candidates)) {
+        Write-WarnMsg "Rejected Python candidate: $($entry.candidate) ($($entry.reason))"
     }
 }
 
@@ -431,12 +501,20 @@ function Remove-RuntimeState {
 function Wait-Port {
     param(
         [int]$Port,
-        [int]$TimeoutSeconds = 60
+        [int]$TimeoutSeconds = 60,
+        [System.Diagnostics.Process]$Process
     )
 
     for ($i = 0; $i -lt $TimeoutSeconds; $i++) {
         if (Test-PortListening $Port) {
             return $true
+        }
+
+        if ($Process) {
+            $Process.Refresh()
+            if ($Process.HasExited) {
+                return $false
+            }
         }
 
         Start-Sleep -Seconds 1
@@ -466,7 +544,9 @@ function Invoke-Doctor {
     $failed = $false
     $frontendPath = Get-FrontendPath $ProjectRoot
     $logsPath = Get-LogsPath $ProjectRoot
-    $pythonExe = Resolve-ProjectPython $ProjectRoot
+    $rejectedCandidates = @()
+    $pythonExe = Resolve-ProjectPython -ProjectRoot $ProjectRoot -RequireBackendDependencies -RejectedCandidates ([ref]$rejectedCandidates)
+    Write-RejectedPythonCandidates -Candidates $rejectedCandidates
 
     Write-Info "Project root: $ProjectRoot"
 
@@ -490,17 +570,11 @@ function Invoke-Doctor {
     if ($pythonExe) {
         $pythonVersion = & $pythonExe --version 2>&1
         Write-Ok "Python: $pythonVersion ($pythonExe)"
-        if (Test-BackendDependencies $pythonExe) {
-            Write-Ok "Backend dependencies are healthy."
-        }
-        else {
-            $failed = $true
-            Write-Fail "Backend dependencies are incomplete. Run: powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 install"
-        }
+        Write-Ok "Backend application import is healthy."
     }
     else {
         $failed = $true
-        Write-Fail "No runnable Python found. Install Python or set BILIBILI_RAG_PYTHON."
+        Write-Fail "No healthy Python can import app.main. Run scripts\dev.ps1 install or set BILIBILI_RAG_PYTHON to a healthy environment."
     }
 
     if (Test-CommandExists "node") {
@@ -625,16 +699,15 @@ function Invoke-Start {
     $backendErrLog = Join-Path $logsPath "backend-start.err.log"
     $frontendLog = Join-Path $logsPath "frontend-start.log"
     $frontendErrLog = Join-Path $logsPath "frontend-start.err.log"
-    $pythonExe = Resolve-ProjectPython $ProjectRoot
+    $rejectedCandidates = @()
+    $pythonExe = Resolve-ProjectPython -ProjectRoot $ProjectRoot -RequireBackendDependencies -RejectedCandidates ([ref]$rejectedCandidates)
+    Write-RejectedPythonCandidates -Candidates $rejectedCandidates
     $quotedProjectRoot = '"' + ($ProjectRoot -replace '"', '\"') + '"'
     $backendProcess = $null
     $frontendProcess = $null
 
     if (-not $pythonExe) {
-        throw "No runnable Python found. Run scripts\dev.ps1 doctor."
-    }
-    if (-not (Test-BackendDependencies $pythonExe)) {
-        throw "Backend dependencies are incomplete. Run scripts\dev.ps1 install."
+        throw "No healthy Python can import app.main. Run scripts\dev.ps1 install or set BILIBILI_RAG_PYTHON to a healthy environment."
     }
     if (-not (Test-CommandExists "npm")) {
         throw "npm is missing. Install Node.js LTS."
@@ -677,15 +750,23 @@ function Invoke-Start {
             -WindowStyle Hidden `
             -PassThru
 
-        if (-not (Wait-Port -Port 8000 -TimeoutSeconds 60)) {
+        if (-not (Wait-Port -Port 8000 -TimeoutSeconds 60 -Process $backendProcess)) {
             Show-LogTail $backendLog
             Show-LogTail $backendErrLog
+            $backendProcess.Refresh()
+            if ($backendProcess.HasExited) {
+                throw "Backend exited before port 8000 was ready (exit code $($backendProcess.ExitCode))."
+            }
             throw "Backend did not become ready on port 8000."
         }
 
-        if (-not (Wait-Port -Port 3000 -TimeoutSeconds 60)) {
+        if (-not (Wait-Port -Port 3000 -TimeoutSeconds 60 -Process $frontendProcess)) {
             Show-LogTail $frontendLog
             Show-LogTail $frontendErrLog
+            $frontendProcess.Refresh()
+            if ($frontendProcess.HasExited) {
+                throw "Frontend exited before port 3000 was ready (exit code $($frontendProcess.ExitCode))."
+            }
             throw "Frontend did not become ready on port 3000."
         }
 
@@ -785,12 +866,27 @@ function Invoke-Stop {
 function Invoke-Status {
     param([string]$ProjectRoot)
 
-    $pythonExe = Resolve-ProjectPython $ProjectRoot
     $runtime = Read-RuntimeState $ProjectRoot
+    $pythonExe = $null
+    $pythonRunnable = $false
+    $usingRecordedPython = [bool]($runtime -and $runtime.python)
+    if ($usingRecordedPython) {
+        $pythonExe = $runtime.python
+        $pythonRunnable = Test-PythonRunnable -PythonExe $pythonExe
+    }
+    else {
+        $pythonExe = Resolve-ProjectPython -ProjectRoot $ProjectRoot -RequireBackendDependencies
+        if ($pythonExe) {
+            $pythonRunnable = $true
+        }
+    }
 
     Write-Info "Project root: $ProjectRoot"
 
-    if ($pythonExe) {
+    if ($usingRecordedPython -and -not $pythonRunnable) {
+        Write-WarnMsg "Python: unavailable (recorded: $pythonExe)"
+    }
+    elseif ($pythonExe) {
         Write-Ok "Python: $(& $pythonExe --version 2>&1) ($pythonExe)"
     }
     else {
@@ -885,4 +981,6 @@ function Invoke-CommandByName {
     }
 }
 
-Invoke-CommandByName -Command $Command
+if ($MyInvocation.InvocationName -ne ".") {
+    Invoke-CommandByName -Command $Command
+}

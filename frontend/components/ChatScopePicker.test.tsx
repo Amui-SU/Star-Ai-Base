@@ -273,8 +273,12 @@ describe("ChatScopePicker", () => {
         options={duplicatedOptions}
         value={{ folderIds: [], bvids: [] }}
         webSearchEnabled={false}
+        webSearchProvider="auto"
+        tavilyConfigured={false}
         onChange={vi.fn()}
         onWebSearchChange={vi.fn()}
+        onWebSearchProviderChange={vi.fn()}
+        onConfigureTavily={vi.fn()}
       />,
     );
 

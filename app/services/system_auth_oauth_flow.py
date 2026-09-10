@@ -200,6 +200,7 @@ async def redirect_with_oauth_session(
     db.add(
         SystemSession(
             user_id=user.id,
+            credential_version=user.credential_version,
             session_token_hash=hash_token(token),
             expires_at=session_expires_at().replace(tzinfo=None),
         )

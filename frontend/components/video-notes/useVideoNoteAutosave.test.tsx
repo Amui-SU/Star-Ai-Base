@@ -42,7 +42,13 @@ describe("useVideoNoteAutosave", () => {
           save,
           delayMs: 200,
         }),
-      { initialProps: { title: "原笔记", currentBlocks: [], currentTags: [] } },
+      {
+        initialProps: {
+          title: "原笔记",
+          currentBlocks: [] as VideoNoteBlock[],
+          currentTags: [] as string[],
+        },
+      },
     );
 
     expect(result.current.status).toBe("idle");

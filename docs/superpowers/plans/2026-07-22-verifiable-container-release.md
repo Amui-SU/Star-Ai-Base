@@ -1,5 +1,7 @@
 # Verifiable Container Release Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make manual ECS releases prove that backend, frontend, local routes, public routes, and deployment records all use the same tested 40-character Git SHA.
@@ -32,7 +34,7 @@
 - Read: `docs/superpowers/specs/2026-07-21-verifiable-container-release-design.md`
 - Worktree: `.worktrees/verifiable-container-release`
 
-- [ ] **Step 1: Create the implementation worktree**
+- [x] **Step 1: Create the implementation worktree**
 
 Run:
 
@@ -43,7 +45,7 @@ git worktree add -b fix/verifiable-container-release .worktrees\verifiable-conta
 
 Expected: the main checkout is clean and the new worktree starts at the approved design commit.
 
-- [ ] **Step 2: Install frontend dependencies inside the worktree**
+- [x] **Step 2: Install frontend dependencies inside the worktree**
 
 Run:
 
@@ -55,7 +57,7 @@ Working directory: `.worktrees/verifiable-container-release/frontend`
 
 Expected: dependencies install without modifying `package.json` or `package-lock.json`.
 
-- [ ] **Step 3: Run the targeted baseline**
+- [x] **Step 3: Run the targeted baseline**
 
 Run:
 
@@ -75,7 +77,7 @@ Expected: both commands pass before release-flow changes begin.
 - Modify: `app/main.py`
 - Modify: `Dockerfile.backend`
 
-- [ ] **Step 1: Write the failing health-version test**
+- [x] **Step 1: Write the failing health-version test**
 
 Create `tests/test_application_health.py`:
 
@@ -107,7 +109,7 @@ async def test_health_reports_the_runtime_build_version(client, monkeypatch):
     assert response.json() == {"status": "healthy", "version": version}
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -118,7 +120,7 @@ python -m pytest -q tests/test_application_health.py
 Expected: FAIL because `Settings` does not expose or validate `app_version` and
 `/health` does not return `version`.
 
-- [ ] **Step 3: Add the minimal backend version setting and response**
+- [x] **Step 3: Add the minimal backend version setting and response**
 
 Import `re` and `field_validator`, then add the application setting and
 validator in `app/config.py`:
@@ -154,7 +156,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_VERSION=$APP_VERSION
 ```
 
-- [ ] **Step 4: Run the focused backend test and verify GREEN**
+- [x] **Step 4: Run the focused backend test and verify GREEN**
 
 Run:
 
@@ -164,7 +166,7 @@ python -m pytest -q tests/test_application_health.py
 
 Expected: all backend version tests pass.
 
-- [ ] **Step 5: Commit the backend identity slice**
+- [x] **Step 5: Commit the backend identity slice**
 
 Run:
 
@@ -186,7 +188,7 @@ Expected: one commit containing only backend build identity.
 - Modify: `compose.production.yml`
 - Modify: `.github/workflows/publish-images.yml`
 
-- [ ] **Step 1: Add failing Dockerfile and Compose contracts**
+- [x] **Step 1: Add failing Dockerfile and Compose contracts**
 
 Extend `test_frontend_image_defines_api_url_and_healthcheck_contracts` in `tests/test_container_deployment.py` with:
 
@@ -226,7 +228,7 @@ def test_backend_image_accepts_the_release_sha_as_app_version():
     assert any("APP_VERSION=$APP_VERSION" in line for line in lines)
 ```
 
-- [ ] **Step 2: Add the failing workflow build-argument contract**
+- [x] **Step 2: Add the failing workflow build-argument contract**
 
 In `tests/test_ci_workflow.py`, extend
 `test_publish_images_builds_sha_only_then_promotes_both_images_when_current`:
@@ -235,7 +237,7 @@ In `tests/test_ci_workflow.py`, extend
 assert content.count("APP_VERSION=${{ env.IMAGE_TAG }}") == 2
 ```
 
-- [ ] **Step 3: Run the focused contracts and verify RED**
+- [x] **Step 3: Run the focused contracts and verify RED**
 
 Run:
 
@@ -246,7 +248,7 @@ python -m pytest -q tests/test_ci_workflow.py -k "builds_sha_only"
 
 Expected: FAIL because the frontend image, Compose file, and workflow do not yet propagate `APP_VERSION`.
 
-- [ ] **Step 4: Generate frontend version metadata and inject backend runtime identity**
+- [x] **Step 4: Generate frontend version metadata and inject backend runtime identity**
 
 Update `frontend/Dockerfile` build stage:
 
@@ -271,7 +273,7 @@ Add to the backend `environment` block in `compose.production.yml`:
 APP_VERSION: "${IMAGE_TAG:?set IMAGE_TAG}"
 ```
 
-- [ ] **Step 5: Pass `APP_VERSION` to both image builds**
+- [x] **Step 5: Pass `APP_VERSION` to both image builds**
 
 Add to the backend build action in `.github/workflows/publish-images.yml`:
 
@@ -288,7 +290,7 @@ build-args: |
   APP_VERSION=${{ env.IMAGE_TAG }}
 ```
 
-- [ ] **Step 6: Run the focused contracts and verify GREEN**
+- [x] **Step 6: Run the focused contracts and verify GREEN**
 
 Run:
 
@@ -299,7 +301,7 @@ python -m pytest -q tests/test_ci_workflow.py -k "builds_sha_only"
 
 Expected: both commands pass.
 
-- [ ] **Step 7: Commit image identity propagation**
+- [x] **Step 7: Commit image identity propagation**
 
 Run:
 
@@ -318,7 +320,7 @@ Expected: one commit containing image/Compose/workflow identity propagation and 
 - Modify: `tests/test_container_deployment.py`
 - Modify: `scripts/deploy.sh`
 
-- [ ] **Step 1: Let the deployment test helper pass explicit CLI arguments**
+- [x] **Step 1: Let the deployment test helper pass explicit CLI arguments**
 
 Change `run_deploy` in `tests/test_container_deployment.py` to:
 
@@ -351,7 +353,7 @@ def run_deploy(
     )
 ```
 
-- [ ] **Step 2: Add failing same-SHA behavior tests**
+- [x] **Step 2: Add failing same-SHA behavior tests**
 
 Add:
 
@@ -388,7 +390,7 @@ def test_deploy_script_allows_explicit_same_sha_redeployment(tmp_path):
     )
 ```
 
-- [ ] **Step 3: Run the behavior tests and verify RED**
+- [x] **Step 3: Run the behavior tests and verify RED**
 
 Run:
 
@@ -398,7 +400,7 @@ python -m pytest -q tests/test_container_deployment.py -k "same_sha"
 
 Expected: FAIL because the script accepts only one argument and does not reject an already-current target.
 
-- [ ] **Step 4: Parse the explicit override and add the guard**
+- [x] **Step 4: Parse the explicit override and add the guard**
 
 Replace the top-level argument parsing in `scripts/deploy.sh` with:
 
@@ -425,7 +427,7 @@ if [[ "$HAS_PREVIOUS" == true && "$TARGET_TAG" == "$PREVIOUS_TAG" && "$ALLOW_RED
 fi
 ```
 
-- [ ] **Step 5: Run deployment behavior tests and verify GREEN**
+- [x] **Step 5: Run deployment behavior tests and verify GREEN**
 
 Run:
 
@@ -435,7 +437,7 @@ python -m pytest -q tests/test_container_deployment.py -k "same_sha or allows_fr
 
 Expected: the new tests and representative existing deploy tests pass.
 
-- [ ] **Step 6: Commit same-version protection**
+- [x] **Step 6: Commit same-version protection**
 
 Run:
 
@@ -454,7 +456,7 @@ Expected: one commit containing only argument parsing, the early guard, and beha
 - Modify: `tests/test_container_deployment.py`
 - Modify: `scripts/deploy.sh`
 
-- [ ] **Step 1: Extend the fake Docker and curl boundaries**
+- [x] **Step 1: Extend the fake Docker and curl boundaries**
 
 Add these fake Compose cases in `deployment_fixture`:
 
@@ -494,7 +496,7 @@ fixture environment to the same test constants used by `.env.deploy`. Limiting
 the mismatch to `FAKE_TARGET_TAG` makes the target fail while allowing the
 previous SHA to pass rollback attestation.
 
-- [ ] **Step 2: Add failing target-version and rollback-version tests**
+- [x] **Step 2: Add failing target-version and rollback-version tests**
 
 Add:
 
@@ -559,7 +561,7 @@ for url in [
     assert f"{PREVIOUS_TAG}|{url}" in curl_calls
 ```
 
-- [ ] **Step 3: Run version-verification behavior tests and verify RED**
+- [x] **Step 3: Run version-verification behavior tests and verify RED**
 
 Run:
 
@@ -569,7 +571,7 @@ python -m pytest -q tests/test_container_deployment.py -k "runtime_version or wr
 
 Expected: FAIL because deployment checks only availability and exact legacy health bodies.
 
-- [ ] **Step 4: Add robust JSON version verification helpers**
+- [x] **Step 4: Add robust JSON version verification helpers**
 
 Add `python3` to required commands in `scripts/deploy.sh`:
 
@@ -643,7 +645,7 @@ verify_runtime_version() {
 }
 ```
 
-- [ ] **Step 5: Replace availability-only rollout checks**
+- [x] **Step 5: Replace availability-only rollout checks**
 
 After starting backend and frontend for the target, use:
 
@@ -665,7 +667,7 @@ restore_version_state || return 1
 
 Keep the existing transaction and backup ordering unchanged.
 
-- [ ] **Step 6: Run deployment behavior tests and verify GREEN**
+- [x] **Step 6: Run deployment behavior tests and verify GREEN**
 
 Run:
 
@@ -675,7 +677,7 @@ python -m pytest -q tests/test_container_deployment.py -k "deploy_script"
 
 Expected: all deploy-script structure and behavior tests pass.
 
-- [ ] **Step 7: Commit runtime version attestation**
+- [x] **Step 7: Commit runtime version attestation**
 
 Run:
 
@@ -694,7 +696,7 @@ Expected: one commit containing endpoint/image verification and rollback coverag
 - Modify: `tests/test_ci_workflow.py`
 - Modify: `.github/workflows/publish-images.yml`
 
-- [ ] **Step 1: Add the failing workflow-summary contract**
+- [x] **Step 1: Add the failing workflow-summary contract**
 
 Add to `tests/test_ci_workflow.py`:
 
@@ -715,7 +717,7 @@ def test_publish_images_writes_an_exact_manual_deployment_summary():
     assert "/version.json" in summary
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -725,7 +727,7 @@ python -m pytest -q tests/test_ci_workflow.py -k "manual_deployment_summary"
 
 Expected: FAIL because the workflow does not write `$GITHUB_STEP_SUMMARY`.
 
-- [ ] **Step 3: Write the post-publication summary**
+- [x] **Step 3: Write the post-publication summary**
 
 Append this step after freshness/promotion handling in
 `.github/workflows/publish-images.yml`:
@@ -756,7 +758,7 @@ Append this step after freshness/promotion handling in
 
 Do not print registry credentials or add SSH permissions.
 
-- [ ] **Step 4: Run the workflow tests and verify GREEN**
+- [x] **Step 4: Run the workflow tests and verify GREEN**
 
 Run:
 
@@ -766,7 +768,7 @@ python -m pytest -q tests/test_ci_workflow.py
 
 Expected: all workflow tests pass.
 
-- [ ] **Step 5: Commit the workflow operator handoff**
+- [x] **Step 5: Commit the workflow operator handoff**
 
 Run:
 
@@ -785,7 +787,7 @@ Expected: one commit containing the summary and its contract test.
 - Modify: `tests/test_container_deployment.py`
 - Modify: `docs/deployment/container-production.md`
 
-- [ ] **Step 1: Add the failing documentation contract**
+- [x] **Step 1: Add the failing documentation contract**
 
 Add to `tests/test_container_deployment.py`:
 
@@ -814,7 +816,7 @@ def test_production_guide_documents_verifiable_release_operations():
         assert required in guide
 ```
 
-- [ ] **Step 2: Run the documentation contract and verify RED**
+- [x] **Step 2: Run the documentation contract and verify RED**
 
 Run:
 
@@ -824,7 +826,7 @@ python -m pytest -q tests/test_container_deployment.py -k "verifiable_release_op
 
 Expected: FAIL because the current guide does not contain the new four-path release structure and version decision table.
 
-- [ ] **Step 3: Document the four operational flows**
+- [x] **Step 3: Document the four operational flows**
 
 Restructure the release sections in `docs/deployment/container-production.md`
 with these exact headings and commands:
@@ -862,7 +864,7 @@ ROLLBACK_SHA="$(tr -d '[:space:]' < deploy/previous-version)"
 
 Explain that normal same-SHA deployment is rejected before image pulls.
 
-- [ ] **Step 4: Document safe baseline adoption and `IMAGE_TAG` usage**
+- [x] **Step 4: Document safe baseline adoption and `IMAGE_TAG` usage**
 
 Add `## 接管已有运行版本`. First explain how to inspect a host that already
 has a trusted `current-version` record:
@@ -914,7 +916,7 @@ Explain that empty, ambiguous, non-SHA, or differing image results must stop
 the adoption procedure. After recording the baseline, export `IMAGE_TAG` from
 the file and run the Compose inspection shown above.
 
-- [ ] **Step 5: Add the unchanged-page decision table**
+- [x] **Step 5: Add the unchanged-page decision table**
 
 Add:
 
@@ -934,7 +936,7 @@ Include a post-deployment checklist for `deploy/current-version`, Compose image
 references, local `/health`, local `/version.json`, public `/health`, and public
 `/version.json`.
 
-- [ ] **Step 6: Run the documentation and deployment contracts**
+- [x] **Step 6: Run the documentation and deployment contracts**
 
 Run:
 
@@ -945,7 +947,7 @@ npx --prefix frontend prettier --check docs/deployment/container-production.md
 
 Expected: both commands pass.
 
-- [ ] **Step 7: Commit the production guide**
+- [x] **Step 7: Commit the production guide**
 
 Run:
 
@@ -964,7 +966,7 @@ Expected: one documentation-focused commit with its contract guard.
 - Verify all changed files from Tasks 1–6.
 - Do not stage `frontend/node_modules`, `.next`, caches, secrets, logs, or data.
 
-- [ ] **Step 1: Inspect and format the implementation worktree**
+- [x] **Step 1: Inspect and format the implementation worktree**
 
 Run:
 
@@ -976,7 +978,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-before-commit
 
 Expected: formatting completes without unrelated changes.
 
-- [ ] **Step 2: Run the complete commit verification**
+- [x] **Step 2: Run the complete commit verification**
 
 Run:
 
@@ -986,7 +988,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-before-commit
 
 Expected: backend tests, frontend Prettier, ESLint, Vitest, and the production Next.js build all pass.
 
-- [ ] **Step 3: Confirm the final diff and clean commit state**
+- [x] **Step 3: Confirm the final diff and clean commit state**
 
 Run:
 
@@ -998,7 +1000,7 @@ git diff --check main..HEAD
 
 Expected: only the approved release-flow files changed and every implementation slice is committed.
 
-- [ ] **Step 4: Fast-forward the verified branch into main**
+- [x] **Step 4: Fast-forward the verified branch into main**
 
 Run from the primary checkout:
 
@@ -1009,7 +1011,7 @@ git merge --ff-only fix/verifiable-container-release
 
 Expected: `main` advances without a merge commit.
 
-- [ ] **Step 5: Re-run targeted release tests on main**
+- [x] **Step 5: Re-run targeted release tests on main**
 
 Run:
 
@@ -1019,7 +1021,7 @@ python -m pytest -q tests/test_application_health.py tests/test_ci_workflow.py t
 
 Expected: all targeted tests pass on `main`.
 
-- [ ] **Step 6: Remove the temporary worktree and branch**
+- [x] **Step 6: Remove the temporary worktree and branch**
 
 After validating the resolved path is under `.worktrees`, run:
 
@@ -1030,7 +1032,7 @@ git branch -d fix/verifiable-container-release
 
 Expected: only the primary worktree remains.
 
-- [ ] **Step 7: Push only after explicit publication authorization**
+- [x] **Step 7: Push only after explicit publication authorization**
 
 Run:
 
@@ -1040,7 +1042,7 @@ git push origin main
 
 Expected: the exact verified commit is present on `origin/main`.
 
-- [ ] **Step 8: Monitor exact-SHA CI and image publication**
+- [x] **Step 8: Monitor exact-SHA CI and image publication**
 
 Run:
 

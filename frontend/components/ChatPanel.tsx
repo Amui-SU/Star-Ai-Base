@@ -12,16 +12,15 @@ import { useChatPanelViewport } from "@/components/chat/useChatPanelViewport";
 import { useChatStreaming } from "@/components/chat/useChatStreaming";
 import { useChatWebSearchSettings } from "@/components/chat/useChatWebSearchSettings";
 import type { Message } from "@/components/chat/types";
+import { useRefreshVersion } from "@/hooks/refreshBus";
 import { displayKnowledgeBaseName } from "@/lib/displayNames";
 
 interface Props {
-  statsKey?: number;
   sidebarOpen?: boolean;
   sidebarWidth?: number;
   knowledgeBaseId?: number | null;
   knowledgeBaseName?: string;
   isAdmin?: boolean;
-  apiAccountsKey?: number;
   onOpenApiAccounts?: () => void;
   conversationOpenRequest?: { id: number; key: number } | null;
   newConversationRequestKey?: number;
@@ -30,17 +29,17 @@ interface Props {
 }
 
 export default function ChatPanel({
-  statsKey,
   knowledgeBaseId,
   knowledgeBaseName,
   isAdmin = false,
-  apiAccountsKey = 0,
   onOpenApiAccounts,
   conversationOpenRequest = null,
   newConversationRequestKey = 0,
   onConversationSaved,
   onOpenVideoNote,
 }: Props) {
+  const statsKey = useRefreshVersion("kb-stats");
+  const apiAccountsKey = useRefreshVersion("api-accounts");
   const knowledgeBaseTitle = knowledgeBaseId
     ? displayKnowledgeBaseName(knowledgeBaseName)
     : "选择知识库";

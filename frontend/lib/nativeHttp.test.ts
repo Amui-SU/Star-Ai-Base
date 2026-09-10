@@ -19,6 +19,20 @@ afterEach(() => {
 });
 
 describe("requestWithNativeFallback", () => {
+  it("does not start native fallback after fetch is cancelled", async () => {
+    const controller = new AbortController();
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValue(new DOMException("Aborted", "AbortError"));
+    controller.abort();
+    const { requestWithNativeFallback } = await import("./nativeHttp");
+    await expect(
+      requestWithNativeFallback("http://localhost/test", {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(request).not.toHaveBeenCalled();
+  });
   it("uses CapacitorHttp when native fetch cannot reach a LAN backend", async () => {
     globalThis.fetch = vi
       .fn()

@@ -6,6 +6,7 @@ import type { OAuthProvider } from "@/components/auth/authPageLogic";
 import { authCardStyle } from "@/components/auth/authCardStyles";
 import {
   AuthEmailStep,
+  AuthForgotPasswordStep,
   AuthLoginStep,
   AuthRegisterStep,
 } from "@/components/auth/AuthCardSteps";
@@ -41,6 +42,9 @@ export default function AuthCard({
         />
       )}
       {form.step === "login" && <AuthLoginStep form={form} />}
+      {form.step === "forgot-password" && (
+        <AuthForgotPasswordStep form={form} />
+      )}
       {form.step === "register" && <AuthRegisterStep form={form} />}
     </div>
   );

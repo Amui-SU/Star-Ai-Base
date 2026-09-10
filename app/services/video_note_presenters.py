@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import FavoriteFolder, FavoriteVideo, VideoCache, VideoNote
+from app.services.bilibili_multi_part import bilibili_video_url
 from app.services.knowledge_base_presenters import nullable_equal
 
 
@@ -34,7 +35,7 @@ class VideoNoteSource:
 
     @property
     def url(self) -> str:
-        return f"https://www.bilibili.com/video/{self.bvid}"
+        return bilibili_video_url(self.bvid)
 
 
 def _video_cache_matches_favorite():

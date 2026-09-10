@@ -71,19 +71,24 @@ export function useChatKnowledgeContext({
   );
 
   useEffect(() => {
+    let cancelled = false;
     if (knowledgeBaseId) {
       knowledgeBaseApi
         .stats(knowledgeBaseId)
-        .then(setStats)
+        .then((value) => {
+          if (!cancelled) setStats(value);
+        })
         .catch(() => {});
     } else {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- switching to no knowledge base must clear stale stats immediately.
       setStats(null);
     }
+    return () => {
+      cancelled = true;
+    };
   }, [statsKey, knowledgeBaseId]);
 
   useEffect(() => {
-    let cancelled = false;
     /* eslint-disable react-hooks/set-state-in-effect -- knowledge-base changes intentionally reset the chat context before loading scoped options. */
     actionsRef.current.onResetChat();
     actionsRef.current.onResetConversationIdentity();
@@ -93,8 +98,12 @@ export function useChatKnowledgeContext({
     setScopeNotice("");
     /* eslint-enable react-hooks/set-state-in-effect */
     clearScopeNoticeTimer();
+  }, [actionsRef, clearScopeNoticeTimer, knowledgeBaseId]);
 
+  useEffect(() => {
+    let cancelled = false;
     if (!knowledgeBaseId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing the selected knowledge base must clear its scope options.
       setScopeOptions({ folders: [] });
       return () => {
         cancelled = true;
@@ -113,7 +122,7 @@ export function useChatKnowledgeContext({
     return () => {
       cancelled = true;
     };
-  }, [actionsRef, clearScopeNoticeTimer, knowledgeBaseId]);
+  }, [statsKey, knowledgeBaseId]);
 
   useEffect(() => {
     return () => {

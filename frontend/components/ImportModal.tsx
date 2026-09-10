@@ -22,22 +22,29 @@ export default function ImportModal({
   onImported,
 }: Props) {
   const {
+    cancelMultiPart,
     getQR,
     localVideoFile,
     localVideoMessage,
     localVideoSubmitting,
     methodList,
+    multiPartInfo,
     openMethod,
     qr,
     qrErrorMessage,
     qrStatus,
     returnToMethods,
+    selectedPages,
     setLocalVideoFile,
     setUrl,
     step,
     submitLocalVideo,
+    submitMultiPart,
     submitUrl,
     switchVideoMode,
+    taskProgress,
+    toggleAllPages,
+    togglePage,
     url,
     urlMessage,
     urlSubmitting,
@@ -67,22 +74,29 @@ export default function ImportModal({
         localVideoMessage={localVideoMessage}
         localVideoSubmitting={localVideoSubmitting}
         methodList={methodList}
+        multiPartInfo={multiPartInfo}
         qr={qr}
         qrErrorMessage={qrErrorMessage}
         qrStatus={qrStatus}
+        selectedPages={selectedPages}
         step={step}
+        taskProgress={taskProgress}
         url={url}
         urlMessage={urlMessage}
         urlSubmitting={urlSubmitting}
         videoMode={videoMode}
         onCancel={onClose}
+        onCancelMultiPart={cancelMultiPart}
         onGetQR={() => void getQR()}
         onLocalVideoFileChange={setLocalVideoFile}
         onOpenMethod={openMethod}
         onReturnToMethods={returnToMethods}
         onSubmitLocalVideo={() => void submitLocalVideo()}
+        onSubmitMultiPart={() => void submitMultiPart()}
         onSubmitUrl={() => void submitUrl()}
         onSwitchVideoMode={switchVideoMode}
+        onTogglePage={togglePage}
+        onToggleAllPages={toggleAllPages}
         onUrlChange={setUrl}
       />
     </ModalShell>

@@ -103,7 +103,9 @@ async def register_system_user(
             role="owner",
         )
         db.add(member)
-        token = await create_system_session(db, user.id, response)
+        token = await create_system_session(
+            db, user.id, response, credential_version=user.credential_version
+        )
         await db.commit()
     except IntegrityError:
         await db.rollback()

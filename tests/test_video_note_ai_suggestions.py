@@ -55,6 +55,7 @@ def test_summary_suggestions_clean_ai_payload_and_keep_generated_message():
         ai_status="generated",
     )
 
+    assert response.result_source == "ai"
     assert response.message == "✓ AI 已重新生成摘要和关键观点"
     assert response.tag_suggestions == ["AI", "复盘"]
     operations = _operations(response)
@@ -78,6 +79,7 @@ def test_ai_edit_suggestions_fall_back_to_source_outline_for_timestamps():
         _source(),
     )
 
+    assert response.result_source == "fallback"
     assert response.message == (
         "ℹ AI 模型未连接，已根据入库内容提供基础建议；配置模型后可获得更好效果"
     )
@@ -113,6 +115,7 @@ def test_ai_edit_suggestions_prefer_bilibili_timestamps_for_timestamp_generation
         ai_status="official",
     )
 
+    assert response.result_source == "official"
     assert response.message == "✓ 已根据 B 站官方章节生成时间戳提纲"
     assert _operations(response)[0]["block"]["items"] == [
         {"time": 32, "text": "官方章节开场"},
@@ -168,3 +171,18 @@ def test_ai_edit_suggestions_reject_single_zero_second_timestamp_summary():
 
     assert response.message == "ℹ 当前视频暂无可用时间点数据，已生成基础框架"
     assert _operations(response)[0]["block"]["items"] == []
+
+
+def test_failed_ai_edit_suggestions_report_fallback_result_source():
+    response = build_ai_edit_suggestions(
+        VideoNote(blocks_json=[]),
+        VideoNoteAiEditRequest(
+            action="custom_edit",
+            instruction="Add a follow-up note",
+            selected_block_ids=[],
+        ),
+        _source(),
+        ai_status="failed",
+    )
+
+    assert response.result_source == "fallback"

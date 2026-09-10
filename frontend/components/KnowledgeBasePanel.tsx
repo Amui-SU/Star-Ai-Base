@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { KnowledgeBasePanelView } from "@/components/knowledge-base/KnowledgeBasePanelView";
+import { useRefreshVersion } from "@/hooks/refreshBus";
 import { knowledgeBaseApi, type KnowledgeBase } from "@/lib/api";
 import { displayKnowledgeBaseName } from "@/lib/displayNames";
 
@@ -10,7 +11,6 @@ interface Props {
   activeId: number | null;
   onSelect: (kb: KnowledgeBase | null) => void;
   onActiveKnowledgeBase?: (kb: KnowledgeBase | null) => void;
-  refreshKey?: number;
   disabled?: boolean;
 }
 
@@ -18,9 +18,9 @@ export default function KnowledgeBasePanel({
   activeId,
   onSelect,
   onActiveKnowledgeBase,
-  refreshKey,
   disabled = false,
 }: Props) {
+  const refreshVersion = useRefreshVersion("knowledge-bases");
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -59,7 +59,7 @@ export default function KnowledgeBasePanel({
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshVersion]);
 
   useEffect(() => {
     onActiveKnowledgeBase?.(activeKb);

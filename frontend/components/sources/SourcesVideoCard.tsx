@@ -1,4 +1,5 @@
 import type { Video } from "@/lib/api";
+import { bilibiliVideoUrl } from "@/lib/bilibiliVideo";
 
 interface SourcesVideoCardProps {
   editingVideoId: string | null;
@@ -79,7 +80,7 @@ export default function SourcesVideoCard({
           />
         ) : (
           <a
-            href={`https://www.bilibili.com/video/${video.bvid}`}
+            href={bilibiliVideoUrl(video.bvid)}
             target="_blank"
             rel="noopener noreferrer"
             className="video-card-title truncate"

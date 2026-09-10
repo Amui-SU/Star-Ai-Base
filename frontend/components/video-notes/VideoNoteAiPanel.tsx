@@ -1,12 +1,14 @@
 "use client";
 
-import type { VideoNoteAiResponse } from "@/lib/api";
+import type { VideoNoteAiResponse, VideoNoteAiResultSource } from "@/lib/api";
+import { VIDEO_NOTE_AI_RESULT_META } from "./videoNoteAiUi";
 
 interface VideoNoteAiPanelProps {
   collapsed: boolean;
   loading: boolean;
   canUndoAiEdit: boolean;
   message: string | null;
+  resultSource: VideoNoteAiResultSource | null;
   onCollapse: () => void;
   onGenerateSummary: () => Promise<VideoNoteAiResponse | void>;
   onGenerateQuestions: () => Promise<VideoNoteAiResponse | void>;
@@ -19,6 +21,7 @@ export default function VideoNoteAiPanel({
   loading,
   canUndoAiEdit,
   message,
+  resultSource,
   onCollapse,
   onGenerateSummary,
   onGenerateQuestions,
@@ -99,13 +102,34 @@ export default function VideoNoteAiPanel({
           撤销 AI 编辑
         </button>
       </div>
-      {(loading || message) && (
+      {loading ? (
         <div className="video-note-ai-status-wrap">
           <p className="video-note-ai-status" role="status" aria-live="polite">
             {message ?? "正在处理..."}
           </p>
         </div>
-      )}
+      ) : message && resultSource ? (
+        <div
+          className={`video-note-ai-status-wrap video-note-ai-result-card ${VIDEO_NOTE_AI_RESULT_META[resultSource].className}`}
+          data-source={VIDEO_NOTE_AI_RESULT_META[resultSource].source}
+        >
+          <div className="video-note-ai-result-head">
+            <span className="video-note-ai-result-badge">
+              {VIDEO_NOTE_AI_RESULT_META[resultSource].badge}
+            </span>
+            <span>{VIDEO_NOTE_AI_RESULT_META[resultSource].detail}</span>
+          </div>
+          <p className="video-note-ai-status" role="status" aria-live="polite">
+            {message}
+          </p>
+        </div>
+      ) : message ? (
+        <div className="video-note-ai-status-wrap">
+          <p className="video-note-ai-status" role="status" aria-live="polite">
+            {message}
+          </p>
+        </div>
+      ) : null}
     </section>
   );
 }

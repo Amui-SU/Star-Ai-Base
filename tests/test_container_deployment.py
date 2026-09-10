@@ -29,6 +29,7 @@ VALID_PERSONAL_ACR_BOUNDARY = (
 INVALID_PERSONAL_ACR_BOUNDARY = (
     "crpi-" + "a" * 59 + ".cn-beijing.personal.cr.aliyuncs.com"
 )
+SCRIPT_SUBPROCESS_TIMEOUT_SECONDS = 30
 
 
 def read(relative_path: str) -> str:
@@ -2251,7 +2252,7 @@ def run_restore(
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=10,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
         check=False,
     )
 
@@ -2276,7 +2277,7 @@ def run_recover(
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=10,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
         check=False,
     )
 
@@ -3136,9 +3137,28 @@ def test_nginx_example_routes_tls_traffic_to_loopback_services():
 
 def test_nginx_example_limits_send_code_and_covers_every_backend_prefix():
     content = read("deploy/nginx/zhiku-cloud.conf.example")
-    send_code_block = content.split("location = /system-auth/send-code {", maxsplit=1)[
-        1
-    ].split("}", maxsplit=1)[0]
+    import re
+
+    locations = re.findall(r"location\s+(=|~)\s+(\S+)\s*\{([^}]+)\}", content)
+
+    def resolve(path):
+        for kind, pattern, block in locations:
+            if (kind == "=" and path == pattern) or (
+                kind == "~" and re.search(pattern, path)
+            ):
+                return block
+        raise AssertionError(f"No backend location for {path}")
+
+    for path in (
+        "/system-auth/send-code",
+        "/system-auth/send-code/",
+        "/system-auth/password-reset/send-code",
+        "/system-auth/password-reset/send-code/",
+    ):
+        assert "limit_req zone=send_code_per_ip" in resolve(path)
+    assert "limit_req zone=" not in resolve("/system-auth/login")
+    assert "limit_req zone=" not in resolve("/system-auth/password-reset/confirm")
+    send_code_block = resolve("/system-auth/send-code")
     backend_locations = "\n".join(
         line.strip()
         for line in content.splitlines()

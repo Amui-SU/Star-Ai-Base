@@ -117,6 +117,7 @@ export async function requestWithNativeFallback(
   try {
     return await fetch(input, init);
   } catch (fetchError) {
+    if (init.signal?.aborted) throw init.signal.reason;
     if (!canUseNativeHttp()) throw fetchError;
     const url = typeof input === "string" ? input : input.toString();
     try {

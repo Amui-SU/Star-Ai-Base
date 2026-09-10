@@ -123,3 +123,110 @@
   color: rgba(59, 57, 53, 0.72);
   opacity: 1;
 }
+
+/* —— 分P选择 —— */
+.import-part-header {
+  margin-bottom: 10px;
+}
+
+.import-part-title {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.import-part-meta {
+  margin-top: 2px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.import-part-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.import-part-list {
+  list-style: none;
+  margin: 4px 0 10px;
+  padding: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+}
+
+.import-part-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.import-part-item:hover {
+  background: var(--paper-3);
+}
+
+.import-part-item-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.import-part-item-duration {
+  flex-shrink: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* —— 导入任务进度 —— */
+.import-task-progress {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.import-task-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 4px;
+  font-size: 0.86rem;
+}
+
+.import-task-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
+.import-task-state {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.import-task-item.completed .import-task-state {
+  color: var(--teal);
+}
+
+.import-task-item.failed .import-task-state {
+  color: var(--danger);
+}

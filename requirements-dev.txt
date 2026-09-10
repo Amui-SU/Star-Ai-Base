@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Developer workflow formatting
+black==26.5.1

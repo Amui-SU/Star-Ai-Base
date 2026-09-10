@@ -9,6 +9,7 @@ from langchain.schema.output_parser import StrOutputParser
 from langchain.schema.runnable import RunnablePassthrough
 from loguru import logger
 
+from app.services.bilibili_multi_part import bilibili_video_url
 from app.services.llm_errors import classify_upstream_error
 
 
@@ -67,9 +68,7 @@ def build_rag_answer_context_and_sources(
                 {
                     "bvid": bvid,
                     "title": title,
-                    "url": metadata.get(
-                        "url", f"https://www.bilibili.com/video/{bvid}"
-                    ),
+                    "url": metadata.get("url", bilibili_video_url(bvid)),
                 }
             )
 

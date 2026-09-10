@@ -1,5 +1,7 @@
 # Pre-release Architecture Maintenance Round 2 Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Continue pre-release maintenance by shrinking global frontend style ownership and adding structure guards, without changing product behavior or starting learning-review/import-source feature work.
@@ -91,6 +93,6 @@ Run:
 
 Expected: backend tests, frontend lint, frontend tests, and build all pass.
 
-- [ ] **Step 3: Commit and fast-forward merge**
+- [x] **Step 3: Commit and fast-forward merge**
 
 Stage only source, test, and doc changes. Commit on `maintenance/pre-release-architecture-round2`, fast-forward merge into `main`, and run final targeted checks on `main`.

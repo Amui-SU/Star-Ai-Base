@@ -6,7 +6,20 @@ import {
   sourceBindingApi,
   type ImportMethod,
   type QRCodeResponse,
+  type VideoMultiPartInfo,
 } from "@/lib/api";
+import { useImportTaskTracking } from "./useImportTaskTracking";
+
+const BVID_RE = /BV[0-9A-Za-z]{10}/;
+
+export interface ImportTaskProgressItem {
+  id: string;
+  label: string;
+  status?: string;
+  progress?: number;
+  step?: string | null;
+  message?: string;
+}
 
 export type ImportModalStep = "methods" | "bilibili" | "video";
 export type VideoImportMode = "url" | "local";
@@ -61,6 +74,11 @@ export function useImportModal({
   const [url, setUrl] = useState("");
   const [urlMessage, setUrlMessage] = useState("");
   const [urlSubmitting, setUrlSubmitting] = useState(false);
+  const [multiPartInfo, setMultiPartInfo] = useState<VideoMultiPartInfo | null>(
+    null,
+  );
+  const [selectedPages, setSelectedPages] = useState<number[]>([]);
+  const { trackTasks, taskProgress } = useImportTaskTracking(onImported);
   const [localVideoFile, setLocalVideoFile] = useState<File | null>(null);
   const [localVideoMessage, setLocalVideoMessage] = useState("");
   const [localVideoSubmitting, setLocalVideoSubmitting] = useState(false);
@@ -78,6 +96,8 @@ export function useImportModal({
         setUrl("");
         setUrlMessage("");
         setUrlSubmitting(false);
+        setMultiPartInfo(null);
+        setSelectedPages([]);
         setLocalVideoFile(null);
         setLocalVideoMessage("");
         setLocalVideoSubmitting(false);
@@ -156,15 +176,94 @@ export function useImportModal({
     setUrlSubmitting(true);
     setUrlMessage("");
     try {
+      const trimmedUrl = url.trim();
+
+      // B 站链接先检测分P；检测失败不阻塞，回退到单条导入
+      if (BVID_RE.test(trimmedUrl)) {
+        try {
+          const detected = await importApi.detectMultiPart(trimmedUrl);
+          const info = detected.ok ? detected.multi_part_info : null;
+          if (info?.is_multi_part) {
+            setMultiPartInfo(info);
+            setSelectedPages(info.pages.map((page) => page.page));
+            return;
+          }
+        } catch {
+          /* 检测不可用时按单条导入处理 */
+        }
+      }
+
       const res = await importApi.importUrl({
-        url: url.trim(),
+        url: trimmedUrl,
         source_type: "auto",
         knowledge_base_id: knowledgeBaseId,
       });
       setUrlMessage(res.message);
       if (res.ok) {
-        onImported?.();
         setUrl("");
+        if (res.task_id) {
+          const taskId = res.task_id;
+          trackTasks([{ id: taskId, label: res.bvid || "视频导入" }]);
+        }
+      }
+    } catch (err) {
+      setUrlMessage(err instanceof Error ? err.message : "导入失败");
+    } finally {
+      setUrlSubmitting(false);
+    }
+  };
+
+  const togglePage = (page: number) => {
+    setSelectedPages((current) =>
+      current.includes(page)
+        ? current.filter((value) => value !== page)
+        : [...current, page].sort((a, b) => a - b),
+    );
+  };
+
+  const toggleAllPages = () => {
+    setSelectedPages((current) =>
+      multiPartInfo && current.length < multiPartInfo.pages.length
+        ? multiPartInfo.pages.map((page) => page.page)
+        : [],
+    );
+  };
+
+  const cancelMultiPart = () => {
+    setMultiPartInfo(null);
+    setSelectedPages([]);
+    setUrlMessage("");
+  };
+
+  const submitMultiPart = async () => {
+    if (
+      !multiPartInfo ||
+      selectedPages.length === 0 ||
+      !knowledgeBaseId ||
+      urlSubmitting
+    ) {
+      return;
+    }
+    setUrlSubmitting(true);
+    setUrlMessage("");
+    try {
+      const res = await importApi.importMultiPart({
+        url: url.trim(),
+        knowledge_base_id: knowledgeBaseId,
+        page_indices: selectedPages,
+      });
+      setUrlMessage(res.message);
+      if (res.ok) {
+        setUrl("");
+        // task_ids 与选中的分P顺序一致
+        trackTasks(
+          res.task_ids.map((taskId, index) => ({
+            id: taskId,
+            label: `P${selectedPages[index] ?? index + 1}`,
+          })),
+        );
+        setMultiPartInfo(null);
+        setSelectedPages([]);
       }
     } catch (err) {
       setUrlMessage(err instanceof Error ? err.message : "导入失败");
@@ -185,7 +284,11 @@ export function useImportModal({
       });
       setLocalVideoMessage(res.message);
       if (res.ok) {
-        onImported?.();
+        if (res.task_id) {
+          const taskId = res.task_id;
+          const label = localVideoFile.name;
+          trackTasks([{ id: taskId, label }]);
+        }
         setLocalVideoFile(null);
       }
     } catch (err) {
@@ -223,22 +326,29 @@ export function useImportModal({
   };
 
   return {
+    cancelMultiPart,
     getQR,
     localVideoFile,
     localVideoMessage,
     localVideoSubmitting,
     methodList,
+    multiPartInfo,
     openMethod,
     qr,
     qrErrorMessage,
     qrStatus,
     returnToMethods,
+    selectedPages,
     setLocalVideoFile,
     setUrl,
     step,
     submitLocalVideo,
+    submitMultiPart,
     submitUrl,
     switchVideoMode,
+    taskProgress,
+    toggleAllPages,
+    togglePage,
     url,
     urlMessage,
     urlSubmitting,

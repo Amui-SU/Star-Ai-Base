@@ -3,7 +3,7 @@
 import secrets
 
 from fastapi import HTTPException, Request
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -103,8 +103,15 @@ async def reset_admin_user_password(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     temporary_password = secrets.token_urlsafe(18)
-    user.password_hash = hash_password(temporary_password)
-    user.status = "active"
+    await db.execute(
+        update(SystemUser)
+        .where(SystemUser.id == user_id)
+        .values(
+            password_hash=hash_password(temporary_password),
+            credential_version=SystemUser.credential_version + 1,
+            status="active",
+        )
+    )
     await db.execute(delete(SystemSession).where(SystemSession.user_id == user_id))
     await db.commit()
     await db.refresh(user)

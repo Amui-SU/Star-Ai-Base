@@ -1,5 +1,7 @@
 # 历史记录“开启新对话”实时伸缩实施计划
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让历史侧栏的“开启新对话”按钮占满固定操作区之外的空间，并在拖动边框时与侧栏外壳逐帧同步变化。
@@ -221,7 +223,7 @@ git diff af46db0 --name-only
 
 审查结论：Ready to merge；无 Critical 或 Important 问题。
 
-- [ ] **Step 4：按 worktree 流程合并**
+- [x] **Step 4：按 worktree 流程合并**
 
 在分支验证通过且工作树干净后，使用 fast-forward 合并到 `main`；在 `main` 上重新运行：
 

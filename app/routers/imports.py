@@ -6,6 +6,7 @@ from fastapi import (
     Depends,
     File,
     Form,
+    HTTPException,
     UploadFile,
 )
 from loguru import logger
@@ -21,7 +22,11 @@ from app.models import SystemUser, Workspace
 from app.services.asr import ASRService
 from app.services.bilibili import BilibiliService
 from app.services.content_fetcher import ContentFetcher
-from app.services.ingestion_tasks import create_ingestion_task, update_ingestion_task
+from app.services.ingestion_tasks import (
+    create_ingestion_task,
+    get_ingestion_task_for_workspace,
+    update_ingestion_task,
+)
 from app.services.import_request_runtime import (
     DEFAULT_LOCAL_IMPORT_DIR,
     detect_import_source_type as _detect_source_type,
@@ -38,6 +43,7 @@ from app.services.import_tasks import (
     delete_existing_import_vectors,
     run_bilibili_video_import,
     run_local_video_import,
+    run_multi_part_video_imports,
     store_imported_video_content,
 )
 from app.services.rag_runtime import get_rag_service
@@ -45,6 +51,7 @@ from app.services.bilibili_multi_part import (
     detect_multi_part_video,
     extract_page_info,
     format_part_title,
+    make_part_video_id,
     validate_page_selection,
     build_import_summary,
 )
@@ -87,6 +94,14 @@ class ImportUrlResponse(BaseModel):
     bvid: str | None = None
 
 
+class ImportTaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    progress: int
+    current_step: str | None = None
+    message: str = ""
+
+
 def _delete_existing_import_vectors(
     rag,
     *,
@@ -120,6 +135,9 @@ async def _run_bilibili_video_import(
     part_title: str | None = None,
     total_parts: int | None = None,
     part_duration: int | None = None,
+    storage_bvid: str | None = None,
+    title_override: str | None = None,
+    video_info: dict | None = None,
 ) -> None:
     await run_bilibili_video_import(
         task_id=task_id,
@@ -131,6 +149,9 @@ async def _run_bilibili_video_import(
         part_title=part_title,
         total_parts=total_parts,
         part_duration=part_duration,
+        storage_bvid=storage_bvid,
+        title_override=title_override,
+        video_info=video_info,
         bilibili_service_class=BilibiliService,
         asr_service_class=ASRService,
         content_fetcher_class=ContentFetcher,
@@ -138,6 +159,23 @@ async def _run_bilibili_video_import(
         update_task=update_ingestion_task,
         store_content=_store_imported_video_content,
         delete_vectors=_delete_existing_import_vectors,
+    )
+
+
+async def _run_multi_part_batch(
+    jobs: list[dict],
+    bvid: str,
+    workspace_id: int,
+    knowledge_base_id: int,
+    video_info: dict | None = None,
+) -> None:
+    await run_multi_part_video_imports(
+        jobs,
+        bvid=bvid,
+        workspace_id=workspace_id,
+        knowledge_base_id=knowledge_base_id,
+        video_info=video_info,
+        run_import=_run_bilibili_video_import,
     )
 
 
@@ -248,6 +286,29 @@ async def import_local_video(
     )
 
 
+@router.get("/tasks/{task_id}", response_model=ImportTaskStatusResponse)
+async def get_import_task_status(
+    task_id: str,
+    current_user: SystemUser = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+) -> ImportTaskStatusResponse:
+    task = await get_ingestion_task_for_workspace(
+        db,
+        task_id=task_id,
+        workspace_id=current_workspace.id,
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return ImportTaskStatusResponse(
+        task_id=task.task_id,
+        status=task.status,
+        progress=task.progress or 0,
+        current_step=task.current_step,
+        message=task.error_message or "",
+    )
+
+
 class DetectMultiPartRequest(BaseModel):
     """检测分P视频请求"""
 
@@ -337,18 +398,12 @@ async def import_multi_part(
                 message="无法从URL中提取BV号",
             )
 
-        # 验证知识库
+        # 验证知识库（不存在或无权访问时抛 HTTPException）
         kb = await _get_owned_knowledge_base(
             db,
-            current_user,
-            current_workspace,
             payload.knowledge_base_id,
+            current_workspace.id,
         )
-        if not kb:
-            return ImportMultiPartResponse(
-                ok=False,
-                message="知识库不存在或无权访问",
-            )
 
         # 获取视频信息
         bili = BilibiliService()
@@ -392,6 +447,7 @@ async def import_multi_part(
 
         # 为每个分P创建导入任务
         task_ids = []
+        jobs: list[dict] = []
         for page in selected_pages:
             page_info = extract_page_info(page)
 
@@ -410,32 +466,46 @@ async def import_multi_part(
                     part_info["total_parts"],
                 )
 
+            # 分P存储ID：每个分P独立缓存/向量化/记笔记
+            storage_bvid = (
+                make_part_video_id(bvid, page_info["page"])
+                if part_info["total_parts"] > 1
+                else bvid
+            )
+
             # 创建任务
-            task = await create_ingestion_task(
-                db=db,
-                user_id=current_user.id,
+            task_id = await create_ingestion_task(
+                db,
                 workspace_id=current_workspace.id,
                 knowledge_base_id=kb.id,
-                bvid=bvid,
-                title=title,
-                source_type="bilibili_video",
+                user_id=current_user.id,
+                current_step=f"等待导入: {title}",
+                total_items=1,
             )
 
-            # 启动后台导入任务（带cid和分P元信息）
-            background_tasks.add_task(
-                _run_bilibili_video_import,
-                task.task_id,
-                bvid,
-                current_workspace.id,
-                kb.id,
-                page_info["cid"],  # 传入具体的cid
-                page_info["page"],  # 分P编号
-                page_info["part"],  # 分P标题
-                part_info["total_parts"],  # 总分P数
-                page_info["duration"],  # 当前分P时长
+            jobs.append(
+                {
+                    "task_id": task_id,
+                    "cid": page_info["cid"],
+                    "page": page_info["page"],
+                    "part": page_info["part"],
+                    "total_parts": part_info["total_parts"],
+                    "duration": page_info["duration"],
+                    "storage_bvid": storage_bvid,
+                    "title": title,
+                }
             )
+            task_ids.append(task_id)
 
-            task_ids.append(task.task_id)
+        # 单个后台批任务受控并发执行全部分P，video_info 直接复用不再重复请求
+        background_tasks.add_task(
+            _run_multi_part_batch,
+            jobs,
+            bvid,
+            current_workspace.id,
+            kb.id,
+            video_info,
+        )
 
         # 构建导入摘要
         import_summary = build_import_summary(
@@ -453,6 +523,8 @@ async def import_multi_part(
             import_summary=import_summary,
         )
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"导入分P视频失败: {exc}")
         return ImportMultiPartResponse(

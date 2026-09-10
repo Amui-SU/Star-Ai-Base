@@ -32,6 +32,18 @@ def test_auth_schemas_are_reexported_from_legacy_models_module():
     assert user.is_admin is False
 
 
+def test_password_reset_schemas_are_reexported_from_legacy_models_module():
+    send_request = models.PasswordResetSendCodeRequest(email="member@example.com")
+    confirm_request = models.PasswordResetConfirmRequest(
+        email="member@example.com",
+        code="123456",
+        new_password="new password",
+    )
+
+    assert send_request.email == "member@example.com"
+    assert confirm_request.new_password == "new password"
+
+
 def test_api_account_schemas_are_reexported_from_legacy_models_module():
     assert models.ApiAccountCreateRequest is ApiAccountCreateRequest
     assert models.ApiAccountResponse is ApiAccountResponse

@@ -29,7 +29,6 @@ export default function Home() {
     sidebarPanelStyle,
     conversationOpenRequest,
     newConversationRequestKey,
-    historyRefreshKey,
     activeVideoNote,
     openSidebarMode,
     collapseSidebar,
@@ -99,11 +98,9 @@ export default function Home() {
               activeBindingId={shell.activeBindingId}
               activeKbId={shell.activeKbId}
               activeKnowledgeBase={shell.activeKnowledgeBase}
-              historyRefreshKey={historyRefreshKey}
               isDragging={isDragging}
               isSidebarOpen={isSidebarOpen}
               knowledgeBuilding={shell.knowledgeBuilding}
-              kbRefreshKey={shell.kbRefreshKey}
               sidebarMode={sidebarMode}
               sidebarPanelStyle={sidebarPanelStyle}
               sidebarWidth={sidebarWidth}
@@ -139,13 +136,11 @@ export default function Home() {
               style={{ flex: 1 }}
             >
               <ChatPanel
-                statsKey={shell.statsKey}
                 sidebarOpen={isSidebarOpen}
                 sidebarWidth={sidebarWidth}
                 knowledgeBaseId={shell.activeKbId}
                 knowledgeBaseName={shell.activeKnowledgeBase?.name}
                 isAdmin={Boolean(shell.systemUser?.is_admin)}
-                apiAccountsKey={shell.apiAccountsKey}
                 onOpenApiAccounts={shell.openApiAccounts}
                 conversationOpenRequest={conversationOpenRequest}
                 newConversationRequestKey={newConversationRequestKey}
