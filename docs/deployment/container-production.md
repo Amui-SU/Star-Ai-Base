@@ -13,6 +13,14 @@
 
 ## 配置 ACR 和 GitHub
 
+### BuildKit 证明文件格式兼容
+
+`Publish Images` 的前后端构建均显式使用 `type=image,oci-mediatypes=true,oci-artifact=false`。BuildKit 0.32 起默认采用 OCI artifact 形式存储构建来源证明，当前 ACR 在推送时会拒绝其中的 `application/vnd.oci.empty.v1+json` 配置类型。兼容参数让证明文件采用旧式 image manifest 包装，仍保留 provenance、OCI image index 和 revision annotation；参见 [BuildKit 0.32.2 官方说明](https://github.com/moby/buildkit/blob/v0.32.2/docs/attestations/attestation-storage.md)。这不是关闭证明生成，不要用 `provenance: false` 或禁用默认 attestations 替代。
+
+兼容设置不改变精确 SHA 发布、禁止覆盖已有 SHA 标签、前后端 revision 校验和人工部署门槛。实际发布仍须两个镜像推送与校验均成功；仅构建成功或测试通过不能证明 ACR 已接受镜像。失败的旧 SHA 不得通过删除或覆盖标签来重试，使用经 CI 验证的新修复提交发布。
+
+### 仓库与凭据
+
 正式生产仍推荐阿里云容器镜像服务 **ACR 企业版**，实例地域固定为华北 2（北京）。ACR 个人版可作为此单机项目在资源受限或迁移期间的过渡选择，但阿里云官方将其定位为仅限开发测试且无 SLA 承诺，不能把它当作与企业版等价的生产保障；版本和 SLA 差异见[阿里云官方规格说明](https://help.aliyun.com/zh/acr/product-overview/differences-between-personal-edition-instances-and-enterprise-edition-instances)。无论选择企业版还是个人版，都要创建私有命名空间，并创建 `zhiku-backend`、`zhiku-frontend` 两个私有仓库；不得使用阿里云主账号凭据。
 
 **使用企业版时，两个企业版仓库都必须开启镜像版本不可变。** 分别进入 `zhiku-backend` 和 `zhiku-frontend` 的仓库管理页面，选择“基本信息 > 编辑 > 不可变”，确认两个仓库均已启用。操作路径和验证方法见[阿里云官方说明](https://help.aliyun.com/zh/acr/user-guide/turn-on-immutable-image-version)。未完成这一步不得启用企业版生产发布工作流。

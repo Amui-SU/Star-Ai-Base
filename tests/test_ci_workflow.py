@@ -262,6 +262,42 @@ def test_publish_images_uses_tested_commit_and_acr_configuration():
     )
 
 
+@pytest.mark.parametrize("image", ["backend", "frontend"])
+def test_publish_images_uses_legacy_attestation_exporter(image):
+    workflow = yaml.safe_load(read_publish_workflow())
+    publish = workflow["jobs"]["publish"]
+    step = next(
+        step
+        for step in publish["steps"]
+        if step.get("name") == f"Build and publish {image} image"
+    )
+    inputs = step["with"]
+    # These are the exporter attributes passed to Buildx by build-push-action.
+    exporters = [
+        dict(field.strip().split("=", 1) for field in line.split(","))
+        for line in inputs.get("outputs", "").splitlines()
+        if line.strip()
+    ]
+    assert len(exporters) == 1, "Each image needs an explicit compatible exporter"
+    assert exporters[0]["type"] == "image"
+    assert exporters[0]["oci-artifact"] == "false"
+    assert exporters[0]["oci-mediatypes"] == "true"
+    assert inputs["push"] is True
+    assert str(inputs.get("provenance", "mode=max")).lower() not in {
+        "false",
+        "disabled=true",
+    }
+    environment = {
+        **workflow.get("env", {}),
+        **publish.get("env", {}),
+        **step.get("env", {}),
+    }
+    assert str(environment.get("BUILDX_NO_DEFAULT_ATTESTATIONS", "0")).lower() in {
+        "0",
+        "false",
+    }
+
+
 def test_publish_images_repairs_missing_sha_tags_without_overwriting_existing_ones():
     content = read_publish_workflow()
 

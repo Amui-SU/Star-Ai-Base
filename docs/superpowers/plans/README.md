@@ -69,5 +69,6 @@ python scripts/generate-plan-index.py --check
 | [2026-08-25-pr7-review-remediation.md](2026-08-25-pr7-review-remediation.md)                                     | completed  |
 | [2026-09-01-yaml-advisory-remediation.md](2026-09-01-yaml-advisory-remediation.md)                               | completed  |
 | [2026-09-08-pr7-adversarial-remediation.md](2026-09-08-pr7-adversarial-remediation.md)                           | completed  |
+| [2026-09-10-acr-attestation-compat.md](2026-09-10-acr-attestation-compat.md)                                     | partial    |
 
 <!-- END GENERATED PLAN INDEX -->
