@@ -1,6 +1,6 @@
 # PR 7 Adversarial Remediation Implementation Plan
 
-**Status:** partial
+**Status:** completed
 
 > **For agentic workers:** Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
@@ -139,7 +139,7 @@
 - [x] Replace suffix fallback with exact `README.md` allowlist; explicit security/deployment/spec prefixes require both jobs.
 - [x] Run CI/workflow/dependency-policy/plan tests, frontend lint/tests/build and Playwright, full verifier, and independent adversarial review. Fix material findings with regression tests.
 - [x] Commit batch 2 with normal hooks; fresh dependency installation in an isolated temporary directory uses npm 10.9.2 and verifies tree/audits without touching shared dependencies.
-- [ ] Integrate and push the release branch; validate push and PR workflows for final SHA. Update plan status/checklist and regenerate index using `python scripts/generate-plan-index.py` when the behavior is integrated.
+- [x] Integrate and push the release branch; validate push and PR workflows for final SHA. Update plan status/checklist and regenerate index using `python scripts/generate-plan-index.py` when the behavior is integrated.
 
 ## Task 7: Approved dependency security batch (2026-09-10)
 
@@ -155,8 +155,8 @@ Audit thresholds and application interfaces remain unchanged.
 - [x] Extend dependency contract fixtures for the approved versions and assert every locked copy of Next.js, sharp, Vitest/mocker, and js-yaml avoids the affected versions. Run `python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.py` and observe failure against the existing vulnerable lockfile.
 - [x] Run `scripts/worktree-deps.ps1 -Mode Status`, verify the shared junction points to the main workspace, then run `-Mode Detach`. Update only the approved manifest entries with apply_patch and regenerate the lockfile with `npm exec --yes --package=npm@10.9.2 -- npm install --package-lock-only --ignore-scripts --no-audit --no-fund`.
 - [x] Install fresh isolated dependencies with `npm exec --yes --package=npm@10.9.2 -- npm ci --no-audit --no-fund`; verify `npm ls --depth=0 --json`, `npm audit --omit=dev --audit-level=high`, and `npm audit --audit-level=high` all exit 0. Inspect the lockfile diff for unrelated upgrades and rerun the dependency contracts.
-- [ ] Run the full `scripts/verify-before-commit.ps1` with formatting, lint, tests and build; run `npm run test:e2e -- --workers=1` with CI=true. Obtain independent review, fix material findings, and commit explicitly scoped files with normal hooks.
-- [ ] Fast-forward the release branch, refresh its installed dependencies only after checking other shared consumers, run integration regressions, push without force, and verify both push/PR CI runs for the final SHA. Close this plan and regenerate its index only when all acceptance gates are satisfied.
+- [x] Run the full `scripts/verify-before-commit.ps1` with formatting, lint, tests and build; run `npm run test:e2e -- --workers=1` with CI=true. Obtain independent review, fix material findings, and commit explicitly scoped files with normal hooks.
+- [x] Fast-forward the release branch, refresh its installed dependencies only after checking other shared consumers, run integration regressions, push without force, and verify both push/PR CI runs for the final SHA. Close this plan and regenerate its index only when all acceptance gates are satisfied.
 
 ### Security addendum evidence
 
@@ -215,3 +215,23 @@ Final local verification (2026-09-09): `scripts/verify-before-commit.ps1` exited
 Dependency evidence: a fresh isolated temporary npm 10.9.2 installation added 627 packages; `npm ls --depth=0 --json`, production audit, and full audit exited 0, with zero vulnerabilities. Installation emitted a cleanup EPERM warning for a nested optional dependency, but installation and subsequent tree/audit checks succeeded. The diagnostic directory was preserved and the shared worktree dependency junction was not modified by installation.
 
 Security-batch local completion: the full `scripts/verify-before-commit.ps1 -Format` passed with 1592 backend tests passed, 6 skipped, 2 existing httpx deprecation warnings, and 410 frontend tests passed. Formatting, lint, TypeScript and production build passed. Playwright passed 3 tests. Independent dependency review had no Critical/Important findings; its minor documentation correction was applied. Before commit, 14 dependency/lifecycle tests passed and fresh production/full audits again reported zero vulnerabilities. Full verification output is retained in `.pytest_cache/pr7-security-verification.log`. Integration and exact-SHA CI acceptance remain pending.
+
+## Completion Record (2026-09-10)
+
+All six original findings and the approved dependency addendum are integrated
+into `release/video-security-integration-20260729`. Implementation commits are
+`8764f7c`, `04d002d`, and `af8e132`. For exact code SHA
+`af8e1320ad68684eb55f38b595cda7659da94950`, both the
+[PR run 34447589542](https://github.com/Amui-SU/Star-Ai-Base/actions/runs/34447589542)
+and [push run 34447583403](https://github.com/Amui-SU/Star-Ai-Base/actions/runs/34447583403)
+passed Changes, Backend, Frontend, and CI Success. Main-workspace installation
+with npm 10.9.2, the dependency tree, both zero-vulnerability audits, and all
+410 frontend tests passed; 14 dependency/lifecycle tests passed after integration.
+The existing optional-WASM cleanup warning did not change these successful
+exit codes. No permissions were changed and no hook or audit gate was bypassed.
+
+The final plan/index closeout is documentation-only; its own exact-SHA CI is
+checked after pushing. PR 7 remains open and ready, with no merge into main,
+image publication, production deployment, or live Nginx change. Full local
+verification logs were copied to the main workspace's ignored
+`.pytest_cache/pr7-evidence-04d002d/` directory before worktree cleanup.
