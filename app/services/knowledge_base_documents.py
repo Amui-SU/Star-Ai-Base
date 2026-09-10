@@ -15,6 +15,7 @@ from app.models import (
     Workspace,
 )
 from app.schemas.knowledge_base import KnowledgeBaseChatRequest
+from app.services.bilibili_multi_part import bilibili_video_url
 from app.services.knowledge_base_presenters import nullable_equal
 from app.services.knowledge_scope import InvalidKnowledgeScope, resolve_scope_bvids
 from app.services.rag_runtime import get_rag_service
@@ -93,7 +94,7 @@ async def load_db_fallback_documents(
                 metadata={
                     "bvid": bvid,
                     "title": title or bvid,
-                    "url": f"https://www.bilibili.com/video/{bvid}",
+                    "url": bilibili_video_url(bvid),
                 },
             )
         )

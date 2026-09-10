@@ -560,6 +560,7 @@ async def test_generate_timestamps_prefers_bilibili_view_points(
 
     assert timestamps.status_code == 200
     payload = timestamps.json()
+    assert payload["result_source"] == "official"
     assert payload["message"] == "✓ 已根据 B 站官方章节生成时间戳提纲"
     assert payload["operations"][0]["block"]["items"] == [
         {"time": 34, "text": "官方章节：问题背景"},
@@ -635,6 +636,7 @@ async def test_ai_endpoints_use_model_generated_structured_content(
     )
     assert summary.status_code == 200
     summary_payload = summary.json()
+    assert summary_payload["result_source"] == "ai"
     assert summary_payload["operations"][0]["block"]["text"] == (
         "模型生成的摘要强调先提炼目标，再用问题驱动复盘。"
     )
@@ -643,6 +645,15 @@ async def test_ai_endpoints_use_model_generated_structured_content(
         {"text": "把结论转为下一步行动"},
     ]
     assert summary_payload["tag_suggestions"] == ["AI", "复盘"]
+
+    # 摘要生成成功后，笔记的 summary_status 应同步更新
+    detail = await client.get(
+        f"/video-notes/{kb['id']}/BVNOTE123",
+        headers=headers,
+    )
+    assert detail.status_code == 200
+    assert detail.json()["note"]["summary_status"] == "generated"
+    assert detail.json()["note"]["summary_generated_at"] is not None
 
     questions = await client.post(
         f"/video-notes/{note_id}/ai-edit",

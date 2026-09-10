@@ -81,6 +81,107 @@
   text-align: center;
 }
 
+.video-note-ai-result-card {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  place-items: stretch;
+  background: color-mix(in srgb, var(--paper) 90%, var(--accent) 10%);
+}
+
+.video-note-ai-result-card.ai {
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
+}
+
+.video-note-ai-result-card.official {
+  border-color: color-mix(in srgb, #3b82f6 64%, var(--border));
+}
+
+.video-note-ai-result-card.fallback {
+  border-color: color-mix(in srgb, #f59e0b 64%, var(--border));
+}
+
+.video-note-ai-result-head {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.video-note-ai-result-badge {
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--paper-3);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.video-note-ai-result-card .video-note-ai-status {
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  text-align: left;
+}
+
+.video-note-ai-overwrite-backdrop {
+  z-index: 260;
+}
+
+.video-note-ai-overwrite-card {
+  width: min(calc(100% - 32px), 440px);
+  max-height: calc(100dvh - 32px);
+  padding: 22px;
+  overflow: auto;
+}
+
+.video-note-ai-overwrite-card [role="dialog"] {
+  display: grid;
+  gap: 14px;
+  outline: none;
+}
+
+.video-note-ai-overwrite-card h2,
+.video-note-ai-overwrite-card p,
+.video-note-ai-overwrite-card ul {
+  margin: 0;
+}
+
+.video-note-ai-overwrite-card ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 22px;
+  color: var(--ink-soft);
+}
+
+.video-note-ai-overwrite-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.video-note-ai-overwrite-actions button {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.video-note-ai-overwrite-actions button:last-child {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
 .video-note-ai-collapse,
 .video-note-ai-expand {
   position: relative;

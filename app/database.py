@@ -24,13 +24,13 @@ from app.services.sqlite_legacy_schema import (
     sqlite_clone_scoped_video_cache_rows,
     sqlite_create_api_account_indexes,
     sqlite_create_chat_history_indexes,
+    sqlite_create_password_reset_indexes,
     sqlite_create_video_cache_indexes,
     sqlite_has_unique_bvid_index,
     sqlite_rebuild_video_cache_without_unique_bvid,
     sqlite_select_expr,
     sqlite_table_columns,
 )
-
 
 # 确保数据目录存在
 os.makedirs("data", exist_ok=True)
@@ -62,6 +62,7 @@ _sqlite_add_missing_legacy_columns = sqlite_add_missing_legacy_columns
 _sqlite_clone_scoped_video_cache_rows = sqlite_clone_scoped_video_cache_rows
 _sqlite_create_api_account_indexes = sqlite_create_api_account_indexes
 _sqlite_create_chat_history_indexes = sqlite_create_chat_history_indexes
+_sqlite_create_password_reset_indexes = sqlite_create_password_reset_indexes
 _sqlite_create_video_cache_indexes = sqlite_create_video_cache_indexes
 _sqlite_has_unique_bvid_index = sqlite_has_unique_bvid_index
 _sqlite_rebuild_video_cache_without_unique_bvid = (

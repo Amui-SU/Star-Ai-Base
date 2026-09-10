@@ -1,0 +1,196 @@
+"""Self-service password reset flows for system authentication."""
+
+import logging
+import secrets
+from datetime import timedelta
+
+from fastapi import HTTPException
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import (
+    PasswordResetCode,
+    PasswordResetConfirmRequest,
+    SystemSession,
+    SystemUser,
+)
+from app.security import hash_password
+from app.services.email import send_verification_email
+from app.services.system_auth_codes import (
+    CODE_TTL_SECONDS,
+    MAX_ATTEMPTS,
+    check_ip_rate_limit,
+    email_is_valid,
+    hash_code,
+    password_exceeds_bcrypt_limit,
+)
+from app.time_utils import utc_now_naive
+
+GENERIC_SEND_MESSAGE = "如果该邮箱已注册，重置验证码已发送"
+logger = logging.getLogger(__name__)
+
+
+async def send_password_reset_code(
+    db: AsyncSession,
+    *,
+    email: str,
+    client_ip: str,
+    debug: bool,
+) -> dict[str, str]:
+    normalized_email = email.strip().lower()
+    if not email_is_valid(normalized_email):
+        raise HTTPException(status_code=400, detail="邮箱格式不正确")
+    if not await check_ip_rate_limit(db, client_ip):
+        raise HTTPException(status_code=429, detail="发送过于频繁，请稍后再试")
+
+    code = f"{secrets.randbelow(1000000):06d}"
+    response = {"message": GENERIC_SEND_MESSAGE}
+    if debug:
+        response["code"] = code
+
+    user_result = await db.execute(
+        select(SystemUser).where(
+            SystemUser.email == normalized_email,
+            SystemUser.status == "active",
+        )
+    )
+    if user_result.scalar_one_or_none() is None:
+        return response
+
+    now_naive = utc_now_naive()
+    await db.execute(
+        delete(PasswordResetCode).where(PasswordResetCode.expires_at < now_naive)
+    )
+    existing_result = await db.execute(
+        select(PasswordResetCode).where(
+            PasswordResetCode.email == normalized_email,
+            PasswordResetCode.expires_at > now_naive,
+        )
+    )
+    if existing_result.scalar_one_or_none() is not None:
+        return response
+
+    code_row = PasswordResetCode(
+        email=normalized_email,
+        code_hash=hash_code(code),
+        expires_at=now_naive + timedelta(seconds=CODE_TTL_SECONDS),
+    )
+    db.add(code_row)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        competing_result = await db.execute(
+            select(PasswordResetCode.id).where(
+                PasswordResetCode.email == normalized_email,
+                PasswordResetCode.expires_at > now_naive,
+            )
+        )
+        if competing_result.scalar_one_or_none() is not None:
+            return response
+        raise
+
+    if not debug:
+        try:
+            sent = await send_verification_email(
+                normalized_email,
+                code,
+                purpose="password_reset",
+            )
+        except Exception:
+            sent = False
+        if not sent:
+            await db.execute(
+                delete(PasswordResetCode).where(
+                    PasswordResetCode.id == code_row.id,
+                    PasswordResetCode.code_hash == code_row.code_hash,
+                )
+            )
+            await db.commit()
+            logger.warning("Password reset email delivery failed; reservation removed")
+
+    return response
+
+
+async def confirm_password_reset(
+    db: AsyncSession,
+    *,
+    payload: PasswordResetConfirmRequest,
+) -> dict[str, str]:
+    email = payload.email.strip().lower()
+    if not email_is_valid(email):
+        raise HTTPException(status_code=400, detail="邮箱格式不正确")
+    if password_exceeds_bcrypt_limit(payload.new_password):
+        raise HTTPException(status_code=400, detail="密码长度不能超过 72 字节")
+
+    now_naive = utc_now_naive()
+    submitted_code_hash = hash_code(payload.code.strip())
+    consumed_result = await db.execute(
+        delete(PasswordResetCode)
+        .where(
+            PasswordResetCode.email == email,
+            PasswordResetCode.expires_at > now_naive,
+            PasswordResetCode.code_hash == submitted_code_hash,
+        )
+        .returning(PasswordResetCode.id)
+    )
+    consumed_id = consumed_result.scalar_one_or_none()
+    if consumed_id is None:
+        attempt_result = await db.execute(
+            update(PasswordResetCode)
+            .where(
+                PasswordResetCode.email == email,
+                PasswordResetCode.expires_at > now_naive,
+                PasswordResetCode.code_hash != submitted_code_hash,
+                PasswordResetCode.attempts < MAX_ATTEMPTS,
+            )
+            .values(attempts=PasswordResetCode.attempts + 1)
+            .returning(PasswordResetCode.id, PasswordResetCode.attempts)
+        )
+        attempt_row = attempt_result.one_or_none()
+        if attempt_row is None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail="验证码未发送或已过期，请重新获取",
+            )
+        if attempt_row.attempts >= MAX_ATTEMPTS:
+            await db.execute(
+                delete(PasswordResetCode).where(PasswordResetCode.id == attempt_row.id)
+            )
+        await db.commit()
+        raise HTTPException(status_code=400, detail="验证码错误")
+
+    user_result = await db.execute(
+        select(SystemUser).where(
+            SystemUser.email == email,
+            SystemUser.status == "active",
+        )
+    )
+    user = user_result.scalar_one_or_none()
+    if user is None:
+        await db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail="验证码未发送或已过期，请重新获取",
+        )
+
+    await db.execute(
+        update(SystemUser)
+        .where(SystemUser.id == user.id)
+        .values(
+            password_hash=hash_password(payload.new_password),
+            credential_version=SystemUser.credential_version + 1,
+        )
+    )
+    await db.execute(
+        update(SystemSession)
+        .where(
+            SystemSession.user_id == user.id,
+            SystemSession.revoked_at.is_(None),
+        )
+        .values(revoked_at=now_naive)
+    )
+    await db.commit()
+    return {"message": "密码已重置，请使用新密码登录"}

@@ -2,6 +2,7 @@
 
 import type {
   VideoNoteAiResponse,
+  VideoNoteAiResultSource,
   VideoNote,
   VideoNoteBlock,
   VideoNoteExportResponse,
@@ -11,6 +12,7 @@ import type {
 } from "@/lib/api";
 import type { VideoNoteSaveStatus } from "./useVideoNoteAutosave";
 import VideoNoteAiPanel from "./VideoNoteAiPanel";
+import VideoNoteAiOverwriteDialog from "./VideoNoteAiOverwriteDialog";
 import VideoNoteDrawer from "./VideoNoteDrawer";
 import VideoNoteHeader from "./VideoNoteHeader";
 import VideoNoteListPanel, {
@@ -44,6 +46,8 @@ interface VideoNoteWorkspaceViewProps {
   exporting: boolean;
   aiLoading: boolean;
   aiMessage: string | null;
+  aiResultSource: VideoNoteAiResultSource | null;
+  aiOverwriteTargets: string[];
   canUndoAiEdit: boolean;
   workspaceError: string | null;
   onClose?: () => void;
@@ -66,6 +70,8 @@ interface VideoNoteWorkspaceViewProps {
   onGenerateQuestions: () => Promise<VideoNoteAiResponse | void>;
   onGenerateTimestamps: () => Promise<VideoNoteAiResponse | void>;
   onUndoAiEdit: () => void;
+  onCancelAiOverwrite: () => void;
+  onConfirmAiOverwrite: () => void;
 }
 
 export default function VideoNoteWorkspaceView({
@@ -92,6 +98,8 @@ export default function VideoNoteWorkspaceView({
   exporting,
   aiLoading,
   aiMessage,
+  aiResultSource,
+  aiOverwriteTargets,
   canUndoAiEdit,
   workspaceError,
   onClose,
@@ -114,6 +122,8 @@ export default function VideoNoteWorkspaceView({
   onGenerateQuestions,
   onGenerateTimestamps,
   onUndoAiEdit,
+  onCancelAiOverwrite,
+  onConfirmAiOverwrite,
 }: VideoNoteWorkspaceViewProps) {
   return (
     <VideoNoteDrawer fullscreen={fullscreen} aiCollapsed={aiPanelCollapsed}>
@@ -205,6 +215,7 @@ export default function VideoNoteWorkspaceView({
             loading={aiLoading}
             canUndoAiEdit={canUndoAiEdit}
             message={aiMessage}
+            resultSource={aiResultSource}
             onCollapse={onCollapseAiPanel}
             onGenerateSummary={onGenerateSummary}
             onGenerateQuestions={onGenerateQuestions}
@@ -212,6 +223,13 @@ export default function VideoNoteWorkspaceView({
             onUndoAiEdit={onUndoAiEdit}
           />
         </aside>
+        {aiOverwriteTargets.length > 0 && (
+          <VideoNoteAiOverwriteDialog
+            targets={aiOverwriteTargets}
+            onCancel={onCancelAiOverwrite}
+            onConfirm={onConfirmAiOverwrite}
+          />
+        )}
       </section>
     </VideoNoteDrawer>
   );

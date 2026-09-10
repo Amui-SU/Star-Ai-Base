@@ -82,6 +82,10 @@ SQLITE_LEGACY_COLUMNS: dict[str, dict[str, str]] = {
     },
     "system_users": {
         "llm_api_source": "VARCHAR(20)",
+        "credential_version": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "system_sessions": {
+        "credential_version": "INTEGER NOT NULL DEFAULT 0",
     },
     "chat_conversations": {
         "user_id": "INTEGER",
@@ -163,6 +167,23 @@ def sqlite_create_chat_history_indexes(sync_conn: Connection) -> None:
         )
 
 
+def sqlite_create_password_reset_indexes(sync_conn: Connection) -> None:
+    if not sqlite_table_columns(sync_conn, "password_reset_codes"):
+        return
+    sync_conn.exec_driver_sql("""
+        DELETE FROM password_reset_codes
+        WHERE id NOT IN (
+            SELECT MAX(id)
+            FROM password_reset_codes
+            GROUP BY email
+        )
+        """)
+    sync_conn.exec_driver_sql(
+        'CREATE UNIQUE INDEX IF NOT EXISTS "ux_password_reset_codes_email" '
+        'ON "password_reset_codes" ("email")'
+    )
+
+
 def ensure_sqlite_legacy_schema_sync(sync_conn: Connection) -> None:
     sqlite_add_missing_legacy_columns(sync_conn)
     sqlite_rebuild_video_cache_without_unique_bvid(sync_conn)
@@ -170,6 +191,7 @@ def ensure_sqlite_legacy_schema_sync(sync_conn: Connection) -> None:
     sqlite_clone_scoped_video_cache_rows(sync_conn)
     sqlite_create_api_account_indexes(sync_conn)
     sqlite_create_chat_history_indexes(sync_conn)
+    sqlite_create_password_reset_indexes(sync_conn)
 
 
 async def ensure_sqlite_legacy_columns(conn: AsyncConnection) -> None:

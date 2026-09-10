@@ -34,7 +34,7 @@ server {
 
     client_max_body_size 10m;
 
-    location = /system-auth/send-code {
+    location ~ ^/system-auth/(?:password-reset/)?send-code/?$ {
         limit_req zone=send_code_per_ip burst=2 nodelay;
         limit_req_status 429;
 

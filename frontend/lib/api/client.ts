@@ -19,8 +19,19 @@ const resolveApiBaseUrl = () => {
 export const API_BASE_URL = resolveApiBaseUrl();
 export const getApiBaseUrl = resolveApiBaseUrl;
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export type RequestOptions = RequestInit & {
   query?: Record<string, string | number | boolean | undefined | null>;
+  skipErrorBody?: boolean;
 };
 
 function isFormDataBody(body: BodyInit | null | undefined): body is FormData {
@@ -41,7 +52,7 @@ function withQuery(path: string, query?: RequestOptions["query"]): string {
 
 export async function request<T>(
   path: string,
-  { query, headers, ...init }: RequestOptions = {},
+  { query, headers, skipErrorBody = false, ...init }: RequestOptions = {},
 ): Promise<T> {
   let response: Response;
   const apiBaseUrl = getApiBaseUrl();
@@ -60,6 +71,7 @@ export async function request<T>(
       },
     );
   } catch (error) {
+    if (init.signal?.aborted) throw init.signal.reason;
     throw new Error(
       `无法连接到后端服务（${apiBaseUrl}）。请确认后端已启动，且接口地址可访问。`,
       { cause: error },
@@ -68,6 +80,11 @@ export async function request<T>(
 
   if (!response.ok) {
     let message = response.statusText || "Request failed";
+    if (skipErrorBody) {
+      // Polling uses local messages; a stalled error body must not hide its status.
+      void response.body?.cancel().catch(() => {});
+      throw new ApiError(message, response.status);
+    }
     try {
       const body = await response.json();
       if (typeof body.detail === "string") {
@@ -84,7 +101,7 @@ export async function request<T>(
     } catch {
       // Keep the HTTP status text when the response body is not JSON.
     }
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
 
   if (response.status === 204) {

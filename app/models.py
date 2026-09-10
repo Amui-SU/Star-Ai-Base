@@ -29,6 +29,8 @@ from app.schemas.auth import (
     AdminUserListResponse,
     AdminUserResponse,
     AdminUserStatusUpdateRequest,
+    PasswordResetConfirmRequest,
+    PasswordResetSendCodeRequest,
     SystemAuthResponse,
     SystemDisplayNameUpdateRequest,
     SystemLoginRequest,
@@ -82,6 +84,7 @@ class SystemUser(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(Text, nullable=False)
+    credential_version = Column(Integer, default=0, server_default="0", nullable=False)
     display_name = Column(String(100), nullable=False)
     avatar_url = Column(String(500), nullable=True)
     status = Column(String(20), default="active", nullable=False)
@@ -98,6 +101,7 @@ class SystemSession(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("system_users.id"), index=True, nullable=False)
     session_token_hash = Column(String(128), unique=True, index=True, nullable=False)
+    credential_version = Column(Integer, default=0, server_default="0", nullable=False)
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utc_now)
@@ -247,6 +251,20 @@ class VerificationCode(Base):
     email = Column(String(255), index=True, nullable=False)
     code_hash = Column(String(128), nullable=False)  # SHA-256 哈希
     attempts = Column(Integer, default=0)  # 错误尝试次数
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_utc_now)
+
+
+class PasswordResetCode(Base):
+    """One-time email codes dedicated to password resets."""
+
+    __tablename__ = "password_reset_codes"
+    __table_args__ = (UniqueConstraint("email", name="uq_password_reset_codes_email"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), index=True, nullable=False)
+    code_hash = Column(String(128), nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=_utc_now)
 

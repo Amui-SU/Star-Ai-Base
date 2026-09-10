@@ -40,7 +40,11 @@ class ContentFetcher:
         self.asr = asr_service
 
     async def fetch_content(
-        self, bvid: str, cid: int = None, title: str = None
+        self,
+        bvid: str,
+        cid: int = None,
+        title: str = None,
+        video_info: Optional[dict] = None,
     ) -> VideoContent:
         """
         获取视频内容，自动降级
@@ -49,15 +53,16 @@ class ContentFetcher:
             bvid: 视频 BV 号
             cid: 视频 cid (如果没有会自动获取)
             title: 视频标题 (如果没有会自动获取)
+            video_info: 已获取的视频详情（传入时不再重复请求）
 
         Returns:
             VideoContent 对象
         """
         # 获取视频基本信息。即使收藏夹列表已给出 cid/title，也需要详情里的
         # aid、owner、desc 和字幕列表，后续摘要/字幕/简介都依赖这些字段。
-        video_info = None
         try:
-            video_info = await self.bili.get_video_info(bvid)
+            if video_info is None:
+                video_info = await self.bili.get_video_info(bvid)
             if not cid:
                 cid = video_info.get("cid")
             if not title:

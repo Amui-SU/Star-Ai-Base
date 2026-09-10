@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { sourceBindingApi, systemAuthApi } from "@/lib/api";
 import type { KnowledgeBase, SystemUser } from "@/lib/api";
+import { useRefreshEmit } from "@/hooks/refreshBus";
 
 const ACTIVE_KB_STORAGE_KEY = "active_kb_id";
 const BILIBILI_SESSION_STORAGE_KEYS = [
@@ -32,13 +33,11 @@ export function useHomePageShell() {
   );
   const [activeKnowledgeBase, setActiveKnowledgeBase] =
     useState<KnowledgeBase | null>(null);
-  const [kbRefreshKey, setKbRefreshKey] = useState(0);
   const [showImport, setShowImport] = useState(false);
   const [showAdminUsers, setShowAdminUsers] = useState(false);
   const [showApiAccounts, setShowApiAccounts] = useState(false);
-  const [apiAccountsKey, setApiAccountsKey] = useState(0);
-  const [statsKey, setStatsKey] = useState(0);
   const [knowledgeBuilding, setKnowledgeBuilding] = useState(false);
+  const emitRefresh = useRefreshEmit();
 
   useEffect(() => {
     systemAuthApi
@@ -56,10 +55,13 @@ export function useHomePageShell() {
       .finally(() => setAuthChecking(false));
   }, []);
 
-  const handleAuthSuccess = useCallback((user: SystemUser) => {
-    setSystemUser(user);
-    setKbRefreshKey((value) => value + 1);
-  }, []);
+  const handleAuthSuccess = useCallback(
+    (user: SystemUser) => {
+      setSystemUser(user);
+      emitRefresh("knowledge-bases");
+    },
+    [emitRefresh],
+  );
 
   const handleBiliBound = useCallback(async () => {
     setShowImport(false);
@@ -99,26 +101,23 @@ export function useHomePageShell() {
   const openApiAccounts = useCallback(() => setShowApiAccounts(true), []);
   const closeApiAccounts = useCallback(() => setShowApiAccounts(false), []);
   const markStatsChanged = useCallback(
-    () => setStatsKey((value) => value + 1),
-    [],
+    () => emitRefresh("kb-stats"),
+    [emitRefresh],
   );
   const markApiAccountsChanged = useCallback(
-    () => setApiAccountsKey((value) => value + 1),
-    [],
+    () => emitRefresh("api-accounts"),
+    [emitRefresh],
   );
 
   return {
     activeBindingId,
     activeKbId,
     activeKnowledgeBase,
-    apiAccountsKey,
     authChecking,
-    kbRefreshKey,
     knowledgeBuilding,
     showAdminUsers,
     showApiAccounts,
     showImport,
-    statsKey,
     systemUser,
     closeAdminUsers,
     closeApiAccounts,

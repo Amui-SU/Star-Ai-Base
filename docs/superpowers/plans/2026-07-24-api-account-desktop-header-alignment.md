@@ -1,5 +1,7 @@
 # API Account Desktop Header Alignment Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the desktop API account editor header share one stable vertical center line and consistent control sizing.
@@ -17,7 +19,7 @@
 - Modify: `frontend/app/api-key-config-layout.test.ts`
 - Test: `frontend/app/api-key-config-layout.test.ts`
 
-- [ ] **Step 1: Write the failing style regression**
+- [x] **Step 1: Write the failing style regression**
 
 Add a test under `describe("personal API account layout")` that requires a 64px desktop header, 36px action controls, centered actions, tightened title lines, and no primary-button hover translation inside this header:
 
@@ -41,7 +43,7 @@ it("aligns the desktop workspace header on one stable center line", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -59,7 +61,7 @@ Expected: the new desktop header geometry test fails because the scoped rules do
 - Modify: `frontend/app/styles/api-account-workspace.css`
 - Test: `frontend/app/api-key-config-layout.test.ts`
 
-- [ ] **Step 1: Implement the desktop-only geometry**
+- [x] **Step 1: Implement the desktop-only geometry**
 
 Update the existing desktop rules without changing the `@media (max-width: 720px)` block:
 
@@ -101,7 +103,7 @@ Update the existing desktop rules without changing the `@media (max-width: 720px
 }
 ```
 
-- [ ] **Step 2: Run focused tests and verify GREEN**
+- [x] **Step 2: Run focused tests and verify GREEN**
 
 Run:
 
@@ -120,15 +122,15 @@ Expected: all focused tests pass and ESLint exits with code 0.
 - No repository files
 - Screenshot: outside the repository in the current visualization directory
 
-- [ ] **Step 1: Run the desktop Playwright flow**
+- [x] **Step 1: Run the desktop Playwright flow**
 
 Open the API account list, edit an account at `1440x900`, and capture the first editor viewport. Verify the header button, provider mark, title block, action buttons, and close button share a stable visual center with no overlap or horizontal overflow.
 
-- [ ] **Step 2: Check runtime health**
+- [x] **Step 2: Check runtime health**
 
 Confirm the page title and editor dialog identity, meaningful rendered content, no Next.js error overlay, and no relevant console errors or warnings.
 
-- [ ] **Step 3: Commit the implementation**
+- [x] **Step 3: Commit the implementation**
 
 ```powershell
 git add frontend/app/api-key-config-layout.test.ts frontend/app/styles/api-account-workspace.css

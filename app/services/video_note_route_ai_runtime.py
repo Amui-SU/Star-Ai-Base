@@ -23,6 +23,7 @@ from app.services.video_note_ai import (
 from app.services.video_note_chapters import fetch_bilibili_view_point_timestamps
 from app.services.video_note_presenters import resolve_video_note_source
 from app.services.video_note_route_access import get_user_video_note
+from app.time_utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,10 @@ async def generate_video_note_summary_from_router(
         user=user,
         messages=build_summary_messages(note, source),
     )
+    if ai_status == "generated":
+        note.summary_status = "generated"
+        note.summary_generated_at = utc_now()
+        await db.commit()
     return build_summary_suggestions(
         note,
         source,

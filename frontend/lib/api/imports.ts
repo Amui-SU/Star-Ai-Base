@@ -1,5 +1,11 @@
 import { request } from "./client";
-import type { ImportMethod, ImportUrlResponse } from "./importTypes";
+import type {
+  DetectMultiPartResponse,
+  ImportMethod,
+  ImportMultiPartResponse,
+  ImportTaskStatus,
+  ImportUrlResponse,
+} from "./importTypes";
 
 export const importApi = {
   methods: () => request<{ methods: ImportMethod[] }>("/imports/methods"),
@@ -10,6 +16,28 @@ export const importApi = {
     knowledge_base_id?: number | null;
   }) =>
     request<ImportUrlResponse>("/imports/url", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  taskStatus: (taskId: string, signal?: AbortSignal) =>
+    request<ImportTaskStatus>(`/imports/tasks/${taskId}`, {
+      signal,
+      skipErrorBody: true,
+    }),
+
+  detectMultiPart: (url: string) =>
+    request<DetectMultiPartResponse>("/imports/detect-multi-part", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+
+  importMultiPart: (data: {
+    url: string;
+    knowledge_base_id: number;
+    page_indices: number[];
+  }) =>
+    request<ImportMultiPartResponse>("/imports/multi-part", {
       method: "POST",
       body: JSON.stringify(data),
     }),

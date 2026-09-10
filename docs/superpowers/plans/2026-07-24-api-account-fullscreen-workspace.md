@@ -1,5 +1,7 @@
 # API Account Fullscreen Workspace Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a full-screen API account configuration workspace whose provider, protocol, model mapping, request overrides, and JSON settings are persisted, validated, and used by real model requests.
@@ -71,7 +73,7 @@ Frontend files to modify:
 - Create: `tests/test_api_account_config.py`
 - Modify: `app/services/api_credentials.py`
 
-- [ ] **Step 1: Write failing provider and advanced-config tests**
+- [x] **Step 1: Write failing provider and advanced-config tests**
 
 ```python
 from fastapi import HTTPException
@@ -111,13 +113,13 @@ def test_model_alias_and_fallback_resolution():
     assert resolve_account_model("missing", config, "legacy") == "fallback-model"
 ```
 
-- [ ] **Step 2: Run the focused tests and verify the module is missing**
+- [x] **Step 2: Run the focused tests and verify the module is missing**
 
 Run: `python -m pytest tests/test_api_account_config.py -q`
 
 Expected: collection fails with `ModuleNotFoundError: app.services.api_account_config`.
 
-- [ ] **Step 3: Implement the registry and normalizer**
+- [x] **Step 3: Implement the registry and normalizer**
 
 ```python
 @dataclass(frozen=True)
@@ -154,13 +156,13 @@ def normalize_advanced_config(value: object, *, model: str = "") -> dict[str, An
 
 Move the existing provider constants from `api_credentials.py` into this module, add protocol/auth/website/kind metadata for all existing providers, and re-export focused lookup helpers to avoid duplicated registries.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `python -m pytest tests/test_api_account_config.py tests/test_user_api_accounts.py -q`
 
 Expected: all tests pass and existing provider defaults remain unchanged.
 
-- [ ] **Step 5: Commit the contract slice**
+- [x] **Step 5: Commit the contract slice**
 
 ```powershell
 git add app/services/api_account_config.py app/services/api_credentials.py tests/test_api_account_config.py
@@ -179,7 +181,7 @@ git commit -m "feat: define API account configuration contracts"
 - Modify: `tests/test_database_migration.py`
 - Modify: `tests/test_user_api_accounts.py`
 
-- [ ] **Step 1: Add failing migration and CRUD assertions**
+- [x] **Step 1: Add failing migration and CRUD assertions**
 
 ```python
 assert {
@@ -214,13 +216,13 @@ assert created.json()["advanced_config"]["body"] == {"temperature": 0.2}
 assert "api_key" not in created.json()
 ```
 
-- [ ] **Step 2: Run tests and verify missing fields fail**
+- [x] **Step 2: Run tests and verify missing fields fail**
 
 Run: `python -m pytest tests/test_database_migration.py tests/test_user_api_accounts.py -q`
 
 Expected: assertions fail because the five columns and response fields do not exist.
 
-- [ ] **Step 3: Add model columns and SQLite compatibility types**
+- [x] **Step 3: Add model columns and SQLite compatibility types**
 
 ```python
 protocol = Column(String(40), nullable=True)
@@ -232,7 +234,7 @@ advanced_config = Column(JSON, nullable=True)
 
 Add matching entries to `SQLITE_LEGACY_COLUMNS["user_api_accounts"]` using `VARCHAR(40)`, `VARCHAR(500)`, `TEXT`, and `JSON`. Keep nullable storage for legacy rows; normalization supplies runtime defaults.
 
-- [ ] **Step 4: Expand schemas and route persistence**
+- [x] **Step 4: Expand schemas and route persistence**
 
 ```python
 class ApiAccountConfigurationFields(BaseModel):
@@ -245,13 +247,13 @@ class ApiAccountConfigurationFields(BaseModel):
 
 Normalize all advanced configuration through `normalize_advanced_config`, infer missing legacy protocol/auth values from the provider preset, preserve provider immutability in PATCH, and keep an omitted or blank update API Key from replacing encrypted data.
 
-- [ ] **Step 5: Run persistence tests**
+- [x] **Step 5: Run persistence tests**
 
 Run: `python -m pytest tests/test_database_migration.py tests/test_user_api_accounts.py tests/test_security_isolation.py -q`
 
 Expected: all tests pass, including tenant isolation and secret non-disclosure.
 
-- [ ] **Step 6: Commit persistence**
+- [x] **Step 6: Commit persistence**
 
 ```powershell
 git add app/models.py app/services/sqlite_legacy_schema.py app/schemas/api_accounts.py app/services/api_credentials.py app/routers/api_accounts.py tests/test_database_migration.py tests/test_user_api_accounts.py
@@ -274,7 +276,7 @@ git commit -m "feat: persist advanced API account settings"
 - Modify: `tests/test_chat_health.py`
 - Modify: `tests/test_chat_routing.py`
 
-- [ ] **Step 1: Write failing request-resolution tests**
+- [x] **Step 1: Write failing request-resolution tests**
 
 ```python
 from app.services.api_account_requests import build_account_request_options
@@ -308,13 +310,13 @@ def test_system_kwargs_cannot_be_replaced_by_body_override():
         )
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `python -m pytest tests/test_api_account_requests.py tests/test_chat_completion.py -q`
 
 Expected: the new module is missing and current completion options only include thinking configuration.
 
-- [ ] **Step 3: Implement deterministic request option merging**
+- [x] **Step 3: Implement deterministic request option merging**
 
 ```python
 def build_account_request_options(llm_config: Mapping[str, Any]) -> dict[str, Any]:
@@ -334,17 +336,17 @@ def build_account_request_options(llm_config: Mapping[str, Any]) -> dict[str, An
 
 Have `ResolvedApiCredential.to_llm_config()` include protocol, auth scheme, and normalized advanced config. Resolve the account's stored model through `model_mapping`, then `fallback_model`, then legacy `model` before returning the runtime config.
 
-- [ ] **Step 4: Replace completion-option call sites without changing orchestration**
+- [x] **Step 4: Replace completion-option call sites without changing orchestration**
 
 Rename `build_thinking_completion_options` to `build_completion_request_options`, update chat completion, legacy runtime, health-check, and routing injection points, and retain a compatibility alias only where existing imports require a staged transition. Every direct `client.chat.completions.create(...)` call must receive the same validated options; service-owned arguments such as model, messages, tools, streaming, and response controls remain explicit call arguments and cannot be replaced by configuration.
 
-- [ ] **Step 5: Run runtime regressions**
+- [x] **Step 5: Run runtime regressions**
 
 Run: `python -m pytest tests/test_api_account_requests.py tests/test_chat_completion.py tests/test_chat_runtime.py tests/test_chat_health.py tests/test_chat_routing.py tests/chat_thinking -q`
 
 Expected: all tests pass and thinking options still reach existing providers.
 
-- [ ] **Step 6: Commit request overrides**
+- [x] **Step 6: Commit request overrides**
 
 ```powershell
 git add app/services/api_account_requests.py app/services/api_credentials.py app/services/chat_completion.py app/services/chat_runtime.py app/services/chat_health.py app/services/chat_routing.py tests/test_api_account_requests.py tests/test_chat_completion.py tests/test_chat_runtime.py tests/test_chat_health.py tests/test_chat_routing.py
@@ -361,7 +363,7 @@ git commit -m "feat: apply API account request overrides"
 - Modify: `app/services/llm_client.py`
 - Modify: `tests/test_llm_client.py`
 
-- [ ] **Step 1: Add failing facade translation tests**
+- [x] **Step 1: Add failing facade translation tests**
 
 ```python
 def test_anthropic_facade_translates_messages_and_response():
@@ -396,13 +398,13 @@ def test_anthropic_facade_translates_openai_tools():
 
 Also cover streaming `content_block_delta`, Anthropic thinking blocks, tool-use blocks, assistant tool calls, and user tool results.
 
-- [ ] **Step 2: Run tests and verify missing adapter failure**
+- [x] **Step 2: Run tests and verify missing adapter failure**
 
 Run: `python -m pytest tests/test_anthropic_chat_adapter.py tests/test_llm_client.py -q`
 
 Expected: collection fails because `AnthropicChatClientFacade` does not exist.
 
-- [ ] **Step 3: Add the official SDK and facade**
+- [x] **Step 3: Add the official SDK and facade**
 
 Add `anthropic==0.42.0` to `requirements.txt`. Implement a facade exposing `chat.completions.create(**kwargs)` so existing runtime services remain unchanged. Translate OpenAI message/tool shapes into Anthropic Messages inputs and normalize native responses into lightweight objects with `choices[0].message` or streaming `choices[0].delta` fields consumed by current code.
 
@@ -422,7 +424,7 @@ def create_anthropic_chat_client(config: Mapping[str, Any]) -> AnthropicChatClie
     return AnthropicChatClientFacade(native)
 ```
 
-- [ ] **Step 4: Select the client by protocol**
+- [x] **Step 4: Select the client by protocol**
 
 ```python
 if cfg.get("protocol") == "anthropic_messages":
@@ -437,13 +439,13 @@ return openai_client_factory(
 
 Keep factories injectable so tests never perform network requests.
 
-- [ ] **Step 5: Run protocol and chat regressions**
+- [x] **Step 5: Run protocol and chat regressions**
 
 Run: `python -m pytest tests/test_anthropic_chat_adapter.py tests/test_llm_client.py tests/test_chat_completion.py tests/chat_thinking -q`
 
 Expected: all tests pass for normal, streaming, thinking, and tool-call paths.
 
-- [ ] **Step 6: Commit the protocol adapter**
+- [x] **Step 6: Commit the protocol adapter**
 
 ```powershell
 git add requirements.txt app/services/anthropic_chat_adapter.py app/services/llm_client.py tests/test_anthropic_chat_adapter.py tests/test_llm_client.py
@@ -459,7 +461,7 @@ git commit -m "feat: support Anthropic Messages accounts"
 - Modify: `app/schemas/api_accounts.py`
 - Modify: `app/routers/api_accounts.py`
 
-- [ ] **Step 1: Write failing endpoint tests**
+- [x] **Step 1: Write failing endpoint tests**
 
 ```python
 response = await client.post(
@@ -486,13 +488,13 @@ assert "secret" not in response.text
 
 Add cases for another user's `account_id`, missing key on create, authentication failure, timeout, endpoint failure, unavailable model, and invalid protected fields.
 
-- [ ] **Step 2: Run the endpoint tests and verify 404/422 failures**
+- [x] **Step 2: Run the endpoint tests and verify 404/422 failures**
 
 Run: `python -m pytest tests/test_api_account_draft_validation.py -q`
 
 Expected: the route is absent and draft response schemas are undefined.
 
-- [ ] **Step 3: Implement validation service and result classification**
+- [x] **Step 3: Implement validation service and result classification**
 
 ```python
 class ApiAccountValidationResult(BaseModel):
@@ -512,7 +514,7 @@ class ApiAccountValidationResult(BaseModel):
 
 The service constructs an in-memory resolved credential, reuses the saved encrypted key only after owner-scoped lookup, sends a small non-streaming request, and sanitizes exception text before returning it. Do not persist `last_validated_at`, `last_error`, or draft fields from this endpoint.
 
-- [ ] **Step 4: Keep the router thin**
+- [x] **Step 4: Keep the router thin**
 
 The route should perform dependencies and delegation only:
 
@@ -522,13 +524,13 @@ async def validate_api_account_draft(...):
     return await validate_account_draft(db, current_user, body)
 ```
 
-- [ ] **Step 5: Run validation and isolation tests**
+- [x] **Step 5: Run validation and isolation tests**
 
 Run: `python -m pytest tests/test_api_account_draft_validation.py tests/test_user_api_accounts.py tests/test_security_isolation.py -q`
 
 Expected: all tests pass and no secret appears in results or captured logs.
 
-- [ ] **Step 6: Commit draft validation**
+- [x] **Step 6: Commit draft validation**
 
 ```powershell
 git add app/services/api_account_validation.py app/schemas/api_accounts.py app/routers/api_accounts.py tests/test_api_account_draft_validation.py
@@ -546,7 +548,7 @@ git commit -m "feat: validate unsaved API account drafts"
 - Create: `frontend/lib/apiAccountConfig.test.ts`
 - Modify: `frontend/lib/api/__tests__/userApiAccounts.test.ts`
 
-- [ ] **Step 1: Write failing JSON round-trip and API tests**
+- [x] **Step 1: Write failing JSON round-trip and API tests**
 
 ```typescript
 it("preserves unknown advanced fields while updating known fields", () => {
@@ -572,13 +574,13 @@ expect(fetch).toHaveBeenCalledWith(
 );
 ```
 
-- [ ] **Step 2: Run tests and verify missing exports**
+- [x] **Step 2: Run tests and verify missing exports**
 
 Run: `cd frontend; npm test -- lib/apiAccountConfig.test.ts lib/api/__tests__/userApiAccounts.test.ts`
 
 Expected: TypeScript/Vitest fails because advanced-config utilities and draft validation do not exist.
 
-- [ ] **Step 3: Define shared frontend contracts**
+- [x] **Step 3: Define shared frontend contracts**
 
 ```typescript
 export interface ApiAccountAdvancedConfig {
@@ -602,17 +604,17 @@ export interface ApiAccountValidationResult {
 
 Extend each provider preset with `protocol`, `authScheme`, `websiteUrl`, and `sections`, keeping the current order, identifiers, labels, base URLs, model IDs, and logos unchanged.
 
-- [ ] **Step 4: Implement lossless parsing and serialization**
+- [x] **Step 4: Implement lossless parsing and serialization**
 
 Use one parser for the inline and focus editors. It must require an object, normalize known fields, reject protected fields case-insensitively, retain unknown keys, and return errors with JSON paths. Add `apiAccountApi.validateDraft(data)`.
 
-- [ ] **Step 5: Run frontend contract tests**
+- [x] **Step 5: Run frontend contract tests**
 
 Run: `cd frontend; npm test -- lib/apiAccountConfig.test.ts lib/api/__tests__/userApiAccounts.test.ts lib/providers.test.ts`
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit frontend contracts**
+- [x] **Step 6: Commit frontend contracts**
 
 ```powershell
 git add frontend/lib/providers.ts frontend/lib/api/apiAccountTypes.ts frontend/lib/api/apiAccounts.ts frontend/lib/apiAccountConfig.ts frontend/lib/apiAccountConfig.test.ts frontend/lib/api/__tests__/userApiAccounts.test.ts
@@ -632,7 +634,7 @@ git commit -m "feat: add API account workspace contracts"
 - Modify: `frontend/components/ApiAccountsPanel.test.tsx`
 - Create: `frontend/components/api-accounts/ApiAccountWorkspace.test.tsx`
 
-- [ ] **Step 1: Write failing shell and dirty-state tests**
+- [x] **Step 1: Write failing shell and dirty-state tests**
 
 ```typescript
 it("opens editing as a full-screen workspace and keeps the provider locked", async () => {
@@ -658,13 +660,13 @@ it("asks before leaving a dirty workspace", async () => {
 });
 ```
 
-- [ ] **Step 2: Run component tests and verify compact editor assertions fail**
+- [x] **Step 2: Run component tests and verify compact editor assertions fail**
 
 Run: `cd frontend; npm test -- components/ApiAccountsPanel.test.tsx components/api-accounts/ApiAccountWorkspace.test.tsx`
 
 Expected: no full-screen workspace dialog exists and current editor still renders tabs.
 
-- [ ] **Step 3: Introduce a baseline-backed workspace draft**
+- [x] **Step 3: Introduce a baseline-backed workspace draft**
 
 ```typescript
 interface ApiAccountWorkspaceDraft {
@@ -689,21 +691,21 @@ interface ApiAccountWorkspaceDraft {
 
 Keep `baseline` separate from `draft`; derive `dirty` from a stable serialization that excludes transient validation messages. Saving updates the baseline only after the request succeeds. Testing a draft never clears `dirty`.
 
-- [ ] **Step 4: Render list and workspace as sibling surfaces**
+- [x] **Step 4: Render list and workspace as sibling surfaces**
 
 Keep `ModalShell` for the list. When `view` is `create` or `edit`, render `ApiAccountWorkspace` directly in a full-viewport overlay instead of nesting it in `.modal-card.api-accounts-panel`. Preserve list refresh, set-default, saved-account validation, and delete behavior.
 
-- [ ] **Step 5: Implement leave protection and stable actions**
+- [x] **Step 5: Implement leave protection and stable actions**
 
 Guard return, close, and `beforeunload` while dirty. Disable return, provider switching, test, and save while saving. Keep test enabled for valid dirty drafts.
 
-- [ ] **Step 6: Run shell tests**
+- [x] **Step 6: Run shell tests**
 
 Run: `cd frontend; npm test -- components/ApiAccountsPanel.test.tsx components/api-accounts/ApiAccountWorkspace.test.tsx`
 
 Expected: all list, full-screen shell, provider-lock, key-retention, and dirty-state tests pass.
 
-- [ ] **Step 7: Commit the workspace shell**
+- [x] **Step 7: Commit the workspace shell**
 
 ```powershell
 git add frontend/components/api-accounts/types.ts frontend/components/api-accounts/useApiAccountsPanel.ts frontend/components/api-accounts/ApiAccountWorkspace.tsx frontend/components/api-accounts/ApiAccountSectionNav.tsx frontend/components/api-accounts/ApiAccountsPanelView.tsx frontend/components/ApiAccountsPanel.tsx frontend/components/ApiAccountsPanel.test.tsx frontend/components/api-accounts/ApiAccountWorkspace.test.tsx
@@ -723,7 +725,7 @@ git commit -m "feat: add full-screen API account workspace"
 - Modify: `frontend/components/api-accounts/useApiAccountsPanel.ts`
 - Modify: `frontend/components/api-accounts/ApiAccountWorkspace.test.tsx`
 
-- [ ] **Step 1: Write failing section and JSON synchronization tests**
+- [x] **Step 1: Write failing section and JSON synchronization tests**
 
 ```typescript
 it("maps aliases and synchronizes the advanced JSON", async () => {
@@ -750,21 +752,21 @@ it("cancels focused JSON changes without touching the workspace draft", async ()
 
 Add tests for applying valid JSON, preserving unknown fields, displaying syntax line/column, blocked headers, duplicate aliases, provider preset confirmation, current-draft connection testing, and Tavily's reduced sections.
 
-- [ ] **Step 2: Run workspace tests and verify missing section controls**
+- [x] **Step 2: Run workspace tests and verify missing section controls**
 
 Run: `cd frontend; npm test -- components/api-accounts/ApiAccountWorkspace.test.tsx`
 
 Expected: section navigation, mapping controls, and focus editor are absent.
 
-- [ ] **Step 3: Implement identity and connection sections**
+- [x] **Step 3: Implement identity and connection sections**
 
 Use existing provider icons and input/button classes. New accounts may switch provider; existing accounts render a disabled provider control. Authentication options come only from preset-supported safe values. API Key remains blank on edit with the existing “leave blank to retain” explanation.
 
-- [ ] **Step 4: Implement model and request sections**
+- [x] **Step 4: Implement model and request sections**
 
 Render model mapping as stable rows with icon remove buttons and accessible labels. Keep `ThinkingConfigEditor` inside request configuration. Render Header overrides as key/value rows, Body override as an object JSON editor, and User-Agent as a single-line input. Hide these LLM-only controls for Tavily.
 
-- [ ] **Step 5: Implement lossless inline and focused JSON editors**
+- [x] **Step 5: Implement lossless inline and focused JSON editors**
 
 ```typescript
 const applyFocusDraft = () => {
@@ -781,17 +783,17 @@ const cancelFocusDraft = () => {
 
 The focus layer must use the same parser as inline editing. Applying changes the workspace draft but does not save. Invalid text remains visible with its error and cannot replace the last valid configuration.
 
-- [ ] **Step 6: Wire current-draft validation and error focus**
+- [x] **Step 6: Wire current-draft validation and error focus**
 
 Call `apiAccountApi.validateDraft` with the current normalized payload. Map `section` and local validation paths to the correct section, open it on mobile, focus the first invalid control, and display sanitized result details in the fixed action area.
 
-- [ ] **Step 7: Run workspace and API integration tests**
+- [x] **Step 7: Run workspace and API integration tests**
 
 Run: `cd frontend; npm test -- components/api-accounts/ApiAccountWorkspace.test.tsx components/ApiAccountsPanel.test.tsx lib/apiAccountConfig.test.ts`
 
 Expected: all tests pass, including form/JSON round trips and Tavily reduction.
 
-- [ ] **Step 8: Commit the complete editor**
+- [x] **Step 8: Commit the complete editor**
 
 ```powershell
 git add frontend/components/api-accounts/ApiAccountIdentitySection.tsx frontend/components/api-accounts/ApiAccountConnectionSection.tsx frontend/components/api-accounts/ApiAccountModelSection.tsx frontend/components/api-accounts/ApiAccountRequestSection.tsx frontend/components/api-accounts/AdvancedConfigEditor.tsx frontend/components/api-accounts/ApiAccountWorkspace.tsx frontend/components/api-accounts/useApiAccountsPanel.ts frontend/components/api-accounts/ApiAccountWorkspace.test.tsx
@@ -808,7 +810,7 @@ git commit -m "feat: add advanced API account editing"
 - Modify: `frontend/app/api-key-config-layout.test.ts`
 - Modify: `tests/frontend_structure/test_account_import_component_boundaries.py`
 
-- [ ] **Step 1: Replace obsolete compact-editor style assertions with failing workspace guards**
+- [x] **Step 1: Replace obsolete compact-editor style assertions with failing workspace guards**
 
 ```typescript
 expect(stylesheet).toMatch(
@@ -824,27 +826,27 @@ expect(stylesheet).toMatch(
 
 Update the Python boundary guard to require focused workspace/section imports and prevent configuration logic from moving into `ApiAccountsPanel.tsx`.
 
-- [ ] **Step 2: Run guards and verify missing stylesheet failure**
+- [x] **Step 2: Run guards and verify missing stylesheet failure**
 
 Run: `cd frontend; npm test -- app/api-key-config-layout.test.ts; cd ..; python -m pytest tests/frontend_structure/test_account_import_component_boundaries.py -q`
 
 Expected: guards fail because the new stylesheet and imports do not exist.
 
-- [ ] **Step 3: Implement desktop workspace layout**
+- [x] **Step 3: Implement desktop workspace layout**
 
 Create a full-viewport overlay with fixed header, stable left navigation, one scrolling content column, and fixed action placement. Use existing theme variables, no nested cards, maximum `8px` item radii, and stable control dimensions. Keep `.api-accounts-panel` rules only for the list modal.
 
-- [ ] **Step 4: Implement mobile layout**
+- [x] **Step 4: Implement mobile layout**
 
 At `720px` and below, hide the left navigation, render section disclosure buttons, switch all field grids to one column, and keep the bottom action bar above safe-area insets. Ensure textarea/code areas use `max-width: 100%`, `overflow: auto`, and stable minimum heights.
 
-- [ ] **Step 5: Run style and structure guards**
+- [x] **Step 5: Run style and structure guards**
 
 Run: `cd frontend; npm test -- app/api-key-config-layout.test.ts; cd ..; python -m pytest tests/frontend_structure/test_account_import_component_boundaries.py tests/frontend_structure/test_global_style_boundaries.py -q`
 
 Expected: all guards pass; obsolete compact-editor assertions are removed rather than weakened into contradictory checks.
 
-- [ ] **Step 6: Commit responsive styling**
+- [x] **Step 6: Commit responsive styling**
 
 ```powershell
 git add frontend/app/styles/api-account-workspace.css frontend/app/styles/account-panels.css frontend/app/styles/api-accounts-panel.css frontend/app/api-key-config-layout.test.ts tests/frontend_structure/test_account_import_component_boundaries.py
@@ -857,13 +859,13 @@ git commit -m "style: finish API account workspace layout"
 
 - Modify only files required by failures found in this task.
 
-- [ ] **Step 1: Run backend tests**
+- [x] **Step 1: Run backend tests**
 
 Run: `python -m pytest -q`
 
 Expected: the complete backend suite passes with no new warnings that expose credentials.
 
-- [ ] **Step 2: Run frontend lint, tests, and production build**
+- [x] **Step 2: Run frontend lint, tests, and production build**
 
 ```powershell
 Set-Location frontend
@@ -875,7 +877,7 @@ Set-Location ..
 
 Expected: lint, all Vitest tests, and the Next.js production build pass.
 
-- [ ] **Step 3: Run repository commit verification**
+- [x] **Step 3: Run repository commit verification**
 
 ```powershell
 git status --short
@@ -886,23 +888,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-before-commit
 
 Expected: formatting and all configured verification checks pass.
 
-- [ ] **Step 4: Verify desktop behavior in Edge/Playwright**
+- [x] **Step 4: Verify desktop behavior in Edge/Playwright**
 
 At a desktop viewport, exercise list -> edit -> each section -> alias mapping -> JSON focus cancel/apply -> draft validation -> save -> return. Confirm the workspace is full-screen, the account list remains a modal, long URLs/model IDs do not overflow, and the model dropdown is unchanged.
 
-- [ ] **Step 5: Verify mobile behavior in Edge/Playwright**
+- [x] **Step 5: Verify mobile behavior in Edge/Playwright**
 
 At a mobile viewport, exercise disclosure sections, fixed bottom actions, focused JSON editing, validation errors, keyboard focus, and unsaved-leave confirmation. Capture screenshots and check there is no clipping, overlap, or horizontal page scrolling.
 
-- [ ] **Step 6: Inspect credential safety and runtime payloads**
+- [x] **Step 6: Inspect credential safety and runtime payloads**
 
 Confirm browser network responses, application logs, error messages, test snapshots, and screenshots do not contain API Key plaintext. With stubbed upstreams, verify OpenAI and Anthropic payloads use mapped real model IDs and only allowed overrides.
 
-- [ ] **Step 7: Request two-stage subagent review**
+- [x] **Step 7: Request two-stage subagent review**
 
 First review implementation against `docs/superpowers/specs/2026-07-24-api-account-fullscreen-workspace-design.md`; then review code quality, security boundaries, and missing regression coverage. Address every confirmed finding and rerun the affected tests.
 
-- [ ] **Step 8: Create the final implementation commit if verification fixes remain**
+- [x] **Step 8: Create the final implementation commit if verification fixes remain**
 
 ```powershell
 git add -- app frontend tests requirements.txt
@@ -912,7 +914,7 @@ git commit -m "fix: complete API account workspace verification"
 
 Skip this commit when the worktree is already clean after the task commits.
 
-- [ ] **Step 9: Fast-forward the verified worktree branch into `main`**
+- [x] **Step 9: Fast-forward the verified worktree branch into `main`**
 
 ```powershell
 git switch main

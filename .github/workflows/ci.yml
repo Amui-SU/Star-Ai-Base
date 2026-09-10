@@ -2,32 +2,73 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      backend: ${{ steps.classify.outputs.backend }}
+      frontend: ${{ steps.classify.outputs.frontend }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+
+      - id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            printf '\0' | python scripts/classify-ci-paths.py --stdin-zero --force-full --github-output "$GITHUB_OUTPUT"
+          else
+            git diff --name-only -z --no-renames "$BASE_SHA" "$HEAD_SHA" |
+              python scripts/classify-ci-paths.py --stdin-zero --github-output "$GITHUB_OUTPUT"
+          fi
+
   backend:
     name: Backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install Python dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements-dev.txt
 
       - name: Run backend tests
         run: python -m pytest -q
 
   frontend:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
@@ -36,12 +77,21 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: "22"
+          node-version-file: ".nvmrc"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Report full dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps --no-shell chromium
 
       - name: Run lint
         run: npm run lint
@@ -51,3 +101,42 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+      - name: Run browser tests
+        run: npm run test:e2e
+
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: always()
+    needs: [changes, backend, frontend]
+    steps:
+      - name: Require expected jobs
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BACKEND_EXPECTED: ${{ needs.changes.outputs.backend }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          FRONTEND_EXPECTED: ${{ needs.changes.outputs.frontend }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+        run: |
+          [[ "$CHANGES_RESULT" == "success" ]] || exit 1
+          case "$BACKEND_EXPECTED:$BACKEND_RESULT" in
+            true:success|false:skipped) ;;
+            *) exit 1 ;;
+          esac
+          case "$FRONTEND_EXPECTED:$FRONTEND_RESULT" in
+            true:success|false:skipped) ;;
+            *) exit 1 ;;
+          esac
+          case "$DOCS_ONLY" in
+            true|false) ;;
+            *) exit 1 ;;
+          esac
+          if [[ "$BACKEND_EXPECTED" == "false" && "$FRONTEND_EXPECTED" == "false" ]]; then
+            [[ "$DOCS_ONLY" == "true" ]] || exit 1
+          else
+            [[ "$DOCS_ONLY" == "false" ]] || exit 1
+          fi

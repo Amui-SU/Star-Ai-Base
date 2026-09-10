@@ -1,4 +1,5 @@
 export type VideoNoteTemplateId = "standard" | "blank";
+export type VideoNoteAiResultSource = "ai" | "official" | "fallback";
 
 export type VideoNoteBlockType =
   | "heading"
@@ -128,6 +129,7 @@ export interface VideoNoteAiResponse {
   operations: VideoNoteAiOperation[];
   tag_suggestions: string[];
   message: string;
+  result_source: VideoNoteAiResultSource;
 }
 
 export interface VideoNoteListParams {

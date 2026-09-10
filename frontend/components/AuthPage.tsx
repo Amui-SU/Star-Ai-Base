@@ -69,7 +69,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
             maxWidth: "90rem",
           }}
         >
-          <div className="flex items-center gap-2.5">
+          <div className="auth-brand flex items-center gap-2.5">
             <svg
               className="auth-brand-icon w-7 h-7 text-[#d97757]"
               viewBox="0 0 24 24"
@@ -100,7 +100,7 @@ export default function AuthPage({ onAuthSuccess }: Props) {
         }}
       >
         <section
-          className="auth-form-section auth-form-section-lowered flex items-center justify-center py-6"
+          className="auth-form-section auth-form-section-lowered flex flex-col items-center justify-center py-6"
           style={{ minHeight: "calc(100svh - var(--auth-header-height))" }}
         >
           <div
@@ -114,12 +114,14 @@ export default function AuthPage({ onAuthSuccess }: Props) {
                 ? "欢迎回来"
                 : step === "login"
                   ? "输入密码"
-                  : "创建账号"}
+                  : step === "forgot-password"
+                    ? "重置密码"
+                    : "创建账号"}
             </h1>
             <p className="auth-subtitle mb-0 font-[Noto_Serif_SC,Songti_SC,Georgia,serif] leading-[1.35] text-[#dedbd4]">
               {step === "email"
                 ? "登录以继续你的知识探索"
-                : step === "login"
+                : step === "login" || step === "forgot-password"
                   ? email
                   : "验证邮箱并设置密码"}
             </p>

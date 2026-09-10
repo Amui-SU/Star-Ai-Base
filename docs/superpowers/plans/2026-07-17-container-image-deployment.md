@@ -1,5 +1,7 @@
 # Container Image Deployment Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build tested frontend and backend images in GitHub Actions, publish them to Alibaba Cloud ACR, and deploy an exact Git SHA to the Beijing ECS with one command, persistent data, health checks, and image rollback.
@@ -36,7 +38,7 @@
 - Create: `frontend/.dockerignore`
 - Create: `tests/test_container_deployment.py`
 
-- [ ] **Step 1: Write failing tests for production image inputs and health checks**
+- [x] **Step 1: Write failing tests for production image inputs and health checks**
 
 Create `tests/test_container_deployment.py` with:
 
@@ -78,7 +80,7 @@ def test_production_secrets_and_runtime_data_are_excluded_from_images():
         assert entry in frontend_ignore
 ```
 
-- [ ] **Step 2: Run the tests and verify the new contract fails**
+- [x] **Step 2: Run the tests and verify the new contract fails**
 
 Run:
 
@@ -88,7 +90,7 @@ python -m pytest tests/test_container_deployment.py -q
 
 Expected: three failures because the Dockerfiles do not yet define health checks or the API build argument, the root ignore file lacks production deployment entries, and `frontend/.dockerignore` is absent.
 
-- [ ] **Step 3: Add the backend image health check**
+- [x] **Step 3: Add the backend image health check**
 
 Replace `Dockerfile.backend` with:
 
@@ -117,7 +119,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-- [ ] **Step 4: Add the frontend build argument and health check**
+- [x] **Step 4: Add the frontend build argument and health check**
 
 Replace `frontend/Dockerfile` with:
 
@@ -145,7 +147,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
 ```
 
-- [ ] **Step 5: Extend the image ignore list**
+- [x] **Step 5: Extend the image ignore list**
 
 Append these lines to `.dockerignore`:
 
@@ -172,7 +174,7 @@ android/**/build/
 
 The Dockerfile default remains `http://localhost:8000` so the existing local Compose flow keeps working. Production CI always overrides it with `https://zhiku-cloud.cn`.
 
-- [ ] **Step 6: Run targeted tests and local image builds**
+- [x] **Step 6: Run targeted tests and local image builds**
 
 Run:
 
@@ -184,7 +186,7 @@ docker build --build-arg NEXT_PUBLIC_API_URL=https://zhiku-cloud.cn -f frontend/
 
 Expected: three tests pass; both image builds complete successfully; the frontend build output contains the static `/` route.
 
-- [ ] **Step 7: Commit the image contract**
+- [x] **Step 7: Commit the image contract**
 
 ```bash
 git add Dockerfile.backend frontend/Dockerfile .dockerignore frontend/.dockerignore tests/test_container_deployment.py
@@ -199,7 +201,7 @@ git commit -m "build: harden production container images"
 - Create: `deploy/.env.deploy.example`
 - Modify: `tests/test_container_deployment.py`
 
-- [ ] **Step 1: Write failing tests for immutable images, private ports, and persistence**
+- [x] **Step 1: Write failing tests for immutable images, private ports, and persistence**
 
 Append to `tests/test_container_deployment.py`:
 
@@ -236,7 +238,7 @@ def test_deploy_environment_example_contains_only_non_secret_settings():
         assert forbidden not in content
 ```
 
-- [ ] **Step 2: Run the tests and verify they fail because production assets are absent**
+- [x] **Step 2: Run the tests and verify they fail because production assets are absent**
 
 Run:
 
@@ -246,7 +248,7 @@ python -m pytest tests/test_container_deployment.py -q
 
 Expected: the three existing Task 1 tests pass and the three new tests fail with missing-file errors.
 
-- [ ] **Step 3: Create the production Compose file**
+- [x] **Step 3: Create the production Compose file**
 
 Create `compose.production.yml`:
 
@@ -308,7 +310,7 @@ services:
 
 The production file stays at repository root. On the server it is copied to `/opt/zhiku-cloud/compose.production.yml`, so the relative `data`, `logs`, and `deploy/.env.production` paths resolve under `/opt/zhiku-cloud`.
 
-- [ ] **Step 4: Create the deployment environment example**
+- [x] **Step 4: Create the deployment environment example**
 
 Create `deploy/.env.deploy.example`:
 
@@ -320,7 +322,7 @@ PUBLIC_BASE_URL=https://zhiku-cloud.cn
 
 The operator changes `ACR_NAMESPACE` if the namespace created in ACR differs. No registry password belongs in this file; the server performs `docker login` once and Docker stores its own credential entry.
 
-- [ ] **Step 5: Validate tests and Compose interpolation**
+- [x] **Step 5: Validate tests and Compose interpolation**
 
 Run:
 
@@ -331,7 +333,7 @@ IMAGE_TAG=0123456789abcdef0123456789abcdef01234567 docker compose --env-file dep
 
 Expected: six tests pass and Compose exits with code 0 without printing a rendered configuration error.
 
-- [ ] **Step 6: Commit the production Compose contract**
+- [x] **Step 6: Commit the production Compose contract**
 
 ```bash
 git add compose.production.yml deploy/.env.deploy.example tests/test_container_deployment.py
@@ -345,7 +347,7 @@ git commit -m "build: add production compose deployment"
 - Create: `scripts/deploy.sh`
 - Modify: `tests/test_container_deployment.py`
 
-- [ ] **Step 1: Write failing tests for deploy safety boundaries**
+- [x] **Step 1: Write failing tests for deploy safety boundaries**
 
 Append to `tests/test_container_deployment.py`:
 
@@ -374,7 +376,7 @@ def test_deploy_script_backs_up_and_tracks_successful_versions():
     assert 'wait_http "${PUBLIC_BASE_URL%/}/health"' in content
 ```
 
-- [ ] **Step 2: Run the tests and verify missing script failures**
+- [x] **Step 2: Run the tests and verify missing script failures**
 
 Run:
 
@@ -384,7 +386,7 @@ python -m pytest tests/test_container_deployment.py -q
 
 Expected: the six earlier tests pass and the two new tests fail because `scripts/deploy.sh` does not exist.
 
-- [ ] **Step 3: Implement the deployment script**
+- [x] **Step 3: Implement the deployment script**
 
 Create `scripts/deploy.sh`:
 
@@ -528,7 +530,7 @@ trap - ERR
 echo "deployment succeeded: $TARGET_TAG"
 ```
 
-- [ ] **Step 4: Validate syntax and contract tests**
+- [x] **Step 4: Validate syntax and contract tests**
 
 Run:
 
@@ -539,7 +541,7 @@ python -m pytest tests/test_container_deployment.py -q
 
 Expected: Bash exits with code 0 and all eight deployment tests pass.
 
-- [ ] **Step 5: Exercise validation without touching Docker state**
+- [x] **Step 5: Exercise validation without touching Docker state**
 
 Run:
 
@@ -549,7 +551,7 @@ bash scripts/deploy.sh invalid-tag
 
 Expected: exit code 2 and `usage: scripts/deploy.sh <40-character-git-sha>`. Because validation occurs before Docker commands, no container or file is changed.
 
-- [ ] **Step 6: Commit the deploy script**
+- [x] **Step 6: Commit the deploy script**
 
 ```bash
 git add scripts/deploy.sh tests/test_container_deployment.py
@@ -563,7 +565,7 @@ git commit -m "ops: add versioned container deploy script"
 - Create: `.github/workflows/publish-images.yml`
 - Modify: `tests/test_ci_workflow.py`
 
-- [ ] **Step 1: Write a failing workflow contract test**
+- [x] **Step 1: Write a failing workflow contract test**
 
 Append to `tests/test_ci_workflow.py`:
 
@@ -593,7 +595,7 @@ def test_image_publish_waits_for_ci_and_uses_the_tested_commit_sha():
         assert required in content
 ```
 
-- [ ] **Step 2: Run the test and verify it fails on the missing workflow**
+- [x] **Step 2: Run the test and verify it fails on the missing workflow**
 
 Run:
 
@@ -603,7 +605,7 @@ python -m pytest tests/test_ci_workflow.py -q
 
 Expected: existing CI tests pass and the new workflow test fails because `publish-images.yml` is absent.
 
-- [ ] **Step 3: Create the image publishing workflow**
+- [x] **Step 3: Create the image publishing workflow**
 
 Create `.github/workflows/publish-images.yml`:
 
@@ -669,7 +671,7 @@ jobs:
 
 The Docker Actions are pinned to full commits from GitHub's official image publishing example. The implementation review must check upstream release notes before changing those pins.
 
-- [ ] **Step 4: Run workflow contract tests**
+- [x] **Step 4: Run workflow contract tests**
 
 Run:
 
@@ -679,7 +681,7 @@ python -m pytest tests/test_ci_workflow.py tests/test_container_deployment.py -q
 
 Expected: all CI and deployment contract tests pass.
 
-- [ ] **Step 5: Commit the publishing workflow**
+- [x] **Step 5: Commit the publishing workflow**
 
 ```bash
 git add .github/workflows/publish-images.yml tests/test_ci_workflow.py
@@ -695,7 +697,7 @@ git commit -m "ci: publish versioned images to acr"
 - Modify: `README.md`
 - Modify: `tests/test_container_deployment.py`
 
-- [ ] **Step 1: Write failing tests for API coverage and runbook safety**
+- [x] **Step 1: Write failing tests for API coverage and runbook safety**
 
 Append to `tests/test_container_deployment.py`:
 
@@ -745,7 +747,7 @@ def test_production_runbook_documents_bootstrap_publish_and_recovery():
     assert "docker compose down -v" not in content
 ```
 
-- [ ] **Step 2: Run tests and verify missing documentation failures**
+- [x] **Step 2: Run tests and verify missing documentation failures**
 
 Run:
 
@@ -755,7 +757,7 @@ python -m pytest tests/test_container_deployment.py -q
 
 Expected: the eight earlier tests pass and the two new tests fail because the Nginx example and runbook do not exist.
 
-- [ ] **Step 3: Create the Nginx production example**
+- [x] **Step 3: Create the Nginx production example**
 
 Create `deploy/nginx/zhiku-cloud.conf.example`:
 
@@ -812,7 +814,7 @@ server {
 
 The runbook must tell the operator to preserve the certificate paths from the active server configuration if they differ from the example.
 
-- [ ] **Step 4: Write the production runbook**
+- [x] **Step 4: Write the production runbook**
 
 Create `docs/deployment/container-production.md` with these complete sections and commands:
 
@@ -897,7 +899,7 @@ curl -fsS https://zhiku-cloud.cn/health
 
 ````
 
-- [ ] **Step 5: Link the runbook from README**
+- [x] **Step 5: Link the runbook from README**
 
 Immediately after the existing `docker compose up --build` example in `README.md`, add:
 
@@ -905,7 +907,7 @@ Immediately after the existing `docker compose up --build` example in `README.md
 生产服务器推荐使用 ACR 版本镜像和一键部署脚本，不在 ECS 上重复构建。完整步骤见 [容器镜像生产部署](docs/deployment/container-production.md)。
 ````
 
-- [ ] **Step 6: Run documentation and deployment contract tests**
+- [x] **Step 6: Run documentation and deployment contract tests**
 
 Run:
 
@@ -915,7 +917,7 @@ python -m pytest tests/test_container_deployment.py tests/test_readme_links.py -
 
 Expected: all deployment tests and README link checks pass.
 
-- [ ] **Step 7: Commit the production operations documentation**
+- [x] **Step 7: Commit the production operations documentation**
 
 ```bash
 git add deploy/nginx/zhiku-cloud.conf.example docs/deployment/container-production.md README.md tests/test_container_deployment.py
@@ -928,7 +930,7 @@ git commit -m "docs: add container production runbook"
 
 - Modify only if verification exposes a defect in the files created by Tasks 1-5.
 
-- [ ] **Step 1: Run backend deployment and CI contract tests**
+- [x] **Step 1: Run backend deployment and CI contract tests**
 
 ```bash
 python -m pytest tests/test_docker_support.py tests/test_container_deployment.py tests/test_ci_workflow.py tests/test_readme_links.py -q
@@ -936,7 +938,7 @@ python -m pytest tests/test_docker_support.py tests/test_container_deployment.py
 
 Expected: all selected tests pass with no warnings introduced by the new files.
 
-- [ ] **Step 2: Run the full backend suite**
+- [x] **Step 2: Run the full backend suite**
 
 ```bash
 python -m pytest -q
@@ -944,7 +946,7 @@ python -m pytest -q
 
 Expected: all backend tests pass.
 
-- [ ] **Step 3: Run frontend quality gates**
+- [x] **Step 3: Run frontend quality gates**
 
 ```bash
 cd frontend
@@ -957,7 +959,7 @@ cd ..
 
 Expected: Lint, Vitest, TypeScript, and static export finish with exit code 0. If the existing Vitest suite hits machine-wide 5-second timeouts, rerun the failed files individually and record the full-suite limitation instead of increasing unrelated test timeouts in this deployment change.
 
-- [ ] **Step 4: Validate Docker and Compose artifacts**
+- [x] **Step 4: Validate Docker and Compose artifacts**
 
 ```bash
 docker build -f Dockerfile.backend -t zhiku-backend:verification .
@@ -968,7 +970,7 @@ bash -n scripts/deploy.sh
 
 Expected: both images build, Compose validates, and Bash syntax validation exits with code 0.
 
-- [ ] **Step 5: Verify image contents locally**
+- [x] **Step 5: Verify image contents locally**
 
 ```bash
 docker run --rm -d --name zhiku-backend-check -p 127.0.0.1:18000:8000 zhiku-backend:verification
@@ -982,11 +984,11 @@ docker rm -f zhiku-frontend-check
 
 Expected: backend returns `{"status":"healthy"}` and the frontend returns its generated HTML. Cleanup removes only the two explicitly named verification containers.
 
-- [ ] **Step 6: Push and configure ACR only after local verification**
+- [x] **Step 6: Push and configure ACR only after local verification**
 
 Push the implementation commits to `main`. In GitHub, verify `CI` succeeds before `Publish Images`, then confirm ACR contains both the full commit SHA and `latest` tags for both repositories.
 
-- [ ] **Step 7: Perform the first ECS deployment manually**
+- [x] **Step 7: Perform the first ECS deployment manually**
 
 Follow `docs/deployment/container-production.md`. Before running `deploy.sh`, confirm `/opt/zhiku-cloud/data`, `/opt/zhiku-cloud/logs`, `.env.production`, and the active Nginx certificate paths. After deployment verify:
 
@@ -999,11 +1001,11 @@ curl -fsS -o /dev/null -w '%{http_code}\n' https://zhiku-cloud.cn/video-notes
 
 Expected: the first three checks return success; `/video-notes` reaches FastAPI and may return an authentication or method response, but must not return the frontend Nginx static 404 page.
 
-- [ ] **Step 8: Perform a rollback rehearsal**
+- [x] **Step 8: Perform a rollback rehearsal**
 
 After two successful SHA deployments exist, deploy the value in `previous-version`, confirm public health, then deploy the newest SHA again. Verify `data` survives both container replacements and each deployment creates a backup directory.
 
-- [ ] **Step 9: Record verification evidence**
+- [x] **Step 9: Record verification evidence**
 
 Add the commands, exit codes, image digests, deployed SHA, backup path, and rollback rehearsal result to the deployment change summary or pull request. Do not write registry passwords, app secrets, or the contents of `.env.production`.
 

@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 VideoNoteTemplateId = Literal["standard", "blank"]
+VideoNoteAiResultSource = Literal["ai", "official", "fallback"]
 
 
 class VideoNoteBlock(BaseModel):
@@ -123,3 +124,4 @@ class VideoNoteAiResponse(BaseModel):
     operations: list[VideoNoteAiOperation]
     tag_suggestions: list[str] = Field(default_factory=list)
     message: str
+    result_source: VideoNoteAiResultSource

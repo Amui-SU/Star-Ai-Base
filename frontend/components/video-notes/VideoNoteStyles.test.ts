@@ -147,6 +147,38 @@ describe("video note styles", () => {
     );
   });
 
+  it("styles AI result provenance and the overwrite confirmation dialog", () => {
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-ai-result-card\s*{[^}]*display:\s*grid/,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-ai-result-card\.ai\s*{[^}]*border-color:/,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-ai-result-card\.official\s*{[^}]*border-color:/,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-ai-result-card\.fallback\s*{[^}]*border-color:/,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-ai-overwrite-backdrop\s*{[^}]*z-index:\s*260/,
+    );
+    expect(videoNoteStyles).toMatch(
+      /\.video-note-ai-overwrite-card\s*{[^}]*width:\s*min\(calc\(100% - 32px\),\s*440px\)/,
+    );
+  });
+
+  it("keeps AI result and overwrite actions usable on narrow screens", () => {
+    const mobileCss = videoNoteStyles.split("@media (max-width: 1024px)")[1];
+
+    expect(mobileCss).toMatch(
+      /\.video-note-ai-result-card\s*{[^}]*width:\s*100%/,
+    );
+    expect(mobileCss).toMatch(
+      /\.video-note-ai-overwrite-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    );
+  });
+
   it("keeps the mobile AI panel compact and centered", () => {
     expect(videoNoteStyles).toMatch(
       /@media \(max-width: 1024px\)[\s\S]*?grid-template-rows:\s*minmax\(0,\s*1fr\)\s*minmax\(184px,\s*22dvh\)/s,

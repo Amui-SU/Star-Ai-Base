@@ -1,5 +1,7 @@
 # ACR Personal Edition Compatibility Implementation Plan
 
+**Status:** completed
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Allow production deployment to use an Alibaba Cloud ACR Personal Edition public endpoint in Beijing without weakening SHA-tag deployment, revision verification, backup, or rollback.
@@ -29,7 +31,7 @@
 - Modify: `scripts/production-preflight.sh:15-65`
 - Modify: `deploy/.env.deploy.example:1`
 
-- [ ] **Step 1: Write failing acceptance tests**
+- [x] **Step 1: Write failing acceptance tests**
 
 Add these constants and behavior test:
 
@@ -68,7 +70,7 @@ def test_deploy_script_requires_supported_beijing_acr_public_endpoint():
     assert "supported Beijing ACR public endpoint" in content
 ```
 
-- [ ] **Step 2: Define rejected endpoints**
+- [x] **Step 2: Define rejected endpoints**
 
 Replace the old rejection parametrization with:
 
@@ -104,7 +106,7 @@ def test_deploy_script_rejects_unsupported_or_placeholder_acr_before_docker(
     assert log_lines(fixture["docker_log"]) == []
 ```
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 ```powershell
 python -m pytest tests/test_container_deployment.py::test_deploy_script_requires_supported_beijing_acr_public_endpoint tests/test_container_deployment.py::test_deploy_script_accepts_supported_beijing_acr_public_endpoints tests/test_container_deployment.py::test_deploy_script_rejects_unsupported_or_placeholder_acr_before_docker -q
@@ -112,7 +114,7 @@ python -m pytest tests/test_container_deployment.py::test_deploy_script_requires
 
 Expected: Personal acceptance and the new contract fail because the preflight is Enterprise-only.
 
-- [ ] **Step 4: Implement the strict allowlist**
+- [x] **Step 4: Implement the strict allowlist**
 
 Declare `local supported_registry=false` with the existing local booleans, then replace the Enterprise-only validation with:
 
@@ -140,7 +142,7 @@ Set the example:
 ACR_REGISTRY=crpi-your-instance.cn-beijing.personal.cr.aliyuncs.com
 ```
 
-- [ ] **Step 5: Run focused shared-preflight tests**
+- [x] **Step 5: Run focused shared-preflight tests**
 
 ```powershell
 python -m pytest tests/test_container_deployment.py::test_deploy_script_requires_supported_beijing_acr_public_endpoint tests/test_container_deployment.py::test_deploy_script_accepts_supported_beijing_acr_public_endpoints tests/test_container_deployment.py::test_deploy_script_rejects_unsupported_or_placeholder_acr_before_docker tests/test_container_deployment.py::test_deploy_and_restore_share_one_read_only_production_preflight tests/test_container_deployment.py::test_restore_script_reuses_production_preflight_before_staging_or_downtime -q
@@ -148,7 +150,7 @@ python -m pytest tests/test_container_deployment.py::test_deploy_script_requires
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add scripts/production-preflight.sh deploy/.env.deploy.example tests/test_container_deployment.py
@@ -162,7 +164,7 @@ git commit -m "feat: support ACR personal endpoints"
 - Modify: `tests/test_ci_workflow.py:106-200`
 - Modify: `.github/workflows/publish-images.yml:48-132`
 
-- [ ] **Step 1: Write failing workflow assertions**
+- [x] **Step 1: Write failing workflow assertions**
 
 Replace all test lookups for the old names with:
 
@@ -178,7 +180,7 @@ assert "immutable SHA" not in content
 assert "unable to determine SHA tag state for $image" in inspect_step
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```powershell
 python -m pytest tests/test_ci_workflow.py -q
@@ -186,7 +188,7 @@ python -m pytest tests/test_ci_workflow.py -q
 
 Expected: failures reference the current `immutable SHA` wording.
 
-- [ ] **Step 3: Rename only workflow wording**
+- [x] **Step 3: Rename only workflow wording**
 
 Apply these exact replacements:
 
@@ -204,7 +206,7 @@ echo "unable to determine SHA tag state for $image" >&2
 
 Do not change triggers, action SHAs, tags, annotations, build conditions, freshness checks, or promotion commands.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```powershell
 python -m pytest tests/test_ci_workflow.py -q
@@ -212,7 +214,7 @@ python -m pytest tests/test_ci_workflow.py -q
 
 Expected: all workflow tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add .github/workflows/publish-images.yml tests/test_ci_workflow.py
@@ -228,7 +230,7 @@ git commit -m "ci: clarify SHA tag publication"
 - Modify: `docs/deployment/container-production.md:78-86`
 - Modify: `docs/deployment/container-production.md:140-148`
 
-- [ ] **Step 1: Write failing runbook tests**
+- [x] **Step 1: Write failing runbook tests**
 
 Replace the Enterprise-only ACR tests with:
 
@@ -266,7 +268,7 @@ def test_container_runbook_keeps_enterprise_immutability_and_operational_safety(
     assert "down -v" not in content
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```powershell
 python -m pytest tests/test_container_deployment.py::test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety tests/test_container_deployment.py::test_container_runbook_keeps_enterprise_immutability_and_operational_safety -q
@@ -274,7 +276,7 @@ python -m pytest tests/test_container_deployment.py::test_container_runbook_docu
 
 Expected: both tests fail against the Enterprise-only runbook.
 
-- [ ] **Step 3: Update runbook rules**
+- [x] **Step 3: Update runbook rules**
 
 Document in Chinese that Enterprise remains recommended and should enable immutable versions; Personal is accepted as a transitional single-server choice but is officially development/test only and has no SLA. Document both Personal endpoint forms, no repository-side immutability, isolated credentials, no manual overwrite/deletion of 40-character SHA tags, and production never using `latest`.
 
@@ -290,7 +292,7 @@ unset ACR_PULL_PASSWORD
 
 Change restore preflight wording from “企业版 ACR” to “受支持的北京 ACR 公网地址”.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 ```powershell
 python -m pytest tests/test_container_deployment.py::test_container_runbook_documents_acr_edition_tradeoffs_and_sha_safety tests/test_container_deployment.py::test_container_runbook_keeps_enterprise_immutability_and_operational_safety tests/test_container_deployment.py::test_deploy_script_accepts_supported_beijing_acr_public_endpoints tests/test_ci_workflow.py -q
@@ -298,7 +300,7 @@ python -m pytest tests/test_container_deployment.py::test_container_runbook_docu
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add docs/deployment/container-production.md tests/test_container_deployment.py
@@ -311,7 +313,7 @@ git commit -m "docs: support ACR personal deployment"
 
 - Verify only; no expected source changes.
 
-- [ ] **Step 1: Run deployment tests**
+- [x] **Step 1: Run deployment tests**
 
 ```powershell
 python -m pytest tests/test_docker_support.py tests/test_container_deployment.py tests/test_ci_workflow.py tests/test_readme_links.py -q
@@ -319,7 +321,7 @@ python -m pytest tests/test_docker_support.py tests/test_container_deployment.py
 
 Expected: all tests pass, with only the existing Windows `flock` skip allowed.
 
-- [ ] **Step 2: Verify scripts and Compose**
+- [x] **Step 2: Verify scripts and Compose**
 
 ```powershell
 & 'C:\Program Files\Git\bin\bash.exe' -n scripts/deploy.sh
@@ -333,7 +335,7 @@ docker compose --env-file deploy/.env.deploy.example -f compose.production.yml c
 
 Expected: every command exits zero and Compose resolves both SHA-tagged images with the Personal example registry.
 
-- [ ] **Step 3: Run complete application verification**
+- [x] **Step 3: Run complete application verification**
 
 ```powershell
 python -m pytest -q
@@ -346,7 +348,7 @@ Pop-Location
 
 Expected: backend and frontend tests, lint, and production build exit zero.
 
-- [ ] **Step 4: Check formatting and state**
+- [x] **Step 4: Check formatting and state**
 
 ```powershell
 python -m black --check tests/test_container_deployment.py tests/test_ci_workflow.py

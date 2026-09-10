@@ -41,25 +41,23 @@ async def _resolve_current_user(
         raise _unauthorized()
 
     result = await db.execute(
-        select(SystemSession).where(
-            SystemSession.session_token_hash == hash_token(token)
+        select(SystemSession, SystemUser)
+        .join(SystemUser, SystemUser.id == SystemSession.user_id)
+        .where(
+            SystemSession.session_token_hash == hash_token(token),
+            SystemSession.credential_version == SystemUser.credential_version,
+            SystemUser.status == "active",
         )
+        .execution_options(populate_existing=True)
     )
-    session = result.scalar_one_or_none()
-    if session is None or session.revoked_at is not None:
+    row = result.one_or_none()
+    if row is None:
+        raise _unauthorized()
+    session, user = row
+    if session.revoked_at is not None:
         raise _unauthorized()
 
     if as_aware_utc(session.expires_at) <= utc_now():
-        raise _unauthorized()
-
-    user_result = await db.execute(
-        select(SystemUser).where(
-            SystemUser.id == session.user_id,
-            SystemUser.status == "active",
-        )
-    )
-    user = user_result.scalar_one_or_none()
-    if user is None:
         raise _unauthorized()
 
     if touch_last_seen:

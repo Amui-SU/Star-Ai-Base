@@ -1,4 +1,10 @@
-import { fireEvent, screen, within, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  within,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 
@@ -9,6 +15,17 @@ import {
   video,
   videoNoteApi,
 } from "./VideoNoteWorkspace.test-utils";
+import VideoNoteWorkspace from "./VideoNoteWorkspace";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
 
 it("autosaves copied Markdown from the toolbar menu and toggles fullscreen", async () => {
   const user = userEvent.setup();
@@ -246,3 +263,110 @@ it("downloads exported Markdown from the toolbar export menu", async () => {
   expect(screen.queryByText("已下载 Markdown")).toBeNull();
   expect(screen.queryByRole("menu", { name: "Markdown 导出操作" })).toBeNull();
 });
+
+it.each(["resolve", "reject"] as const)(
+  "discards a stale export %s while a new knowledge base export stays pending",
+  async (outcome) => {
+    const user = userEvent.setup();
+    const oldExport = deferred<{ filename: string; markdown: string }>();
+    const newExport = deferred<{ filename: string; markdown: string }>();
+    const createObjectUrl = vi.fn().mockReturnValue("blob:new-video-note-md");
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectUrl,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    vi.mocked(videoNoteApi.list).mockImplementation(
+      async ({ knowledgeBaseId }) => ({
+        knowledge_base_id: knowledgeBaseId,
+        items: [
+          {
+            bvid: knowledgeBaseId === 7 ? "BVOLD" : "BVNEW",
+            title: knowledgeBaseId === 7 ? "旧知识库视频" : "新知识库视频",
+            has_note: true,
+            note_id: knowledgeBaseId === 7 ? 9 : 10,
+            summary_status: "seeded",
+            tags: [],
+          },
+        ],
+      }),
+    );
+    vi.mocked(videoNoteApi.detail).mockImplementation(
+      async (knowledgeBaseId, bvid) => ({
+        note: {
+          ...baseNote,
+          id: knowledgeBaseId === 7 ? 9 : 10,
+          knowledge_base_id: knowledgeBaseId,
+          bvid,
+          title: knowledgeBaseId === 7 ? "旧知识库笔记" : "新知识库笔记",
+        },
+        video: { ...video, bvid },
+        can_create: false,
+      }),
+    );
+    vi.mocked(videoNoteApi.exportMarkdown)
+      .mockReturnValueOnce(oldExport.promise)
+      .mockReturnValueOnce(newExport.promise);
+
+    const { rerender } = renderWorkspace({ initialBvid: "BVOLD" });
+    await findMarkdownEditor();
+    await user.click(screen.getByRole("button", { name: "导出 Markdown" }));
+    await user.click(
+      screen.getByRole("button", { name: "下载 Markdown 文件" }),
+    );
+    expect(videoNoteApi.exportMarkdown).toHaveBeenCalledWith(9);
+
+    rerender(<VideoNoteWorkspace knowledgeBaseId={8} autosaveDelayMs={2000} />);
+    await findMarkdownEditor();
+    await user.click(screen.getByRole("button", { name: "导出 Markdown" }));
+    await user.click(
+      screen.getByRole("button", { name: "下载 Markdown 文件" }),
+    );
+    const newDownloadButton = screen.getByRole("button", {
+      name: "下载 Markdown 文件",
+    });
+    expect(newDownloadButton).toBeDisabled();
+    expect(videoNoteApi.exportMarkdown).toHaveBeenLastCalledWith(10);
+
+    await act(async () => {
+      if (outcome === "resolve") {
+        oldExport.resolve({
+          filename: "old.md",
+          markdown: "# 过期导出",
+        });
+        await oldExport.promise;
+      } else {
+        oldExport.reject(new Error("过期导出失败"));
+        try {
+          await oldExport.promise;
+        } catch {
+          // The component handles the rejection; this await only flushes it.
+        }
+      }
+    });
+
+    expect(newDownloadButton).toBeDisabled();
+    expect(createObjectUrl).not.toHaveBeenCalled();
+    expect(anchorClick).not.toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
+
+    await act(async () => {
+      newExport.resolve({
+        filename: "new.md",
+        markdown: "# 新知识库导出",
+      });
+      await newExport.promise;
+    });
+    await waitFor(() => expect(createObjectUrl).toHaveBeenCalledOnce());
+    expect(anchorClick).toHaveBeenCalledOnce();
+  },
+);

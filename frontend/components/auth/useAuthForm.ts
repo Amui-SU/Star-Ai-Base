@@ -34,11 +34,16 @@ export interface UseAuthFormResult {
   codeHint: string | null;
   error: string | null;
   setError: Dispatch<SetStateAction<string | null>>;
+  success: string | null;
   submitting: boolean;
   handleSendCode: () => Promise<void>;
+  handleSendPasswordResetCode: () => Promise<void>;
   handleEmailContinue: (event: FormEvent) => void;
   handleLogin: (event: FormEvent) => Promise<void>;
   handleRegister: (event: FormEvent) => Promise<void>;
+  handlePasswordReset: (event: FormEvent) => Promise<void>;
+  startPasswordReset: () => void;
+  backToLogin: () => void;
   backToEmail: () => void;
 }
 
@@ -55,6 +60,7 @@ export function useAuthForm({
   const [codeCountdown, setCodeCountdown] = useState(0);
   const [codeHint, setCodeHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -84,6 +90,21 @@ export function useAuthForm({
     setSendingCode(true);
     try {
       const resp = await systemAuthApi.sendCode(email.trim());
+      startCountdown();
+      if (resp.code) setCodeHint(`验证码: ${resp.code}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "发送失败");
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const handleSendPasswordResetCode = async () => {
+    if (!email.trim()) return setError("请输入邮箱地址");
+    setError(null);
+    setSendingCode(true);
+    try {
+      const resp = await systemAuthApi.sendPasswordResetCode(email.trim());
       startCountdown();
       if (resp.code) setCodeHint(`验证码: ${resp.code}`);
     } catch (err) {
@@ -138,6 +159,54 @@ export function useAuthForm({
     }
   };
 
+  const handlePasswordReset = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!verificationCode.trim()) return setError("请输入验证码");
+    if (!password.trim()) return setError("请输入新密码");
+    if (password !== confirmPassword) return setError("两次输入的密码不一致");
+    setError(null);
+    setSubmitting(true);
+    try {
+      const resp = await systemAuthApi.confirmPasswordReset({
+        email: email.trim(),
+        code: verificationCode.trim(),
+        new_password: password,
+      });
+      setPassword("");
+      setConfirmPassword("");
+      setVerificationCode("");
+      setCodeHint(null);
+      setCodeCountdown(0);
+      setSuccess(resp.message);
+      setStep("login");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "密码重置失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const startPasswordReset = () => {
+    setStep("forgot-password");
+    setPassword("");
+    setConfirmPassword("");
+    setVerificationCode("");
+    setCodeHint(null);
+    setError(null);
+    setSuccess(null);
+    setCodeCountdown(0);
+  };
+
+  const backToLogin = () => {
+    setStep("login");
+    setPassword("");
+    setConfirmPassword("");
+    setVerificationCode("");
+    setCodeHint(null);
+    setError(null);
+    setCodeCountdown(0);
+  };
+
   const backToEmail = () => {
     setStep("email");
     setPassword("");
@@ -146,6 +215,7 @@ export function useAuthForm({
     setVerificationCode("");
     setCodeHint(null);
     setError(null);
+    setSuccess(null);
     setCodeCountdown(0);
   };
 
@@ -167,11 +237,16 @@ export function useAuthForm({
     codeHint,
     error,
     setError,
+    success,
     submitting,
     handleSendCode,
+    handleSendPasswordResetCode,
     handleEmailContinue,
     handleLogin,
     handleRegister,
+    handlePasswordReset,
+    startPasswordReset,
+    backToLogin,
     backToEmail,
   };
 }

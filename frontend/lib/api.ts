@@ -7,7 +7,7 @@ export type {
   ApiAccountDraftValidationResponse,
   ApiAccountDraftValidationStatus,
 } from "./api/apiAccountTypes";
-export { API_BASE_URL, getApiBaseUrl, request } from "./api/client";
+export { API_BASE_URL, ApiError, getApiBaseUrl, request } from "./api/client";
 export { chatApi } from "./api/chat";
 export { chatHistoryApi } from "./api/chatHistory";
 export type {
@@ -30,7 +30,15 @@ export type {
   WebSearchProvider,
 } from "./api/chatTypes";
 export { importApi } from "./api/imports";
-export type { ImportMethod, ImportUrlResponse } from "./api/importTypes";
+export type {
+  DetectMultiPartResponse,
+  ImportMethod,
+  ImportMultiPartResponse,
+  ImportTaskStatus,
+  ImportUrlResponse,
+  VideoMultiPartInfo,
+  VideoPageInfo,
+} from "./api/importTypes";
 export { knowledgeBaseApi } from "./api/knowledgeBases";
 export type {
   KnowledgeBase,
@@ -58,6 +66,7 @@ export type {
   VideoNote,
   VideoNoteAiEditRequest,
   VideoNoteAiOperation,
+  VideoNoteAiResultSource,
   VideoNoteAiResponse,
   VideoNoteBlock,
   VideoNoteBlockItem,

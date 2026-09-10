@@ -28,12 +28,13 @@ def session_token_from_request(request: Request) -> str | None:
 
 
 async def create_system_session(
-    db: AsyncSession, user_id: int, response: Response
+    db: AsyncSession, user_id: int, response: Response, *, credential_version: int
 ) -> str:
     token = create_session_token()
     db.add(
         SystemSession(
             user_id=user_id,
+            credential_version=credential_version,
             session_token_hash=hash_token(token),
             expires_at=session_expires_at().replace(tzinfo=None),
         )
@@ -63,22 +64,23 @@ async def get_current_user(request: Request, db: AsyncSession) -> SystemUser:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
     result = await db.execute(
-        select(SystemSession).where(
-            SystemSession.session_token_hash == hash_token(token)
+        select(SystemSession, SystemUser)
+        .join(SystemUser, SystemUser.id == SystemSession.user_id)
+        .where(
+            SystemSession.session_token_hash == hash_token(token),
+            SystemSession.credential_version == SystemUser.credential_version,
+            SystemUser.status == "active",
         )
+        .execution_options(populate_existing=True)
     )
-    session = result.scalar_one_or_none()
-    if session is None or session.revoked_at is not None:
+    row = result.one_or_none()
+    if row is None:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    session, user = row
+    if session.revoked_at is not None:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
     if as_aware_utc(session.expires_at) <= utc_now():
-        raise HTTPException(status_code=401, detail="未登录或会话已过期")
-
-    user_result = await db.execute(
-        select(SystemUser).where(SystemUser.id == session.user_id)
-    )
-    user = user_result.scalar_one_or_none()
-    if user is None or user.status != "active":
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
     session.last_seen_at = utc_now_naive()
