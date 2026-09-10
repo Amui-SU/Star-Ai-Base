@@ -231,6 +231,10 @@ upgrade Next.js and eslint-config-next together to 16.3.4, sharp to 0.35.4,
 Vitest to 4.1.11, and js-yaml to 4.3.2. Synchronize the existing optional
 sharp-wasm workaround to 0.35.4 and its required @emnapi/runtime to 1.11.3.
 Keep Node 22.13.1, npm 10.9.2, existing API/UI behavior, and audit thresholds.
+Pin the already locked Vite 8.0.16 to avoid unrelated toolchain expansion while
+npm resolves Vitest peers. Child packages required or re-resolved by these
+security upgrades may receive compatible updates within existing dependency ranges; unrelated direct
+dependencies remain unchanged.
 Do not use a blanket audit fix, waive advisories, or upgrade unrelated packages.
 
 Detach the verified shared dependency junction before lockfile/install changes;

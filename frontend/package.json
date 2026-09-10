@@ -23,7 +23,7 @@
     "@capacitor/app": "^8.1.0",
     "@capacitor/cli": "^8.4.0",
     "@capacitor/core": "^8.4.0",
-    "next": "16.2.12",
+    "next": "16.3.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^9.0.1",
@@ -40,23 +40,25 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.12",
+    "eslint-config-next": "16.3.4",
     "jsdom": "^29.1.1",
     "prettier": "3.6.2",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.1.8",
+    "vitest": "4.1.11",
     "yaml": "2.9.0"
   },
   "optionalDependencies": {
-    "@emnapi/runtime": "1.11.1",
-    "@img/sharp-wasm32": "0.35.3",
+    "@emnapi/runtime": "1.11.3",
+    "@img/sharp-wasm32": "0.35.4",
     "@tybys/wasm-util": "0.10.2"
   },
   "overrides": {
     "@xmldom/xmldom": "0.9.12",
     "browserslist": "4.28.8",
     "postcss": "8.5.23",
-    "sharp": "0.35.3"
+    "sharp": "0.35.4",
+    "js-yaml": "4.3.2",
+    "vite": "8.0.16"
   }
 }

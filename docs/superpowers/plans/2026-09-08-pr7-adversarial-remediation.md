@@ -138,7 +138,7 @@
 
 - [x] Replace suffix fallback with exact `README.md` allowlist; explicit security/deployment/spec prefixes require both jobs.
 - [x] Run CI/workflow/dependency-policy/plan tests, frontend lint/tests/build and Playwright, full verifier, and independent adversarial review. Fix material findings with regression tests.
-- [ ] Commit batch 2 with normal hooks; fresh dependency installation in an isolated temporary directory uses npm 10.9.2 and verifies tree/audits without touching shared dependencies.
+- [x] Commit batch 2 with normal hooks; fresh dependency installation in an isolated temporary directory uses npm 10.9.2 and verifies tree/audits without touching shared dependencies.
 - [ ] Integrate and push the release branch; validate push and PR workflows for final SHA. Update plan status/checklist and regenerate index using `python scripts/generate-plan-index.py` when the behavior is integrated.
 
 ## Task 7: Approved dependency security batch (2026-09-10)
@@ -149,15 +149,37 @@ the associated design addendum, and generated plan index.
 
 **Contract:** keep Node 22.13.1 and npm 10.9.2; pin Next.js/eslint-config-next
 16.3.4, sharp/sharp-wasm 0.35.4, @emnapi/runtime 1.11.3, Vitest 4.1.11,
-and js-yaml 4.3.2. Audit thresholds and application interfaces remain unchanged.
+and js-yaml 4.3.2. Keep Vite at its existing locked 8.0.16 using an override.
+Audit thresholds and application interfaces remain unchanged.
 
-- [ ] Extend dependency contract fixtures for the approved versions and assert every locked copy of Next.js, sharp, Vitest/mocker, and js-yaml avoids the affected versions. Run `python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.py` and observe failure against the existing vulnerable lockfile.
-- [ ] Run `scripts/worktree-deps.ps1 -Mode Status`, verify the shared junction points to the main workspace, then run `-Mode Detach`. Update only the approved manifest entries with apply_patch and regenerate the lockfile with `npm exec --yes --package=npm@10.9.2 -- npm install --package-lock-only --ignore-scripts --no-audit --no-fund`.
-- [ ] Install fresh isolated dependencies with `npm exec --yes --package=npm@10.9.2 -- npm ci --no-audit --no-fund`; verify `npm ls --depth=0 --json`, `npm audit --omit=dev --audit-level=high`, and `npm audit --audit-level=high` all exit 0. Inspect the lockfile diff for unrelated upgrades and rerun the dependency contracts.
+- [x] Extend dependency contract fixtures for the approved versions and assert every locked copy of Next.js, sharp, Vitest/mocker, and js-yaml avoids the affected versions. Run `python -m pytest -q tests/developer_workflow/test_frontend_dependency_contract.py` and observe failure against the existing vulnerable lockfile.
+- [x] Run `scripts/worktree-deps.ps1 -Mode Status`, verify the shared junction points to the main workspace, then run `-Mode Detach`. Update only the approved manifest entries with apply_patch and regenerate the lockfile with `npm exec --yes --package=npm@10.9.2 -- npm install --package-lock-only --ignore-scripts --no-audit --no-fund`.
+- [x] Install fresh isolated dependencies with `npm exec --yes --package=npm@10.9.2 -- npm ci --no-audit --no-fund`; verify `npm ls --depth=0 --json`, `npm audit --omit=dev --audit-level=high`, and `npm audit --audit-level=high` all exit 0. Inspect the lockfile diff for unrelated upgrades and rerun the dependency contracts.
 - [ ] Run the full `scripts/verify-before-commit.ps1` with formatting, lint, tests and build; run `npm run test:e2e -- --workers=1` with CI=true. Obtain independent review, fix material findings, and commit explicitly scoped files with normal hooks.
 - [ ] Fast-forward the release branch, refresh its installed dependencies only after checking other shared consumers, run integration regressions, push without force, and verify both push/PR CI runs for the final SHA. Close this plan and regenerate its index only when all acceptance gates are satisfied.
 
 ### Security addendum evidence
+
+The new lock contracts first failed in 8 cases against the old dependency
+versions, then all 9 passed after the update. npm 10.9.2 initially crashed in
+Arborist peer resolution (`edgesOut`) while considering newer Vite/devtools
+peers. Pinning the existing Vite 8.0.16 avoided that expansion and allowed the
+same package-manager command to succeed without force or legacy-peer flags.
+The lockfile changes remain in the selected Next/ESLint, sharp, Vitest/Vite
+dependency paths, including compatible updates within existing ranges. The nested
+optional @napi-rs/wasm-runtime moved from 1.1.5 to 1.2.3 within its existing
+^1.1.4 range, with @tybys/wasm-util 0.10.3 beneath it. No unrelated direct
+dependency changed. Fresh isolated npm ci added 626 packages and exited 0.
+npm ls and both production/full audits exited 0 with zero vulnerabilities.
+The installer reported an EPERM cleanup warning for an optional WASM subtree;
+no permission change or forced deletion was attempted.
+
+Next.js 16.3.4 generated frontend AGENTS.md and CLAUDE.md during the browser
+test's development-server startup. Their source and markers matched the
+installed `next/dist/server/lib/generate-agent-files.js`. These generated
+instruction files were removed after testing and are not part of this security
+change; `next dev` may regenerate them when it detects a coding agent. The
+repository's existing root instructions remain unchanged.
 
 The initial code commits are `8764f7c` and `04d002d`; both are integrated and
 pushed. Main-workspace regressions passed 150 backend and 44 frontend tests.
@@ -191,3 +213,5 @@ Validation checkpoint: frontend verification passed all 410 tests, lint, Prettie
 Final local verification (2026-09-09): `scripts/verify-before-commit.ps1` exited 0 with 1587 backend tests passed, 6 skipped, 2 existing httpx deprecation warnings, and all 410 frontend tests passed. Black, Prettier, lint, production build, and whitespace checks passed. The complete output is in `.pytest_cache/pr7-final-verification-retry.log`. `npm run test:e2e -- --workers=1` with `CI=true` passed all 3 cases. Independent batch, integration, and validation-fix reviews found no remaining Critical/Important issue. Batch 1 was committed normally as `8764f7c`; its repository pre-commit hook passed.
 
 Dependency evidence: a fresh isolated temporary npm 10.9.2 installation added 627 packages; `npm ls --depth=0 --json`, production audit, and full audit exited 0, with zero vulnerabilities. Installation emitted a cleanup EPERM warning for a nested optional dependency, but installation and subsequent tree/audit checks succeeded. The diagnostic directory was preserved and the shared worktree dependency junction was not modified by installation.
+
+Security-batch local completion: the full `scripts/verify-before-commit.ps1 -Format` passed with 1592 backend tests passed, 6 skipped, 2 existing httpx deprecation warnings, and 410 frontend tests passed. Formatting, lint, TypeScript and production build passed. Playwright passed 3 tests. Independent dependency review had no Critical/Important findings; its minor documentation correction was applied. Before commit, 14 dependency/lifecycle tests passed and fresh production/full audits again reported zero vulnerabilities. Full verification output is retained in `.pytest_cache/pr7-security-verification.log`. Integration and exact-SHA CI acceptance remain pending.
