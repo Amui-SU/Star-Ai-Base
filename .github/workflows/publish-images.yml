@@ -85,6 +85,8 @@ jobs:
           context: .
           file: Dockerfile.backend
           push: true
+          # Preserve provenance using the attestation envelope supported by ACR.
+          outputs: type=image,oci-mediatypes=true,oci-artifact=false
           build-args: |
             APP_VERSION=${{ env.IMAGE_TAG }}
           tags: |
@@ -101,6 +103,8 @@ jobs:
           context: ./frontend
           file: frontend/Dockerfile
           push: true
+          # Preserve provenance using the attestation envelope supported by ACR.
+          outputs: type=image,oci-mediatypes=true,oci-artifact=false
           build-args: |
             NEXT_PUBLIC_API_URL=https://zhiku-cloud.cn
             APP_VERSION=${{ env.IMAGE_TAG }}
